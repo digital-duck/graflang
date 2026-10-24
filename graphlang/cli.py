@@ -7,7 +7,8 @@ from .grafr.cli import cmd_info, cmd_run, cmd_validate
 from .grafv.cli import cmd_vis
 
 
-@click.group(help="GraphLang: graph-first agentic workflows. Run, validate, compile and draw a *.graph.yaml.")
+@click.group(help="GraphLang: graph-first agentic workflows. Run, validate, compile and draw a *.graph.yaml.",
+             context_settings={"help_option_names": ["-h", "--help"]})
 def main():
     pass
 

@@ -230,3 +230,9 @@ def test_the_style_reads_what_the_model_writes():
     assert s.group("lp/b", G.nodes["lp/b"]) == "lp" and s.group("a", G.nodes["a"]) is None
     edge = next(d for u, v, d in G.edges(data=True) if d["relation"] == "binds")
     assert s.edge_dashed("", "", edge) and "→" in s.edge_info("", "", edge)
+
+
+@pytest.mark.parametrize("args", [["-h"], ["--help"], ["run", "-h"], ["vis", "-h"], ["validate", "--help"]])
+def test_short_and_long_help_work_on_graf_and_every_command(args):
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0 and "Usage:" in result.output
