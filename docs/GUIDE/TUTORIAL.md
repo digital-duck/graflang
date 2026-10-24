@@ -200,8 +200,35 @@ graf run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="rain"
 
 `--llm ADAPTER:MODEL` is shorthand for `--adapter ADAPTER --model MODEL` (and wins if you give both). Leave the model off (`--llm claude_cli`) to use the adapter's default. See [SETUP.md](SETUP.md) for adapter setup.
 
+## 8. A real example: PII compliance audit
+
+`cookbook/compliance_audit/` mixes everything above: an LLM for the fuzzy part, fixed rules for the decision, a retry path and a Cedar guard. An LLM reads a document and lists the **types** of personal data in it (never the values). Boolean rules then decide, with no LLM, whether the document may go to a destination. A failing document is redacted, read again and re-checked once. A Cedar `GUARD` has the last word, and anything that cannot be shown compliant ends at the `escalated` output.
+
+The rule check is an SPL.py procedure, so install SPL.py first (see [SETUP.md](SETUP.md)), then run it with a real model:
+
+```bash
+graf run cookbook/compliance_audit/compliance_audit.graph.yaml --llm claude_cli:claude-sonnet-5-5 \
+    --param document="Customer John Doe, SSN 123-45-6789, asks to update his address." \
+    --param destination=external_api --param engine=stdlib --param rules_file=
+```
+
+With `claude-sonnet-5-5` the run reads the document, finds an SSN, fails rule R2 ("a social security number never leaves externally, even masked"), redacts it, reads the redacted text again, passes, and the guard releases it. The output folder has `safe_document.md` (the redacted text) and `audit.md` (for example `released to external_api (stdlib engine)`).
+
+The result depends on the model, and the graph fails closed. With `claude-haiku-5-5` the same command ended at `escalated` (`Violated: ['R1']`): the first read found a name and an SSN, the redaction removed both, but the second read reported an unmasked `ADDRESS` (it took the word "address" in the text for personal data), so rule R1 failed and nothing was released. That is a false alarm, not a leak, and it is the intended behaviour when the model's reading cannot be shown compliant. Add `--save-nodes` to keep each node's output under `output/.../nodes/` and see where a run went. Try `--param destination=internal_db` and the same document passes the first check untouched.
+
+Things to look at:
+
+- `graf vis cookbook/compliance_audit/compliance_audit.graph.yaml` draws the two paths (first pass, and redact then re-check).
+- `engine` picks how the rules are checked: `stdlib` (no extra install), `sympy` or `z3`. All three must give the same answer.
+- The rules are in `cookbook/compliance_audit/procedures/rules.json`. Copy it, edit a rule, and run again with `--param rules_file=my_rules.json`. Check a file first with `python cookbook/compliance_audit/procedures/tools.py my_rules.json`. A missing or invalid rules file stops the run; it is never replaced by the defaults.
+- The `released` output is marked `risky: true`, and `graf validate` proves it can only be reached through the guard's `allow` port. Add an edge from `compliant_first.pass` straight to `released` and validate again to see it refuse.
+- No LLM needed to see every path: `pytest tests/test_compliance_audit.py` runs the graph with a stub model.
+
+The default rules are an illustration, not legal advice and not a real GDPR or PCI rule set. The full explanation is in `cookbook/compliance_audit/readme.md`.
+
 ## Where next
 
 - [USER-GUIDE.md](USER-GUIDE.md): every command, node type, port convention, `GUARD` and `MUTATE`.
+- `cookbook/compliance_audit/`: deterministic rules, redact and re-check, and a Cedar release guard (section 8).
 - `cookbook/code_pipeline/`: the flagship, with a test-gated `LOOP`, a Cedar `GUARD` on retries, and SPL procedures.
 - [contributor-guide.md](contributor-guide.md): how the runtime is built and how to extend it.
