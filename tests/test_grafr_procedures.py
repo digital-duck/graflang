@@ -87,3 +87,12 @@ def test_flagship_runs_end_to_end_with_echo_procedures(tmp_path, monkeypatch):
     assert rt.fired["analyze"] == 1 and rt.fired["judge"] == 1 and "docs" in out
     import shutil
     shutil.rmtree(CODE / ".grafr", ignore_errors=True)
+
+
+def test_a_tools_py_next_to_the_procedure_is_loaded_for_its_call_statements(tmp_path):
+    (tmp_path / "tools.py").write_text(
+        "from spl.tools import spl_tool\n\n@spl_tool\ndef shout(text: str) -> str:\n    return text.upper() + '!'\n")
+    (tmp_path / "p.spl").write_text(
+        'WORKFLOW p\n  INPUT: @word TEXT := "hi"\n  OUTPUT: @out TEXT\nDO\n  CALL shout(@word) INTO @out;\n'
+        '  COMMIT @out WITH status = \'complete\'\nEND\n')
+    assert run_procedure(tmp_path / "p.spl", {"word": "go"}, "echo") == "GO!"

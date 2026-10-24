@@ -126,7 +126,7 @@ jq -c 'select(.level=="WARNING" or .level=="ERROR")' ~/.graflang/logs/*.jsonl   
 graf run FILE --log-level debug                                                          # every firing, plus previews
 ```
 
-A `procedure_ref` node runs an SPL.py workflow. When logging is on, SPL.py writes its own log for that procedure (`spl-<procedure>-<timestamp>`) into the same folder, with the same level and format.
+A `procedure_ref` node runs an SPL.py workflow. When logging is on, SPL.py writes its own log for that procedure (`spl-<procedure>-<timestamp>`) into the same folder, with the same level and format. A `tools.py` in the same folder as the procedure is loaded too, so its `CALL` statements can use your `@spl_tool` functions.
 
 Used as a Python library (`GraphLangRuntime(...).execute(...)`), the runtime logs nothing until `graphlang.logging_config.setup_logging(...)` is called; the CLI calls it for you.
 
@@ -198,7 +198,7 @@ NOT @test_passed AND @cycle < @in_max_cycles
 contains(@in_analysis, '[READY]')
 ```
 
-Literals, `AND`/`OR`/`NOT`, comparisons, arithmetic, and these functions: `contains`, `startswith`, `endswith`, `len`, `lower`, `upper`, `strip`, `abs`, `min`, `max`, `int`, `float`, `str`, `bool`, `is_empty`. There is no `eval`, attribute access, subscripts, lambdas or `**`; expression length and repetition are capped. `EVALUATE`/`ASSERT` see their own `in_*` ports, so bind what they need. LLM-judged (semantic) conditions are not implemented.
+Literals, `AND`/`OR`/`NOT`, comparisons, arithmetic, and these functions: `contains`, `startswith`, `endswith`, `len`, `lower`, `upper`, `strip`, `abs`, `min`, `max`, `int`, `float`, `str`, `bool`, `is_empty`, and `json_get(value, "a.b.0", default)`, which reads a typed field out of JSON text (for example a procedure's verdict; a JSON `true` stays a boolean). There is no `eval`, attribute access, subscripts, lambdas or `**`; expression length and repetition are capped. `EVALUATE`/`ASSERT` see their own `in_*` ports, so bind what they need. LLM-judged (semantic) conditions are not implemented.
 
 ## LOOP
 

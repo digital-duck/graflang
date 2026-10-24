@@ -88,3 +88,18 @@ def test_limits_and_errors_are_expression_errors():
         evaluate("1 +")
     with pytest.raises(ExpressionError, match="unknown variable @nope; available: \\['x'\\]"):
         evaluate("@nope", {"x": 1})
+
+
+def test_json_get_reads_typed_fields_from_json_text_or_a_dict():
+    verdict = '{"compliant": false, "violated": ["R1", "R2"], "facts": {"is_external": true}}'
+    assert evaluate("json_get(@v, 'compliant') == FALSE", {"v": verdict}) is True
+    assert evaluate("json_get(@v, 'facts.is_external') == TRUE", {"v": verdict}) is True    # a JSON true stays a boolean
+    assert evaluate("json_get(@v, 'violated.1')", {"v": verdict}) == "R2"
+    assert evaluate("json_get(@v, 'facts.is_external')", {"v": {"facts": {"is_external": True}}}) is True
+
+
+def test_json_get_tolerates_a_code_fence_and_falls_back_to_the_default():
+    assert evaluate("json_get(@v, 'a')", {"v": '```json\n{"a": 1}\n```'}) == 1
+    assert evaluate("json_get(@v, 'a', 'none')", {"v": "not json"}) == "none"
+    assert evaluate("json_get(@v, 'a.b')", {"v": '{"a": 1}'}) == ""
+    assert evaluate("json_get(@v, 'a.5')", {"v": '{"a": [1]}'}) == ""

@@ -1,0 +1,152 @@
+version: "1.0-graph"
+
+# PII compliance audit. An LLM finds the personal data in a document; deterministic rules (procedures/compliance_check.spl,
+# engine stdlib | sympy | z3) decide whether it may go to the destination. A failing document is redacted, re-extracted and
+# re-checked once. A Cedar guard decides the release. Anything that cannot be shown compliant ends at `escalated`.
+
+workflow:
+  name: "compliance_audit"
+  inputs:
+    - {name: "document", type: "TEXT"}
+    - {name: "destination", type: "TEXT"}     # external_api and third_party_vendor are external
+    - {name: "engine", type: "TEXT"}          # stdlib, sympy or z3
+    - {name: "rules_file", type: "TEXT"}      # optional path to your own rules JSON; empty = procedures/rules.json
+  outputs:
+    - {name: "safe_document", type: "TEXT"}
+    - {name: "audit", type: "TEXT"}
+
+resources:
+  prompts:
+    extract_pii: "./prompts/extract_pii.md"
+    redact: "./prompts/redact.md"
+  procedures:
+    compliance_check: "./procedures/compliance_check.spl"
+  policies:
+    release_policy: "./policies/release_policy.cedar"
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_document", "out_destination", "out_engine", "out_rules_file"]
+
+  # 1. Probabilistic: what personal data is in the document? (types only)
+  - id: "extract_pii"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.extract_pii", label: "Find personal data"}
+    ports: ["trigger", "complete", "in_document", "out_pii_map"]
+
+  # 2. Deterministic: do the facts satisfy the rules? Returns JSON {compliant, violated, facts, ...}
+  - id: "check"
+    type: "SOLVE"
+    config: {procedure_ref: "procedures.compliance_check", label: "Check the rules"}
+    ports: ["trigger", "complete", "in_pii_map", "in_destination", "in_engine", "in_rules_file", "out_verdict"]
+
+  - id: "compliant_first"
+    type: "EVALUATE"
+    config: {condition: "json_get(@in_verdict, 'compliant') == TRUE", label: "Compliant?"}
+    ports: ["trigger", "pass", "fail", "in_verdict"]
+
+  # 3. Remediation: delete SSNs, mask the rest, then prove it again from scratch
+  - id: "redact"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.redact", label: "Redact"}
+    ports: ["trigger", "complete", "in_document", "in_verdict", "out_redacted"]
+
+  - id: "extract_again"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.extract_pii", label: "Find personal data in the redacted text"}
+    ports: ["trigger", "complete", "in_document", "out_pii_map"]
+
+  - id: "recheck"
+    type: "SOLVE"
+    config: {procedure_ref: "procedures.compliance_check", label: "Check the rules again"}
+    ports: ["trigger", "complete", "in_pii_map", "in_destination", "in_engine", "in_rules_file", "out_verdict"]
+
+  - id: "compliant_second"
+    type: "EVALUATE"
+    config: {condition: "json_get(@in_verdict, 'compliant') == TRUE", label: "Compliant now?"}
+    ports: ["trigger", "pass", "fail", "in_verdict"]
+
+  # 4. Runtime authorization (Cedar): the last word before anything leaves
+  - id: "release_guard"
+    type: "GUARD"
+    config:
+      policy_ref: "policies.release_policy"
+      principal: 'Service::"compliance-workflow"'
+      action: 'Action::"release_document"'
+      resource: 'Destination::"target"'
+      context_mapping:
+        compliant: "json_get(@in_verdict, 'compliant') == TRUE"
+        is_external: "json_get(@in_verdict, 'facts.is_external') == TRUE"
+      label: "May it be released?"
+    ports: ["trigger", "allow", "deny", "in_verdict"]
+
+  - id: "audit_released"
+    type: "SOLVE"
+    config:
+      expression: "'released to ' + @in_destination + ' (' + json_get(@in_verdict, 'engine') + ' engine)'"
+      label: "Audit note: released"
+    ports: ["trigger", "complete", "in_destination", "in_verdict", "out_audit"]
+
+  - id: "audit_escalated"
+    type: "SOLVE"
+    config:
+      expression: "'ESCALATED to a human reviewer, not released. Violated: ' + str(json_get(@in_verdict, 'violated'))"
+      label: "Audit note: escalated"
+    ports: ["trigger", "complete", "in_verdict", "out_audit"]
+
+  - id: "released"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_safe_document", "in_audit"]
+
+  - id: "escalated"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_audit"]
+
+edges:
+  # first pass
+  - {source: "wf_entry.entry",          target: "extract_pii.trigger",  type: "triggers"}
+  - {source: "wf_entry.out_document",   target: "extract_pii.in_document", type: "binds"}
+  - {source: "extract_pii.complete",    target: "check.trigger",        type: "triggers"}
+  - {source: "extract_pii.out_pii_map", target: "check.in_pii_map",      type: "binds"}
+  - {source: "wf_entry.out_destination", target: "check.in_destination", type: "binds"}
+  - {source: "wf_entry.out_engine",     target: "check.in_engine",       type: "binds"}
+  - {source: "wf_entry.out_rules_file", target: "check.in_rules_file",      type: "binds"}
+  - {source: "check.complete",          target: "compliant_first.trigger", type: "triggers"}
+  - {source: "check.out_verdict",       target: "compliant_first.in_verdict", type: "binds"}
+
+  # compliant on the first pass: straight to the guard
+  - {source: "compliant_first.pass",    target: "release_guard.trigger", type: "triggers"}
+  - {source: "check.out_verdict",       target: "release_guard.in_verdict", type: "binds"}
+
+  # not compliant: redact, extract again from the redacted text, check again
+  - {source: "compliant_first.fail",    target: "redact.trigger",        type: "triggers"}
+  - {source: "wf_entry.out_document",   target: "redact.in_document",    type: "binds"}
+  - {source: "check.out_verdict",       target: "redact.in_verdict",      type: "binds"}
+  - {source: "redact.complete",         target: "extract_again.trigger", type: "triggers"}
+  - {source: "redact.out_redacted",     target: "extract_again.in_document", type: "binds"}
+  - {source: "extract_again.complete",  target: "recheck.trigger",       type: "triggers"}
+  - {source: "extract_again.out_pii_map", target: "recheck.in_pii_map",  type: "binds"}
+  - {source: "wf_entry.out_destination", target: "recheck.in_destination", type: "binds"}
+  - {source: "wf_entry.out_engine",     target: "recheck.in_engine",     type: "binds"}
+  - {source: "wf_entry.out_rules_file", target: "recheck.in_rules_file",      type: "binds"}
+  - {source: "recheck.complete",        target: "compliant_second.trigger", type: "triggers"}
+  - {source: "recheck.out_verdict",     target: "compliant_second.in_verdict", type: "binds"}
+  - {source: "compliant_second.pass",   target: "release_guard.trigger", type: "triggers"}
+  - {source: "recheck.out_verdict",     target: "release_guard.in_verdict", type: "binds"}   # the newer verdict wins
+  - {source: "compliant_second.fail",   target: "audit_escalated.trigger", type: "triggers"}
+  - {source: "check.out_verdict",       target: "audit_escalated.in_verdict", type: "binds"}
+  - {source: "recheck.out_verdict",     target: "audit_escalated.in_verdict", type: "binds"}   # the newer verdict wins
+
+  # the guard decides
+  - {source: "release_guard.allow",     target: "audit_released.trigger", type: "triggers"}
+  - {source: "wf_entry.out_destination", target: "audit_released.in_destination", type: "binds"}
+  - {source: "check.out_verdict",       target: "audit_released.in_verdict", type: "binds"}
+  - {source: "recheck.out_verdict",     target: "audit_released.in_verdict", type: "binds"}
+  - {source: "audit_released.complete", target: "released.trigger",      type: "triggers"}
+  - {source: "wf_entry.out_document",   target: "released.in_safe_document", type: "binds"}
+  - {source: "redact.out_redacted",     target: "released.in_safe_document", type: "binds"}   # the redacted text wins if there is one
+  - {source: "audit_released.out_audit", target: "released.in_audit",    type: "binds"}
+  - {source: "release_guard.deny",      target: "audit_escalated.trigger", type: "triggers"}
+  - {source: "audit_escalated.complete", target: "escalated.trigger",    type: "triggers"}
+  - {source: "audit_escalated.out_audit", target: "escalated.in_audit",   type: "binds"}

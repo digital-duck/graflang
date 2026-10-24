@@ -65,6 +65,17 @@ def declared_inputs(path: Path) -> list[str]:
     return [p.name for p in defns[-1].ast_node.inputs]
 
 
+def _load_sibling_tools(executor, path: Path) -> None:
+    """Register the `@spl_tool` functions of `tools.py` next to the procedure, so its CALL statements work.
+    `spl3 run` does the same; without it a procedure that CALLs a Python tool fails."""
+    tools_file = path.parent / "tools.py"
+    if not tools_file.is_file():
+        return
+    from spl.tools import load_tools_module
+    for name, fn in load_tools_module(str(tools_file)).items():
+        executor.register_tool(name, fn)
+
+
 async def _run(path: Path, params: Dict[str, str], adapter_name: str, model: Optional[str], workflow: Optional[str]) -> str:
     from types import SimpleNamespace
     from spl3._loader import load_definitions_from_file, load_workflows_from_file
@@ -79,6 +90,7 @@ async def _run(path: Path, params: Dict[str, str], adapter_name: str, model: Opt
     executor = Executor(adapter=adapter)
     executor.composer = WorkflowComposer(registry, executor)
 
+    _load_sibling_tools(executor, path)                # a procedure's tools.py, as `spl3 run` does
     tool_apis, functions, procedures = load_definitions_from_file(path)
     for stmt in functions:
         executor.functions.register(stmt)

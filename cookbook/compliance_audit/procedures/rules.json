@@ -1,0 +1,23 @@
+{
+  "name": "Illustrative PII data-flow policy (not legal advice)",
+  "notes": "Edit this file (or copy it and pass the copy with --param rules_file=PATH). Facts a rule can use: has_ssn, has_ccn, has_email, has_phone, has_address, has_name, has_dob, has_other (a data type of that kind is in the document), has_pii (any of them), is_masked (every reported item is already masked), is_external (the destination is in external_destinations). An expression is {\"var\": name}, {\"not\": e}, {\"and\": [e, ...]}, {\"or\": [e, ...]}, {\"implies\": [a, b]} or {\"const\": true}. Declare every variable you use under \"variables\". Check your edit with: python tools.py rules.json",
+  "external_destinations": ["external_api", "third_party_vendor"],
+  "variables": ["has_ssn", "has_ccn", "is_masked", "is_external"],
+  "rules": [
+    {
+      "id": "R1",
+      "desc": "PII sent to an external destination must be masked",
+      "expr": {"implies": [{"var": "is_external"}, {"var": "is_masked"}]}
+    },
+    {
+      "id": "R2",
+      "desc": "A social security number never leaves externally, even masked",
+      "expr": {"not": {"and": [{"var": "has_ssn"}, {"var": "is_external"}]}}
+    },
+    {
+      "id": "R3",
+      "desc": "Card numbers must always be masked",
+      "expr": {"implies": [{"var": "has_ccn"}, {"var": "is_masked"}]}
+    }
+  ]
+}

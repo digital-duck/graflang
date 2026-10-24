@@ -8,7 +8,7 @@ interpreted by `_eval` below. What it accepts:
 * `AND`, `OR`, `NOT` (any case; `and`/`or`/`not` also work), comparisons (== != < <= > >= in, not in),
   arithmetic (+ - * / // %), parentheses, list/tuple literals
 * calls to a fixed set of functions: contains, startswith, endswith, len, lower, upper, strip, abs,
-  min, max, int, float, str, bool, is_empty
+  min, max, int, float, str, bool, is_empty, json_get
 
 Everything else is rejected: attribute access, subscripts, lambdas, comprehensions, imports, `**`,
 keyword arguments, calls to anything not listed. Expressions are limited in length and size, and
@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import ast
 import io
+import json
+import re
 import tokenize
 from typing import Any, Callable, Dict
 
@@ -40,7 +42,30 @@ def _contains(a: Any, b: Any) -> bool:
     return str(b) in str(a)
 
 
+def _json_get(value: Any, key: Any, default: Any = "") -> Any:
+    """Read a field out of JSON: `value` is a dict or JSON text (a code fence around it is ignored); `key` is a field
+    name, or a dotted path (`result.violated.0`: names for objects, numbers for lists). Returns the field with its JSON
+    type (so a `true` stays a boolean a condition can test), or `default` when the text is not JSON or the path is absent.
+    Unlike SPL's `json_get`, which always returns text."""
+    if isinstance(value, str):
+        text = value.strip()
+        fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        try:
+            value = json.loads(fenced.group(1).strip() if fenced else text)
+        except ValueError:
+            return default
+    for part in str(key).split("."):
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        elif isinstance(value, list) and part.isdigit() and int(part) < len(value):
+            value = value[int(part)]
+        else:
+            return default
+    return value
+
+
 FUNCS: Dict[str, Callable[..., Any]] = {
+    "json_get": _json_get,
     "contains": _contains,
     "startswith": lambda a, b: str(a).startswith(str(b)),
     "endswith": lambda a, b: str(a).endswith(str(b)),
