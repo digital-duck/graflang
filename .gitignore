@@ -223,3 +223,6 @@ __marimo__/
 .grafr/
 # grafr run results (<graph folder>/output/)
 output/
+
+# private design chat (kept in the maintainer's private notes, see docs/DEV/readme.md)
+docs/DEV/IDEATION/
