@@ -10,20 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-GRAPHLANG, ZINET, CONCEPTBOOK, UNKNOWN = "graphlang", "zinet", "conceptbook", "unknown"
-ZINET_LAYERS = ("primitives", "concepts", "applications")
+from zinet.formats import CONCEPTBOOK, GRAPHLANG, LAYERS as ZINET_LAYERS, UNKNOWN, ZINET, detect
 
-
-def detect(data: Any) -> str:
-    """'graphlang', 'zinet', 'conceptbook' or 'unknown' for an already-parsed YAML document."""
-    if not isinstance(data, dict):
-        return UNKNOWN
-    if "workflow" in data or ("nodes" in data and "edges" in data):
-        return GRAPHLANG
-    layers = [data[k] for k in ZINET_LAYERS if k in data]
-    if layers:
-        return CONCEPTBOOK if any(isinstance(v, dict) for v in layers) else ZINET
-    return UNKNOWN
+__all__ = ["CONCEPTBOOK", "GRAPHLANG", "UNKNOWN", "ZINET", "ZINET_LAYERS", "detect", "require_graphlang"]
 
 
 def require_graphlang(data: Any, path: str | Path) -> None:

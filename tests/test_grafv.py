@@ -81,7 +81,7 @@ def test_cytoscape_uses_dot_positions_when_available_and_falls_back_without(tmp_
         placed = {e["data"]["id"] for e in data if "position" in e}
         assert placed == {"start", "a", "end", "lp/b", "lp/c"}           # the LOOP is a box around its body: no position of its own
         assert "<option>dot</option>" in (tmp_path / "a.html").read_text(encoding="utf-8")
-    monkeypatch.setattr(engines.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     out = engines.render(workflow(), tmp_path / "b.html")[0]
     page = out.read_text(encoding="utf-8")
     assert not any("position" in e for e in _page_data(page)) and "<option>dot</option>" not in page
@@ -152,7 +152,7 @@ def test_graf_is_the_only_command_line():
 
 
 def test_engine_registry():
-    assert set(engines.ENGINES) == {"cytoscape", "graphviz", "pyvis", "graphify", "mermaid"}
+    assert set(engines.ENGINES) == {"cytoscape", "graphviz", "pyvis", "graphify", "mermaid", "ascii"}
     assert engines.DEFAULT_ENGINE == "cytoscape"
 
 
@@ -206,3 +206,27 @@ def test_mermaid_is_not_opened_in_a_browser(tmp_path, monkeypatch):
     monkeypatch.setattr("graphlang.grafv.cli.webbrowser.open", lambda url: opened.append(url))
     result = CliRunner().invoke(main, ["vis", str(SELF_REFINE), "--engine", "mermaid", "-o", str(tmp_path / "m.mmd")])
     assert result.exit_code == 0 and (tmp_path / "m.mmd").exists() and opened == []
+
+
+def test_ascii_engine_is_available_through_zinet(tmp_path):
+    out, _, n = engines.render(workflow(), tmp_path / "w.txt", "ascii")
+    text = out.read_text(encoding="utf-8")
+    assert n == 6 and text.startswith("Tier 0") and "[INPUT   ] start" in text and "[GENERATE] a  <- start" in text
+
+
+def test_zinet_install_hints_are_shown_as_graflang_extras(tmp_path, monkeypatch):
+    monkeypatch.setitem(engines.ENGINES["pyvis"], "ready", lambda: (False, "needs pyvis: pip install 'zinet[pyvis]'"))
+    with pytest.raises(RuntimeError, match=r"graflang\[vis\]"):
+        engines.render(workflow(), tmp_path / "p.html", "pyvis")
+    result = CliRunner().invoke(main, ["vis", "--list-engines"])
+    assert "graflang[vis]" in result.output and "zinet[" not in result.output
+    assert engines.hint("pip install 'zinet[graphify]'") == "pip install 'graflang[graphify]'"
+
+
+def test_the_style_reads_what_the_model_writes():
+    G, _ = build(workflow())
+    s = engines.graphlang_style("t")
+    assert s.shape("start", G.nodes["start"]) == "round-rectangle" and s.shape("lp/c", G.nodes["lp/c"]) == "diamond"
+    assert s.group("lp/b", G.nodes["lp/b"]) == "lp" and s.group("a", G.nodes["a"]) is None
+    edge = next(d for u, v, d in G.edges(data=True) if d["relation"] == "binds")
+    assert s.edge_dashed("", "", edge) and "→" in s.edge_info("", "", edge)

@@ -27,6 +27,7 @@ Draws the workflow and opens it. Nodes are coloured by type (`GENERATE`, `EVALUA
 | `--engine graphviz` | a static SVG through `dot`, good for docs; DOT text is written if `dot` is not installed |
 | `--engine pyvis` | interactive HTML through pyvis, laid out left to right; loop-body nodes have a dashed border. Needs `pip install "graflang[vis]"` |
 | `--engine graphify` | graphify's HTML export, coloured by community. It is undirected, so it shows structure only (no edge types). Needs `pip install "graflang[graphify]"` |
+| `--engine ascii` | a plain-text outline by depth (tier 0 has no dependencies), for a terminal or a diff. Nothing is opened |
 | `--engine mermaid` | a Mermaid flowchart as text (`.mmd`; `-o FILE.md` wraps it in a fenced block) to paste into GitHub, mkdocs or `mermaid.live`. Nothing is opened |
 | `-o FILE` | output file (default `~/.graflang/vis/<graph>-<engine>.<html\|svg\|mmd>`) |
 | `--no-open` | write the file without opening it |
@@ -41,7 +42,7 @@ If Graphviz (`dot`) is installed, the interactive page also uses it to lay the n
 | `--param key=value` | a workflow input; repeatable. Coerced to the declared type (`INTEGER`, `FLOAT`, `BOOL`). A value without `=` is a usage error |
 | `--llm ADAPTER[:MODEL]` | `--adapter` and `--model` in one value, e.g. `claude_cli:claude-haiku-5-5`, `ollama:gemma3:12b`, `mock`. Only the first `:` splits, so model ids with `:` or `/` work. Wins over `--adapter`/`--model` |
 | `--adapter NAME` | `claude_cli` (default), `mock` (no LLM, placeholder text), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
-| `--model ID` | model for every `GENERATE` node; overrides `model:` hints in the graph |
+| `--model ID` | model for every `GENERATE` node; overrides `model:` hints in the graph. Default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), where the graph's hints apply |
 | `--max-steps N` | stop after N node firings (default 1000) |
 | `--output-dir DIR` | where results go (default `<graph folder>/output`); see [Results](#results-the-output-folder) |
 | `--save-nodes` | also save every node's output, LLM responses included |

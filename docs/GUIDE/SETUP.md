@@ -14,7 +14,7 @@ Install GraphLang, check that it works, and (optionally) connect a real LLM. Nex
 From the repository root:
 
 ```bash
-pip install -e ../dd-llm -e ../dd-logging   # first, from sibling checkouts, until dd-llm>=0.2.0 and dd-logging>=0.2.0 are on PyPI
+pip install -e ../dd-llm -e ../dd-logging -e ../zinet   # first, from sibling checkouts, until dd-llm, dd-logging and zinet >=0.2.0 are on PyPI
 pip install -e ".[dev]"                     # runtime + pytest
 ```
 
@@ -30,7 +30,7 @@ Optional extras:
 | `vis`, `graphify` | `pyvis`, `graphify` | `graf vis --engine pyvis` / `--engine graphify` (the default engine, `graphviz` and `mermaid` need nothing extra) |
 | `grafc` | `jinja2` | the compiler templates |
 
-Core dependencies (`click`, `ruamel.yaml`, `networkx`, `jsonschema`, `cedarpy`, `dd-llm`, `rich`, `dd-llm[openai]`, `dd-logging`) come with the base install. `dd-llm` is the shared LLM layer that provides the adapters, and its `openai` SDK serves openai, openrouter, ollama, deepseek and qwen. `cedarpy` is the official Cedar engine and is required: `grafr` imports it at startup.
+Core dependencies (`click`, `ruamel.yaml`, `networkx`, `jsonschema`, `cedarpy`, `dd-llm`, `rich`, `dd-llm[openai]`, `dd-logging`, `zinet`) come with the base install. `zinet` is the shared graph library: `graf vis` draws through it. `dd-llm` is the shared LLM layer that provides the adapters, and its `openai` SDK serves openai, openrouter, ollama, deepseek and qwen. `cedarpy` is the official Cedar engine and is required: `grafr` imports it at startup.
 
 One console script is installed, `graf`, with the subcommands `run`, `validate`, `info`, `compile`, `check` and `vis`. `python -m graphlang ...` does the same thing.
 

@@ -29,14 +29,15 @@ dependencies = [
     "dd-llm[openai]>=0.2.0",  # LLM adapters; [openai] = the SDK that ollama, openrouter, openai, deepseek, qwen speak (claude_cli needs none)
     "rich>=13.7",
     "dd-logging>=0.2.0",      # timestamped text/JSONL run logs (shared with SPL.py)
+    "zinet>=0.2.0",           # graph drawing (graf vis), and the graph algorithms shared with graph-code and work-graph
 ]
 
 [project.optional-dependencies]
 spl = ["spl-llm>=3.4"]        # only for SPL procedure_ref nodes (runs SPL.py workflows); plain GENERATE needs just dd-llm
 anthropic = ["dd-llm[anthropic]>=0.2.0"]
 gemini = ["dd-llm[gemini]>=0.2.0"]
-vis = ["pyvis>=0.3"]             # `graf vis --engine pyvis`
-graphify = ["graphifyy>=0.7.19"]  # `graf vis --engine graphify`
+vis = ["zinet[pyvis]>=0.2.0"]     # `graf vis --engine pyvis`
+graphify = ["zinet[graphify]>=0.2.0"]  # `graf vis --engine graphify`
 grafc = ["jinja2>=3.1"]       # the Rust code generator (`graf compile`) renders templates
 dev = ["pytest>=7.4"]
 
@@ -48,7 +49,7 @@ where = ["."]
 include = ["graphlang*"]
 
 [tool.setuptools.package-data]
-graphlang = ["schema/*.json", "policies/*.cedar", "grafc/rust_gen/templates/*.j2", "grafv/data/*"]
+graphlang = ["schema/*.json", "policies/*.cedar", "grafc/rust_gen/templates/*.j2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

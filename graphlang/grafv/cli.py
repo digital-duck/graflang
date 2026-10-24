@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from ..grafr.runtime import load_graph
-from .engines import DEFAULT_ENGINE, ENGINES, render
+from .engines import DEFAULT_ENGINE, ENGINES, hint, render
 
 console = Console()
 
@@ -16,17 +16,17 @@ console = Console()
 @click.command("vis")
 @click.argument("graph", required=False)
 @click.option("--engine", type=click.Choice(sorted(ENGINES)), default=DEFAULT_ENGINE, show_default=True,
-              help="cytoscape: interactive HTML, works offline; graphviz: static SVG; pyvis, graphify: other HTML views; mermaid: text for docs (see --list-engines)")
+              help="cytoscape: interactive HTML, works offline; graphviz: svg/png/pdf; mermaid, ascii: text; pyvis, graphify: other HTML views (see --list-engines)")
 @click.option("--list-engines", is_flag=True, help="show the engines and whether each is ready")
 @click.option("-o", "--out", type=click.Path(dir_okay=False), default=None,
-              help="output file (default ~/.graflang/vis/<graph>-<engine>.<html|svg>)")
+              help="output file (default ~/.graflang/vis/<graph>-<engine>.<html|svg|mmd|txt>)")
 @click.option("--no-open", is_flag=True, help="write the file but do not open it")
 def cmd_vis(graph, engine, list_engines, out, no_open):
     """Draw a GraphLang workflow (GRAPH is the path to the .graph.yaml file) and open it."""
     if list_engines:
         for name, spec in ENGINES.items():
             ok, why = spec["ready"]()
-            console.print(f"{name:<10} {'ok ' if ok else '!! '} {spec['about']}" + ("" if ok else f"  [{why}]")
+            console.print(f"{name:<10} {'ok ' if ok else '!! '} {hint(spec['about'])}" + ("" if ok else f"  [{hint(why)}]")
                           + ("  (default)" if name == DEFAULT_ENGINE else ""), highlight=False, soft_wrap=True, markup=False)
         return
     if not graph:

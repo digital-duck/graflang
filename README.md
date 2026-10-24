@@ -23,6 +23,15 @@ GraphLang flips the script on agentic AI. Where LangGraph and AutoGen use Python
 
 ---
 
+## Two graph formats, one family
+
+GraphLang workflows live in `*.graph.yaml` and are run, checked, compiled and drawn by the one command `graf`. They are not
+[zinet](https://github.com/digital-duck/zinet) graphs: zinet stores a *static* dependency graph (`primitives:`, `concepts:`,
+`applications:`), while a workflow is *executable* (typed nodes with ports, `triggers` and `binds` edges, loops and retries,
+Cedar policies). Both are plain YAML that persists a graph, and the file name is only a convention, so `graf` tells the files
+apart by content (`workflow:` with `nodes:` and `edges:` is a workflow) and says what a zinet or ConceptBook file is instead of
+failing on a schema error. The two share graph code: `graf vis` draws through zinet's engines (`zinet.vis`).
+
 ## Core Innovations
 
 ### 1. Physics-Inspired Execution
