@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- `graf vis`: nodes are labelled by what they do (`draft`, `write file`, `set iteration`, `repeat while ...`) with underscores shown as spaces, and show no type line (the colour and legend say it); the id and type are in the side panel. A node's `config.label` is used as written when present.
+- Requires zinet 0.2.1.
+
 ## 0.1.0
 
 First release: an early prototype. The graph (`*.graph.yaml`) is the program; the model changes the topology instead of writing code.

@@ -255,12 +255,12 @@ def _label(node):
 def test_display_labels_say_what_a_node_does():
     assert _label({"id": "gen_1", "type": "GENERATE", "config": {"function": "draft", "prompt_inline": "draft(@task)"}}) == "draft"
     assert _label({"id": "n", "type": "GENERATE", "config": {"prompt_ref": "prompts.critique"}}) == "critique"
-    assert _label({"id": "tool_1", "type": "SOLVE", "config": {"tool": "write_file", "expression": "write_file(...)"}}) == "write_file"
-    assert _label({"id": "x", "type": "SOLVE", "config": {"procedure_ref": "procedures.run_tests"}}) == "run_tests"
+    assert _label({"id": "tool_1", "type": "SOLVE", "config": {"tool": "write_file", "expression": "write_file(...)"}}) == "write file"
+    assert _label({"id": "x", "type": "SOLVE", "config": {"procedure_ref": "procedures.run_tests"}}) == "run tests"
     assert _label({"id": "set_1", "type": "CONTEXT", "ports": ["trigger", "out_iteration"], "config": {"action": "set"}}) == "set iteration"
     assert _label({"id": "e", "type": "EVALUATE", "config": {"condition": "contains(@in_subject, '[APPROVED]')"}}) == "contains(subject, '[APPROVED]')"
-    assert _label({"id": "l", "type": "LOOP", "config": {"condition": "@in_iteration < @in_max_iterations"}}) == "repeat while iteration < max_iterat…"
-    assert _label({"id": "wf_entry", "type": "INPUT"}) == "wf_entry"                        # nothing better than the id
+    assert _label({"id": "l", "type": "LOOP", "config": {"condition": "@in_iteration < @in_max_iterations"}}) == "repeat while iteration < max iterat…"
+    assert _label({"id": "wf_entry", "type": "INPUT"}) == "wf entry"                        # nothing better than the id, with spaces
     assert _label({"id": "g", "type": "GENERATE", "config": {"label": "Write the first draft", "function": "draft"}}) == "Write the first draft"
 
 
@@ -270,9 +270,12 @@ def test_the_id_stays_in_the_side_panel_and_search_still_finds_by_label():
     assert G.nodes["a"]["label"] == "p"
 
 
-def test_nodes_show_no_type_line_with_a_zinet_that_supports_it():
-    import dataclasses
-    from zinet import vis
-    if "show_kind" not in {f.name for f in dataclasses.fields(vis.Style)}:
-        pytest.skip("zinet < 0.2.1 has no show_kind")
+def test_nodes_show_no_type_line():
     assert engines.graphlang_style().show_kind is False
+
+
+def test_underscores_become_spaces_but_an_explicit_label_is_left_alone():
+    assert _label({"id": "write_draft_file", "type": "OUTPUT"}) == "write draft file"
+    assert _label({"id": "x", "type": "GENERATE", "config": {"label": "keep_this_as_written"}}) == "keep_this_as_written"
+    G, _ = build(workflow())
+    assert "_" not in " ".join(d["label"] for _, d in G.nodes(data=True) if d["label"] != "p")   # ids stay in the panel, not on the node

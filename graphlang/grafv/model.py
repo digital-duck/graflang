@@ -40,27 +40,34 @@ def _ref_name(ref: str) -> str:
 
 
 def display_label(node: Dict[str, Any]) -> str:
-    """What a node is called in a picture: its `config.label` if it has one, else a short summary of what it does
-    (the function or prompt it runs, the tool it calls, the condition it tests), else its id. The id stays in the side panel."""
+    """What a node is called in a picture. Underscores become spaces (`write_file` is shown as `write file`); an explicit
+    `config.label` is shown exactly as written. See `_summary` for how the rest is derived."""
     cfg = node.get("config") or {}
-    kind = node["type"]
     if cfg.get("label"):
         return _short(cfg["label"])
+    return _short(_summary(node).replace("_", " "))
+
+
+def _summary(node: Dict[str, Any]) -> str:
+    """A short summary of what a node does (the function or prompt it runs, the tool it calls, the condition it tests),
+    else its id. The id stays in the side panel."""
+    cfg = node.get("config") or {}
+    kind = node["type"]
     if kind == "GENERATE":
         name = cfg.get("function") or (_ref_name(cfg["prompt_ref"]) if cfg.get("prompt_ref") else None)
         if name:
-            return _short(name)
+            return name
     if kind in ("SOLVE", "QUERY", "RECOVER", "OBSERVE", "EMIT"):
         name = cfg.get("tool") or (_ref_name(cfg["procedure_ref"]) if cfg.get("procedure_ref") else None)
         if name:
-            return _short(name)
+            return name
     if kind == "CONTEXT" and cfg.get("action"):
         out = next((p[4:] for p in node.get("ports", []) if p.startswith("out_")), "")
-        return _short(f"{cfg['action']} {out}".strip())
+        return f"{cfg['action']} {out}".strip()
     if kind in ("EVALUATE", "ASSERT") and cfg.get("condition"):
-        return _short(str(cfg["condition"]).replace("@in_", "@").replace("@", ""))
+        return str(cfg["condition"]).replace("@in_", "@").replace("@", "")
     if kind == "LOOP" and cfg.get("condition"):
-        return _short("repeat while " + str(cfg["condition"]).replace("@in_", "@").replace("@", ""))
+        return "repeat while " + str(cfg["condition"]).replace("@in_", "@").replace("@", "")
     return node["id"]
 
 
