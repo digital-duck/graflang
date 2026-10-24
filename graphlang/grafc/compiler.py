@@ -10,7 +10,6 @@ from ..formats import require_graphlang
 from .analyzer import GraphAnalyzer
 from .optimizer import GraphOptimizer
 from .cedar_compiler import CedarCompiler
-from .rust_gen.codegen import RustCodeGenerator
 
 class GraphLangCompiler:
     """Compiles GraphLang workflows to Rust."""
@@ -98,6 +97,10 @@ class GraphLangCompiler:
     
     def generate_rust(self):
         """Generate Rust code from the Graph IR."""
+        try:
+            from .rust_gen.codegen import RustCodeGenerator      # needs jinja2: only `graf compile` uses it
+        except ImportError as e:
+            raise ValueError(f"`graf compile` needs the Rust code generator's template engine: pip install 'graflang[grafc]' ({e})") from None
         codegen = RustCodeGenerator(
             graph_data=self.graph_data,
             resources=self.resources,

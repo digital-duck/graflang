@@ -66,7 +66,12 @@ def cmd_compile(graph, output, target, optimize):
         compiler.compile_policies()
 
         progress.update(task, description="Generating Rust code...")
-        compiler.generate_rust()
+        try:
+            compiler.generate_rust()
+        except ValueError as e:
+            progress.stop()
+            console.print(f"[red]✗ Cannot generate Rust:[/red] {escape(str(e))}")
+            sys.exit(1)
 
         progress.update(task, description="Writing output files...")
         compiler.write_output()
