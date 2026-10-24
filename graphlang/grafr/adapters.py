@@ -3,10 +3,12 @@
 `make_llm(name, model)` returns an object with `.generate(prompt, model=None, **opts) -> str`.
 
 * `mock`: no LLM; returns a canned string. The default, so nothing is billed unless you ask.
-* anything else (`claude_cli`, `ollama`, `openrouter`, `anthropic`, ...): SPL.py's adapter of that name
-  (`spl3.adapters.get_adapter`), so GraphLang reuses the providers, retries and subscription-safe
-  environment handling already in SPL.py. `claude_cli` runs the Claude Code CLI with ANTHROPIC_API_KEY
+* anything else (`claude_cli`, `ollama`, `openrouter`, `anthropic`, `openai`, `gemini`, ...): the dd-llm
+  adapter of that name (`dd_llm.get_adapter`). dd-llm is small and has no core dependencies, so GraphLang
+  does not need SPL.py for plain LLM calls. `claude_cli` runs the Claude Code CLI with ANTHROPIC_API_KEY
   stripped, i.e. on your subscription, not the paid API.
+
+(SPL.py is needed only for `procedure_ref` nodes; see procedures.py.)
 
 DODA: the graph says *what* to generate; the provider and model are chosen when you run it
 (`grafr run --adapter claude_cli --model claude-haiku-5-5`). A `model` written in a node is only a hint:
@@ -14,13 +16,11 @@ it is used when it is compatible with the chosen adapter and no `--model` was gi
 """
 from __future__ import annotations
 
-import asyncio
-import threading
 from typing import Any, Optional
 
 
 class LLMUnavailable(RuntimeError):
-    """The requested adapter cannot be created (SPL.py missing, unknown name, ...)."""
+    """The requested adapter cannot be created (dd-llm missing, unknown name, missing API key, ...)."""
 
 
 def resolve_model(adapter: str, node_model: Optional[str], override: Optional[str]) -> Optional[str]:
@@ -35,10 +35,10 @@ def resolve_model(adapter: str, node_model: Optional[str], override: Optional[st
             return None                      # a hint for another provider, e.g. 'ollama/gemma3' under claude_cli
         node_model = rest
     try:
-        from spl3.adapters import _model_compatible
-        return node_model if _model_compatible(adapter, node_model) else None
+        from dd_llm import model_compatible
     except ImportError:
         return node_model
+    return node_model if model_compatible(adapter, node_model) else None
 
 
 class MockLLM:
@@ -52,55 +52,18 @@ class MockLLM:
         return f"[Mock LLM response from {model or 'mock'} for prompt: {prompt[:300]}...]"
 
 
-def _run_coro(coro):
-    """Run a coroutine to completion from sync code, even if an event loop is already running here."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    box: dict = {}
-
-    def target():
-        try:
-            box["value"] = asyncio.run(coro)
-        except BaseException as e:           # re-raised in the caller's thread
-            box["error"] = e
-
-    t = threading.Thread(target=target)
-    t.start()
-    t.join()
-    if "error" in box:
-        raise box["error"]
-    return box["value"]
-
-
-def _import_spl_get_adapter():
-    """SPL.py's adapter factory. If SPL.py is not installed, SPL_PY_PATH may point at a checkout of it."""
-    try:
-        from spl3.adapters import get_adapter
-    except ImportError:
-        import os
-        import sys
-        path = os.environ.get("SPL_PY_PATH")
-        if not path or path in sys.path:
-            raise
-        sys.path.insert(0, path)
-        from spl3.adapters import get_adapter
-    return get_adapter
-
-
-class SPLAdapterLLM:
-    """Wraps one of SPL.py's async adapters behind the sync `generate` GraphLang nodes use."""
+class DDLLM:
+    """A dd-llm adapter behind the `generate` GraphLang nodes use."""
 
     def __init__(self, name: str, model: Optional[str] = None):
         try:
-            get_adapter = _import_spl_get_adapter()
+            import dd_llm
         except ImportError as e:
-            raise LLMUnavailable("adapter %r needs SPL.py: `pip install -e /path/to/SPL.py` (or `pip install spl-llm`), "
-                                 "or set SPL_PY_PATH to its folder; use --adapter mock without it" % name) from e
+            raise LLMUnavailable("adapter %r needs dd-llm: `pip install dd-llm` (or `pip install -e /path/to/dd-llm`); "
+                                 "use --adapter mock without it" % name) from e
         try:
-            self._adapter = get_adapter(name, **({"model": model} if model else {}))
-        except ValueError as e:
+            self._adapter = dd_llm.get_adapter(name)
+        except ValueError as e:                      # unknown adapter, or a required key / setting is missing
             raise LLMUnavailable(str(e)) from e
         self.name = name
         self.adapter_name = name
@@ -108,7 +71,13 @@ class SPLAdapterLLM:
 
     def generate(self, prompt: str, model: Optional[str] = None, **opts: Any) -> str:
         kwargs = {k: v for k, v in opts.items() if k in ("max_tokens", "temperature", "system") and v is not None}
-        result = _run_coro(self._adapter.generate(prompt, model=model or "", **kwargs))
+        try:
+            result = self._adapter.call(prompt, model=model or "", **kwargs)
+        except ImportError as e:                     # the provider's SDK is an optional extra of dd-llm
+            raise LLMUnavailable("adapter %r needs an extra package: %s (see `pip install dd-llm[%s]`)" % (self.name, e, self.name)) from e
+        if not result.success:
+            errors = result.error_history or []
+            raise RuntimeError(errors[-1]["error"] if errors else f"{self.name} call failed")
         return result.content
 
 
@@ -116,4 +85,4 @@ def make_llm(adapter: str = "mock", model: Optional[str] = None):
     """The LLM object for `--adapter` / `--model`."""
     if adapter == "mock":
         return MockLLM(model)
-    return SPLAdapterLLM(adapter, model)
+    return DDLLM(adapter, model)

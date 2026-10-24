@@ -11,7 +11,7 @@ GraphLang: a graph-first language for agentic workflows. The graph (YAML, `*.gra
 ## Commands
 
 ```bash
-pip install -e ".[dev]"                      # extras: dev, spl (real adapters/procedures), grafc (jinja2)
+pip install -e ".[dev]"                      # extras: dev, openai/anthropic/gemini (provider SDKs via dd-llm), spl (procedure_ref only), grafc (jinja2)
 pytest                                       # all tests
 pytest tests/test_grafr_loop.py::test_name   # single test
 grafr run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `mock`; --param is repeatable
@@ -21,7 +21,7 @@ grafc compile|check <graph.yaml>         # `python -m graphlang.grafr.cli ...` a
 
 Both CLIs are `click` groups (`main` in `graphlang/grafr/cli.py` and `graphlang/grafc/cli.py`); add new commands as `@main.command()`. Imports in tests must be `graphlang.grafr...` / `graphlang.grafc...`. Tests under `tests/test_cedar_compiler.py` and `test_policy_slicer.py` exercise the hand-written Cedar compiler and have known failures (gap #18).
 
-Real LLM calls: `--adapter claude_cli --model <id>` goes through SPL.py's adapters, which must be importable (`pip install -e /path/to/SPL.py` or set `SPL_PY_PATH`). Default `mock` adapter needs no LLM; tests use it.
+Real LLM calls: `--adapter claude_cli --model <id>` goes through dd-llm (`/home/papagame/projects/digital-duck/dd-llm`, a core dependency; `pip install -e` it if missing). `procedure_ref` nodes additionally need SPL.py importable (`pip install -e /path/to/SPL.py` or set `SPL_PY_PATH`). Default `mock` adapter needs no LLM; tests use it.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ Real LLM calls: `--adapter claude_cli --model <id>` goes through SPL.py's adapte
   - `runtime.py` loads YAML into a `networkx.MultiDiGraph` and executes it as **token-passing dataflow** (not true interaction-net rewriting, gap #26). Two edge types: `triggers` (control tokens between ports like `complete`/`pass`/`fail`) and `binds` (data, keyed by port name; last writer wins). Nodes may re-fire (retry wires work), `JOIN` is a barrier, `FORK` emits on all control ports, `--max-steps` bounds runaway loops (`RunLimitExceeded`).
   - `nodes/`: one executor per node type (GENERATE, EVALUATE, SOLVE, ASSERT, LOOP, GUARD, MUTATE, CONTEXT...), registered via `register_executor` in `nodes/__init__.py`. `LOOP` runs its `subgraph` once per iteration, with condition checked before each iteration.
   - `expr.py`: safe expression evaluator for `@var` conditions (no `eval`; whitelisted functions). Use it for any new condition syntax.
-  - `adapters.py`: `mock` plus SPL.py LLM adapters. `resolver.py`: resolves the `resources` block (procedures/prompts/policies, three-tier composition).
+  - `adapters.py`: `mock` plus dd-llm adapters. `resolver.py`: resolves the `resources` block (procedures/prompts/policies, three-tier composition).
   - `cedar_guard.py`: Cedar checks for GUARD/MUTATE via the official engine (`cedarpy`), fail-closed (any evaluation error denies); callers must pass every attribute the policies read. `topology.py` backs `grafr validate`. `procedures.py` runs a node's `procedure_ref` SPL workflow through SPL.py's executor. `MUTATE` validates (schema, structure, Cedar, budget) and applies deltas; a MUTATE inside a LOOP body affects only that iteration's copy (gap #32). `SOLVE` with neither `expression` nor `procedure_ref` is still a stub that yields True (gap #31).
 - `graphlang/grafc/`: the compiler, mostly a stub. `cedar/` is a ~1,500-line hand-written Cedar lexer/parser/type checker/compiler (open decision: keep, or use the official `cedar-policy` crate); `rust_gen/` is Rust codegen; also analyzer/optimizer/visualizer.
 - `graphlang/policies/`: shared Cedar policies (`graph_safety.cedar`, `mutation_safety.cedar`), referenced from graph YAMLs via `resources.policies`.

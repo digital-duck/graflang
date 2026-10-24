@@ -58,7 +58,7 @@ The LLM can propose mutations, but only those that pass the Cedar policy check a
 
 ```bash
 # Install the dynamic interpreter (development)
-pip install -e ".[dev]"        # add the `spl` extra for real LLM adapters
+pip install -e ".[dev]"        # `claude_cli` works as is; `.[openai]` etc. add provider SDKs
 
 # Run a workflow (default adapter is `mock`, which calls no LLM)
 grafr run cookbook/code_pipeline/code_pipeline.graph.yaml \

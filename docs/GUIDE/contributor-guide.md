@@ -32,7 +32,7 @@ Tests use the `mock` adapter; none needs an LLM. Known failures: `tests/test_ced
 - `runtime.py` loads YAML into a `networkx.MultiDiGraph` (a `triggers` and a `binds` edge may join the same pair) and runs it as token-passing dataflow. This is not interaction-net rewriting (gap #26). Nodes may re-fire; `JOIN` is a barrier; `FORK` emits on all control ports; `--max-steps` raises `RunLimitExceeded`. The schema is validated on load, and a missing schema is an error.
 - `nodes/`: one executor per node type, subclasses of `NodeExecutor` (`nodes/base.py`), registered in `nodes/__init__.py`.
 - `expr.py`: the safe condition evaluator. Any new condition feature goes here; never use `eval`.
-- `adapters.py`: `mock` plus SPL.py adapters. `procedures.py`: runs `procedure_ref` SPL workflows. `resolver.py`: the `resources` block.
+- `adapters.py`: `mock` plus dd-llm adapters (`make_llm`, `resolve_model`). `procedures.py`: runs `procedure_ref` SPL workflows. `resolver.py`: the `resources` block.
 - `cedar_guard.py`: Cedar via the official engine (`cedarpy`).
 - `topology.py`: static checks behind `grafr validate` and `tests/test_topology.py`.
 - `cli.py`: a `click` group named `main`.

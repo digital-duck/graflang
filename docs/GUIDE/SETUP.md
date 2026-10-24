@@ -22,10 +22,11 @@ Optional extras:
 | Extra | Adds | When you need it |
 |---|---|---|
 | `dev` | `pytest`, `pytest-asyncio` | running the tests |
-| `spl` | SPL.py (`spl-llm`) | real LLM adapters (`claude_cli`, `ollama`, ...) and `procedure_ref` nodes |
+| `openai`, `anthropic`, `gemini` | the provider SDK, through dd-llm | those providers (only `claude_cli`, `gemini_cli` and `echo` need no SDK; see below) |
+| `spl` | SPL.py (`spl-llm`) | only `procedure_ref` nodes, which run SPL.py workflows |
 | `grafc` | `jinja2` | the compiler templates |
 
-Core dependencies (`click`, `ruamel.yaml`, `networkx`, `jsonschema`, `cedarpy`, `rich`) come with the base install. `cedarpy` is the official Cedar engine and is required: `grafr` imports it at startup.
+Core dependencies (`click`, `ruamel.yaml`, `networkx`, `jsonschema`, `cedarpy`, `dd-llm`, `rich`) come with the base install. `dd-llm` is the small shared LLM layer (no dependencies of its own) that provides the adapters; if it is not on PyPI yet for you, install it from a checkout first: `pip install -e /path/to/dd-llm`. `cedarpy` is the official Cedar engine and is required: `grafr` imports it at startup.
 
 Two console scripts are installed, `grafr` and `grafc`. `python -m graphlang.grafr.cli ...` and `python -m graphlang.grafc.cli ...` do the same thing.
 
@@ -44,13 +45,15 @@ The `run` uses the default `mock` adapter, which calls no LLM and prints placeho
 
 ## Connect a real LLM
 
-Real adapters come from SPL.py and must be importable. Pick one:
+Adapters come from [dd-llm](https://github.com/digital-duck/dd-llm), which is already installed with `grafr`. `claude_cli` needs nothing else. Hosted providers need their SDK, as a dd-llm extra:
 
 ```bash
-pip install -e ".[spl]"            # from PyPI
-pip install -e /path/to/SPL.py     # a local checkout
-export SPL_PY_PATH=/path/to/SPL.py # or point at a checkout without installing
+pip install -e ".[openai]"       # openai, openrouter, ollama (OpenAI-compatible), deepseek, qwen
+pip install -e ".[anthropic]"    # anthropic
+pip install -e ".[gemini]"       # gemini
 ```
+
+Adapter names: `claude_cli`, `gemini_cli`, `openai`, `anthropic`, `gemini`, `vertex`, `openrouter`, `ollama`, `deepseek`, `qwen`, `azure_openai`, `bedrock`, `momagrid`, `echo`. Keys come from the usual environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, ...); see the dd-llm README.
 
 Then choose the adapter and model at run time. The graph says *what* to generate; you choose *who* generates it:
 
@@ -60,18 +63,21 @@ grafr run cookbook/self_refine/self_refine.graph.yaml \
     --param topic="rain"
 ```
 
-- `claude_cli` runs the Claude Code CLI on your subscription (SPL.py strips `ANTHROPIC_API_KEY` for it).
-- `ollama` needs a running Ollama server with the model pulled.
+- `claude_cli` runs the Claude Code CLI on your subscription (dd-llm strips `ANTHROPIC_API_KEY` from the child process so it cannot bill the paid API).
+- `ollama` needs a running Ollama server with the model pulled, and the `openai` extra (it speaks the OpenAI-compatible API).
 - A `model:` written inside a node is only a hint. It is used when you give no `--model` and it fits the adapter; `ollama/gemma3` is ignored under `claude_cli`.
 
-Nodes that use `procedure_ref` (the `code_pipeline` procedures `00`-`07`) run SPL.py workflows and only execute under a real adapter. Their logs go to `<graph folder>/.grafr/logs` (git-ignored).
+Nodes that use `procedure_ref` (the `code_pipeline` procedures `00`-`07`) run SPL.py workflows, so they need SPL.py importable (`pip install -e ".[spl]"`, `pip install -e /path/to/SPL.py`, or `export SPL_PY_PATH=/path/to/SPL.py`) and only execute under a real adapter. Their logs go to `<graph folder>/.grafr/logs` (git-ignored).
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
 | `ModuleNotFoundError: cedarpy` | base install missing; reinstall with `pip install -e ".[dev]"` |
-| `Unknown adapter ...` or an SPL.py import error | SPL.py is not installed; see "Connect a real LLM" |
+| `adapter ... needs dd-llm` | dd-llm is missing; `pip install -e /path/to/dd-llm` |
+| `adapter ... needs an extra package` | the provider SDK is missing; install the matching extra (`.[openai]`, ...) |
+| `Unknown adapter ...` or `... API key required` | misspelled adapter name, or the provider's key variable is not set |
+| `procedure_ref nodes need SPL.py` | install the `spl` extra or set `SPL_PY_PATH` |
 | `✗ Run failed: stopped after N node firings` | a loop or retry wire never ended; fix the condition, or raise `--max-steps` (default 1000) |
 | `✗ Run failed: ... unknown variable` | a condition reads an `@variable` that is not bound; the message names the node |
 | Output is `[Mock LLM response ...]` | you are on the default `mock` adapter; pass `--adapter` |

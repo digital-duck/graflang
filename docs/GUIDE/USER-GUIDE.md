@@ -21,7 +21,7 @@ grafc compile  FILE [-o DIR] [--target rust] [--optimize]
 | Option | Meaning |
 |---|---|
 | `--param key=value` | a workflow input; repeatable. Coerced to the declared type (`INTEGER`, `FLOAT`, `BOOL`). A value without `=` is a usage error |
-| `--adapter NAME` | `mock` (default, no LLM) or an SPL.py adapter: `claude_cli`, `ollama`, `openrouter`, ... |
+| `--adapter NAME` | `mock` (default, no LLM) or a dd-llm adapter: `claude_cli`, `ollama`, `openrouter`, `openai`, `anthropic`, ... |
 | `--model ID` | model for every `GENERATE` node; overrides `model:` hints in the graph |
 | `--max-steps N` | stop after N node firings (default 1000) |
 

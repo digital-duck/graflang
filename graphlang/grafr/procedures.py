@@ -2,14 +2,52 @@
 
 This mirrors what `spl3 run` does for one file: load the sibling .spl files into a registry (so IMPORT
 and CALL resolve), register the file's functions/procedures/TOOL_APIs, build an Executor around the
-chosen adapter, and run the workflow. Needs SPL.py importable (see adapters.py).
+chosen adapter, and run the workflow. Needs SPL.py importable (`pip install -e ".[spl]"`, or SPL_PY_PATH). Plain GENERATE calls do not: they use dd-llm (adapters.py).
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .adapters import _import_spl_get_adapter, _run_coro
+
+def _run_coro(coro):
+    """Run a coroutine to completion from sync code, even if an event loop is already running here."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    box: dict = {}
+
+    def target():
+        try:
+            box["value"] = asyncio.run(coro)
+        except BaseException as e:           # re-raised in the caller's thread
+            box["error"] = e
+
+    t = threading.Thread(target=target)
+    t.start()
+    t.join()
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _import_spl_get_adapter():
+    """SPL.py's adapter factory. If SPL.py is not installed, SPL_PY_PATH may point at a checkout of it."""
+    try:
+        from spl3.adapters import get_adapter
+    except ImportError:
+        import os
+        import sys
+        path = os.environ.get("SPL_PY_PATH")
+        if not path or path in sys.path:
+            raise ImportError("procedure_ref nodes need SPL.py: `pip install -e \".[spl]\"`, `pip install -e /path/to/SPL.py`, "
+                              "or set SPL_PY_PATH to its folder") from None
+        sys.path.insert(0, path)
+        from spl3.adapters import get_adapter
+    return get_adapter
 
 
 def declared_inputs(path: Path) -> list[str]:
