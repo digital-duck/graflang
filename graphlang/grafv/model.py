@@ -27,9 +27,46 @@ def color(node_type: str) -> str:
     return TYPE_COLORS.get(node_type, OTHER_COLOR)
 
 
+LABEL_CHARS = 36
+
+
+def _short(text: str, limit: int = LABEL_CHARS) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _ref_name(ref: str) -> str:
+    return str(ref).rsplit(".", 1)[-1]
+
+
+def display_label(node: Dict[str, Any]) -> str:
+    """What a node is called in a picture: its `config.label` if it has one, else a short summary of what it does
+    (the function or prompt it runs, the tool it calls, the condition it tests), else its id. The id stays in the side panel."""
+    cfg = node.get("config") or {}
+    kind = node["type"]
+    if cfg.get("label"):
+        return _short(cfg["label"])
+    if kind == "GENERATE":
+        name = cfg.get("function") or (_ref_name(cfg["prompt_ref"]) if cfg.get("prompt_ref") else None)
+        if name:
+            return _short(name)
+    if kind in ("SOLVE", "QUERY", "RECOVER", "OBSERVE", "EMIT"):
+        name = cfg.get("tool") or (_ref_name(cfg["procedure_ref"]) if cfg.get("procedure_ref") else None)
+        if name:
+            return _short(name)
+    if kind == "CONTEXT" and cfg.get("action"):
+        out = next((p[4:] for p in node.get("ports", []) if p.startswith("out_")), "")
+        return _short(f"{cfg['action']} {out}".strip())
+    if kind in ("EVALUATE", "ASSERT") and cfg.get("condition"):
+        return _short(str(cfg["condition"]).replace("@in_", "@").replace("@", ""))
+    if kind == "LOOP" and cfg.get("condition"):
+        return _short("repeat while " + str(cfg["condition"]).replace("@in_", "@").replace("@", ""))
+    return node["id"]
+
+
 def _info(node: Dict[str, Any]) -> str:
     cfg = node.get("config") or {}
-    lines = [f"type: {node['type']}"]
+    lines = [f"id: {node['id']}", f"type: {node['type']}"]
     lines += [f"{k}: {cfg[k]}" for k in CONFIG_KEYS if cfg.get(k) not in (None, "", [])]
     if cfg.get("prompt_inline"):
         lines.append("prompt_inline: " + str(cfg["prompt_inline"]).strip().splitlines()[0][:60])
@@ -49,7 +86,7 @@ def _add(G: nx.MultiDiGraph, nodes: List[Dict], edges: List[Dict], prefix: str, 
     for n in nodes:
         qid = prefix + n["id"]
         ids[n["id"]] = qid
-        G.add_node(qid, label=n["id"], kind=n["type"], color=color(n["type"]), info=_info(n),
+        G.add_node(qid, label=display_label(n), kind=n["type"], color=color(n["type"]), info=_info(n),
                    **({"parent": parent} if parent else {}))
     for e in edges:
         try:

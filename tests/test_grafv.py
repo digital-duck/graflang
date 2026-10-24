@@ -70,7 +70,7 @@ def test_cytoscape_page_is_self_contained_and_complete(tmp_path):
     data = _page_data(page)
     nodes = {e["data"]["id"]: e for e in data if "source" not in e["data"]}
     assert nodes["lp/b"]["data"]["parent"] == "lp" and nodes["lp/c"]["data"]["shape"] == "diamond"
-    assert nodes["lp"]["data"]["text"] == "lp" and nodes["a"]["data"]["text"] == "a\nGENERATE"
+    assert nodes["lp"]["data"]["text"] == "repeat while cycle < 2" and nodes["a"]["data"]["text"] == "p"     # labels say what a node does; the type line is off
     assert {e["data"]["relation"] for e in data if "source" in e["data"]} == {"triggers", "binds"}
     assert "GENERATE" in page and "control" in page and "data" in page          # legend
 
@@ -212,7 +212,7 @@ def test_mermaid_is_not_opened_in_a_browser(tmp_path, monkeypatch):
 def test_ascii_engine_is_available_through_zinet(tmp_path):
     out, _, n = engines.render(workflow(), tmp_path / "w.txt", "ascii")
     text = out.read_text(encoding="utf-8")
-    assert n == 6 and text.startswith("Tier 0") and "[INPUT   ] start" in text and "[GENERATE] a  <- start" in text
+    assert n == 6 and text.startswith("Tier 0") and "[INPUT   ] start" in text and "[GENERATE] p  <- start" in text
 
 
 def test_zinet_install_hints_are_shown_as_graflang_extras(tmp_path, monkeypatch):
@@ -245,3 +245,34 @@ def test_the_page_starts_with_the_control_flow_and_loops_collapsed():
     assert json.loads(re.search(r"const OPTS = (\{.*?\});", page).group(1)) == {"dataHidden": True, "collapsed": True}
     assert 'id="showdata"' in page and "show data edges" in page and 'id="collapseall"' in page
     assert engines.graphlang_style().secondary_hidden and engines.graphlang_style().groups_collapsed
+
+
+def _label(node):
+    from graphlang.grafv.model import display_label
+    return display_label({"ports": [], **node})
+
+
+def test_display_labels_say_what_a_node_does():
+    assert _label({"id": "gen_1", "type": "GENERATE", "config": {"function": "draft", "prompt_inline": "draft(@task)"}}) == "draft"
+    assert _label({"id": "n", "type": "GENERATE", "config": {"prompt_ref": "prompts.critique"}}) == "critique"
+    assert _label({"id": "tool_1", "type": "SOLVE", "config": {"tool": "write_file", "expression": "write_file(...)"}}) == "write_file"
+    assert _label({"id": "x", "type": "SOLVE", "config": {"procedure_ref": "procedures.run_tests"}}) == "run_tests"
+    assert _label({"id": "set_1", "type": "CONTEXT", "ports": ["trigger", "out_iteration"], "config": {"action": "set"}}) == "set iteration"
+    assert _label({"id": "e", "type": "EVALUATE", "config": {"condition": "contains(@in_subject, '[APPROVED]')"}}) == "contains(subject, '[APPROVED]')"
+    assert _label({"id": "l", "type": "LOOP", "config": {"condition": "@in_iteration < @in_max_iterations"}}) == "repeat while iteration < max_iterat…"
+    assert _label({"id": "wf_entry", "type": "INPUT"}) == "wf_entry"                        # nothing better than the id
+    assert _label({"id": "g", "type": "GENERATE", "config": {"label": "Write the first draft", "function": "draft"}}) == "Write the first draft"
+
+
+def test_the_id_stays_in_the_side_panel_and_search_still_finds_by_label():
+    G, _ = build(workflow())
+    assert G.nodes["a"]["info"].splitlines()[:2] == ["id: a", "type: GENERATE"]
+    assert G.nodes["a"]["label"] == "p"
+
+
+def test_nodes_show_no_type_line_with_a_zinet_that_supports_it():
+    import dataclasses
+    from zinet import vis
+    if "show_kind" not in {f.name for f in dataclasses.fields(vis.Style)}:
+        pytest.skip("zinet < 0.2.1 has no show_kind")
+    assert engines.graphlang_style().show_kind is False

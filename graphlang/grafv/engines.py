@@ -8,6 +8,7 @@ page the data edges start hidden (they show for the node you hover or select) an
 """
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -25,6 +26,10 @@ __all__ = ["DEFAULT_ENGINE", "ENGINES", "cytoscape_html", "graphify_ready", "gra
            "render", "to_dot", "to_mermaid_text"]
 
 
+# Nodes show only their label: the colour and the legend already say the type. Needs zinet >= 0.2.1 (older versions ignore it).
+_NO_KIND = {"show_kind": False} if "show_kind" in {f.name for f in dataclasses.fields(vis.Style)} else {}
+
+
 def _shape(kind: str) -> str:
     return "round-rectangle" if kind in _ROUND else "diamond" if kind in _DIAMOND else "hexagon" if kind in _HEXAGON else "rectangle"
 
@@ -37,7 +42,7 @@ def graphlang_style(title: str = "workflow") -> vis.Style:
         edge_label=lambda u, v, d: d["label"], edge_kind=lambda u, v, d: d["relation"],
         edge_dashed=lambda u, v, d: d["relation"] == "binds", edge_info=lambda u, v, d: f"{d['sport']} → {d['tport']}",
         edge_legend=(("control", False), ("data", True)), title=title, kind_colors=dict(TYPE_COLORS),
-        secondary_hidden=True, groups_collapsed=True)       # first view: the control flow, loops as one box
+        secondary_hidden=True, groups_collapsed=True, **_NO_KIND)       # first view: the control flow, loops as one box
 
 
 def _title(G: nx.MultiDiGraph) -> str:
