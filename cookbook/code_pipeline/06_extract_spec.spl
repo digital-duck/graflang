@@ -1,0 +1,52 @@
+-- 06_extract_spec.spl  [Step 3b]
+-- Sub-workflow: reverse-engineer a formal specification from implementation code.
+-- Used in the closure check: spec_judge compares this @out_spec against the
+-- original @spec to verify the implementation captured the correct intent.
+--
+-- Artifacts written:
+--   spec/extracted.md  — spec reverse-engineered from the final implementation
+
+CREATE FUNCTION reverse_spec(code TEXT)
+RETURN TEXT
+AS $$
+You are a software architect reading an implementation and reconstructing its specification.
+
+Study the following code carefully and write a precise, formal specification
+describing what this code does — as if you were the original author writing
+the spec *before* implementation.
+
+Code:
+{code}
+
+Write the specification in natural language. Cover:
+1. Purpose — what problem does this solve?
+2. Inputs — what parameters or data does it accept, including types and constraints?
+3. Outputs — what does it return, including type and meaning?
+4. Behaviour — the algorithm or logic, including edge cases and error conditions handled.
+5. Assumptions — any implicit constraints or prerequisites the implementation relies on.
+
+Be precise and complete. Do not describe implementation details (variable names,
+language syntax). Describe *what* the code does, not *how*.
+$$;
+
+
+WORKFLOW extract_spec
+    INPUT:
+        @code    TEXT,
+        @extract_model   TEXT DEFAULT 'gemma4',
+        @log_dir TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
+    OUTPUT: @out_spec TEXT
+DO
+    LOGGING '[06_extract_spec] reverse-engineering spec from implementation ...' LEVEL INFO
+    GENERATE reverse_spec(@code)
+        WITH OUTPUT BUDGET 1024 TOKENS
+        USING MODEL @extract_model
+        INTO @out_spec
+    CALL write_file(f'{@log_dir}/spec/extracted.md', @out_spec) INTO NONE
+    LOGGING f'[06_extract_spec] done | out_spec_len={len(@out_spec)}' LEVEL INFO
+    RETURN @out_spec
+EXCEPTION
+    WHEN ModelUnavailable THEN
+        LOGGING '[06_extract_spec] model unavailable' LEVEL ERROR
+        RETURN '[ERROR] Spec extraction model unavailable.' WITH status = 'failed'
+END

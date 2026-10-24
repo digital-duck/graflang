@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GraphLang graph delta (what a MUTATE node may propose)",
+  "type": "object",
+  "required": ["action", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "action": { "enum": ["add_node", "remove_node", "add_edge", "remove_edge", "update_config"] },
+    "payload": { "type": "object" }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "action": { "const": "add_node" },
+        "payload": {
+          "type": "object",
+          "required": ["id", "type", "ports"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+            "type": { "enum": ["GENERATE", "SOLVE", "ASSERT", "EVALUATE", "RECOVER", "OBSERVE", "FORK", "JOIN", "CONTEXT", "QUERY"] },
+            "ports": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "config": { "type": "object" }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "remove_node" },
+        "payload": {
+          "type": "object", "required": ["id"], "additionalProperties": false,
+          "properties": { "id": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" } }
+        }
+      }
+    },
+    {
+      "properties": {
+        "action": { "enum": ["add_edge", "remove_edge"] },
+        "payload": {
+          "type": "object", "required": ["source", "target", "type"], "additionalProperties": false,
+          "properties": {
+            "source": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" },
+            "target": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" },
+            "type": { "enum": ["triggers", "binds"] }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "update_config" },
+        "payload": {
+          "type": "object", "required": ["node_id", "key", "value"], "additionalProperties": false,
+          "properties": {
+            "node_id": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+            "key": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+            "value": {}
+          }
+        }
+      }
+    }
+  ]
+}

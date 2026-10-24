@@ -1,0 +1,22 @@
+use crate::context::ExecutionContext;
+
+{% for policy_name, policy_code in policies.items() %}
+// Policy: {{ policy_name }}
+{{ policy_code }}
+{% endfor %}
+
+// Default policy evaluation
+pub fn evaluate_policy(ctx: &ExecutionContext) -> bool {
+    {% if policies %}
+    // Evaluate all policies
+    {% for policy_name in policies.keys() %}
+    if !{{ policy_name }}::evaluate_policy(ctx) {
+        return false;
+    }
+    {% endfor %}
+    true
+    {% else %}
+    // No policies defined, allow by default
+    true
+    {% endif %}
+}

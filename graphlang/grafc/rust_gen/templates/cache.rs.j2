@@ -1,0 +1,159 @@
+// Policy evaluation cache - memoizes results for identical contexts
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+use crate::context::ExecutionContext;
+
+/// Cache for policy evaluation results
+pub struct PolicyCache {
+    /// Cache entries: hash(context) -> (node_id, result)
+    entries: HashMap<u64, CacheEntry>,
+    /// Maximum cache size (LRU eviction)
+    max_size: usize,
+    /// Access order for LRU
+    access_order: Vec<u64>,
+    /// Cache statistics
+    pub hits: usize,
+    pub misses: usize,
+}
+
+struct CacheEntry {
+    node_id: String,
+    result: bool,
+    timestamp: std::time::Instant,
+}
+
+impl PolicyCache {
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            max_size,
+            access_order: Vec::new(),
+            hits: 0,
+            misses: 0,
+        }
+    }
+    
+    /// Compute a hash of the execution context for caching
+    fn compute_context_hash(ctx: &ExecutionContext, node_id: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        
+        // Hash principal
+        ctx.principal.id.hash(&mut hasher);
+        ctx.principal.parents.hash(&mut hasher);
+        
+        // Hash action
+        ctx.action.id.hash(&mut hasher);
+        
+        // Hash resource
+        ctx.resource.id.hash(&mut hasher);
+        
+        // Hash context data (sorted for deterministic hashing)
+        let mut context_pairs: Vec<_> = ctx.context.iter().collect();
+        context_pairs.sort_by_key(|(k, _)| k.clone());
+        for (k, v) in context_pairs {
+            k.hash(&mut hasher);
+            v.hash(&mut hasher);
+        }
+        
+        // Hash proposed delta if present
+        if let Some(ref delta) = ctx.proposed_delta {
+            delta.action.hash(&mut hasher);
+            delta.node_type.hash(&mut hasher);
+            delta.source_port.hash(&mut hasher);
+        }
+        
+        // Hash mutation count
+        ctx.mutation_count.hash(&mut hasher);
+        
+        // Hash node_id (different nodes have different policy slices)
+        node_id.hash(&mut hasher);
+        
+        hasher.finish()
+    }
+    
+    /// Get cached result or compute and cache
+    pub fn get_or_compute<F>(&mut self, ctx: &ExecutionContext, node_id: &str, compute: F) -> bool
+    where
+        F: FnOnce(&ExecutionContext) -> bool,
+    {
+        let hash = Self::compute_context_hash(ctx, node_id);
+        
+        // Check cache
+        if let Some(entry) = self.entries.get(&hash) {
+            if entry.node_id == node_id {
+                self.hits += 1;
+                // Update access order (LRU)
+                if let Some(pos) = self.access_order.iter().position(|&h| h == hash) {
+                    self.access_order.remove(pos);
+                    self.access_order.push(hash);
+                }
+                return entry.result;
+            }
+        }
+        
+        // Cache miss - compute result
+        self.misses += 1;
+        let result = compute(ctx);
+        
+        // Evict if cache is full (LRU)
+        if self.entries.len() >= self.max_size {
+            if let Some(oldest_hash) = self.access_order.first().cloned() {
+                self.entries.remove(&oldest_hash);
+                self.access_order.remove(0);
+            }
+        }
+        
+        // Insert new entry
+        self.entries.insert(hash, CacheEntry {
+            node_id: node_id.to_string(),
+            result,
+            timestamp: std::time::Instant::now(),
+        });
+        self.access_order.push(hash);
+        
+        result
+    }
+    
+    /// Clear the cache
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.access_order.clear();
+        self.hits = 0;
+        self.misses = 0;
+    }
+    
+    /// Get cache statistics
+    pub fn stats(&self) -> CacheStats {
+        let total = self.hits + self.misses;
+        let hit_rate = if total > 0 {
+            (self.hits as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        
+        CacheStats {
+            size: self.entries.len(),
+            hits: self.hits,
+            misses: self.misses,
+            hit_rate,
+        }
+    }
+}
+
+pub struct CacheStats {
+    pub size: usize,
+    pub hits: usize,
+    pub misses: usize,
+    pub hit_rate: f64,
+}
+
+impl std::fmt::Display for CacheStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Cache[size={}, hits={}, misses={}, hit_rate={:.1}%]",
+            self.size, self.hits, self.misses, self.hit_rate
+        )
+    }
+}

@@ -1,0 +1,42 @@
+-- 02_review_code.spl  [Step 1b]
+-- Sub-workflow: review code and return structured improvement feedback.
+--
+-- Artifacts written:
+--   target/{lang}/review.md  — structured review feedback
+
+CREATE FUNCTION reviewer(code TEXT, lang TEXT)
+RETURN TEXT
+AS $$
+You are a senior {lang} code reviewer.
+
+Review the following {lang} code for correctness, clarity, and robustness.
+Provide specific, actionable feedback as a bullet list.
+Focus on logic errors, missing edge cases, and poor naming.
+Do not comment on style preferences or minor formatting.
+
+Code:
+{code}
+$$;
+
+
+WORKFLOW review_code
+    INPUT:
+        @code    TEXT,
+        @lang    TEXT DEFAULT 'python',
+        @review_model   TEXT DEFAULT 'gemma4',
+        @log_dir TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
+    OUTPUT: @feedback TEXT
+DO
+    LOGGING f'[02_review_code] started | lang={@lang}' LEVEL INFO
+    GENERATE reviewer(@code, @lang)
+        WITH OUTPUT BUDGET 1024 TOKENS
+        USING MODEL @review_model
+        INTO @feedback
+    CALL write_file(f'{@log_dir}/target/{@lang}/review.md', @feedback) INTO NONE
+    LOGGING f'[02_review_code] done | feedback_len={len(@feedback)}' LEVEL INFO
+    RETURN @feedback
+EXCEPTION
+    WHEN ModelUnavailable THEN
+        LOGGING '[02_review_code] model unavailable' LEVEL ERROR
+        RETURN '[ERROR] Review model unavailable.' WITH status = 'failed'
+END

@@ -1,0 +1,82 @@
+-- 00_analyze_spec.spl  [Step 0]
+-- Sub-workflow: gate the pipeline by verifying the input spec is sufficiently
+-- well-defined before any code generation is attempted.
+--
+-- A spec is considered READY when it has:
+--   • a clear, singular purpose
+--   • at least implicit input/output contracts
+--   • enough detail for a developer to begin without asking clarifying questions
+--
+-- A spec is VAGUE when it is missing any of the above — e.g. "write something
+-- useful", "add AI", or a one-word request with no context.
+--
+-- Output tokens (first line of response):
+--   [READY]  — spec is well-defined; pipeline may proceed
+--   [VAGUE]  — spec is too ambiguous; pipeline should abort
+--
+-- Artifacts written:
+--   spec/analysis.md  — verdict, LLM summary, and structured restatement of the spec
+
+CREATE FUNCTION spec_analyst(spec TEXT)
+RETURN TEXT
+AS $$
+You are a senior software architect acting as a specification analyst.
+
+Your job is to decide whether the specification below is sufficiently
+well-defined to begin code generation — without any clarifying questions.
+
+Evaluate the spec across these four dimensions:
+1. Purpose clarity   — is there one clear, concrete goal?
+2. Input/output      — are the inputs, outputs, or function signatures at least implicit?
+3. Scope boundaries  — is it clear what is in scope and what is not?
+4. Success criteria  — is there enough detail to know when the implementation is correct?
+
+A spec does NOT need to be exhaustive — reasonable assumptions are acceptable —
+but it must not be so vague that a developer would have to invent the problem
+as well as the solution.
+
+SPEC:
+{spec}
+
+Give your verdict on the FIRST LINE, followed by a brief analysis and a
+structured restatement that downstream steps can use:
+
+If the spec is clear enough to proceed:
+[READY]
+<one-sentence summary of what will be built>
+
+STRUCTURED SPEC:
+<restate the spec as a numbered list of unambiguous requirements, filling in
+obvious implied details. Keep it concise — 3 to 8 bullet points.>
+
+If the spec is too vague or ambiguous to proceed:
+[VAGUE]
+<bullet list of exactly what information is missing or ambiguous>
+$$;
+
+
+WORKFLOW analyze_spec
+    INPUT:
+        @spec    TEXT,
+        @analyze_model   TEXT DEFAULT 'gemma4',
+        @log_dir TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
+    OUTPUT: @analysis TEXT
+DO
+    LOGGING f'[00_analyze_spec] evaluating spec clarity | spec="{@spec}"' LEVEL INFO
+    GENERATE spec_analyst(@spec)
+        WITH OUTPUT BUDGET 512 TOKENS
+        USING MODEL @analyze_model
+        INTO @analysis
+    EVALUATE @analysis
+        WHEN contains('[READY]') THEN
+            LOGGING '[00_analyze_spec] verdict: READY — spec is well-defined, pipeline may proceed' LEVEL INFO
+        ELSE
+            LOGGING '[00_analyze_spec] verdict: VAGUE — spec is too ambiguous, aborting pipeline' LEVEL WARN
+    END
+    CALL write_file(f'{@log_dir}/spec/analysis.md', @analysis) INTO NONE
+    RETURN @analysis
+EXCEPTION
+    WHEN ModelUnavailable THEN
+        LOGGING '[00_analyze_spec] model unavailable' LEVEL ERROR
+        RETURN '[ERROR] Spec analysis model unavailable.' WITH status = 'failed'
+END

@@ -1,0 +1,57 @@
+-- 05_document_code.spl  [Step 3a]
+-- Sub-workflow: generate documentation for code that has passed testing.
+--
+-- Artifacts written:
+--   target/{lang}/docs.md  — developer documentation in Markdown
+
+CREATE FUNCTION write_docs(code TEXT, spec TEXT, lang TEXT)
+RETURN TEXT
+AS $$
+You are a technical writer generating developer documentation for {lang} code.
+
+Original specification:
+{spec}
+
+Implemented {lang} code:
+{code}
+
+Write clear, complete documentation in Markdown. Include:
+
+## Overview
+One paragraph describing what this code does and why.
+
+## Function / Class Reference
+For each public function or class: signature, description, parameters, return value, example usage.
+
+## Edge Cases & Assumptions
+Any notable constraints, limitations, or assumptions the implementation makes.
+
+## Usage Example
+A short, runnable {lang} example demonstrating typical use.
+
+Be concise and accurate. Do not pad with filler.
+$$;
+
+
+WORKFLOW document_code
+    INPUT:
+        @code    TEXT,
+        @spec    TEXT DEFAULT "",
+        @lang    TEXT DEFAULT 'python',
+        @document_model   TEXT DEFAULT 'gemma4',
+        @log_dir TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
+    OUTPUT: @docs TEXT
+DO
+    LOGGING f'[05_document_code] started | lang={@lang}' LEVEL INFO
+    GENERATE write_docs(@code, @spec, @lang)
+        WITH OUTPUT BUDGET 2048 TOKENS
+        USING MODEL @document_model
+        INTO @docs
+    CALL write_file(f'{@log_dir}/target/{@lang}/docs.md', @docs) INTO NONE
+    LOGGING f'[05_document_code] done | docs_len={len(@docs)}' LEVEL INFO
+    RETURN @docs
+EXCEPTION
+    WHEN ModelUnavailable THEN
+        LOGGING '[05_document_code] model unavailable' LEVEL ERROR
+        RETURN '[ERROR] Documentation model unavailable.' WITH status = 'failed'
+END

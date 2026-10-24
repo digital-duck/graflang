@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GraphLang IR",
+  "type": "object",
+  "required": ["version", "workflow", "nodes", "edges"],
+  "properties": {
+    "version": { "type": "string", "const": "1.0-graph" },
+    "workflow": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "inputs": { "type": "array", "items": { "$ref": "#/defs/Param" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/defs/Param" } }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "procedures": { "type": "object", "additionalProperties": { "type": "string" } },
+        "prompts": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "ports"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+          "type": { 
+            "type": "string", 
+            "enum": [
+              "INPUT", "EMIT", "GENERATE", "SOLVE", "QUERY", 
+              "EVALUATE", "FORK", "JOIN", "LOOP", 
+              "ASSERT", "RECOVER", "CONTEXT", "MUTATE", 
+              "GUARD", "OBSERVE", "OUTPUT"
+            ] 
+          },
+          "ports": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Must include at least one control port (trigger/complete/exit) and relevant data ports (in_*/out_*)."
+          },
+          "config": { 
+            "type": "object",
+            "properties": {
+              "prompt_ref": { "type": "string" },
+              "prompt_inline": { "type": "string" },
+              "procedure_ref": { "type": "string" },
+              "condition": { "type": "string" },
+              "subgraph": { "$ref": "#/defs/SubGraph" }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "type"],
+        "properties": {
+          "source": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" },
+          "target": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" },
+          "type": { "type": "string", "enum": ["triggers", "binds"] }
+        }
+      }
+    }
+  },
+  "defs": {
+    "Param": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": { "name": { "type": "string" }, "type": { "type": "string" } }
+    },
+    "SubGraph": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "properties": {
+        "nodes": { "type": "array", "items": { "$ref": "#/properties/nodes/items" } },
+        "edges": { "type": "array", "items": { "$ref": "#/properties/edges/items" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+version: "1.0-graph"
+
+workflow:
+  name: "self_refine"
+  inputs:
+    - {name: "topic", type: "TEXT"}
+  outputs:
+    - {name: "essay", type: "TEXT"}
+
+resources:
+  prompts:
+    draft: "./prompts/draft.md"
+    critique: "./prompts/critique.md"
+    refine: "./prompts/refine.md"
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_topic"]
+
+  - id: "draft"
+    type: "GENERATE"
+    config:
+      prompt_ref: "prompts.draft"
+      model: "ollama/gemma3"
+    ports: ["trigger", "complete", "in_topic", "out_essay"]
+
+  - id: "critique"
+    type: "GENERATE"
+    config:
+      prompt_ref: "prompts.critique"
+      model: "ollama/gemma3"
+    ports: ["trigger", "complete", "in_essay", "out_feedback"]
+
+  - id: "refine"
+    type: "GENERATE"
+    config:
+      prompt_ref: "prompts.refine"
+      model: "ollama/gemma3"
+    ports: ["trigger", "complete", "in_essay", "in_feedback", "out_essay"]
+
+  - id: "wf_exit"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_result"]
+
+edges:
+  # Control flow
+  - {source: "wf_entry.entry", target: "draft.trigger", type: "triggers"}
+  - {source: "draft.complete", target: "critique.trigger", type: "triggers"}
+  - {source: "critique.complete", target: "refine.trigger", type: "triggers"}
+  - {source: "refine.complete", target: "wf_exit.trigger", type: "triggers"}
+
+  # Data flow
+  - {source: "wf_entry.out_topic", target: "draft.in_topic", type: "binds"}
+  - {source: "draft.out_essay", target: "critique.in_essay", type: "binds"}
+  - {source: "draft.out_essay", target: "refine.in_essay", type: "binds"}
+  - {source: "critique.out_feedback", target: "refine.in_feedback", type: "binds"}
+  - {source: "refine.out_essay", target: "wf_exit.in_result", type: "binds"}

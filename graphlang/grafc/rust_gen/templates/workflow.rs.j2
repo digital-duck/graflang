@@ -1,0 +1,43 @@
+use crate::context::ExecutionContext;
+use crate::nodes::*;
+use async_trait::async_trait;
+
+pub struct {{ workflow.name }};
+
+impl {{ workflow.name }} {
+    pub fn new() -> Self {
+        Self
+    }
+    
+    pub async fn execute(&self, ctx: &mut ExecutionContext) -> Result<String, Box<dyn std::error::Error>> {
+        println!("Starting workflow execution...");
+        
+        {% for node in nodes %}
+        {% if node.type == 'INPUT' %}
+        // INPUT: {{ node.id }}
+        {% elif node.type == 'OUTPUT' %}
+        // OUTPUT: {{ node.id }}
+        let result = ctx.get("{{ node.id }}.in_result").cloned().unwrap_or_default();
+        return Ok(result);
+        {% elif node.type == 'GENERATE' %}
+        // GENERATE: {{ node.id }}
+        println!("  ⚡ Executing GENERATE: {{ node.id }}");
+        let {{ node.id }}_result = generate_node(ctx, "{{ node.id }}").await?;
+        ctx.set("{{ node.id }}.out", {{ node.id }}_result);
+        {% elif node.type == 'SOLVE' %}
+        // SOLVE: {{ node.id }}
+        println!("  ⚡ Executing SOLVE: {{ node.id }}");
+        let {{ node.id }}_result = solve_node(ctx, "{{ node.id }}").await?;
+        ctx.set("{{ node.id }}.out", {{ node.id }}_result.to_string());
+        {% elif node.type == 'GUARD' %}
+        // GUARD: {{ node.id }}
+        println!("  🛡 Evaluating GUARD: {{ node.id }}");
+        if !crate::policies::evaluate_policy(ctx) {
+            return Err("Policy violation".into());
+        }
+        {% endif %}
+        {% endfor %}
+        
+        Ok("Workflow completed".to_string())
+    }
+}

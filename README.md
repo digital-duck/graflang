@@ -6,7 +6,7 @@ GraphLang flips the script on agentic AI. Where LangGraph and AutoGen use Python
 
 > **Status:** Early prototype. Private development repository.  
 > **Companion:** [SPL.py](https://github.com/digital-duck/SPL.py) — the declarative workflow language that GraphLang elevates.  
-> **Paper:** *GraphLang: A Physics-Inspired, Topologically Grounded Language for Self-Revising Agentic Workflows* (forthcoming)
+> **Paper:** *GraphLang: A Physics-Inspired, Topologically Grounded Language for Self-Revising Agentic Workflows* (in preparation; no draft in this repository yet)
 
 ---
 
@@ -16,8 +16,8 @@ GraphLang flips the script on agentic AI. Where LangGraph and AutoGen use Python
 |---|---|---|
 | **Source of truth** | Python code that describes a graph | The graph itself |
 | **LLM's role** | Generate text/code | Mutate the topology |
-| **Parallelism** | `asyncio.gather` + race conditions | Interaction Nets (strongly confluent) |
-| **Safety** | Scattered `if/else` guardrails | Declarative Cedar policies, compiled to Rust |
+| **Parallelism** | `asyncio.gather` + race conditions | Interaction Nets (confluent for the deterministic core; LLM-sampling nodes and `LOOP` are not) |
+| **Safety** | Scattered `if/else` guardrails | Declarative Cedar policies, enforced at runtime (Rust compilation planned) |
 | **Self-revision** | Rewrite the Python file | Output a validated graph delta |
 | **Visualization** | Lossy Mermaid translation | First-class, interactive topology |
 
@@ -30,7 +30,7 @@ GraphLang is grounded in **Lafont's Interaction Nets** — a mathematically prov
 
 - **`GENERATE`** — probabilistic agents (LLM calls)
 - **`SOLVE` / `ASSERT`** — deterministic agents (SymPy, Lean, Python eval)
-- **`FORK` / `JOIN`** — superposition and entanglement (parallelism without race conditions)
+- **`FORK` / `JOIN`** — explicit fan-out and barrier (parallelism without race conditions)
 - **`LOOP`** — cyclic control flow (test-gated retry)
 - **`MUTATE`** — the self-revising operator (LLM outputs validated graph deltas)
 - **`GUARD`** — policy checkpoints backed by Cedar
@@ -45,12 +45,12 @@ Keep the topology clean while preserving the full expressive power of SPL:
 ### 3. Policy-Grounded Safety
 Safety isn't an afterthought. [Cedar](https://www.cedarpolicy.com/) policies are first-class topological constructs (`GUARD` nodes) that are:
 - Evaluated at runtime by `grafr` (dynamic, hot-reloadable)
-- Compiled to zero-cost Rust `match` statements by `grafc` (deployment)
+- Planned: compiled to zero-cost Rust `match` statements by `grafc` (deployment; `grafc` is still a stub)
 
 The LLM can propose mutations, but only those that pass the Cedar policy check are applied.
 
 ### 4. Compilation to Rust (Downstream)
-`grafc` compiles the Graph IR + Cedar policies into a memory-safe, high-performance Rust binary. This is a **downstream deployment optimization**, not the core innovation. The innovation is the topological execution model itself.
+**Planned; `grafc` is currently a stub.** `grafc` is meant to compile the Graph IR + Cedar policies into a memory-safe, high-performance Rust binary. This is a **downstream deployment optimization**, not the core innovation. The innovation is the topological execution model itself.
 
 ---
 
@@ -58,17 +58,18 @@ The LLM can propose mutations, but only those that pass the Cedar policy check a
 
 ```bash
 # Install the dynamic interpreter (development)
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # add the `spl` extra for real LLM adapters
 
-# Run a workflow
-grafr run examples/code_pipeline/code_pipeline.graph.yaml \
+# Run a workflow (default adapter is `mock`, which calls no LLM)
+grafr run cookbook/code_pipeline/code_pipeline.graph.yaml \
     --adapter ollama \
     --param spec="Write a binary search function"
 
-# Compile to Rust (deployment)
-grafc compile examples/code_pipeline/code_pipeline.graph.yaml \
+# Compile to Rust (deployment; planned, grafc is a stub)
+# Cedar policies are referenced from the graph's `resources.policies` block
+# (shared policies live in graphlang/policies/).
+grafc compile cookbook/code_pipeline/code_pipeline.graph.yaml \
     --target rust \
-    --policy policies/mutation_safety.cedar \
     -o code_pipeline
 ```
 
@@ -91,11 +92,13 @@ workflow:
 
 resources:
   procedures:
+    analyze_spec: "./00_analyze_spec.spl"
     generate_code: "./01_generate_code.spl"
     review_code: "./02_review_code.spl"
     test_code: "./04_test_code.spl"
+    # ... (8 procedures in the full file, 00-07)
   policies:
-    mutation_safety: "./policies/mutation_safety.cedar"
+    mutation_safety: "../../graphlang/policies/mutation_safety.cedar"
 
 nodes:
   - id: "analyze"
@@ -105,12 +108,14 @@ nodes:
 
   - id: "spec_gate"
     type: "EVALUATE"
-    config: {condition: "contains(@in_analysis, '[READY]')"}
+    config: {condition: "contains(@in_analysis, '[READY]')"}   # @in_analysis is this node's own in_* port, fed by a `binds` edge
     ports: ["trigger", "pass", "fail", "in_analysis"]
 
   - id: "test_gated_loop"
     type: "LOOP"
     config:
+      # @in_max_cycles is a LOOP input port; @test_passed and @cycle are loop state
+      # (the previous iteration's outputs and the 0-based counter), not declared ports.
       condition: "NOT @test_passed AND @cycle < @in_max_cycles"
       subgraph:
         nodes:
@@ -127,8 +132,9 @@ nodes:
 
 edges:
   - {source: "analyze.complete", target: "spec_gate.trigger", type: "triggers"}
+  - {source: "analyze.out_analysis", target: "spec_gate.in_analysis", type: "binds"}
   - {source: "spec_gate.pass", target: "test_gated_loop.trigger", type: "triggers"}
-  # ... (full file in examples/code_pipeline/)
+  # ... (full file in cookbook/code_pipeline/)
 ```
 
 **What makes this revolutionary:**
@@ -166,9 +172,9 @@ edges:
 [**SPL.py**](https://github.com/digital-duck/SPL.py) is the declarative workflow language that GraphLang elevates. SPL provides:
 
 - The `GENERATE` / `EVALUATE` (probabilistic) and `SOLVE` / `ASSERT` (deterministic) vocabulary
-- The 78-recipe cookbook and 1,200-run empirical validation
+- The 78-recipe cookbook and its empirical validation
 - The neurosymbolic verifier ladder (SymPy → SageMath → Lean 4)
-- The 15 LLM adapters (Ollama, Claude, OpenAI, Momagrid, etc.)
+- The LLM adapters (Ollama, Claude, OpenAI, Momagrid, etc.)
 
 GraphLang takes SPL's proven semantics and gives them a **topological execution model**. SPL workflows can be automatically ported to GraphLang via the `spl2graph` transpiler.
 
@@ -178,9 +184,9 @@ GraphLang takes SPL's proven semantics and gives them a **topological execution 
 
 - [x] Core vocabulary design (physics-inspired, pruned from SPL)
 - [x] JSON Schema for Graph IR (3-tier composition)
-- [x] Cedar integration (`GUARD` nodes)
+- [x] Cedar integration in `grafr` (`GUARD` and `MUTATE` checks via `cedarpy`)
 - [x] Flagship example (`code_pipeline.graph.yaml`)
-- [ ] `grafr` Python interpreter (NetworkX-based topological executor)
+- [x] `grafr` Python interpreter (NetworkX-based topological executor)
 - [ ] `grafc` Rust compiler (Graph IR + Cedar → Rust AST)
 - [ ] Interactive Streamlit UI (drill-down visualization of Tier 3 composites)
 - [ ] `spl2graph` transpiler (port all 78 SPL recipes)

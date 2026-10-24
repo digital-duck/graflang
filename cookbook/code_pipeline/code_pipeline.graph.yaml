@@ -1,0 +1,185 @@
+# code_pipeline.graph.yaml
+# The flagship case study for GraphLang: A neurosymbolic, self-revising code generation pipeline.
+version: "1.0-graph"
+
+workflow:
+  name: "code_pipeline"
+  inputs:
+    - {name: "spec", type: "TEXT"}
+    - {name: "lang", type: "TEXT", default: "python"}
+    - {name: "max_cycles", type: "INTEGER", default: 3}
+    - {name: "check_closure", type: "BOOL", default: true}
+  outputs:
+    - {name: "docs", type: "TEXT"}
+
+# ============================================================
+# TIER 2: RESOURCES (External artifacts, keeping topology clean)
+# ============================================================
+resources:
+  procedures:
+    analyze_spec: "./00_analyze_spec.spl"
+    generate_code: "./01_generate_code.spl"
+    review_code: "./02_review_code.spl"
+    improve_code: "./03_improve_code.spl"
+    test_code: "./04_test_code.spl"
+    document_code: "./05_document_code.spl"
+    extract_spec: "./06_extract_spec.spl"
+    spec_judge: "./07_spec_judge.spl"
+  
+  policies:
+    mutation_safety: "../../graphlang/policies/mutation_safety.cedar"
+
+# ============================================================
+# TIER 1 & 3: NODES (The Topology)
+# ============================================================
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_spec", "out_lang", "out_max_cycles", "out_check_closure"]
+
+  - id: "analyze"
+    type: "GENERATE"
+    config: {procedure_ref: "procedures.analyze_spec", model: "ollama/gemma3"}
+    ports: ["trigger", "complete", "in_spec", "out_analysis"]
+
+  - id: "spec_gate"
+    type: "EVALUATE"
+    config: {condition: "contains(@in_analysis, '[READY]')"}
+    ports: ["trigger", "pass", "fail", "in_analysis"]
+
+  - id: "abort_vague"
+    type: "RECOVER"
+    config: {action: "halt", message: "Spec is too vague. Please refine and retry."}
+    ports: ["trigger", "halt", "in_message", "out_error"]
+
+  # TIER 3: COMPOSITE NODE (The Test-Gated Loop)
+  # Encapsulates the generate -> review -> improve -> test cycle
+  - id: "test_gated_loop"
+    type: "LOOP"
+    config:
+      # One iteration = one pass through the subgraph (gen -> review -> improve -> test -> gate).
+      # The loop repeats until the tests pass, the guard denies, or max_cycles is reached.
+      condition: "NOT @test_passed AND NOT @denied AND @cycle < @in_max_cycles"
+      max_iterations: "@in_max_cycles"
+      outputs:
+        final_code: {from: "loop_imp.out_improved_code"}   # out_final_code: code from the latest iteration
+        test_passed: {fired: "loop_eval.pass"}             # out_test_passed: did the gate pass last time?
+        denied: {fired: "loop_guard.deny"}                 # the policy refused another attempt
+      subgraph:
+        nodes:
+          - id: "loop_gen"
+            type: "GENERATE"
+            config: {procedure_ref: "procedures.generate_code"}
+            ports: ["trigger", "complete", "in_spec", "in_lang", "out_code"]
+          - id: "loop_rev"
+            type: "GENERATE"
+            config: {procedure_ref: "procedures.review_code"}
+            ports: ["trigger", "complete", "in_code", "in_lang", "out_feedback"]
+          - id: "loop_imp"
+            type: "GENERATE"
+            config: {procedure_ref: "procedures.improve_code"}
+            ports: ["trigger", "complete", "in_code", "in_feedback", "out_improved_code"]
+          - id: "loop_test"
+            type: "SOLVE"
+            config: {procedure_ref: "procedures.test_code", engine: "python_eval"}
+            ports: ["trigger", "complete", "in_code", "in_spec", "out_result"]
+          - id: "loop_eval"
+            type: "EVALUATE"
+            config: {condition: "contains(@in_result, '[PASSED]')"}
+            ports: ["trigger", "pass", "fail", "in_result"]
+          # TIER 1: Inline safety guard before allowing a retry mutation
+          - id: "loop_guard"
+            type: "GUARD"
+            config: 
+              policy_ref: "policies.mutation_safety"
+              action: 'Action::"allow_retry"'
+              context_mapping: {cycle: "@in_cycle", max_cycles: "@in_max_cycles"}   # the Cedar context
+            ports: ["trigger", "allow", "deny", "in_cycle", "in_max_cycles"]
+        edges:
+          - {source: "loop_gen.complete", target: "loop_rev.trigger", type: "triggers"}
+          - {source: "loop_rev.complete", target: "loop_imp.trigger", type: "triggers"}
+          - {source: "loop_imp.complete", target: "loop_test.trigger", type: "triggers"}
+          - {source: "loop_test.complete", target: "loop_eval.trigger", type: "triggers"}
+          - {source: "loop_eval.fail", target: "loop_guard.trigger", type: "triggers"}
+          # Data inside the body (ports with no bind read the LOOP's own inputs: spec, lang)
+          - {source: "loop_gen.out_code", target: "loop_rev.in_code", type: "binds"}
+          - {source: "loop_gen.out_code", target: "loop_imp.in_code", type: "binds"}
+          - {source: "loop_rev.out_feedback", target: "loop_imp.in_feedback", type: "binds"}
+          - {source: "loop_imp.out_improved_code", target: "loop_test.in_code", type: "binds"}
+          - {source: "loop_test.out_result", target: "loop_eval.in_result", type: "binds"}
+    ports: ["trigger", "loop", "exit", "in_spec", "in_lang", "in_max_cycles", "out_final_code", "out_test_passed", "out_denied"]
+
+  - id: "document"
+    type: "GENERATE"
+    config: {procedure_ref: "procedures.document_code"}
+    ports: ["trigger", "complete", "in_code", "in_spec", "out_docs"]
+
+  - id: "extract"
+    type: "GENERATE"
+    config: {procedure_ref: "procedures.extract_spec"}
+    ports: ["trigger", "complete", "in_code", "out_extracted_spec"]
+
+  - id: "closure_gate"
+    type: "EVALUATE"
+    config: {condition: "@in_check_closure == TRUE"}
+    ports: ["trigger", "pass", "fail", "in_check_closure"]
+
+  - id: "judge"
+    type: "GENERATE"
+    config:
+      procedure_ref: "procedures.spec_judge"
+      params: {spec: in_orig_spec, out_spec: in_derived_spec}     # the .spl's parameter names differ from the ports
+    ports: ["trigger", "complete", "in_orig_spec", "in_derived_spec", "out_closure_report"]
+
+  - id: "merge_docs"
+    type: "CONTEXT"
+    config: {action: "append", target_key: "final_docs"}
+    ports: ["trigger", "complete", "in_base", "in_appendage", "out_merged"]
+
+  - id: "wf_exit"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_result"]
+
+# ============================================================
+# EDGES: The Wires (Explicit Control and Data Flow)
+# ============================================================
+edges:
+  # 1. Entry & Gate
+  - {source: "wf_entry.entry", target: "analyze.trigger", type: "triggers"}
+  - {source: "wf_entry.out_spec", target: "analyze.in_spec", type: "binds"}
+  - {source: "analyze.complete", target: "spec_gate.trigger", type: "triggers"}
+  - {source: "analyze.out_analysis", target: "spec_gate.in_analysis", type: "binds"}
+  - {source: "spec_gate.pass", target: "test_gated_loop.trigger", type: "triggers"}
+  - {source: "spec_gate.fail", target: "abort_vague.trigger", type: "triggers"}
+  - {source: "analyze.out_analysis", target: "abort_vague.in_message", type: "binds"}
+  
+  # 2. Loop to Documentation
+  - {source: "test_gated_loop.exit", target: "document.trigger", type: "triggers"}
+  - {source: "test_gated_loop.out_final_code", target: "document.in_code", type: "binds"}
+  - {source: "wf_entry.out_spec", target: "document.in_spec", type: "binds"}
+  # Inputs into the loop and the closure gate (the loop's condition reads @in_max_cycles; the gate reads @in_check_closure)
+  - {source: "wf_entry.out_spec", target: "test_gated_loop.in_spec", type: "binds"}
+  - {source: "wf_entry.out_lang", target: "test_gated_loop.in_lang", type: "binds"}
+  - {source: "wf_entry.out_max_cycles", target: "test_gated_loop.in_max_cycles", type: "binds"}
+  - {source: "wf_entry.out_check_closure", target: "closure_gate.in_check_closure", type: "binds"}
+  - {source: "test_gated_loop.out_final_code", target: "extract.in_code", type: "binds"}
+  
+  # 3. Extraction & Closure Branching
+  - {source: "document.complete", target: "extract.trigger", type: "triggers"}
+  - {source: "document.out_docs", target: "merge_docs.in_base", type: "binds"}
+  - {source: "extract.complete", target: "closure_gate.trigger", type: "triggers"}
+  - {source: "extract.out_extracted_spec", target: "judge.in_derived_spec", type: "binds"}
+  - {source: "wf_entry.out_spec", target: "judge.in_orig_spec", type: "binds"}
+  
+  - {source: "closure_gate.pass", target: "judge.trigger", type: "triggers"}
+  - {source: "judge.complete", target: "merge_docs.trigger", type: "triggers"}
+  - {source: "judge.out_closure_report", target: "merge_docs.in_appendage", type: "binds"}
+  - {source: "merge_docs.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "merge_docs.out_merged", target: "wf_exit.in_result", type: "binds"}
+  # When the closure check is skipped nothing is merged: the documentation itself is the result.
+  # (If several binds feed one port, the most recently written source wins.)
+  - {source: "document.out_docs", target: "wf_exit.in_result", type: "binds"}
+  
+  # Bypass judge if closure check is disabled
+  - {source: "closure_gate.fail", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "merge_docs.out_merged", target: "wf_exit.in_result", type: "binds"} # Fallback bind

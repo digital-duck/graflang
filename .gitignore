@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# grafr run artifacts (procedure logs)
+.grafr/

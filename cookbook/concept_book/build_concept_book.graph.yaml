@@ -1,0 +1,85 @@
+version: "1.0-graph"
+
+workflow:
+  name: "build_concept_book"
+  inputs:
+    - {name: "subject", type: "TEXT"}
+    - {name: "target_audience", type: "TEXT", default: "beginners"}
+    - {name: "num_chapters", type: "INTEGER", default: 5}
+  outputs:
+    - {name: "book", type: "TEXT"}
+
+resources:
+  prompts:
+    outline: "./prompts/outline.md"
+    chapter: "./prompts/chapter.md"
+    review: "./prompts/review.md"
+    compile: "./prompts/compile.md"
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_subject", "out_target_audience", "out_num_chapters"]
+
+  - id: "generate_outline"
+    type: "GENERATE"
+    config:
+      prompt_ref: "prompts.outline"
+      model: "ollama/gemma3"
+    ports: ["trigger", "complete", "in_subject", "in_num_chapters", "out_outline"]
+
+  - id: "chapter_loop"
+    type: "LOOP"
+    config:
+      condition: "@chapter_index < @in_num_chapters"
+      max_iterations: "@in_num_chapters"
+      index_var: chapter_index                 # 0-based; also readable by the body as port in_chapter_index
+      outputs:
+        chapters: {collect: "write_chapter.out_chapter"}   # out_chapters: one chapter per iteration
+      subgraph:
+        nodes:
+          - id: "write_chapter"
+            type: "GENERATE"
+            config:
+              prompt_ref: "prompts.chapter"
+              model: "ollama/gemma3"
+            ports: ["trigger", "complete", "in_outline", "in_chapter_index", "in_subject", "out_chapter"]
+          - id: "review_chapter"
+            type: "GENERATE"
+            config:
+              prompt_ref: "prompts.review"
+              model: "ollama/gemma3"
+            ports: ["trigger", "complete", "in_chapter", "out_approved"]
+        edges:
+          - {source: "write_chapter.complete", target: "review_chapter.trigger", type: "triggers"}
+          - {source: "write_chapter.out_chapter", target: "review_chapter.in_chapter", type: "binds"}
+    ports: ["trigger", "loop", "exit", "in_outline", "in_subject", "in_num_chapters", "out_chapters"]
+
+  - id: "compile_book"
+    type: "GENERATE"
+    config:
+      prompt_ref: "prompts.compile"
+      model: "ollama/gemma3"
+    ports: ["trigger", "complete", "in_outline", "in_chapters", "in_subject", "out_book"]
+
+  - id: "wf_exit"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_result"]
+
+edges:
+  # Control flow
+  - {source: "wf_entry.entry", target: "generate_outline.trigger", type: "triggers"}
+  - {source: "generate_outline.complete", target: "chapter_loop.trigger", type: "triggers"}
+  - {source: "chapter_loop.exit", target: "compile_book.trigger", type: "triggers"}
+  - {source: "compile_book.complete", target: "wf_exit.trigger", type: "triggers"}
+
+  # Data flow
+  - {source: "wf_entry.out_subject", target: "generate_outline.in_subject", type: "binds"}
+  - {source: "wf_entry.out_num_chapters", target: "generate_outline.in_num_chapters", type: "binds"}
+  - {source: "generate_outline.out_outline", target: "chapter_loop.in_outline", type: "binds"}
+  - {source: "wf_entry.out_subject", target: "chapter_loop.in_subject", type: "binds"}
+  - {source: "wf_entry.out_num_chapters", target: "chapter_loop.in_num_chapters", type: "binds"}
+  - {source: "generate_outline.out_outline", target: "compile_book.in_outline", type: "binds"}
+  - {source: "chapter_loop.out_chapters", target: "compile_book.in_chapters", type: "binds"}
+  - {source: "wf_entry.out_subject", target: "compile_book.in_subject", type: "binds"}
+  - {source: "compile_book.out_book", target: "wf_exit.in_result", type: "binds"}

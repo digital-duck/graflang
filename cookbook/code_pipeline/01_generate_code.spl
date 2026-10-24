@@ -1,0 +1,51 @@
+-- 01_generate_code.spl  [Step 1a]
+-- Sub-workflow: generate code in the target language from a natural-language spec.
+--
+-- Artifacts written:
+--   target/{lang}/code.{ext}  — generated source code (ext = py, go, ts, js, …)
+
+CREATE FUNCTION coder(spec TEXT, lang TEXT)
+RETURN TEXT
+AS $$
+You are an expert {lang} developer.
+
+Write clean, correct, well-structured {lang} code for the following specification.
+Return only the code — no explanation, no markdown fences.
+
+Specification:
+{spec}
+$$;
+
+
+WORKFLOW generate_code
+    INPUT:
+        @spec    TEXT,
+        @lang    TEXT DEFAULT 'python',
+        @generate_model   TEXT DEFAULT 'gemma4',
+        @log_dir TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
+    OUTPUT: @code TEXT
+DO
+    LOGGING f'[01_generate_code] started | lang={@lang} spec="{@spec}"' LEVEL INFO
+
+    @ext := 'py'
+    EVALUATE @lang
+        WHEN = 'go'   THEN @ext := 'go'
+        WHEN = 'ts'   THEN @ext := 'ts'
+        WHEN = 'js'   THEN @ext := 'js'
+        WHEN = 'java' THEN @ext := 'java'
+        WHEN = 'rust' THEN @ext := 'rs'
+    END
+
+    GENERATE coder(@spec, @lang)
+        WITH OUTPUT BUDGET 2048 TOKENS
+        USING MODEL @generate_model
+        INTO @code
+    CALL clean_code(@code) INTO @code
+    CALL write_file(f'{@log_dir}/target/{@lang}/code.{@ext}', @code) INTO NONE
+    LOGGING f'[01_generate_code] done | output_len={len(@code)}' LEVEL INFO
+    RETURN @code
+EXCEPTION
+    WHEN ModelUnavailable THEN
+        LOGGING '[01_generate_code] model unavailable' LEVEL ERROR
+        RETURN '[ERROR] Code generation model unavailable.' WITH status = 'failed'
+END

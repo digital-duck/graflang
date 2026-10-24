@@ -1,0 +1,56 @@
+-- 04_test_code.spl  [Step 2]
+-- Sub-workflow: evaluate code correctness against the original spec.
+-- Returns [PASSED] or [FAILED]\n<feedback> so the orchestrator can branch.
+--
+-- Artifacts written:
+--   tests/{lang}/result.md  — test verdict and failure details (if any)
+
+CREATE FUNCTION run_tests(code TEXT, spec TEXT, lang TEXT)
+RETURN TEXT
+AS $$
+IMPORTANT: Your response MUST start with either [PASSED] or [FAILED] on the very first line.
+Do not write any code. Do not write explanations before the verdict token.
+
+You are a rigorous {lang} code reviewer acting as an automated test suite.
+
+Original specification:
+{spec}
+
+{lang} code to evaluate:
+{code}
+
+Evaluate the code against the specification. Check:
+1. Correctness — does it implement what the spec requires?
+2. Edge cases — are obvious boundary conditions handled?
+3. Logic errors — any off-by-one, wrong conditionals, or missing branches?
+4. Return type / signature — does it match what the spec expects?
+5. Language idioms — does it follow standard {lang} conventions and best practices?
+
+Output format — first line must be one of these two tokens, nothing else:
+[PASSED]   ← if the code fully satisfies the specification with no critical issues
+[FAILED]   ← followed by a concise bullet list of specific failures or missing requirements
+$$;
+
+
+WORKFLOW test_code
+    INPUT:
+        @code    TEXT,
+        @spec    TEXT DEFAULT "",
+        @lang    TEXT DEFAULT 'python',
+        @test_model   TEXT DEFAULT 'gemma4',
+        @log_dir TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
+    OUTPUT: @test_result TEXT
+DO
+    LOGGING f'[04_test_code] started | lang={@lang}' LEVEL INFO
+    GENERATE run_tests(@code, @spec, @lang)
+        WITH OUTPUT BUDGET 1024 TOKENS
+        USING MODEL @test_model
+        INTO @test_result
+    CALL write_file(f'{@log_dir}/tests/{@lang}/result.md', @test_result) INTO NONE
+    LOGGING f'[04_test_code] done | result={@test_result[:50]}' LEVEL INFO
+    RETURN @test_result
+EXCEPTION
+    WHEN ModelUnavailable THEN
+        LOGGING '[04_test_code] model unavailable' LEVEL ERROR
+        RETURN '[FAILED]\nModel unavailable — cannot evaluate.' WITH status = 'failed'
+END

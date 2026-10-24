@@ -1,0 +1,25 @@
+mod workflow;
+mod nodes;
+mod policies;
+mod context;
+
+use workflow::{{ workflow_name }};
+use context::ExecutionContext;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("⚡ Executing GraphLang workflow: {{ workflow_name }}");
+    
+    let mut ctx = ExecutionContext::new();
+    
+    // Load inputs from command line or environment
+    // TODO: Parse CLI args
+    
+    let workflow = {{ workflow_name }}::new();
+    let result = workflow.execute(&mut ctx).await?;
+    
+    println!("✓ Workflow completed");
+    println!("Output: {:?}", result);
+    
+    Ok(())
+}

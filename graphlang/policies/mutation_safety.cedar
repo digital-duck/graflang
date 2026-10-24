@@ -19,7 +19,7 @@ forbid(
     resource == Graph::"execution_topology"
 ) when {
     context.proposed_delta.action == "remove_node" &&
-    context.proposed_delta.node_type in ["ASSERT", "SOLVE"]
+    ["ASSERT", "SOLVE"].contains(context.proposed_delta.node_type)
 };
 
 forbid(
@@ -28,7 +28,7 @@ forbid(
     resource == Graph::"execution_topology"
 ) when {
     context.proposed_delta.action == "remove_edge" &&
-    context.proposed_delta.source_port in ["ASSERT.fail", "SOLVE.complete"]
+    ["ASSERT.fail", "SOLVE.complete"].contains(context.proposed_delta.source_port)
 };
 
 // ────────────────────────────────────────────────────────────
@@ -120,3 +120,18 @@ permit(
 
 // (Implicit default-deny is enforced by Cedar's evaluation engine.
 //  No `permit(principal, action, resource)` catch-all is needed.)
+
+// ────────────────────────────────────────────────────────────
+// POLICY 7: Bounded Retry — allow another loop iteration while under budget
+// ────────────────────────────────────────────────────────────
+// A GUARD node inside a LOOP asks Action::"allow_retry". The loop's own
+// max_iterations is the hard limit; this rule is the policy-level check.
+// (Added with the LOOP implementation; the forbids above are unchanged.)
+
+permit(
+    principal == Service::"llm-agent",
+    action == Action::"allow_retry",
+    resource == Graph::"execution_topology"
+) when {
+    context.cycle < context.max_cycles
+};
