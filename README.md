@@ -198,7 +198,7 @@ GraphLang takes SPL's proven semantics and gives them a **topological execution 
 - [x] `grafr` Python interpreter (NetworkX-based topological executor)
 - [ ] `grafc` Rust compiler (Graph IR + Cedar → Rust AST)
 - [x] `graf vis`: read a workflow as a graph (control flow first, data edges on demand, loops that collapse to one box)
-- [ ] Visual IDE: author and edit a workflow in the graph view (add and connect nodes and ports, edit their config, validate while you edit, write the `*.graph.yaml` with its comments kept, run from the view). Planned; the plan is in zinet's `docs/DEV/readme-todo.md`.
+- [ ] Visual IDE: author and edit a workflow in the graph view (add and connect nodes and ports, edit their config, validate while you edit, write the `*.graph.yaml` with its comments kept, run from the view). Planned.
 - [ ] Interactive Streamlit UI (drill-down visualization of Tier 3 composites)
 - [ ] `spl2graph` transpiler (port all 78 SPL recipes)
 - [ ] Paper submission (NeurIPS / ICLR)
