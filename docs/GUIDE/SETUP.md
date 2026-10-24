@@ -14,11 +14,10 @@ Install GraphLang, check that it works, and (optionally) connect a real LLM. Nex
 From the repository root:
 
 ```bash
-pip install -e ../dd-llm -e ../dd-logging -e ../zinet   # first, from sibling checkouts, until dd-llm, dd-logging and zinet >=0.2.0 are on PyPI
-pip install -e ".[dev]"                     # runtime + pytest
+pip install -e ".[dev]"     # runtime + pytest; dd-llm, dd-logging and zinet (all >=0.2.0) come from PyPI
 ```
 
-If `pip` says `No matching distribution found for dd-llm>=0.2.0`, the first line is what is missing (PyPI only has dd-llm 0.1.0).
+To work on those libraries at the same time, install them from sibling checkouts first (`pip install -e ../dd-llm -e ../dd-logging -e ../zinet`).
 
 Optional extras:
 
