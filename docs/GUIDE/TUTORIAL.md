@@ -6,7 +6,7 @@ You will run a bundled workflow, read its anatomy, then write a small one of you
 
 ```bash
 grafr info cookbook/self_refine/self_refine.graph.yaml
-grafr run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain"
+grafr run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain" --adapter claude_cli
 ```
 
 `info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft (#1)` and so on), then the output. With `mock` the text is a placeholder that echoes the prompt: it proves the wiring works, not that the essay is good.
