@@ -4,6 +4,9 @@ from typing import Dict
 from .base import NodeExecutor
 from ..cedar_guard import CedarGuard
 from ..expr import evaluate
+from ...logging_config import INFO, WARNING, get_logger, log_event
+
+_log = get_logger("grafr.nodes.guard")
 
 
 class GuardExecutor(NodeExecutor):
@@ -39,4 +42,6 @@ class GuardExecutor(NodeExecutor):
             config.get('action', 'Action::"mutate_graph"'),
             config.get('resource', 'Graph::"execution_topology"'),
             cedar_context)
+        log_event(_log, "guard.decision", level=INFO if decision.allowed else WARNING, node=node_id, policy=policy_ref,
+                  allowed=decision.allowed, reason=decision.explain(), context=cedar_context)
         return {"_route": "allow" if decision.allowed else "deny", "_reason": decision.explain()}

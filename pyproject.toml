@@ -26,13 +26,13 @@ dependencies = [
     "networkx>=3.2",
     "jsonschema>=4.20",
     "cedarpy>=4.8",           # the official Cedar engine: GUARD and MUTATE policy checks
-    "dd-llm>=0.2.0",          # LLM adapters (claude_cli, ollama, openai, ...); zero core dependencies
+    "dd-llm[openai]>=0.2.0",  # LLM adapters; [openai] = the SDK that ollama, openrouter, openai, deepseek, qwen speak (claude_cli needs none)
     "rich>=13.7",
+    "dd-logging>=0.2.0",      # timestamped text/JSONL run logs (shared with SPL.py)
 ]
 
 [project.optional-dependencies]
 spl = ["spl-llm>=3.4"]        # only for SPL procedure_ref nodes (runs SPL.py workflows); plain GENERATE needs just dd-llm
-openai = ["dd-llm[openai]>=0.2.0"]        # SDKs for the hosted providers; claude_cli needs none
 anthropic = ["dd-llm[anthropic]>=0.2.0"]
 gemini = ["dd-llm[gemini]>=0.2.0"]
 grafc = ["jinja2>=3.1"]       # the Rust code generator (grafc) renders templates

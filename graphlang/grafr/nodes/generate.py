@@ -1,8 +1,13 @@
 """GENERATE node executor (probabilistic LLM calls)."""
 
+import time
 from typing import Dict
 from .base import NodeExecutor
 from ..adapters import resolve_model
+from ...logging_config import DEBUG, get_logger, log_event
+
+_log = get_logger("grafr.nodes.generate")
+PREVIEW_CHARS = 200
 
 
 class GenerateExecutor(NodeExecutor):
@@ -25,7 +30,13 @@ class GenerateExecutor(NodeExecutor):
             prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
 
         model = resolve_model(llm.name, config.get('model'), getattr(llm, 'model_override', None))
+        started = time.perf_counter()
         response = llm.generate(prompt, model=model, temperature=config.get('temperature'))
+        log_event(_log, "llm.call", node=node_data['id'], adapter=llm.name, model=model,
+                  prompt_chars=len(prompt), response_chars=len(str(response)),
+                  ms=round((time.perf_counter() - started) * 1000))
+        log_event(_log, "llm.text", level=DEBUG, node=node_data['id'], prompt=prompt[:PREVIEW_CHARS],
+                  response=str(response)[:PREVIEW_CHARS])
 
         output_ports = [p for p in node_data['ports'] if p.startswith('out_')]
         return {output_ports[0]: response} if output_ports else {}

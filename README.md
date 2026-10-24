@@ -58,9 +58,9 @@ The LLM can propose mutations, but only those that pass the Cedar policy check a
 
 ```bash
 # Install the dynamic interpreter (development)
-pip install -e ".[dev]"        # `claude_cli` works as is; `.[openai]` etc. add provider SDKs
+pip install -e ".[dev]"        # `claude_cli`, `ollama`, `openai`, `openrouter` work as is; `.[anthropic]`, `.[gemini]` add SDKs
 
-# Run a workflow (default adapter is `mock`, which calls no LLM)
+# Run a workflow (default adapter is `claude_cli`; `--adapter mock` calls no LLM)
 grafr run cookbook/code_pipeline/code_pipeline.graph.yaml \
     --adapter ollama \
     --param spec="Write a binary search function"

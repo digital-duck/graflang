@@ -19,6 +19,7 @@ nodes, or several edges of the same kind on different ports, are all kept.
 from __future__ import annotations
 
 import json
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -31,9 +32,12 @@ from ruamel.yaml import YAML
 from .adapters import make_llm
 from .cedar_guard import CedarGuard
 from .expr import ExpressionError, evaluate, evaluate_condition
+from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
+from .output import RunOutput
 from .resolver import ResourceResolver
 
 console = Console()
+_log = get_logger("grafr.runtime")
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "graflang-ir.json"
 DELTA_SCHEMA_PATH = SCHEMA_PATH.with_name("graph_delta.schema.json")
@@ -112,7 +116,8 @@ class GraphLangRuntime:
     """Execute a GraphLang workflow."""
 
     def __init__(self, graph_data: Dict, adapter: str = "mock", max_steps: int = DEFAULT_MAX_STEPS,
-                 verbose: bool = True, model: Optional[str] = None, llm=None, *,
+                 verbose: bool = True, model: Optional[str] = None, llm=None,
+                 node_output: Optional[RunOutput] = None, *,
                  _parent: "GraphLangRuntime | None" = None, _nodes: Optional[List[Dict]] = None,
                  _edges: Optional[List[Dict]] = None, _boundary: Optional[Dict[str, Any]] = None,
                  _scope: Optional[Dict[str, Any]] = None):
@@ -134,9 +139,11 @@ class GraphLangRuntime:
             self.budget = _Budget(max_steps)
             self.resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
             self.depth = 0
+            self.node_output = node_output              # --save-nodes: where each node's outputs are written
         else:
             self.llm, self.context, self.budget = _parent.llm, _parent.context, _parent.budget
             self.resolver, self.depth = _parent.resolver, _parent.depth + 1
+            self.node_output = _parent.node_output
         self._build_graph(_nodes if _nodes is not None else graph_data["nodes"],
                           _edges if _edges is not None else graph_data["edges"])
 
@@ -175,6 +182,22 @@ class GraphLangRuntime:
     # ---- execution --------------------------------------------------------------------------
     def execute(self, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Run the workflow and return its outputs: a dict keyed by the workflow's declared output name."""
+        wf = self.graph_data["workflow"]["name"]
+        log_event(_log, "run.start", workflow=wf, nodes=self.G.number_of_nodes(), inputs=sorted(inputs or {}),
+                  adapter=self.llm.name, model=getattr(self.llm, "model_override", None))
+        started = time.perf_counter()
+        try:
+            outputs = self._execute(inputs)
+        except Exception as e:
+            log_event(_log, "run.fail", level=ERROR, workflow=wf, steps=self.steps, error=f"{type(e).__name__}: {e}",
+                      ms=round((time.perf_counter() - started) * 1000))
+            raise
+        log_event(_log, "run.end", workflow=wf, steps=self.steps, outputs=sorted(outputs),
+                  reached_output=bool(outputs), mutations=self.budget.mutations,
+                  ms=round((time.perf_counter() - started) * 1000))
+        return outputs
+
+    def _execute(self, inputs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         inputs = dict(inputs or {})
         declared = {p["name"]: p for p in self.graph_data["workflow"].get("inputs", [])}
         unknown = set(inputs) - set(declared)
@@ -221,10 +244,23 @@ class GraphLangRuntime:
         if self.verbose:
             console.print(f"{'  ' * self.depth}[cyan]⚡[/cyan] {data['type']} {node} (#{self.fired[node]})")
         in_data = self._gather_inputs(node)
-        result = self._execute_node(data["type"], data, in_data) or {}
+        log_event(_log, "node.fire", level=DEBUG, node=node, type=data["type"], n=self.fired[node], depth=self.depth,
+                  inputs=sorted(in_data))
+        started = time.perf_counter()
+        try:
+            result = self._execute_node(data["type"], data, in_data) or {}
+        except Exception as e:
+            log_event(_log, "node.error", level=ERROR, node=node, type=data["type"], n=self.fired[node],
+                      depth=self.depth, error=f"{type(e).__name__}: {e}")
+            raise
+        log_event(_log, "node.done", node=node, type=data["type"], n=self.fired[node], depth=self.depth,
+                  route=result.get("_route"), outputs=sorted(p for p in result if not p.startswith("_")),
+                  ms=round((time.perf_counter() - started) * 1000))
         for port, value in result.items():
             if not port.startswith("_"):
                 self._write(node, port, value)
+        if self.node_output:
+            self.node_output.save_node(self.steps, node, result)
         if data["type"] == "OUTPUT":
             self._collect_outputs(in_data)
         self._emit(node, result, queue)
@@ -339,6 +375,7 @@ class GraphLangRuntime:
                     break
             except ExpressionError as e:
                 raise ValueError(f"LOOP {node_data['id']!r}: {e}") from None
+            log_event(_log, "loop.iteration", level=DEBUG, node=node_data["id"], cycle=cycle, depth=self.depth)
             sub = GraphLangRuntime(self.graph_data, _parent=self, _nodes=body["nodes"], _edges=body["edges"],
                                    _boundary=in_data, _scope=scope, verbose=self.verbose)
             queue: deque = deque((n, None) for n in sub._start_nodes())
@@ -352,6 +389,7 @@ class GraphLangRuntime:
                     state[name] = split_ref(spec["fired"]) in sub.emitted
             cycle += 1
         self.loop_iterations[node_data["id"]] = cycle
+        log_event(_log, "loop.end", node=node_data["id"], iterations=cycle, depth=self.depth)
         result = {f"out_{name}": value for name, value in state.items()}
         result["_route"] = "exit"
         return result
@@ -375,6 +413,8 @@ class GraphLangRuntime:
             raise ValueError(f"MUTATE node {node_id!r} must declare the ports {missing}")
 
         def outcome(applied: bool, reason: str) -> Dict:
+            log_event(_log, "mutate.applied" if applied else "mutate.rejected", level=INFO if applied else WARNING,
+                      node=node_id, reason=reason, mutations=self.budget.mutations, depth=self.depth)
             if self.verbose:
                 console.print(f"{'  ' * self.depth}  [{'green' if applied else 'red'}]{'applied' if applied else 'rejected'}[/]: {reason}")
             res: Dict[str, Any] = {"_route": "applied" if applied else "rejected"}

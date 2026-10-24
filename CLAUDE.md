@@ -11,17 +11,18 @@ GraphLang: a graph-first language for agentic workflows. The graph (YAML, `*.gra
 ## Commands
 
 ```bash
-pip install -e ".[dev]"                      # extras: dev, openai/anthropic/gemini (provider SDKs via dd-llm), spl (procedure_ref only), grafc (jinja2)
+pip install -e ".[dev]"                      # extras: dev, anthropic/gemini (provider SDKs via dd-llm; the openai SDK is core), spl (procedure_ref only), grafc (jinja2)
 pytest                                       # all tests
 pytest tests/test_grafr_loop.py::test_name   # single test
-grafr run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `mock`; --param is repeatable
+grafr run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `claude_cli` (real LLM!); add `--adapter mock` to run offline; --param is repeatable
 grafr validate|info <graph.yaml>
+grafr run ... --log-level debug --log-format jsonl|text|both --log-dir DIR --no-log --output-dir DIR --save-nodes --no-output   # logs default to ~/.graflang/logs
 grafc compile|check <graph.yaml>         # `python -m graphlang.grafr.cli ...` also works
 ```
 
 Both CLIs are `click` groups (`main` in `graphlang/grafr/cli.py` and `graphlang/grafc/cli.py`); add new commands as `@main.command()`. Imports in tests must be `graphlang.grafr...` / `graphlang.grafc...`. Tests under `tests/test_cedar_compiler.py` and `test_policy_slicer.py` exercise the hand-written Cedar compiler and have known failures (gap #18).
 
-Real LLM calls: `--adapter claude_cli --model <id>` goes through dd-llm (`/home/papagame/projects/digital-duck/dd-llm`, a core dependency; `pip install -e` it if missing). `procedure_ref` nodes additionally need SPL.py importable (`pip install -e /path/to/SPL.py` or set `SPL_PY_PATH`). Default `mock` adapter needs no LLM; tests use it.
+Real LLM calls: `--llm claude_cli:<model-id>` (same as `--adapter claude_cli --model <id>`; `--llm` wins) goes through dd-llm (`/home/papagame/projects/digital-duck/dd-llm`, a core dependency; `pip install -e` it if missing). `procedure_ref` nodes additionally need SPL.py importable (`pip install -e /path/to/SPL.py` or set `SPL_PY_PATH`). Default `mock` adapter needs no LLM; tests use it.
 
 ## Architecture
 
@@ -33,6 +34,7 @@ Real LLM calls: `--adapter claude_cli --model <id>` goes through dd-llm (`/home/
   - `adapters.py`: `mock` plus dd-llm adapters. `resolver.py`: resolves the `resources` block (procedures/prompts/policies, three-tier composition).
   - `cedar_guard.py`: Cedar checks for GUARD/MUTATE via the official engine (`cedarpy`), fail-closed (any evaluation error denies); callers must pass every attribute the policies read. `topology.py` backs `grafr validate`. `procedures.py` runs a node's `procedure_ref` SPL workflow through SPL.py's executor. `MUTATE` validates (schema, structure, Cedar, budget) and applies deltas; a MUTATE inside a LOOP body affects only that iteration's copy (gap #32). `SOLVE` with neither `expression` nor `procedure_ref` is still a stub that yields True (gap #31).
 - `graphlang/grafc/`: the compiler, mostly a stub. `cedar/` is a ~1,500-line hand-written Cedar lexer/parser/type checker/compiler (open decision: keep, or use the official `cedar-policy` crate); `rust_gen/` is Rust codegen; also analyzer/optimizer/visualizer.
+- Logging: dd-logging (`/home/papagame/projects/digital-duck/dd-logging`, a core dependency; `pip install -e` it if missing) via `graphlang/logging_config.py`. Use `get_logger("grafr.<module>")` and `log_event(_log, "noun.verb", **fields)` (fields land as JSONL keys); never `logging.getLogger` or `print` for run diagnostics. Nothing is logged until `setup_logging` is called (the CLI does).
 - `graphlang/policies/`: shared Cedar policies (`graph_safety.cedar`, `mutation_safety.cedar`), referenced from graph YAMLs via `resources.policies`.
 - `cookbook/`: example graphs (`code_pipeline`, `self_refine`, `concept_book`) with their `prompts/`. `code_pipeline` has its `.spl` procedures (`00`-`07`) next to the graph; running them for real needs SPL.py importable.
 

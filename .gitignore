@@ -221,3 +221,5 @@ __marimo__/
 
 # grafr run artifacts (procedure logs)
 .grafr/
+# grafr run results (<graph folder>/output/)
+output/

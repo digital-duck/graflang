@@ -8,8 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from ..logging_config import ERROR, active_settings, get_logger, log_event
+
+_log = get_logger("grafr.procedures")
 
 
 def _run_coro(coro):
@@ -114,7 +119,32 @@ def run_procedure(path: Path, args: Dict[str, Any], adapter_name: str, model: Op
         if name == "log_dir" and name not in params and log_dir is not None:
             Path(log_dir).mkdir(parents=True, exist_ok=True)
             params[name] = str(log_dir)
-    return _run_coro(_run(path, params, adapter_name, model, workflow))
+    spl_log = _start_spl_logging(path)
+    log_event(_log, "procedure.start", procedure=path.name, adapter=adapter_name, model=model,
+              params=sorted(params), spl_log=str(spl_log) if spl_log else None)
+    started = time.perf_counter()
+    try:
+        out = _run_coro(_run(path, params, adapter_name, model, workflow))
+    except Exception as e:
+        log_event(_log, "procedure.fail", level=ERROR, procedure=path.name, error=f"{type(e).__name__}: {e}")
+        raise
+    log_event(_log, "procedure.end", procedure=path.name, output_chars=len(out),
+              ms=round((time.perf_counter() - started) * 1000))
+    return out
+
+
+def _start_spl_logging(path: Path) -> Optional[Path]:
+    """When grafr logging is on, have SPL.py write its own log (same dir, level and format) for this procedure,
+    so one run's graph trace and the SPL executor's trace sit side by side. Skipped if SPL.py predates
+    `spl3.logging_config`."""
+    settings = active_settings()
+    if not settings:
+        return None
+    try:
+        from spl3.logging_config import setup_logging
+    except ImportError:
+        return None
+    return setup_logging(f"spl-{path.stem}", **{k: v for k, v in settings.items() if v is not None})
 
 
 def run_node_procedure(node_data: Dict, in_data: Dict[str, Any], resolver, llm) -> Dict[str, Any]:

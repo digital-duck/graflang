@@ -21,11 +21,91 @@ grafc compile  FILE [-o DIR] [--target rust] [--optimize]
 | Option | Meaning |
 |---|---|
 | `--param key=value` | a workflow input; repeatable. Coerced to the declared type (`INTEGER`, `FLOAT`, `BOOL`). A value without `=` is a usage error |
-| `--adapter NAME` | `mock` (default, no LLM) or a dd-llm adapter: `claude_cli`, `ollama`, `openrouter`, `openai`, `anthropic`, ... |
+| `--llm ADAPTER[:MODEL]` | `--adapter` and `--model` in one value, e.g. `claude_cli:claude-haiku-5-5`, `ollama:gemma3:12b`, `mock`. Only the first `:` splits, so model ids with `:` or `/` work. Wins over `--adapter`/`--model` |
+| `--adapter NAME` | `claude_cli` (default), `mock` (no LLM, placeholder text), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
 | `--model ID` | model for every `GENERATE` node; overrides `model:` hints in the graph |
 | `--max-steps N` | stop after N node firings (default 1000) |
+| `--output-dir DIR` | where results go (default `<graph folder>/output`); see [Results](#results-the-output-folder) |
+| `--save-nodes` | also save every node's output, LLM responses included |
+| `--no-output` | write no result files |
+| `--log-level LEVEL` | `debug`, `info` (default), `warning`, `error`; see [Logging](#logging) |
+| `--log-format FORMAT` | `both` (default), `text`, `jsonl` |
+| `--log-dir DIR` | where log files go (default `~/.graflang/logs`) |
+| `--no-log` | write no log file |
 
 A run ends with the workflow output. If no `OUTPUT` node was reached (a gate routed to a dead end) it says so. Failures print `✗ Run failed: ...` and exit with code 1: bad expression, unknown variable (message names the node), rejected edge to a missing port, or the step limit (`stopped after N node firings`).
+
+### Results: the output folder
+
+Each run writes its results to a new folder, `<graph folder>/output/<graph>-<adapter>-<timestamp>/`. For `cookbook/self_refine/self_refine.graph.yaml` that is `cookbook/self_refine/output/self_refine-claude_cli-20261024-082120/`:
+
+```
+result.json                       the workflow outputs (what the run prints as Output)
+essay.md                          one file per text output; other values are written as .json
+nodes/001-draft.out_essay.md      only with --save-nodes
+```
+
+- With `--save-nodes`, every node's output ports are saved under `nodes/`, numbered in firing order (`001-`, `002-`, ...). Nodes that fire again in a `LOOP` get a new number each time. This is where intermediate LLM responses go. Prompts are not saved.
+- `--output-dir DIR` replaces `<graph folder>/output`. Each run still gets its own subfolder, so runs never overwrite each other.
+- `--no-output` writes nothing. A run that fails, or ends without reaching an `OUTPUT` node, writes no result files.
+- `output/` is in `.gitignore`.
+
+LLM text is kept out of the log on purpose: it is a result of the run, not a diagnostic. The log records the folder and file names instead.
+
+### Logging
+
+Every run writes a log of what happened: which nodes fired, how long each took, what the guards and mutations decided, and which files were written. By default a run produces two files in `~/.graflang/logs/`, named `<graph>-<adapter>-<timestamp>`:
+
+- `.log`: one line per event, for reading
+- `.jsonl`: one JSON object per line, for tools such as `jq`
+
+```
+08:21:20  INFO  graflang.grafr.runtime  run.start workflow=self_refine nodes=5 inputs=['topic'] adapter=claude_cli model=None
+08:21:41  INFO  graflang.grafr.nodes.generate  llm.call node=draft adapter=claude_cli model=None prompt_chars=186 response_chars=4846 ms=21459
+08:22:25  INFO  graflang.grafr.runtime  run.end workflow=self_refine steps=4 outputs=['essay'] reached_output=True mutations=0 ms=64944
+```
+
+The path of the log file is printed at the end of the run, also when it fails.
+
+**Settings**
+
+| What | Option | Environment variable | Default |
+|---|---|---|---|
+| level | `--log-level` | `DD_LOG_LEVEL` | `info` |
+| format | `--log-format` | `DD_LOG_FORMAT` | `both` |
+| folder | `--log-dir` | `DD_LOG_DIR` | `~/.graflang/logs` |
+| off | `--no-log` | | |
+
+An option beats the environment variable, which beats the default. `--log-dir .` puts the files in the current folder.
+
+**Events** (the `event` field in the `.jsonl`)
+
+| Event | Level | Fields |
+|---|---|---|
+| `run.start`, `run.end` | info | workflow, adapter, model; steps, outputs, mutations, ms |
+| `run.fail` | error | error, steps, ms |
+| `node.fire` | debug | node, type, n (times fired), depth (loop nesting), inputs |
+| `node.done` | info | node, type, route, outputs, ms |
+| `node.error` | error | node, error |
+| `loop.iteration`, `loop.end` | debug, info | node, cycle; iterations |
+| `llm.call` | info | node, adapter, model, prompt_chars, response_chars, ms |
+| `llm.text` | debug | a 200-character preview of the prompt and the response |
+| `guard.decision` | info, warning when denied | node, policy, allowed, reason, context |
+| `mutate.applied`, `mutate.rejected` | info, warning | node, reason, mutations |
+| `procedure.start`, `procedure.end`, `procedure.fail` | info, error | procedure, adapter, ms |
+| `node.saved`, `run.output` | info | file, chars; dir, files |
+
+Examples:
+
+```bash
+jq -c 'select(.event=="node.done") | {node, ms}' ~/.graflang/logs/self_refine-*.jsonl     # time per node
+jq -c 'select(.level=="WARNING" or .level=="ERROR")' ~/.graflang/logs/*.jsonl             # denials and failures
+grafr run FILE --log-level debug                                                          # every firing, plus previews
+```
+
+A `procedure_ref` node runs an SPL.py workflow. When logging is on, SPL.py writes its own log for that procedure (`spl-<procedure>-<timestamp>`) into the same folder, with the same level and format.
+
+Used as a Python library (`GraphLangRuntime(...).execute(...)`), the runtime logs nothing until `graphlang.logging_config.setup_logging(...)` is called; the CLI calls it for you.
 
 ### `grafr validate`
 

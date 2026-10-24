@@ -1,15 +1,15 @@
 # Tutorial: your first GraphLang workflow
 
-You will run a bundled workflow, read its anatomy, then write a small one of your own with a retry loop. About 15 minutes. Everything here runs with the default `mock` adapter, so no LLM or network is needed. Install first: [SETUP.md](SETUP.md).
+You will run a bundled workflow, read its anatomy, then write a small one of your own with a retry loop. About 15 minutes. Every command here passes `--adapter mock`, so no LLM or network is needed (without it `grafr run` calls `claude_cli`). Install first: [SETUP.md](SETUP.md).
 
 ## 1. Run a workflow
 
 ```bash
 grafr info cookbook/self_refine/self_refine.graph.yaml
-grafr run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain" --adapter claude_cli
+grafr run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain" --adapter mock
 ```
 
-`info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft (#1)` and so on), then the output. With `mock` the text is a placeholder that echoes the prompt: it proves the wiring works, not that the essay is good.
+`info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft (#1)` and so on), then the output and a `log:` line with the path of this run's log file (section 5). With `mock` the text is a placeholder that echoes the prompt: it proves the wiring works, not that the essay is good.
 
 ## 2. Read the graph
 
@@ -90,7 +90,7 @@ Check and run it:
 
 ```bash
 grafr validate haiku.graph.yaml
-grafr run haiku.graph.yaml --param topic="rain"
+grafr run haiku.graph.yaml --adapter mock --param topic="rain"
 ```
 
 What you built: `write` generates; `gate` (`EVALUATE`) tests a condition on the poem and sends the token to `pass` or `fail`; `fail` is wired back to `write.trigger`, so a bad result tries again. A node may fire more than once, so a retry is simply a wire back to an earlier node.
@@ -106,14 +106,65 @@ config: {condition: "len(@in_poem) > 100000"}
 ```
 
 ```bash
-grafr run haiku.graph.yaml --param topic="rain" --max-steps 20
+grafr run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20
 ```
 
 The run fails with `✗ Run failed: stopped after 20 node firings` (naming the nodes that fired most). `--max-steps` bounds the number of node firings, which is your safety net for endless retry wires. A better design is to let `LOOP` own the repetition (next section).
 
 Now introduce a typo: change `@in_poem` to `@poem`. `grafr validate` reports that the condition uses a variable that is not available, before anything runs. Run `validate` after every edit.
 
-## 5. Let a LOOP own the repetition
+## 5. Read the run log
+
+Every `grafr run` also writes a log file that records what happened, whether or not the run succeeded. The terminal shows the last line, `log: <path>`. By default the files go to `~/.graflang/logs/` (created on first use), one pair per run, named `<graph>-<adapter>[-<model>]-<timestamp>` (the model appears when you pass `--model` or `--llm ADAPTER:MODEL`, with `:` and `/` turned into `-`). Use `--log-dir .` to put them in the current folder instead:
+
+```
+~/.graflang/logs/haiku-mock-20261024-081302.log      # for people
+~/.graflang/logs/haiku-mock-20261024-081302.jsonl    # for tools (one JSON object per line)
+```
+
+Run the failing graph from section 4 and open the `.log`:
+
+```
+08:13:02  INFO   graflang.grafr.runtime  node.done node=write type=GENERATE n=10 depth=0 route=None outputs=['out_poem'] ms=0
+08:13:02  INFO   graflang.grafr.runtime  node.done node=gate type=EVALUATE n=10 depth=0 route=fail outputs=[] ms=0
+08:13:02  ERROR  graflang.grafr.runtime  run.fail workflow=haiku_check steps=21 error="RunLimitExceeded: stopped after 20 node firings; most fired: [('write', 10), ('gate', 10)]" ms=9
+```
+
+`n=10` is how many times that node has fired, and `route=fail` shows which port `gate` sent the token to: the retry loop is visible as `write` and `gate` alternating until the cap. Each line starts with an event name:
+
+| Event | Level | Meaning |
+|---|---|---|
+| `run.start`, `run.end`, `run.fail` | info / error | one run; `run.fail` carries the error |
+| `node.done`, `node.error` | info / error | a node finished or raised, with its `route` and `ms` |
+| `llm.call` | info | a GENERATE call: adapter, model, prompt and response sizes, `ms` |
+| `loop.end`, `guard.decision`, `mutate.applied`, `mutate.rejected` | info / warning | LOOP exit, Cedar allow or deny, MUTATE outcome |
+| `node.fire`, `loop.iteration`, `llm.text` | debug | every firing, every iteration, and previews of the prompt and response text |
+
+The default level is `info`. Add `--log-level debug` to see the debug events, for example to check exactly what prompt a node sent:
+
+```bash
+grafr run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20 --log-level debug
+```
+
+The `.jsonl` has the same events with their fields as keys, so you can query it:
+
+```bash
+jq -r 'select(.event=="llm.call") | [.node, .model, .prompt_chars, .response_chars, .ms] | @tsv' ~/.graflang/logs/*.jsonl
+jq -r 'select(.level=="ERROR") | .msg' ~/.graflang/logs/*.jsonl
+```
+
+Options on `grafr run` (each also has an environment variable):
+
+| Option | Env var | Default |
+|---|---|---|
+| `--log-level debug\|info\|warning\|error` | `DD_LOG_LEVEL` | `info` |
+| `--log-format text\|jsonl\|both` | `DD_LOG_FORMAT` | `both` |
+| `--log-dir DIR` | `DD_LOG_DIR` | `~/.graflang/logs` |
+| `--no-log` | | off (log files are written) |
+
+Logging is off when you use the runtime as a library (`GraphLangRuntime(...)` from Python): nothing is written until you call `graphlang.logging_config.setup_logging(run_name, ...)`. For `procedure_ref` nodes, a SPL.py new enough to have `spl3.logging_config` writes its own `spl-<procedure>-…` log into the same directory; older versions just skip it.
+
+## 6. Let a LOOP own the repetition
 
 A `LOOP` node runs a sub-graph repeatedly while a condition holds, and has a built-in counter and iteration cap. Its body is a plain sequence (no back-edge inside it); the loop supplies the repetition:
 
@@ -137,15 +188,15 @@ A `LOOP` node runs a sub-graph repeatedly while a condition holds, and has a bui
 
 `@cycle` is the 0-based counter. `@ok` is the previous iteration's output named `ok`. Because the condition is checked before each iteration, `NOT @ok` is true on the first pass (nothing has fired yet). In the body, `write.in_topic` has no `binds` edge, so it reads the loop's own `in_topic`, which you bind from `start.out_topic`. Replace `write`/`gate` in your graph with this node, wire `start.entry -> retry.trigger`, `retry.exit -> done.trigger` and `retry.out_poem -> done.in_result`, then `validate` and `run`. For a complete example see `cookbook/concept_book/` (collects one chapter per iteration) and `cookbook/code_pipeline/`.
 
-## 6. Go real
+## 7. Go real
 
-Pick an adapter and model when you run, not in the graph:
+Pick an adapter and model when you run, not in the graph. The default adapter is `claude_cli` (the `claude` command-line tool, so no API key). The adapter and model are part of the log file name (`haiku-claude_cli-claude-haiku-5-5-<timestamp>.log`), so runs with different LLMs are easy to tell apart:
 
 ```bash
-grafr run haiku.graph.yaml --adapter claude_cli --model claude-haiku-5-5 --param topic="rain"
+grafr run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="rain"
 ```
 
-See [SETUP.md](SETUP.md) for adapter setup.
+`--llm ADAPTER:MODEL` is shorthand for `--adapter ADAPTER --model MODEL` (and wins if you give both). Leave the model off (`--llm claude_cli`) to use the adapter's default. See [SETUP.md](SETUP.md) for adapter setup.
 
 ## Where next
 

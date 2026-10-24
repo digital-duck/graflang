@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Command-line interface for grafr (GraphLang runtime)."""
 
+import os
 import sys
 from pathlib import Path
 
 import click
+from dd_llm import parse_llm_spec
 from rich.console import Console
 from rich.table import Table
 
+from ..logging_config import disable_logging, setup_logging
+from .output import RunOutput
 from .runtime import load_graph, GraphLangRuntime
 from .topology import check
 
@@ -21,18 +25,48 @@ def main():
 
 @main.command("run")
 @click.argument("graph")
-@click.option("--adapter", default="mock", show_default=True,
-              help="LLM adapter: mock (no LLM) or an SPL.py adapter such as claude_cli, ollama, openrouter")
+@click.option("--llm", "llm_spec", default=None, metavar="ADAPTER[:MODEL]",
+              help="adapter and model in one value, e.g. claude_cli:claude-haiku-5-5 or ollama:gemma3:12b; wins over --adapter/--model")
+@click.option("--adapter", default="claude_cli", show_default=True,
+              help="LLM adapter: claude_cli (default), mock (no LLM, placeholder text), or another dd-llm adapter such as ollama, openrouter")
 @click.option("--model", default=None, help="model for every GENERATE node (overrides the model hints in the graph)")
 @click.option("--max-steps", type=int, default=1000, show_default=True,
               help="stop after this many node firings (guards against endless loops)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
-def cmd_run(graph, adapter, model, max_steps, param):
+@click.option("--log-level", type=click.Choice(["debug", "info", "warning", "error"]), default=None,
+              help="file log level (default info, or $DD_LOG_LEVEL); debug adds every node firing and LLM text previews")
+@click.option("--log-format", type=click.Choice(["text", "jsonl", "both"]), default=None,
+              help="log file format (default both, or $DD_LOG_FORMAT): .log for people, .jsonl for tools")
+@click.option("--log-dir", type=click.Path(file_okay=False), default=None,
+              help="where log files go (default ~/.graflang/logs, or $DD_LOG_DIR); e.g. --log-dir . for the current folder")
+@click.option("--no-log", is_flag=True, help="do not write a log file")
+@click.option("--output-dir", type=click.Path(file_okay=False), default=None,
+              help="where results go (default <graph folder>/output): a folder per run with result.json and one file per output")
+@click.option("--save-nodes", is_flag=True,
+              help="also save every node's output (LLM responses included) under <run folder>/nodes/")
+@click.option("--no-output", is_flag=True, help="do not write result files")
+def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
+            no_output):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
     graph_path = Path(graph)
     if not graph_path.exists():
         console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
         sys.exit(1)
+
+    if llm_spec:
+        try:
+            adapter, model = parse_llm_spec(llm_spec)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="--llm")
+
+    if no_log:
+        disable_logging()
+        log_path = None
+    else:
+        if log_dir is None and "DD_LOG_DIR" not in os.environ:
+            log_dir = Path.home() / ".graflang" / "logs"
+        log_path = setup_logging(graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml"), adapter=adapter, model=model or "",
+                                 log_dir=log_dir, log_level=log_level, log_format=log_format or os.environ.get("DD_LOG_FORMAT") or "both")
 
     console.print(f"[bold blue]⚡ Loading graph:[/bold blue] {graph_path}")
     graph_data = load_graph(graph_path)
@@ -49,15 +83,24 @@ def cmd_run(graph, adapter, model, max_steps, param):
         key, value = p.split('=', 1)
         params[key] = value
 
+    run_output = None
+    if not no_output:
+        run_output = RunOutput(output_dir or graph_path.resolve().parent / "output",
+                               graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml"), adapter,
+                               save_nodes=save_nodes)
+
     console.print(f"\n[bold blue]▶ Executing workflow...[/bold blue]")
 
     try:
-        runtime = GraphLangRuntime(graph_data, adapter=adapter, model=model, max_steps=max_steps)
+        runtime = GraphLangRuntime(graph_data, adapter=adapter, model=model, max_steps=max_steps,
+                                   node_output=run_output if save_nodes else None)
         if adapter == "mock":
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")
         result = runtime.execute(params)
     except (ValueError, RuntimeError, NotImplementedError) as e:
         console.print(f"[red]✗ Run failed:[/red] {e}")
+        if log_path:
+            console.print(f"[dim]log: {log_path}[/dim]")
         sys.exit(1)
 
     if not result:
@@ -65,6 +108,11 @@ def cmd_run(graph, adapter, model, max_steps, param):
     else:
         console.print(f"\n[bold green]✓ Workflow completed[/bold green]")
     console.print(f"[bold]Output:[/bold] {result}")
+    if run_output and result:
+        run_output.save_result(result)
+        console.print(f"[dim]output: {run_output.dir}[/dim]")
+    if log_path:
+        console.print(f"[dim]log: {log_path}[/dim]")
 
 
 @main.command("validate")
