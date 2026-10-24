@@ -2,21 +2,39 @@
 
 Reference for running and writing GraphLang workflows. New here? Start with [SETUP.md](SETUP.md) and [TUTORIAL.md](TUTORIAL.md).
 
-A GraphLang program is a YAML file, `*.graph.yaml`. The topology is the program: nodes do work, edges say what fires next and where data flows. `grafr` runs it.
+A GraphLang program is a YAML file, `*.graph.yaml`. The topology is the program: nodes do work, edges say what fires next and where data flows. `graf` runs it, checks it, compiles it and draws it.
 
 ## Commands
 
 ```bash
-grafr validate FILE      # static checks, nothing executes
-grafr info     FILE      # name, node/edge counts, inputs, outputs, resources
-grafr run      FILE [options]
-grafc check    FILE      # can it be compiled? (compiler is a stub)
-grafc compile  FILE [-o DIR] [--target rust] [--optimize]
+graf validate FILE      # static checks, nothing executes
+graf info     FILE      # name, node/edge counts, inputs, outputs, resources
+graf run      FILE [options]
+graf check    FILE      # can it be compiled? (compiler is a stub)
+graf compile  FILE [-o DIR] [--target rust] [--optimize]
+graf vis      FILE [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o OUT] [--no-open]
 ```
 
-`python -m graphlang.grafr.cli ...` is equivalent to `grafr ...`.
+`python -m graphlang ...` is equivalent to `graf ...`.
 
-### `grafr run` options
+### `graf vis`
+
+Draws the workflow and opens it. Nodes are coloured by type (`GENERATE`, `EVALUATE`, `LOOP`, ...), control edges (`triggers`) are solid, data edges (`binds`) are dashed and labelled with the port, and a `LOOP` is drawn as a box around its body.
+
+| Option | Meaning |
+|---|---|
+| `--engine cytoscape` (default) | one interactive HTML file that works offline: search a node, zoom, switch layout, click a node for its config and links |
+| `--engine graphviz` | a static SVG through `dot`, good for docs; DOT text is written if `dot` is not installed |
+| `--engine pyvis` | interactive HTML through pyvis, laid out left to right; loop-body nodes have a dashed border. Needs `pip install "graflang[vis]"` |
+| `--engine graphify` | graphify's HTML export, coloured by community. It is undirected, so it shows structure only (no edge types). Needs `pip install "graflang[graphify]"` |
+| `--engine mermaid` | a Mermaid flowchart as text (`.mmd`; `-o FILE.md` wraps it in a fenced block) to paste into GitHub, mkdocs or `mermaid.live`. Nothing is opened |
+| `-o FILE` | output file (default `~/.graflang/vis/<graph>-<engine>.<html\|svg\|mmd>`) |
+| `--no-open` | write the file without opening it |
+| `--list-engines` | show the engines and whether each is ready |
+
+If Graphviz (`dot`) is installed, the interactive page also uses it to lay the nodes out (it keeps a loop's body together and picks a left-to-right or top-to-bottom shape that fits the screen); without it the page falls back to Cytoscape's own layouts.
+
+### `graf run` options
 
 | Option | Meaning |
 |---|---|
@@ -100,14 +118,14 @@ Examples:
 ```bash
 jq -c 'select(.event=="node.done") | {node, ms}' ~/.graflang/logs/self_refine-*.jsonl     # time per node
 jq -c 'select(.level=="WARNING" or .level=="ERROR")' ~/.graflang/logs/*.jsonl             # denials and failures
-grafr run FILE --log-level debug                                                          # every firing, plus previews
+graf run FILE --log-level debug                                                          # every firing, plus previews
 ```
 
 A `procedure_ref` node runs an SPL.py workflow. When logging is on, SPL.py writes its own log for that procedure (`spl-<procedure>-<timestamp>`) into the same folder, with the same level and format.
 
 Used as a Python library (`GraphLangRuntime(...).execute(...)`), the runtime logs nothing until `graphlang.logging_config.setup_logging(...)` is called; the CLI calls it for you.
 
-### `grafr validate`
+### `graf validate`
 
 Checks edges point to real nodes and ports, `triggers`/`binds` join the right kinds of port, resources exist, conditions parse and use only available variables, and `GUARD`/`MUTATE`/`LOOP` configs are complete. Errors fail the command; warnings (an input nothing feeds, a node nothing triggers) do not.
 
@@ -247,6 +265,6 @@ Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (
 
 - `SOLVE` with neither `expression` nor `procedure_ref` is a stub that returns True.
 - `contains_pii` in the Cedar context is always false, so the data-sovereignty policy cannot trigger.
-- `grafc compile` does not produce a working Rust project yet.
+- `graf compile` does not produce a working Rust project yet.
 
 The full list is the gap table in [`../DEV/readme-design.md`](../DEV/readme-design.md).

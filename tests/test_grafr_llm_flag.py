@@ -1,10 +1,10 @@
-"""`grafr run --llm ADAPTER[:MODEL]`: one value for --adapter and --model."""
+"""`graf run --llm ADAPTER[:MODEL]`: one value for --adapter and --model."""
 import json
 from pathlib import Path
 
 from click.testing import CliRunner
 
-from graphlang.grafr.cli import main
+from graphlang.cli import main
 
 SELF_REFINE = Path(__file__).resolve().parent.parent / "cookbook" / "self_refine" / "self_refine.graph.yaml"
 

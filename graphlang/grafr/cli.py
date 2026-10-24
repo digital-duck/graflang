@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Command-line interface for grafr (GraphLang runtime)."""
+"""The runtime commands of `graf`: run, validate, info (registered in graphlang/cli.py)."""
 
 import os
 import sys
@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 from dd_llm import parse_llm_spec
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from ..logging_config import disable_logging, setup_logging
@@ -18,12 +19,16 @@ from .topology import check
 console = Console()
 
 
-@click.group(help="GraphLang runtime - Execute topologically grounded agentic workflows")
-def main():
-    pass
+def _load_or_exit(graph_path: Path) -> dict:
+    """load_graph, with a message and exit code 1 (not a traceback) for a bad or wrong-kind file."""
+    try:
+        return load_graph(graph_path)
+    except (ValueError, OSError) as e:
+        console.print(f"[red]✗ Invalid graph:[/red] {escape(str(e))}")
+        sys.exit(1)
 
 
-@main.command("run")
+@click.command("run")
 @click.argument("graph")
 @click.option("--llm", "llm_spec", default=None, metavar="ADAPTER[:MODEL]",
               help="adapter and model in one value, e.g. claude_cli:claude-haiku-5-5 or ollama:gemma3:12b; wins over --adapter/--model")
@@ -69,7 +74,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
                                  log_dir=log_dir, log_level=log_level, log_format=log_format or os.environ.get("DD_LOG_FORMAT") or "both")
 
     console.print(f"[bold blue]⚡ Loading graph:[/bold blue] {graph_path}")
-    graph_data = load_graph(graph_path)
+    graph_data = _load_or_exit(graph_path)
 
     console.print(f"[bold green]✓[/bold green] Graph loaded: {graph_data['workflow']['name']}")
     console.print(f"  Nodes: {len(graph_data['nodes'])}")
@@ -115,7 +120,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
         console.print(f"[dim]log: {log_path}[/dim]")
 
 
-@main.command("validate")
+@click.command("validate")
 @click.argument("graph")
 def cmd_validate(graph):
     """Validate a GraphLang workflow against the schema."""
@@ -127,7 +132,7 @@ def cmd_validate(graph):
     try:
         graph_data = load_graph(graph_path)
     except Exception as e:
-        console.print(f"[red]✗ Validation failed:[/red] {e}")
+        console.print(f"[red]✗ Validation failed:[/red] {escape(str(e))}")
         sys.exit(1)
     errors, warnings = check(graph_data)
     for w in warnings:
@@ -141,12 +146,15 @@ def cmd_validate(graph):
                   + (f" ({len(warnings)} warning(s))" if warnings else ""))
 
 
-@main.command("info")
+@click.command("info")
 @click.argument("graph")
 def cmd_info(graph):
     """Display information about a GraphLang workflow."""
     graph_path = Path(graph)
-    graph_data = load_graph(graph_path)
+    if not graph_path.exists():
+        console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
+        sys.exit(1)
+    graph_data = _load_or_exit(graph_path)
 
     table = Table(title=f"Workflow: {graph_data['workflow']['name']}")
     table.add_column("Property", style="cyan")
@@ -167,6 +175,3 @@ def cmd_info(graph):
             for name, path in res_dict.items():
                 console.print(f"    {name} → {path}")
 
-
-if __name__ == "__main__":
-    main()

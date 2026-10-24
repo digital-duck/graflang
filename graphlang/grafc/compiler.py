@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 from ruamel.yaml import YAML
 from jsonschema import validate, ValidationError
 
+from ..formats import require_graphlang
 from .analyzer import GraphAnalyzer
 from .optimizer import GraphOptimizer
 from .cedar_compiler import CedarCompiler
@@ -38,6 +39,7 @@ class GraphLangCompiler:
         yaml = YAML()
         with open(self.graph_path, 'r') as f:
             self.graph_data = yaml.load(f)
+        require_graphlang(self.graph_data, self.graph_path)
         
         # Validate against schema
         schema_path = Path(__file__).parent.parent / "schema" / "graflang-ir.json"

@@ -1,6 +1,6 @@
 """Where a run's results go: `<graph folder>/output/<graph>-<adapter>-<timestamp>/`.
 
-    result.json              the workflow outputs (what `grafr run` prints as Output)
+    result.json              the workflow outputs (what `graf run` prints as Output)
     <name>.md                one file per text output, e.g. essay.md
     nodes/003-draft.out_essay.md    with --save-nodes: every node's output ports, numbered by firing order
 

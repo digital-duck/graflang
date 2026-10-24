@@ -1,17 +1,19 @@
 # Tutorial: your first GraphLang workflow
 
-You will run a bundled workflow, read its anatomy, then write a small one of your own with a retry loop. About 15 minutes. Every command here passes `--adapter mock`, so no LLM or network is needed (without it `grafr run` calls `claude_cli`). Install first: [SETUP.md](SETUP.md).
+You will run a bundled workflow, read its anatomy, then write a small one of your own with a retry loop. About 15 minutes. Every command here passes `--adapter mock`, so no LLM or network is needed (without it `graf run` calls `claude_cli`). Install first: [SETUP.md](SETUP.md).
 
 ## 1. Run a workflow
 
 ```bash
-grafr info cookbook/self_refine/self_refine.graph.yaml
-grafr run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain" --adapter mock
+graf info cookbook/self_refine/self_refine.graph.yaml
+graf run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain" --adapter mock
 ```
 
 `info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft (#1)` and so on), then the output and a `log:` line with the path of this run's log file (section 5). With `mock` the text is a placeholder that echoes the prompt: it proves the wiring works, not that the essay is good.
 
 ## 2. Read the graph
+
+To see it first, run `graf vis cookbook/self_refine/self_refine.graph.yaml`: it opens a picture of the workflow in your browser (click a node to see its config and links). The rest of this section reads the same thing in the YAML.
 
 Open `cookbook/self_refine/self_refine.graph.yaml`. In GraphLang the graph *is* the program, so there is no code to read: you read nodes and edges.
 
@@ -89,8 +91,8 @@ edges:
 Check and run it:
 
 ```bash
-grafr validate haiku.graph.yaml
-grafr run haiku.graph.yaml --adapter mock --param topic="rain"
+graf validate haiku.graph.yaml
+graf run haiku.graph.yaml --adapter mock --param topic="rain"
 ```
 
 What you built: `write` generates; `gate` (`EVALUATE`) tests a condition on the poem and sends the token to `pass` or `fail`; `fail` is wired back to `write.trigger`, so a bad result tries again. A node may fire more than once, so a retry is simply a wire back to an earlier node.
@@ -106,16 +108,16 @@ config: {condition: "len(@in_poem) > 100000"}
 ```
 
 ```bash
-grafr run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20
+graf run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20
 ```
 
 The run fails with `✗ Run failed: stopped after 20 node firings` (naming the nodes that fired most). `--max-steps` bounds the number of node firings, which is your safety net for endless retry wires. A better design is to let `LOOP` own the repetition (next section).
 
-Now introduce a typo: change `@in_poem` to `@poem`. `grafr validate` reports that the condition uses a variable that is not available, before anything runs. Run `validate` after every edit.
+Now introduce a typo: change `@in_poem` to `@poem`. `graf validate` reports that the condition uses a variable that is not available, before anything runs. Run `validate` after every edit.
 
 ## 5. Read the run log
 
-Every `grafr run` also writes a log file that records what happened, whether or not the run succeeded. The terminal shows the last line, `log: <path>`. By default the files go to `~/.graflang/logs/` (created on first use), one pair per run, named `<graph>-<adapter>[-<model>]-<timestamp>` (the model appears when you pass `--model` or `--llm ADAPTER:MODEL`, with `:` and `/` turned into `-`). Use `--log-dir .` to put them in the current folder instead:
+Every `graf run` also writes a log file that records what happened, whether or not the run succeeded. The terminal shows the last line, `log: <path>`. By default the files go to `~/.graflang/logs/` (created on first use), one pair per run, named `<graph>-<adapter>[-<model>]-<timestamp>` (the model appears when you pass `--model` or `--llm ADAPTER:MODEL`, with `:` and `/` turned into `-`). Use `--log-dir .` to put them in the current folder instead:
 
 ```
 ~/.graflang/logs/haiku-mock-20261024-081302.log      # for people
@@ -143,7 +145,7 @@ Run the failing graph from section 4 and open the `.log`:
 The default level is `info`. Add `--log-level debug` to see the debug events, for example to check exactly what prompt a node sent:
 
 ```bash
-grafr run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20 --log-level debug
+graf run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20 --log-level debug
 ```
 
 The `.jsonl` has the same events with their fields as keys, so you can query it:
@@ -153,7 +155,7 @@ jq -r 'select(.event=="llm.call") | [.node, .model, .prompt_chars, .response_cha
 jq -r 'select(.level=="ERROR") | .msg' ~/.graflang/logs/*.jsonl
 ```
 
-Options on `grafr run` (each also has an environment variable):
+Options on `graf run` (each also has an environment variable):
 
 | Option | Env var | Default |
 |---|---|---|
@@ -193,7 +195,7 @@ A `LOOP` node runs a sub-graph repeatedly while a condition holds, and has a bui
 Pick an adapter and model when you run, not in the graph. The default adapter is `claude_cli` (the `claude` command-line tool, so no API key). The adapter and model are part of the log file name (`haiku-claude_cli-claude-haiku-5-5-<timestamp>.log`), so runs with different LLMs are easy to tell apart:
 
 ```bash
-grafr run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="rain"
+graf run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="rain"
 ```
 
 `--llm ADAPTER:MODEL` is shorthand for `--adapter ADAPTER --model MODEL` (and wins if you give both). Leave the model off (`--llm claude_cli`) to use the adapter's default. See [SETUP.md](SETUP.md) for adapter setup.

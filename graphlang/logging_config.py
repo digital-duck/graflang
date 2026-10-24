@@ -3,7 +3,7 @@
     from graphlang.logging_config import get_logger, log_event
     _log = get_logger("grafr.runtime")            # -> graflang.grafr.runtime
 
-`setup_logging` (called by `grafr run`) writes `<log_dir>/<run_name>-<adapter>-<timestamp>.log` and/or `.jsonl`.
+`setup_logging` (called by `graf run`) writes `<log_dir>/<run_name>-<adapter>-<timestamp>.log` and/or `.jsonl`.
 Until it is called every logger is silent, so using the runtime as a library logs nothing.
 """
 from __future__ import annotations

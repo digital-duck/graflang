@@ -10,6 +10,7 @@ graphlang/
   policies/    shared Cedar policies: graph_safety.cedar, mutation_safety.cedar
   grafr/       the dynamic interpreter (runtime, executors, CLI)
   grafc/       the compiler (mostly a stub; hand-written Cedar compiler, Rust codegen)
+  grafv/       `graf vis`: workflow -> networkx model; cytoscape, graphviz, pyvis, graphify and mermaid engines
 cookbook/      example graphs: code_pipeline, self_refine, concept_book
 tests/         pytest
 docs/DEV/      design notes and the gap table
@@ -34,7 +35,7 @@ Tests use the `mock` adapter; none needs an LLM. Known failures: `tests/test_ced
 - `expr.py`: the safe condition evaluator. Any new condition feature goes here; never use `eval`.
 - `adapters.py`: `mock` plus dd-llm adapters (`make_llm`, `resolve_model`). `procedures.py`: runs `procedure_ref` SPL workflows. `resolver.py`: the `resources` block.
 - `cedar_guard.py`: Cedar via the official engine (`cedarpy`).
-- `topology.py`: static checks behind `grafr validate` and `tests/test_topology.py`.
+- `topology.py`: static checks behind `graf validate` and `tests/test_topology.py`.
 - `cli.py`: a `click` group named `main`.
 
 ### Adding a node type or executor
@@ -46,7 +47,7 @@ Tests use the `mock` adapter; none needs an LLM. Known failures: `tests/test_ced
 
 ### Adding a CLI command
 
-Add a function to `graphlang/grafr/cli.py` or `graphlang/grafc/cli.py` decorated with `@main.command("name")` and `click.argument`/`click.option`. Keep rich output consistent with the existing commands.
+Add a function to the package it belongs to (`graphlang/grafr/cli.py`, `grafc/cli.py` or `grafv/cli.py`) decorated with `@click.command("name")` and `click.argument`/`click.option`, then register it in `graphlang/cli.py` (`main.add_command(...)`). Keep rich output consistent with the existing commands.
 
 ## Cedar: fail closed
 

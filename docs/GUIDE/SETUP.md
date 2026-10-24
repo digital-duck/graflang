@@ -2,7 +2,7 @@
 
 Install GraphLang, check that it works, and (optionally) connect a real LLM. Next: [TUTORIAL.md](TUTORIAL.md) walks through a first workflow; [USER-GUIDE.md](USER-GUIDE.md) is the reference.
 
-> **Status:** early prototype. `grafr` (the runtime) works end to end on the bundled workflows. `grafc` (the Rust compiler) is a stub.
+> **Status:** early prototype. `graf run` (the runtime) works end to end on the bundled workflows. `graf compile` (the Rust compiler) is a stub.
 
 ## Requirements
 
@@ -27,18 +27,20 @@ Optional extras:
 | `dev` | `pytest`, `pytest-asyncio` | running the tests |
 | `anthropic`, `gemini` | the provider SDK, through dd-llm | those providers (the `openai` SDK is already a core dependency; only `claude_cli`, `gemini_cli` and `echo` need none; see below) |
 | `spl` | SPL.py (`spl-llm`) | only `procedure_ref` nodes, which run SPL.py workflows |
+| `vis`, `graphify` | `pyvis`, `graphify` | `graf vis --engine pyvis` / `--engine graphify` (the default engine, `graphviz` and `mermaid` need nothing extra) |
 | `grafc` | `jinja2` | the compiler templates |
 
 Core dependencies (`click`, `ruamel.yaml`, `networkx`, `jsonschema`, `cedarpy`, `dd-llm`, `rich`, `dd-llm[openai]`, `dd-logging`) come with the base install. `dd-llm` is the shared LLM layer that provides the adapters, and its `openai` SDK serves openai, openrouter, ollama, deepseek and qwen. `cedarpy` is the official Cedar engine and is required: `grafr` imports it at startup.
 
-Two console scripts are installed, `grafr` and `grafc`. `python -m graphlang.grafr.cli ...` and `python -m graphlang.grafc.cli ...` do the same thing.
+One console script is installed, `graf`, with the subcommands `run`, `validate`, `info`, `compile`, `check` and `vis`. `python -m graphlang ...` does the same thing.
 
 ## Check the install
 
 ```bash
-grafr --help
-grafr validate cookbook/self_refine/self_refine.graph.yaml
-grafr run cookbook/self_refine/self_refine.graph.yaml --adapter mock --param topic="rain"
+graf --help
+graf validate cookbook/self_refine/self_refine.graph.yaml
+graf run cookbook/self_refine/self_refine.graph.yaml --adapter mock --param topic="rain"
+graf vis cookbook/self_refine/self_refine.graph.yaml     # opens a picture of the workflow in your browser
 pytest
 ```
 
@@ -48,7 +50,7 @@ pytest
 
 ## Connect a real LLM
 
-Adapters come from [dd-llm](https://github.com/digital-duck/dd-llm), which is already installed with `grafr`. `claude_cli` needs nothing else. `openai`, `openrouter`, `ollama`, `deepseek` and `qwen` work out of the box (the `openai` SDK is a core dependency). The others need their SDK, as an extra:
+Adapters come from [dd-llm](https://github.com/digital-duck/dd-llm), which is already installed with `graf`. `claude_cli` needs nothing else. `openai`, `openrouter`, `ollama`, `deepseek` and `qwen` work out of the box (the `openai` SDK is a core dependency). The others need their SDK, as an extra:
 
 ```bash
 pip install -e ".[anthropic]"    # anthropic
@@ -60,7 +62,7 @@ Adapter names: `claude_cli`, `gemini_cli`, `openai`, `anthropic`, `gemini`, `ver
 Then choose the adapter and model at run time. The graph says *what* to generate; you choose *who* generates it:
 
 ```bash
-grafr run cookbook/self_refine/self_refine.graph.yaml \
+graf run cookbook/self_refine/self_refine.graph.yaml \
     --llm claude_cli:claude-haiku-5-5 \
     --param topic="rain"
 ```

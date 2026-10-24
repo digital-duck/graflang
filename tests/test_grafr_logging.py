@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from graphlang.grafr.cli import main
+from graphlang.cli import main
 from graphlang.grafr.runtime import GraphLangRuntime, load_graph
 from graphlang.logging_config import active_settings, disable_logging, setup_logging
 

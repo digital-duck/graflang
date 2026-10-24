@@ -11,7 +11,7 @@
 (SPL.py is needed only for `procedure_ref` nodes; see procedures.py.)
 
 DODA: the graph says *what* to generate; the provider and model are chosen when you run it
-(`grafr run --adapter claude_cli --model claude-haiku-5-5`). A `model` written in a node is only a hint:
+(`graf run --llm claude_cli:claude-haiku-5-5`). A `model` written in a node is only a hint:
 it is used when it is compatible with the chosen adapter and no `--model` was given, else ignored.
 """
 from __future__ import annotations

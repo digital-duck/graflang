@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Command-line interface for grafc (GraphLang compiler)."""
+"""The compiler commands of `graf`: compile, check (registered in graphlang/cli.py)."""
 
 import sys
 from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .compiler import GraphLangCompiler
@@ -13,12 +14,7 @@ from .compiler import GraphLangCompiler
 console = Console()
 
 
-@click.group(help="GraphLang compiler - Compile Graph IR to Rust")
-def main():
-    pass
-
-
-@main.command("compile")
+@click.command("compile")
 @click.argument("graph")
 @click.option("-o", "--output", default=None, help="Output directory for Rust project")
 @click.option("--target", default="rust", type=click.Choice(["rust"]), show_default=True, help="Compilation target")
@@ -50,7 +46,11 @@ def cmd_compile(graph, output, target, optimize):
         )
 
         progress.update(task, description="Loading and validating graph...")
-        compiler.load_graph()
+        try:
+            compiler.load_graph()
+        except (ValueError, OSError) as e:
+            console.print(f"[red]✗ Invalid graph:[/red] {escape(str(e))}")
+            sys.exit(1)
 
         progress.update(task, description="Resolving resources...")
         compiler.resolve_resources()
@@ -78,7 +78,7 @@ def cmd_compile(graph, output, target, optimize):
     console.print(f"  ./target/release/{graph_path.stem}")
 
 
-@main.command("check")
+@click.command("check")
 @click.argument("graph")
 def cmd_check(graph):
     """Check if a GraphLang workflow can be compiled."""
@@ -94,9 +94,6 @@ def cmd_check(graph):
         compiler.analyze()
         console.print(f"[bold green]✓[/bold green] Workflow is compilable: {graph_path.name}")
     except Exception as e:
-        console.print(f"[red]✗ Compilation check failed:[/red] {e}")
+        console.print(f"[red]✗ Compilation check failed:[/red] {escape(str(e))}")
         sys.exit(1)
 
-
-if __name__ == "__main__":
-    main()

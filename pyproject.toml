@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "graflang"                     # pip install graflang; the Python package is `graphlang`
 version = "0.1.0"
-description = "GraphLang: a physics-inspired, topologically grounded language for self-revising agentic workflows (runner: grafr, compiler: grafc)"
+description = "GraphLang: a physics-inspired, topologically grounded language for self-revising agentic workflows (one command line: `graf`)"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [{name = "Wen Gong"}]
@@ -35,19 +35,20 @@ dependencies = [
 spl = ["spl-llm>=3.4"]        # only for SPL procedure_ref nodes (runs SPL.py workflows); plain GENERATE needs just dd-llm
 anthropic = ["dd-llm[anthropic]>=0.2.0"]
 gemini = ["dd-llm[gemini]>=0.2.0"]
-grafc = ["jinja2>=3.1"]       # the Rust code generator (grafc) renders templates
+vis = ["pyvis>=0.3"]             # `graf vis --engine pyvis`
+graphify = ["graphifyy>=0.7.19"]  # `graf vis --engine graphify`
+grafc = ["jinja2>=3.1"]       # the Rust code generator (`graf compile`) renders templates
 dev = ["pytest>=7.4"]
 
 [project.scripts]
-grafr = "graphlang.grafr.cli:main"
-grafc = "graphlang.grafc.cli:main"
+graf = "graphlang.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["graphlang*"]
 
 [tool.setuptools.package-data]
-graphlang = ["schema/*.json", "policies/*.cedar", "grafc/rust_gen/templates/*.j2"]
+graphlang = ["schema/*.json", "policies/*.cedar", "grafc/rust_gen/templates/*.j2", "grafv/data/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -61,14 +61,14 @@ The LLM can propose mutations, but only those that pass the Cedar policy check a
 pip install -e ".[dev]"        # `claude_cli`, `ollama`, `openai`, `openrouter` work as is; `.[anthropic]`, `.[gemini]` add SDKs
 
 # Run a workflow (default adapter is `claude_cli`; `--adapter mock` calls no LLM)
-grafr run cookbook/code_pipeline/code_pipeline.graph.yaml \
+graf run cookbook/code_pipeline/code_pipeline.graph.yaml \
     --adapter ollama \
     --param spec="Write a binary search function"
 
 # Compile to Rust (deployment; planned, grafc is a stub)
 # Cedar policies are referenced from the graph's `resources.policies` block
 # (shared policies live in graphlang/policies/).
-grafc compile cookbook/code_pipeline/code_pipeline.graph.yaml \
+graf compile cookbook/code_pipeline/code_pipeline.graph.yaml \
     --target rust \
     -o code_pipeline
 ```

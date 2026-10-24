@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from graphlang.grafr.cli import main
+from graphlang.cli import main
 from graphlang.logging_config import disable_logging
 
 SELF_REFINE_DIR = Path(__file__).resolve().parent.parent / "cookbook" / "self_refine"
