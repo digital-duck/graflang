@@ -272,4 +272,4 @@ Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (
 - `contains_pii` in the Cedar context is always false, so the data-sovereignty policy cannot trigger.
 - `graf compile` does not produce a working Rust project yet.
 
-The full list is the gap table in [`../DEV/readme-design.md`](../DEV/readme-design.md).
+The full list is the gap table in the maintainer's design notes (see [`../DEV/readme.md`](../DEV/readme.md)).

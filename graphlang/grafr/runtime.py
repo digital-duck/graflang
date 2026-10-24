@@ -11,7 +11,7 @@ Model (kept deliberately small):
   `complete`, `exit`, `entry`.
 * Nodes may fire any number of times, so a retry wire back to an earlier node is a real loop. A run
   is stopped after `max_steps` firings (shared by LOOP bodies), so a loop that never exits cannot hang.
-* A `LOOP` node runs its `subgraph` once per iteration (see `_run_loop` and docs/DEV/readme-design.md).
+* A `LOOP` node runs its `subgraph` once per iteration (see `_run_loop`, and the design notes `claude/readme-design.md` described in docs/DEV/readme.md).
 
 The graph is a `networkx.MultiDiGraph`: a `triggers` edge and a `binds` edge between the same two
 nodes, or several edges of the same kind on different ports, are all kept.

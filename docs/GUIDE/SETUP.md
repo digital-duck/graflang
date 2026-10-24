@@ -45,7 +45,7 @@ pytest
 
 `--adapter mock` calls no LLM and prints placeholder text, so it needs no network and costs nothing. Seeing `✓ Workflow completed` means the runtime, schema validation and Cedar import all work.
 
-`pytest` has known failures: `tests/test_cedar_compiler.py` and `tests/test_policy_slicer.py` test the hand-written Cedar compiler in `grafc/cedar/`, which is unfinished (gap #18 in `docs/DEV/readme-design.md`). Everything else should pass.
+`pytest` has known failures: `tests/test_cedar_compiler.py` and `tests/test_policy_slicer.py` test the hand-written Cedar compiler in `grafc/cedar/`, which is unfinished (gap #18 in the design notes; see `docs/DEV/readme.md`). Everything else should pass.
 
 ## Connect a real LLM
 

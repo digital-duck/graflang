@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 GraphLang: a graph-first language for agentic workflows. The graph (YAML, `*.graph.yaml`) is the program; the LLM mutates topology instead of writing code. It evolves from the sibling repo SPL.py (`spl3` package). Early prototype; much of the code was drafted by Qwen and then adopted/fixed piecemeal. `README.md` is aspirational (some claims, e.g. Rust compilation and Cedar enforcement, are not implemented yet).
 
-**Read `docs/DEV/readme-design.md` first**: it holds the gap table (numbered items, status open/resolved) and the written semantics of LOOP/conditions/data/LLM. Update that table when you close or open a gap. `docs/DEV/qwen-file-map.md` explains where the Qwen-generated files came from; `docs/DEV/readme-qwen.md` (9k lines) is the raw transcript, so grep it rather than reading it.
+**Read `/home/papagame/projects/digital-duck/zinets/docs/graph-vision/claude/readme-design.md` first** (private notes, outside this repo): it holds the gap table (numbered items, status open/resolved) and the written semantics of LOOP/conditions/data/LLM. Update that table when you close or open a gap. `/home/papagame/projects/digital-duck/zinets/docs/graph-vision/claude/qwen-file-map.md` explains where the Qwen-generated files came from; `/home/papagame/projects/digital-duck/zinets/docs/graph-vision/qwen/IDEATION/readme-qwen.md` (9k lines) is the raw transcript, so grep it rather than reading it.
 
 ## Commands
 

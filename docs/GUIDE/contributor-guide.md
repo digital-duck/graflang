@@ -1,6 +1,6 @@
 # Contributor guide
 
-How the code is organised, how to test it, and how to extend it. Read [`../DEV/readme-design.md`](../DEV/readme-design.md) too: it holds the numbered gap table (open and resolved items) and the written semantics. Update that table when you close or open a gap.
+How the code is organised, how to test it, and how to extend it. Read the maintainer's design notes too (see [`../DEV/readme.md`](../DEV/readme.md) for where they are): it holds the numbered gap table (open and resolved items) and the written semantics. Update that table when you close or open a gap.
 
 ## Layout
 
@@ -43,7 +43,7 @@ Tests use the `mock` adapter; none needs an LLM. Known failures: `tests/test_ced
 1. Add the type to the enum in `graphlang/schema/graflang-ir.json` if it is new.
 2. Write a `NodeExecutor` subclass in `graphlang/grafr/nodes/` and register it with `register_executor("TYPE", ...)`. Tests can swap executors the same way and restore `_EXECUTORS` afterwards (see `tests/test_grafr_runtime.py`).
 3. Teach `topology.py` any config the node requires.
-4. Add tests; document the semantics in `readme-design.md`.
+4. Add tests; document the semantics in the design notes (`readme-design.md`).
 
 ### Adding a CLI command
 
@@ -63,4 +63,4 @@ Cedar skips a policy that errors, for example a `forbid` that reads a context at
 
 - Vocabulary is settled by the owner: `FORK`/`JOIN` (short names, no implicit fan-out), port exclusion rather than Pauli-exclusion wording. Do not reintroduce superposition, entanglement or conservation language.
 - Do not reuse unsupported numbers from the Qwen draft paper (40% fewer loops, 2x faster audits). No experiments exist.
-- Treat Qwen-originated files (`docs/DEV/readme-qwen.md` is the raw transcript; `qwen-file-map.md` maps it to the repo) as unreviewed drafts; verify with tests before building on them.
+- Treat Qwen-originated files (the raw transcript, `readme-qwen.md`, and `qwen-file-map.md`, which maps it to the repo, are in the maintainer's notes; see `docs/DEV/readme.md`) as unreviewed drafts; verify with tests before building on them.
