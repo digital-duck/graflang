@@ -6,7 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from graphlang.cli import main
-from graphlang.formats import GRAPHLANG, UNKNOWN, ZINET, detect
+from graphlang.formats import CONCEPTBOOK, GRAPHLANG, UNKNOWN, ZINET, detect
 
 ROOT = Path(__file__).resolve().parent.parent
 SELF_REFINE = ROOT / "cookbook" / "self_refine" / "self_refine.graph.yaml"
@@ -27,6 +27,8 @@ applications:
     ({"nodes": [], "edges": []}, GRAPHLANG),
     ({"version": "1.0", "primitives": [], "concepts": []}, ZINET),
     ({"applications": [{"id": "a"}]}, ZINET),
+    ({"domain": "x", "primitives": {"p": {"tier": 0}}, "concepts": {"a": {"composed_of": ["p"]}}}, CONCEPTBOOK),
+    ({"primitives": None, "concepts": []}, ZINET),
     ({}, UNKNOWN), ({"hello": 1}, UNKNOWN), ([1, 2], UNKNOWN), (None, UNKNOWN),
 ])
 def test_detect(data, kind):
@@ -60,3 +62,21 @@ def test_a_graphlang_workflow_named_plain_graph_yaml_works(tmp_path):
                                        "--log-dir", str(tmp_path / "logs"), "--output-dir", str(tmp_path / "out")])
     assert result.exit_code == 0, result.output
     assert next((tmp_path / "logs").glob("graph-mock-*.log"))                 # the run is named after the file stem
+
+
+CONCEPTBOOK_GRAPH = """domain: demo
+primitives:
+  p: {tier: 0}
+concepts:
+  a: {composed_of: [p], tier: 1}
+"""
+
+
+@pytest.mark.parametrize("cmd", [["validate"], ["info"], ["check"]])
+def test_a_conceptbook_graph_is_not_called_a_zinet_graph(tmp_path, cmd):
+    f = tmp_path / "graph.yaml"
+    f.write_text(CONCEPTBOOK_GRAPH)
+    result = CliRunner().invoke(main, [*cmd, str(f)])
+    assert result.exit_code == 1
+    assert "ConceptBook / graph-code graph" in result.output and "grafcode validate" in result.output
+    assert "is a zinet graph" not in result.output
