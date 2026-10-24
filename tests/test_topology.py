@@ -75,3 +75,44 @@ def test_runtime_rejects_edges_to_missing_ports():
     g = graph([ENTRY, {"id": "a", "type": "SOLVE", "ports": ["trigger"]}], [{"source": "s.entry", "target": "a.nope", "type": "triggers"}])
     with pytest.raises(ValueError, match="no port 'nope'"):
         GraphLangRuntime(g, verbose=False)
+
+
+# ---- every risky node is behind a GUARD ---------------------------------------------------------------------------------
+
+def guarded(*, risky_after_guard=True, via_deny=False, extra_path=False, marked=True, typ="OUTPUT", loop=False):
+    n = lambda i, t="SOLVE", ports=("trigger", "complete"), **cfg: {"id": i, "type": t, "ports": list(ports), "config": cfg}
+    e = lambda a, b: {"source": a, "target": b, "type": "triggers"}
+    risky = n("r", typ, ("trigger", "exit", "complete"), **({"risky": True} if marked else {}))
+    nodes = [n("work"), n("g", "GUARD", ("trigger", "allow", "deny", "in_v"), policy_ref="policies.p", context_mapping={}), risky]
+    edges = [e("s.entry", "work.trigger"), e("work.complete", "g.trigger"),
+             e("g.deny" if via_deny else "g.allow", "r.trigger")]
+    if extra_path:
+        edges.append(e("work.complete", "r.trigger"))
+    if loop:
+        body = {"nodes": [{"id": "inner", "type": "EMIT", "ports": ["trigger", "complete"]}], "edges": []}
+        nodes[2] = {"id": "r", "type": "LOOP", "ports": ["trigger", "exit"], "config": {"subgraph": body, "max_iterations": 1}}
+    return [m for m in errs(nodes, edges, resources={"policies": {"p": "./x.cedar"}}) if "risky" in m or "denies" in m]
+
+
+def test_a_risky_node_behind_a_guard_allow_is_fine():
+    assert guarded() == [] and guarded(typ="EMIT", marked=False) == []
+
+
+def test_a_risky_node_with_a_path_around_the_guard_is_an_error():
+    msgs = guarded(extra_path=True)
+    assert len(msgs) == 1 and "without passing a GUARD" in msgs[0] and "'r'" in msgs[0]
+
+
+def test_a_risky_node_on_the_deny_branch_is_an_error():
+    assert any("after GUARD 'g' denies" in m for m in guarded(via_deny=True))
+
+
+def test_emit_and_query_are_risky_by_type_and_other_nodes_only_when_marked():
+    assert any("EMIT 'r'" in m for m in guarded(typ="EMIT", marked=False, extra_path=True))
+    assert guarded(typ="OUTPUT", marked=False, extra_path=True) == []
+
+
+def test_a_loop_whose_body_holds_a_risky_node_must_be_guarded_as_a_whole():
+    assert guarded(loop=True) == []
+    msgs = guarded(loop=True, extra_path=True)
+    assert len(msgs) == 1 and "LOOP 'r'" in msgs[0] and "body holds risky r/inner" in msgs[0]

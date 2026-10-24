@@ -134,6 +134,8 @@ Used as a Python library (`GraphLangRuntime(...).execute(...)`), the runtime log
 
 Checks edges point to real nodes and ports, `triggers`/`binds` join the right kinds of port, resources exist, conditions parse and use only available variables, and `GUARD`/`MUTATE`/`LOOP` configs are complete. Errors fail the command; warnings (an input nothing feeds, a node nothing triggers) do not.
 
+It also checks that **every risky node is behind a `GUARD`**. A node is risky if its type is `EMIT` or `QUERY` (they reach outside the workflow) or you mark it with `config: {risky: true}`; mark an `OUTPUT` that releases data, or a `procedure_ref` node that acts on the world. A `LOOP` whose body holds a risky node counts as risky itself. The check follows `triggers` edges from the `INPUT` node with every edge that leaves a `GUARD` removed. A risky node still reached has a path around the guard, which is an error; a risky node reachable from a guard's `deny` port is an error too. Limits: `binds` (data) edges are ignored, guards inside a `LOOP` body are not credited, and a node you forget to mark is not checked, so the check is only as complete as your marking.
+
 ## File layout
 
 ```yaml

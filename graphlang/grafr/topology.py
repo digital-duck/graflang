@@ -142,6 +142,72 @@ def _check_loop(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[s
     _check_scope(body["nodes"], body["edges"], f"{prefix}{nid}/", resolver, scope, loop_in, errors, warnings)
 
 
+RISKY_TYPES = ("EMIT", "QUERY")       # reach outside the workflow; anything else is risky only when marked `risky: true`
+
+
+def _risky(node: Dict) -> bool:
+    return node["type"] in RISKY_TYPES or bool(node.get("config", {}).get("risky"))
+
+
+def _contains_risky(node: Dict) -> List[str]:
+    """Risky nodes inside a LOOP body (any depth), as `loop/node` names; the LOOP is then treated as risky itself."""
+    found = []
+    for b in node.get("config", {}).get("subgraph", {}).get("nodes", []):
+        if _risky(b):
+            found.append(f"{node['id']}/{b['id']}")
+        if b["type"] == "LOOP":
+            found += [f"{node['id']}/{f}" for f in _contains_risky(b)]
+    return found
+
+
+def _check_guarded(nodes: List[Dict], edges: List[Dict], errors: List[str]) -> None:
+    """Every risky node must be reachable only through a GUARD's `allow` port.
+
+    A node is risky when its type is in RISKY_TYPES or it has `config.risky: true` (put it on an OUTPUT that releases
+    data, or on a `procedure_ref` node that acts on the world). A LOOP is risky when its body holds a risky node. We follow
+    `triggers` edges from the INPUT node with every edge that leaves a GUARD removed: a risky node still reached has a path
+    that skips the guard. We then follow each guard's `deny` port the same way: a risky node reached from there is run
+    after a refusal. Data (`binds`) edges are not control flow and are ignored; so are guards inside LOOP bodies.
+    """
+    by_id = {n["id"]: n for n in nodes}
+    guards = {n["id"] for n in nodes if n["type"] == "GUARD"}
+    out: Dict[str, List[str]] = {}
+    deny_from: Dict[str, List[str]] = {}
+    for e in edges:
+        if e["type"] != "triggers":
+            continue
+        (src, _, sport), (tgt, _, _) = e["source"].partition("."), e["target"].partition(".")
+        if src not in by_id or tgt not in by_id:
+            continue
+        if src in guards:
+            if sport == "deny":
+                deny_from.setdefault(src, []).append(tgt)
+        else:
+            out.setdefault(src, []).append(tgt)
+
+    def reach(starts):
+        seen, todo = set(), list(starts)
+        while todo:
+            n = todo.pop()
+            if n not in seen:
+                seen.add(n)
+                todo += out.get(n, [])
+        return seen
+
+    risky = {}
+    for n in nodes:
+        inside = _contains_risky(n) if n["type"] == "LOOP" else []
+        if _risky(n) or inside:
+            risky[n["id"]] = f"{n['type']} {n['id']!r}" + (f" (its body holds risky {', '.join(inside)})" if inside else "")
+    unguarded = reach(n["id"] for n in nodes if n["type"] == "INPUT")
+    for nid, what in risky.items():
+        if nid in unguarded:
+            errors.append(f"{what} is risky but can run without passing a GUARD's allow port")
+    for g, targets in deny_from.items():
+        for nid in sorted(set(risky) & reach(targets)):
+            errors.append(f"{risky[nid]} can run after GUARD {g!r} denies")
+
+
 def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
@@ -160,6 +226,7 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         for d in sorted(declared - {p[4:] for p in n["ports"] if p.startswith("out_")}):
             warnings.append(f"INPUT {n['id']!r}: declared input {d!r} has no out_{d} port")
     _check_scope(nodes, edges, "", resolver, set(), set(), errors, warnings)
+    _check_guarded(nodes, edges, errors)
     for kind in SUFFIX:
         for name, rel in graph_data.get("resources", {}).get(kind, {}).items():
             if not (resolver.base_dir / rel).exists():

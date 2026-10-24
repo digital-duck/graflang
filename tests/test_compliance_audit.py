@@ -167,3 +167,12 @@ def test_a_bad_rules_file_stops_the_run_instead_of_falling_back_to_the_defaults(
     path.write_text("{ nope", encoding="utf-8")
     with pytest.raises(Exception, match="not valid JSON"):                       # the procedure's ASSERT fails; nothing is released
         run(CLEAN, "internal_db", rules_file=str(path))
+
+
+def test_validate_proves_the_release_is_only_reachable_through_the_guard():
+    from graphlang.grafr.topology import check
+    data = load_graph(GRAPH)
+    assert check(data)[0] == []
+    data["edges"].append({"source": "compliant_first.pass", "target": "audit_released.trigger", "type": "triggers"})
+    data["nodes"] = [{**n, "config": {**n["config"], "risky": True}} if n["id"] == "audit_released" else n for n in data["nodes"]]
+    assert any("'audit_released' is risky but can run without passing a GUARD" in m for m in check(data)[0])

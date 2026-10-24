@@ -97,6 +97,7 @@ nodes:
 
   - id: "released"
     type: "OUTPUT"
+    config: {risky: true}        # the document leaves here; `graf validate` checks that only release_guard.allow reaches it
     ports: ["trigger", "exit", "in_safe_document", "in_audit"]
 
   - id: "escalated"
