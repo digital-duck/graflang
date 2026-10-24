@@ -146,7 +146,8 @@ def test_cli_list_engines():
 
 
 def test_graf_is_the_only_command_line():
-    assert set(main.commands) == {"run", "validate", "info", "compile", "check", "vis"}
+    assert {n for n, c in main.commands.items() if not c.hidden} == {"run", "validate", "info", "compile", "check", "vis"}
+    assert main.commands["viz"].hidden                      # `graf viz` is a hidden alias of `graf vis` (tests/test_cli_alias.py)
     scripts = (ROOT / "pyproject.toml").read_text().split("[project.scripts]")[1].split("[")[0]
     assert 'graf = "graphlang.cli:main"' in scripts and "grafr" not in scripts and "grafc" not in scripts
 

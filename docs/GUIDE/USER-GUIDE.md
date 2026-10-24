@@ -58,15 +58,17 @@ A run ends with the workflow output. If no `OUTPUT` node was reached (a gate rou
 
 ### Results: the output folder
 
-Each run writes its results to a new folder, `<graph folder>/output/<graph>-<adapter>-<timestamp>/`. For `cookbook/self_refine/self_refine.graph.yaml` that is `cookbook/self_refine/output/self_refine-claude_cli-20261024-082120/`:
+Each run writes its results to a new folder, `<graph folder>/output/<graph>-<adapter>[-<model>]-<timestamp>/`. For `graf run cookbook/self_refine/self_refine.graph.yaml --llm ollama:gemma3 ...` that is `cookbook/self_refine/output/self_refine-ollama-gemma3-20261024-111347/`:
 
 ```
+run.json                          what produced it: graph, adapter, model, parameters, start time
 result.json                       the workflow outputs (what the run prints as Output)
 essay.md                          one file per text output; other values are written as .json
 nodes/001-draft.out_essay.md      only with --save-nodes
 ```
 
 - With `--save-nodes`, every node's output ports are saved under `nodes/`, numbered in firing order (`001-`, `002-`, ...). Nodes that fire again in a `LOOP` get a new number each time. This is where intermediate LLM responses go. Prompts are not saved.
+- The model part is the one you asked for with `--llm` or `--model` (characters other than letters, digits, `.`, `_`, `-` become `-`, so `gemma3:12b` shows as `gemma3-12b`); log files use the same naming. Without one the name still carries the default (`claude-sonnet-5-5` under `claude_cli`). Only adapters with no default (`ollama`, ...) give a folder without a model part and `"model": null` in `run.json`; the nodes then use the model hints in the graph.
 - `--output-dir DIR` replaces `<graph folder>/output`. Each run still gets its own subfolder, so runs never overwrite each other.
 - `--no-output` writes nothing. A run that fails, or ends without reaching an `OUTPUT` node, writes no result files.
 - `output/` is in `.gitignore`.

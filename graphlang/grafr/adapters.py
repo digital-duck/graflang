@@ -19,6 +19,15 @@ from __future__ import annotations
 from typing import Any, Optional
 
 
+# Per-adapter default when no --model/--llm model is given. An adapter not listed (ollama, openrouter, ...) has
+# none: the model hints in the graph apply, else the adapter's own default.
+DEFAULT_MODELS = {"claude_cli": "claude-sonnet-5-5"}
+
+
+def default_model(adapter: str) -> Optional[str]:
+    return DEFAULT_MODELS.get(adapter)
+
+
 class LLMUnavailable(RuntimeError):
     """The requested adapter cannot be created (dd-llm missing, unknown name, missing API key, ...)."""
 
@@ -85,4 +94,4 @@ def make_llm(adapter: str = "mock", model: Optional[str] = None):
     """The LLM object for `--adapter` / `--model`."""
     if adapter == "mock":
         return MockLLM(model)
-    return DDLLM(adapter, model)
+    return DDLLM(adapter, model or default_model(adapter))

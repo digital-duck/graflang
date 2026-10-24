@@ -1,5 +1,7 @@
-"""Where a run's results go: `<graph folder>/output/<graph>-<adapter>-<timestamp>/`.
+"""Where a run's results go: `<graph folder>/output/<graph>-<adapter>[-<model>]-<timestamp>/`
+(the model part is the one asked for with --llm/--model, named the same way as the log files).
 
+    run.json                 what produced it: graph, adapter, model, parameters, start time
     result.json              the workflow outputs (what `graf run` prints as Output)
     <name>.md                one file per text output, e.g. essay.md
     nodes/003-draft.out_essay.md    with --save-nodes: every node's output ports, numbered by firing order
@@ -34,9 +36,14 @@ def _render(value: Any) -> tuple[str, str]:
 class RunOutput:
     """One run's output folder; created on first write."""
 
-    def __init__(self, root: Path, stem: str, adapter: str, *, save_nodes: bool = False):
-        self.dir = Path(root) / f"{_slug(stem)}-{_slug(adapter)}-{datetime.now():%Y%m%d-%H%M%S}"
+    def __init__(self, root: Path, stem: str, adapter: str, *, model: str = "", params: Dict[str, Any] | None = None,
+                 save_nodes: bool = False):
+        now = datetime.now()
+        parts = [_slug(stem), _slug(adapter)] + ([re.sub(r"[^A-Za-z0-9._-]+", "-", model).strip("-")] if model else [])
+        self.dir = Path(root) / f"{'-'.join(parts)}-{now:%Y%m%d-%H%M%S}"
         self.save_nodes = save_nodes
+        self.meta = {"graph": stem, "adapter": adapter, "model": model or None, "params": params or {},
+                     "started": now.isoformat(timespec="seconds")}
 
     def save_node(self, step: int, node: str, result: Dict[str, Any]) -> List[Path]:
         """Write each non-control output port of a node that fired (no-op unless --save-nodes)."""
@@ -63,8 +70,10 @@ class RunOutput:
             path = self.dir / f"{_slug(name)}{suffix}"
             path.write_text(text, encoding="utf-8")
             paths.append(path)
+        run_json = self.dir / "run.json"
+        run_json.write_text(json.dumps(self.meta, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
         summary = self.dir / "result.json"
         summary.write_text(json.dumps(result, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-        paths.append(summary)
+        paths += [summary, run_json]
         log_event(_log, "run.output", dir=str(self.dir), files=[p.name for p in paths])
         return paths

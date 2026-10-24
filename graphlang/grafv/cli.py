@@ -13,7 +13,7 @@ from .engines import DEFAULT_ENGINE, ENGINES, hint, render
 console = Console()
 
 
-@click.command("vis")
+@click.command("vis", short_help="Draw a workflow as a diagram (alias: viz).")
 @click.argument("graph", required=False)
 @click.option("--engine", type=click.Choice(sorted(ENGINES)), default=DEFAULT_ENGINE, show_default=True,
               help="cytoscape: interactive HTML, works offline; graphviz: svg/png/pdf; mermaid, ascii: text; pyvis, graphify: other HTML views (see --list-engines)")

@@ -12,6 +12,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from ..logging_config import disable_logging, setup_logging
+from .adapters import default_model
 from .output import RunOutput
 from .runtime import load_graph, GraphLangRuntime
 from .topology import check
@@ -28,13 +29,15 @@ def _load_or_exit(graph_path: Path) -> dict:
         sys.exit(1)
 
 
-@click.command("run")
+@click.command("run", short_help="Run a workflow; results go to <graph folder>/output.")
 @click.argument("graph")
 @click.option("--llm", "llm_spec", default=None, metavar="ADAPTER[:MODEL]",
               help="adapter and model in one value, e.g. claude_cli:claude-haiku-5-5 or ollama:gemma3:12b; wins over --adapter/--model")
 @click.option("--adapter", default="claude_cli", show_default=True,
               help="LLM adapter: claude_cli (default), mock (no LLM, placeholder text), or another dd-llm adapter such as ollama, openrouter")
-@click.option("--model", default=None, help="model for every GENERATE node (overrides the model hints in the graph)")
+@click.option("--model", default=None,
+              help="model for every GENERATE node (overrides the model hints in the graph); default claude-sonnet-5-5 "
+                   "for claude_cli, none for other adapters")
 @click.option("--max-steps", type=int, default=1000, show_default=True,
               help="stop after this many node firings (guards against endless loops)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
@@ -64,6 +67,8 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
         except ValueError as e:
             raise click.BadParameter(str(e), param_hint="--llm")
 
+    model = model or default_model(adapter)          # claude_cli: claude-sonnet-5-5; ollama etc.: none
+
     if no_log:
         disable_logging()
         log_path = None
@@ -92,7 +97,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
     if not no_output:
         run_output = RunOutput(output_dir or graph_path.resolve().parent / "output",
                                graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml"), adapter,
-                               save_nodes=save_nodes)
+                               model=model or "", params=params, save_nodes=save_nodes)
 
     console.print(f"\n[bold blue]▶ Executing workflow...[/bold blue]")
 
@@ -120,7 +125,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
         console.print(f"[dim]log: {log_path}[/dim]")
 
 
-@click.command("validate")
+@click.command("validate", short_help="Check a workflow against the schema and wiring rules.")
 @click.argument("graph")
 def cmd_validate(graph):
     """Validate a GraphLang workflow against the schema."""
@@ -146,7 +151,7 @@ def cmd_validate(graph):
                   + (f" ({len(warnings)} warning(s))" if warnings else ""))
 
 
-@click.command("info")
+@click.command("info", short_help="Show a workflow's nodes, edges, inputs and outputs.")
 @click.argument("graph")
 def cmd_info(graph):
     """Display information about a GraphLang workflow."""

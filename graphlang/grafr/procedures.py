@@ -57,6 +57,7 @@ def _import_spl_get_adapter():
 
 def declared_inputs(path: Path) -> list[str]:
     """Names of the workflow INPUT parameters in an .spl file (the last WORKFLOW defined, as `spl3 run` picks)."""
+    _import_spl_get_adapter()                   # puts SPL_PY_PATH on sys.path if SPL.py is not installed
     from spl3._loader import load_workflows_from_file
     defns = load_workflows_from_file(Path(path))
     if not defns:

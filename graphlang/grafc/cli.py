@@ -14,7 +14,7 @@ from .compiler import GraphLangCompiler
 console = Console()
 
 
-@click.command("compile")
+@click.command("compile", short_help="Compile a workflow to Rust (experimental stub).")
 @click.argument("graph")
 @click.option("-o", "--output", default=None, help="Output directory for Rust project")
 @click.option("--target", default="rust", type=click.Choice(["rust"]), show_default=True, help="Compilation target")
@@ -78,7 +78,7 @@ def cmd_compile(graph, output, target, optimize):
     console.print(f"  ./target/release/{graph_path.stem}")
 
 
-@click.command("check")
+@click.command("check", short_help="Check whether a workflow can be compiled.")
 @click.argument("graph")
 def cmd_check(graph):
     """Check if a GraphLang workflow can be compiled."""

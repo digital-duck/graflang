@@ -79,3 +79,54 @@ def test_failed_run_writes_no_result_files(app):
                                        "--log-dir", str(app.parent / "logs")])       # required --param missing
     assert result.exit_code != 0
     assert not (app / "output").exists()
+
+
+def test_folder_name_carries_the_model_and_run_json_records_it(app):
+    assert run(app, "--llm", "mock:demo/model:7b").exit_code == 0
+    (run_dir,) = run_dirs(app / "output")
+    assert run_dir.name.startswith("self_refine-mock-demo-model-7b-")
+    meta = json.loads((run_dir / "run.json").read_text())
+    assert meta["adapter"] == "mock" and meta["model"] == "demo/model:7b" and meta["params"] == {"topic": "ducks"}
+
+
+def test_folder_name_without_a_model_has_no_model_part(app):
+    assert run(app).exit_code == 0
+    (run_dir,) = run_dirs(app / "output")
+    assert run_dir.name.startswith("self_refine-mock-2") and json.loads((run_dir / "run.json").read_text())["model"] is None
+
+
+def test_claude_cli_defaults_to_sonnet_and_other_adapters_have_no_default():
+    from graphlang.grafr.adapters import default_model
+    assert default_model("claude_cli") == "claude-sonnet-5-5"
+    assert default_model("ollama") is None and default_model("mock") is None
+
+
+def test_default_model_reaches_the_run_name_and_the_llm(app, monkeypatch):
+    seen = {}
+
+    class Fake:
+        name, adapter_name = "claude_cli", "claude_cli"
+
+        def __init__(self, model):
+            seen["model"] = model
+            self.model_override = model
+
+        def generate(self, prompt, model=None, **kw):
+            seen.setdefault("calls", []).append(model)
+            return "text"
+
+    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", lambda name, model=None: Fake(model))
+    assert run(app, "--adapter", "claude_cli").exit_code == 0
+    (run_dir,) = run_dirs(app / "output")
+    assert run_dir.name.startswith("self_refine-claude_cli-claude-sonnet-5-5-")
+    assert json.loads((run_dir / "run.json").read_text())["model"] == "claude-sonnet-5-5"
+    assert seen["model"] == "claude-sonnet-5-5" and set(seen["calls"]) == {"claude-sonnet-5-5"}
+
+
+def test_explicit_model_beats_the_default(app, monkeypatch):
+    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", lambda name, model=None: type(
+        "F", (), {"name": "claude_cli", "adapter_name": "claude_cli", "model_override": model,
+                  "generate": lambda self, p, model=None, **k: "t"})())
+    assert run(app, "--llm", "claude_cli:claude-haiku-5-5").exit_code == 0
+    (run_dir,) = run_dirs(app / "output")
+    assert "claude-haiku-5-5" in run_dir.name and "sonnet" not in run_dir.name
