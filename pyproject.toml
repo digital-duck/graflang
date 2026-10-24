@@ -41,6 +41,12 @@ graphify = ["zinet[graphify]>=0.2.0"]  # `graf vis --engine graphify`
 grafc = ["jinja2>=3.1"]       # the Rust code generator (`graf compile`) renders templates
 dev = ["pytest>=7.4"]
 
+[project.urls]
+Homepage = "https://github.com/digital-duck/graflang"
+Repository = "https://github.com/digital-duck/graflang"
+Issues = "https://github.com/digital-duck/graflang/issues"
+Changelog = "https://github.com/digital-duck/graflang/blob/main/CHANGELOG.md"
+
 [project.scripts]
 graf = "graphlang.cli:main"
 
