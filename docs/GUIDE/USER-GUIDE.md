@@ -33,6 +33,8 @@ Draws the workflow and opens it. Nodes are coloured by type (`GENERATE`, `EVALUA
 | `--no-open` | write the file without opening it |
 | `--list-engines` | show the engines and whether each is ready |
 
+On the interactive page the first view is the control flow: the data edges are hidden behind a "show data edges" checkbox (they always show for the node you hover or select, with everything else faded) and a `LOOP` starts as one box. Click a collapsed loop to open it, double-click an open one to close it, or use "Collapse groups" / "Expand groups". Click a node for its config and links.
+
 If Graphviz (`dot`) is installed, the interactive page also uses it to lay the nodes out (it keeps a loop's body together and picks a left-to-right or top-to-bottom shape that fits the screen); without it the page falls back to Cytoscape's own layouts.
 
 ### `graf run` options

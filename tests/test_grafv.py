@@ -60,7 +60,7 @@ def test_cookbook_graphs_all_build():
 
 
 def _page_data(page):
-    return json.loads(re.search(r"const data = (\[.*?\]);\nconst dark", page, re.S).group(1).replace("<\\/", "</"))
+    return json.loads(re.search(r"const data = (\[.*?\]);\nconst OPTS", page, re.S).group(1).replace("<\\/", "</"))
 
 
 def test_cytoscape_page_is_self_contained_and_complete(tmp_path):
@@ -236,3 +236,11 @@ def test_the_style_reads_what_the_model_writes():
 def test_short_and_long_help_work_on_graf_and_every_command(args):
     result = CliRunner().invoke(main, args)
     assert result.exit_code == 0 and "Usage:" in result.output
+
+
+def test_the_page_starts_with_the_control_flow_and_loops_collapsed():
+    G, _ = build(workflow())
+    page = engines.cytoscape_html(G)
+    assert json.loads(re.search(r"const OPTS = (\{.*?\});", page).group(1)) == {"dataHidden": True, "collapsed": True}
+    assert 'id="showdata"' in page and "show data edges" in page and 'id="collapseall"' in page
+    assert engines.graphlang_style().secondary_hidden and engines.graphlang_style().groups_collapsed

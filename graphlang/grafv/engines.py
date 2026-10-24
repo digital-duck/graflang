@@ -3,7 +3,8 @@
 `graf vis --engine NAME`: cytoscape (interactive HTML, offline, default), graphviz (svg/png/pdf through `dot`), mermaid
 (flowchart text), ascii (a text outline), and, with their extras installed, pyvis and graphify. The engines live in
 `zinet.vis`; this module only says how a GraphLang workflow looks: node colour by node type, control edges (`triggers`)
-solid, data edges (`binds`) dashed with the port as the label, and a LOOP drawn as a box around its body.
+solid, data edges (`binds`) dashed with the port as the label, and a LOOP drawn as a box around its body. On the interactive
+page the data edges start hidden (they show for the node you hover or select) and a LOOP starts as one box.
 """
 from __future__ import annotations
 
@@ -35,7 +36,8 @@ def graphlang_style(title: str = "workflow") -> vis.Style:
         shape=lambda n, d: _shape(d["kind"]), group=lambda n, d: d.get("parent"), info=lambda n, d: d["info"],
         edge_label=lambda u, v, d: d["label"], edge_kind=lambda u, v, d: d["relation"],
         edge_dashed=lambda u, v, d: d["relation"] == "binds", edge_info=lambda u, v, d: f"{d['sport']} → {d['tport']}",
-        edge_legend=(("control", False), ("data", True)), title=title, kind_colors=dict(TYPE_COLORS))
+        edge_legend=(("control", False), ("data", True)), title=title, kind_colors=dict(TYPE_COLORS),
+        secondary_hidden=True, groups_collapsed=True)       # first view: the control flow, loops as one box
 
 
 def _title(G: nx.MultiDiGraph) -> str:
