@@ -1,4 +1,4 @@
-"""HumanEval tasks (164 hand-written Python problems with hidden unit tests), downloaded once into data/ (git-ignored)."""
+"""HumanEval tasks (164 hand-written Python problems with hidden unit tests), read from data/ (source and license in data/README.md)."""
 from __future__ import annotations
 
 import gzip
