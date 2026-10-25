@@ -45,9 +45,16 @@ The three pipeline arms run the same prompts with the same gates, so I expect th
 ## Run
 
 ```bash
+conda create -n graf python=3.11
+conda activate graf
+
+cd ~/projects/digital-duck/graflang
+
 pip install -e ".[dev]" && pip install -r requirements.txt     # requirements.txt: langgraph
-pip install -e /path/to/SPL.py
-python run.py --verify-oracle
+pip install -e ~/projects/digital-duck/SPL.py
+
+cd experiments/code_pipeline
+python run.py --verify-oracle        # no LLM: checks the scorer itself (all 164 canonical solutions must pass, a do-nothing stub must not); ~7 s
 python run.py --n 20 --reps 1 --model claude-haiku-5-5 --out results/pilot.jsonl      # a fixed random sample of 20 tasks
 python analyze.py results/pilot.jsonl
 ```
