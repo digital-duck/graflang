@@ -21,7 +21,7 @@ It is written to avoid the objections the TMLR Action Editor raised against the 
 
 ## Tasks and oracle
 
-HumanEval (164 Python problems, hidden unit tests), downloaded to `data/` (git-ignored). The spec every arm gets is the problem's signature and docstring plus one instruction line (`tasks.py`). The tests are never shown to any arm.
+HumanEval (164 Python problems, hidden unit tests), committed in `data/` (source, license and checksum in `data/README.md`). The spec every arm gets is the problem's signature and docstring plus one instruction line (`tasks.py`). The tests are never shown to any arm.
 
 `oracle.py` runs the final code plus the tests in a separate process. A task passes only if the process exits 0 within 10 s. No code, a missing function, a wrong answer, a crash and a timeout all count as failures; a run that stops at the spec gate (`[READY]` never appears) counts as a failure too. `python run.py --verify-oracle` checks that all 164 canonical solutions pass and that a do-nothing stub passes none (done: no canonical failures, no stub passes).
 
