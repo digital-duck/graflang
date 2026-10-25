@@ -1,0 +1,115 @@
+⚡ Loading graph: 
+/home/papagame/projects/digital-duck/graflang/cookbook/code_pipeline/code_pipeli
+ne.graph.yaml
+✓ Graph loaded: code_pipeline
+  Nodes: 11
+  Edges: 28
+
+▶ Executing workflow...
+⚡ GENERATE analyze (#1)
+[INFO] [00_analyze_spec] evaluating spec clarity | spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def iscube(a):
+    '''
+    Write a function that takes an integer a and returns True 
+    if this ingeger is a cube of some integer number.
+    Note: you may assume the input is always valid.
+    Examples:
+    iscube(1) ==> True
+    iscube(2) ==> False
+    iscube(-1) ==> True
+    iscube(64) ==> True
+    iscube(0) ==> True
+    iscube(180) ==> False
+    '''"
+[INFO] [00_analyze_spec] verdict: READY — spec is well-defined, pipeline may proceed
+⚡ EVALUATE spec_gate (#1)
+⚡ LOOP test_gated_loop (#1)
+  ⚡ GENERATE loop_gen (#1)
+[INFO] [01_generate_code] started | lang=python spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def iscube(a):
+    '''
+    Write a function that takes an integer a and returns True 
+    if this ingeger is a cube of some integer number.
+    Note: you may assume the input is always valid.
+    Examples:
+    iscube(1) ==> True
+    iscube(2) ==> False
+    iscube(-1) ==> True
+    iscube(64) ==> True
+    iscube(0) ==> True
+    iscube(180) ==> False
+    '''"
+[INFO] [01_generate_code] done | output_len=41
+  ⚡ GENERATE loop_rev (#1)
+[INFO] [02_review_code] started | lang=python
+[INFO] [02_review_code] done | feedback_len=675
+  ⚡ GENERATE loop_imp (#1)
+[INFO] [03_improve_code] started | lang=python
+[INFO] [03_improve_code] done | output_len=510
+  ⚡ SOLVE loop_test (#1)
+[INFO] [04_test_code] started | lang=python
+[INFO] [04_test_code] done | result={@test_result[:50]}
+  ⚡ EVALUATE loop_eval (#1)
+⚡ GENERATE document (#1)
+[INFO] [05_document_code] started | lang=python
+[INFO] [05_document_code] done | docs_len=723
+⚡ GENERATE extract (#1)
+[INFO] [06_extract_spec] reverse-engineering spec from implementation ...
+[INFO] [06_extract_spec] done | out_spec_len=730
+⚡ EVALUATE closure_gate (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'docs': '## Overview\n\n`is_cube(n)` returns `True` if the integer `n` 
+is the cube of some integer (positive, negative, or zero). It uses only integer 
+arithmetic (a doubling search for an upper bound, then a binary search for the 
+integer cube root), so it stays exact for arbitrarily large inputs. 
+Floating-point cube roots lose precision above about 2**53 and overflow past 
+about 1e308. `iscube` is an alias that matches the name in the original 
+specification.\n\n## Function / Class Reference\n\n### `is_cube(n)`\n\nAlias: 
+`iscube = is_cube`\n\n**Description:** Checks whether `n == k**3` for some 
+integer `k`. It relies on `(-k)**3 == -(k**3)`, so it tests `abs(n)` and handles
+negative inputs the same way as positive ones.\n\n**Parameters:**\n\n| Name | 
+Type  | Description                                            
+|\n|------|-------|--------------------------------------------------------|\n| 
+`n`  | `int` | The value to test. `bool` is accepted because it is a subclass of
+`int`. |\n\n**Returns:** `bool`. `True` if `n` is a perfect cube, otherwise 
+`False`.\n\n**Raises:** `TypeError` if `n` is not an `int` (floats, strings, 
+`None`, `nan` and `inf` all raise).\n\n**Algorithm:**\n1. Double `high` from 1 
+until `high**3 >= abs(n)`.\n2. Binary search `[0, high]` for the smallest 
+integer whose cube is `>= abs(n)`.\n3. Return whether that integer\'s cube 
+equals `abs(n)`.\n\nComplexity is O(log |n|) iterations, each with a big-integer
+multiplication.\n\n**Examples:**\n\n```python\nis_cube(64)    # True  
+(4**3)\nis_cube(-64)   # True  ((-4)**3)\nis_cube(180)   # False\nis_cube(0)    
+# True\nis_cube(True)  # True  (True == 1)\n```\n\n### `_run_tests()`\n\nPrivate
+self-test, run when the file is executed as a script. It uses plain `assert` 
+statements and raises `AssertionError` on failure. It covers small values, 
+negatives, `2**150`, cubes near `2**53`, cubes above 1e47, values beyond float 
+range (`10**309`), and the `TypeError` cases.\n\n## Edge Cases & 
+Assumptions\n\n- **Strict typing:** `8.0` and `0.125` raise `TypeError` rather 
+than being coerced, even though `8.0` is mathematically a cube. This is stricter
+than the original spec, which says the input is always a valid integer.\n- 
+**`bool`:** `True` and `False` are treated as `1` and `0`.\n- **Zero:** `0` is a
+cube (`0**3`). With `magnitude == 0`, `high` stays at 1 and the search returns 
+`low == 0`.\n- **Negative numbers:** Always evaluated through `abs(n)`.\n- 
+**Large integers:** There is no size limit besides memory and time. Tests cover 
+values above `10**309`.\n- **Name:** The primary name is `is_cube`. `iscube` is 
+provided only as an alias.\n\n## Usage Example\n\n```python\nfrom your_module 
+import is_cube, iscube\n\nfor value in (1, 2, -1, 64, 0, 180, 10**309):\n    
+print(value if value < 10**6 else "10**309", is_cube(value))\n\nassert 
+iscube(-27) is True\n\ntry:\n    is_cube(8.0)\nexcept TypeError as e:\n    
+print("TypeError:", e)   # is_cube expects an int, got float\n```'}
+output: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-f
+ixed-smoke/claude_cli/claude-sonnet-5-5/HumanEval_77/graflang-rep0/graf_out/code
+_pipeline-claude_cli-claude-sonnet-5-5-20261025-113104
+log: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-f
+ixed-smoke/claude_cli/claude-sonnet-5-5/HumanEval_77/graflang-rep0/logs/code_pip
+eline-claude_cli-claude-sonnet-5-5-20261025-113104.jsonl
+
+--- stderr ---

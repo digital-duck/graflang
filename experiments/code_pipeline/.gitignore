@@ -1,0 +1,5 @@
+# per-run logs and outputs (large, reproducible, may hold model output)
+logs/
+output/
+nohup.out
+__pycache__/

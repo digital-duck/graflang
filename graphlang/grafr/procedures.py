@@ -7,6 +7,8 @@ chosen adapter, and run the workflow. Needs SPL.py importable (`pip install -e "
 from __future__ import annotations
 
 import asyncio
+import itertools
+import os
 import threading
 import time
 from pathlib import Path
@@ -76,7 +78,12 @@ def _load_sibling_tools(executor, path: Path) -> None:
         executor.register_tool(name, fn)
 
 
-async def _run(path: Path, params: Dict[str, str], adapter_name: str, model: Optional[str], workflow: Optional[str]) -> str:
+_PROMPT_CALLS = itertools.count(1)
+PROMPT_LOG_ENV = "GRAFLANG_LOG_PROMPTS"     # set by `graf run --log-prompts DIR`: every prompt a procedure sends is written here
+
+
+async def _run(path: Path, params: Dict[str, str], adapter_name: str, model: Optional[str], workflow: Optional[str],
+               prompt_log_dir: Optional[Path] = None) -> str:
     from types import SimpleNamespace
     from spl3._loader import load_definitions_from_file, load_workflows_from_file
     from spl3.composer import WorkflowComposer
@@ -89,6 +96,12 @@ async def _run(path: Path, params: Dict[str, str], adapter_name: str, model: Opt
     adapter = get_adapter(adapter_name, **({"model": model} if model else {}))
     executor = Executor(adapter=adapter)
     executor.composer = WorkflowComposer(registry, executor)
+    if prompt_log_dir is not None:
+        # one folder per procedure call, numbered in call order: SPL numbers the prompt files from 1 for each executor, so a
+        # procedure that runs again (every cycle of a loop) would overwrite its own prompts
+        folder = Path(prompt_log_dir) / f"{next(_PROMPT_CALLS):03d}-{path.stem}"
+        folder.mkdir(parents=True, exist_ok=True)
+        executor.prompt_log_dir = str(folder)
 
     _load_sibling_tools(executor, path)                # a procedure's tools.py, as `spl3 run` does
     tool_apis, functions, procedures = load_definitions_from_file(path)
@@ -125,7 +138,8 @@ def run_procedure(path: Path, args: Dict[str, Any], adapter_name: str, model: Op
     """
     path = Path(path)
     names = declared_inputs(path)
-    params = {k: str(v) for k, v in args.items() if k in names}
+    # a value that is None (a loop's carried value before its first iteration) is passed as empty text, not as "None"
+    params = {k: ("" if v is None else str(v)) for k, v in args.items() if k in names}
     for name in names:
         if "model" in name and name not in params and model:
             params[name] = model
@@ -137,7 +151,8 @@ def run_procedure(path: Path, args: Dict[str, Any], adapter_name: str, model: Op
               params=sorted(params), spl_log=str(spl_log) if spl_log else None)
     started = time.perf_counter()
     try:
-        out = _run_coro(_run(path, params, adapter_name, model, workflow))
+        prompts = os.environ.get(PROMPT_LOG_ENV)
+        out = _run_coro(_run(path, params, adapter_name, model, workflow, Path(prompts) if prompts else None))
     except Exception as e:
         log_event(_log, "procedure.fail", level=ERROR, procedure=path.name, error=f"{type(e).__name__}: {e}")
         raise

@@ -1,0 +1,118 @@
+⚡ Loading graph: 
+/home/papagame/projects/digital-duck/graflang/cookbook/code_pipeline/code_pipeli
+ne.graph.yaml
+✓ Graph loaded: code_pipeline
+  Nodes: 11
+  Edges: 28
+
+▶ Executing workflow...
+⚡ GENERATE analyze (#1)
+[INFO] [00_analyze_spec] evaluating spec clarity | spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def digitSum(s):
+    """Task
+    Write a function that takes a string as input and returns the sum of the upper characters only'
+    ASCII codes.
+
+    Examples:
+        digitSum("") => 0
+        digitSum("abAB") => 131
+        digitSum("abcCd") => 67
+        digitSum("helloE") => 69
+        digitSum("woArBld") => 131
+        digitSum("aAaaaXa") => 153
+    """"
+[INFO] [00_analyze_spec] verdict: READY — spec is well-defined, pipeline may proceed
+⚡ EVALUATE spec_gate (#1)
+⚡ LOOP test_gated_loop (#1)
+  ⚡ GENERATE loop_gen (#1)
+[INFO] [01_generate_code] started | lang=python spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def digitSum(s):
+    """Task
+    Write a function that takes a string as input and returns the sum of the upper characters only'
+    ASCII codes.
+
+    Examples:
+        digitSum("") => 0
+        digitSum("abAB") => 131
+        digitSum("abcCd") => 67
+        digitSum("helloE") => 69
+        digitSum("woArBld") => 131
+        digitSum("aAaaaXa") => 153
+    """"
+[INFO] [01_generate_code] done | output_len=102
+  ⚡ GENERATE loop_rev (#1)
+[INFO] [02_review_code] started | lang=python
+[INFO] [02_review_code] done | feedback_len=447
+  ⚡ GENERATE loop_imp (#1)
+[INFO] [03_improve_code] started | lang=python
+[INFO] [03_improve_code] done | output_len=229
+  ⚡ SOLVE loop_test (#1)
+[INFO] [04_test_code] started | lang=python
+[INFO] [04_test_code] done | result={@test_result[:50]}
+  ⚡ EVALUATE loop_eval (#1)
+⚡ GENERATE document (#1)
+[INFO] [05_document_code] started | lang=python
+[INFO] [05_document_code] done | docs_len=743
+⚡ GENERATE extract (#1)
+[INFO] [06_extract_spec] reverse-engineering spec from implementation ...
+[INFO] [06_extract_spec] done | out_spec_len=1123
+⚡ EVALUATE closure_gate (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'docs': '# digitSum\n\n## Overview\n\n`digitSum` returns the sum of the
+ASCII codes of the uppercase letters (`A` through `Z`) in a string. All other 
+characters are ignored, including lowercase letters, digits, punctuation, and 
+non-ASCII uppercase letters such as `É`. The function is useful for 
+checksum-style string scoring and as a small exercise in filtering and 
+aggregating characters. Despite its name, it does not sum digits. The name is 
+kept because the original specification requires it.\n\n## Function 
+Reference\n\n### `digitSum(s)`\n\n```python\ndef digitSum(s: str) -> 
+int\n```\n\nReturns the sum of `ord(c)` for each character `c` in `s` where 
+`\'A\' <= c <= \'Z\'`.\n\n**Parameters**\n\n| Name | Type | Description 
+|\n|------|------|-------------|\n| `s` | `str` | The input string. Any length, 
+including empty. |\n\n**Returns**\n\n| Type | Description 
+|\n|------|-------------|\n| `int` | The sum of ASCII codes of uppercase `A`–`Z`
+characters in `s`. Returns `0` if there are none. |\n\n**Raises**\n\n| Exception
+| Condition |\n|-----------|-----------|\n| `TypeError` | `s` is not an instance
+of `str`. The message is `digitSum expects a str, got <type name>`. 
+|\n\n**Examples**\n\n```python\n>>> digitSum("")\n0\n>>> digitSum("abAB")      #
+\'A\' (65) + \'B\' (66)\n131\n>>> digitSum("abcCd")     # \'C\' (67)\n67\n>>> 
+digitSum("helloE")    # \'E\' (69)\n69\n>>> digitSum("aAaaaXa")   # \'A\' (65) +
+\'X\' (88)\n153\n>>> digitSum("\\u00c9")    # non-ASCII uppercase is 
+ignored\n0\n```\n\n## Edge Cases & Assumptions\n\n- **Empty string** returns 
+`0`.\n- **ASCII only.** Only code points 65–90 count. Non-ASCII uppercase 
+letters (e.g. `É`, `Ω`) contribute nothing.\n- **Single-character comparison.** 
+Iterating over a `str` yields one-character strings, so the range check `\'A\' 
+<= c <= \'Z\'` is a valid character test.\n- **Type strictness.** Only `str` is 
+accepted. Other iterables, such as a list of characters, raise `TypeError` 
+rather than being coerced. `bytes` is also rejected, since iterating over 
+`bytes` would yield integers.\n- **No digit handling.** Digits (`0`–`9`) are not
+summed. The name `digitSum` is misleading and is retained only for compatibility
+with the specification.\n- **Return size.** Python integers are unbounded, so 
+long inputs do not overflow. The maximum contribution per character is 90 
+(`Z`).\n- **Performance.** The function is O(n) in the length of `s` and uses 
+constant extra memory apart from the generator.\n\n## Usage 
+Example\n\n```python\ndef digitSum(s):\n    if not isinstance(s, str):\n        
+raise TypeError(f"digitSum expects a str, got {type(s).__name__}")\n    return 
+sum(ord(c) for c in s if \'A\' <= c <= \'Z\')\n\n\nif __name__ == "__main__":\n 
+samples = ["", "abAB", "helloE", "woArBld"]\n    for text in samples:\n        
+print(f"{text!r:12} -> {digitSum(text)}")\n\n    try:\n        digitSum(["a", 
+"B"])\n    except TypeError as exc:\n        print(f"Error: 
+{exc}")\n```\n\nOutput:\n\n```\n\'\'           -> 0\n\'abAB\'       -> 
+131\n\'helloE\'     -> 69\n\'woArBld\'    -> 131\nError: digitSum expects a str,
+got list\n```'}
+output: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-p
+refix-check/claude_cli/claude-haiku-5-5/HumanEval_66/graflang-rep0/graf_out/code
+_pipeline-claude_cli-claude-haiku-5-5-20261025-114004
+log: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-p
+refix-check/claude_cli/claude-haiku-5-5/HumanEval_66/graflang-rep0/logs/code_pip
+eline-claude_cli-claude-haiku-5-5-20261025-114004.jsonl
+
+--- stderr ---

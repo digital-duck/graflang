@@ -1,0 +1,84 @@
+# Prompt: write_docs [call 006]
+
+- model: `claude-sonnet-5-5`
+- max_tokens: 2048
+- temperature: 0.7
+
+---
+
+
+You are a technical writer generating developer documentation for python code.
+
+Original specification:
+Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def count_upper(s):
+    """
+    Given a string s, count the number of uppercase vowels in even indices.
+    
+    For example:
+    count_upper('aBCdEf') returns 1
+    count_upper('abcdefg') returns 0
+    count_upper('dBBE') returns 0
+    """
+
+Implemented python code:
+_UPPER_VOWELS = frozenset("AEIOU")
+
+
+def count_upper(s: str) -> int:
+    """Count uppercase vowels (A, E, I, O, U) at even indices of s.
+
+    Indices are 0-based, so positions 0, 2, 4, ... are examined. Only the
+    ASCII uppercase vowels A, E, I, O and U are counted; accented or other
+    non-ASCII uppercase vowels (e.g. 'É') are ignored. Lowercase vowels and
+    uppercase vowels at odd indices are not counted.
+
+    Args:
+        s: The string to examine. Must be a ``str``.
+
+    Returns:
+        The number of uppercase vowels found at even indices.
+
+    Raises:
+        TypeError: If ``s`` is not a ``str``.
+
+    Examples:
+        >>> count_upper("")
+        0
+        >>> count_upper("A")
+        1
+        >>> count_upper("a")
+        0
+        >>> count_upper("aBCdEf")
+        1
+        >>> count_upper("AbEcIdOfU")
+        4
+        >>> count_upper("aAeEiI")
+        0
+        >>> count_upper("bAdEfI")
+        0
+    """
+    if not isinstance(s, str):
+        raise TypeError(f"s must be a str, got {type(s).__name__}")
+    return sum(ch in _UPPER_VOWELS for ch in s[::2])
+
+
+count_uppercase_vowels_at_even_indices = count_upper
+
+Write clear, complete documentation in Markdown. Include:
+
+## Overview
+One paragraph describing what this code does and why.
+
+## Function / Class Reference
+For each public function or class: signature, description, parameters, return value, example usage.
+
+## Edge Cases & Assumptions
+Any notable constraints, limitations, or assumptions the implementation makes.
+
+## Usage Example
+A short, runnable python example demonstrating typical use.
+
+Be concise and accurate. Do not pad with filler.

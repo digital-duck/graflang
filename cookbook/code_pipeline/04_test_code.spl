@@ -42,10 +42,17 @@ WORKFLOW test_code
     OUTPUT: @test_result TEXT
 DO
     LOGGING f'[04_test_code] started | lang={@lang}' LEVEL INFO
-    GENERATE run_tests(@code, @spec, @lang)
-        WITH OUTPUT BUDGET 1024 TOKENS
-        USING MODEL @test_model
-        INTO @test_result
+    -- deterministic name check first: a missing function fails the attempt without asking the LLM tester
+    CALL name_check(@spec, @code) INTO @name_verdict
+    EVALUATE @name_verdict
+        WHEN = "" THEN
+            GENERATE run_tests(@code, @spec, @lang)
+                WITH OUTPUT BUDGET 1024 TOKENS
+                USING MODEL @test_model
+                INTO @test_result
+        ELSE
+            @test_result := @name_verdict
+    END
     CALL write_file(f'{@log_dir}/tests/{@lang}/result.md', @test_result) INTO NONE
     LOGGING f'[04_test_code] done | result={@test_result[:50]}' LEVEL INFO
     RETURN @test_result

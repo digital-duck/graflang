@@ -1,0 +1,88 @@
+==================== adapter: ollama  model: qwen2.5-coder-16k ====================
+80 runs, 20 tasks
+
+arm         runs   pass    95% CI (Wilson)  median s  failures
+single        20  80.0%     [58.4%, 91.9%]       1.6  {'wrong_answer': 4}
+spl           20  55.0%     [34.2%, 74.2%]      29.8  {'wrong_answer': 3, 'renamed': 3, 'no_code': 3}
+graflang      20  50.0%     [29.9%, 70.1%]      34.1  {'renamed': 6, 'wrong_answer': 4}
+langgraph     20  30.0%     [14.5%, 51.9%]      30.7  {'no_code': 4, 'wrong_answer': 3, 'renamed': 7}
+  failure kinds: renamed = the function name from the spec is missing; wrong_answer = a hidden test failed; code_error = syntax error or crash;
+  no_code, timeout, error = nothing to score
+
+Paired difference in pass rate, per task (bootstrap 95% over tasks; tasks where the arms differ):
+  single    - spl       +0.250  [+0.100, +0.450]  differ on 5/20 tasks
+  single    - graflang  +0.300  [+0.100, +0.500]  differ on 6/20 tasks
+  single    - langgraph +0.500  [+0.250, +0.750]  differ on 12/20 tasks
+  spl       - graflang  +0.050  [-0.200, +0.300]  differ on 7/20 tasks
+  spl       - langgraph +0.250  [-0.050, +0.500]  differ on 9/20 tasks
+  graflang  - langgraph +0.200  [-0.050, +0.450]  differ on 8/20 tasks
+
+Cycles used by the pipeline (generate, review, improve, test; the limit is 3):
+  spl       mean 1.35 over 17 runs; 1 cycle(s): 13  2 cycle(s): 2  3 cycle(s): 2
+  graflang  mean 1.60 over 20 runs; 1 cycle(s): 13  2 cycle(s): 2  3 cycle(s): 5
+  langgraph mean 1.44 over 16 runs; 1 cycle(s): 11  2 cycle(s): 3  3 cycle(s): 2
+
+1. Partial correctness: share of the hidden assertions that held (a near miss has most of them)
+  single    mean  89.7% over 20 runs; failed runs with >= 80% of assertions: 2; runs where no assertion ran (missing function, crash): 0
+  spl       mean  80.0% over 14 runs; failed runs with >= 80% of assertions: 0; runs where no assertion ran (missing function, crash): 6
+  graflang  mean  88.1% over 14 runs; failed runs with >= 80% of assertions: 2; runs where no assertion ran (missing function, crash): 6
+  langgraph mean  80.4% over 9 runs; failed runs with >= 80% of assertions: 1; runs where no assertion ran (missing function, crash): 11
+
+2. Trajectory across cycles (hidden tests, scored on each cycle's code; pipeline arms only)
+  spl       of 17 runs: passes on cycle 1 10; fixed by a retry 2; never passes 5; passed then ended failing 1; runs by depth {1: 13, 2: 2, 3: 2}
+            cycle 1: 10/17 pass  cycle 2: 2/4 pass  cycle 3: 0/2 pass
+            retries after a cycle the hidden tests accept: 1 (the tester said FAILED on correct code)
+  graflang  of 20 runs: passes on cycle 1 11; fixed by a retry 1; never passes 8; passed then ended failing 2; runs by depth {1: 13, 2: 2, 3: 5}
+            cycle 1: 11/20 pass  cycle 2: 1/7 pass  cycle 3: 1/5 pass
+            retries after a cycle the hidden tests accept: 3 (the tester said FAILED on correct code)
+  langgraph of 16 runs: passes on cycle 1 6; fixed by a retry 2; never passes 8; passed then ended failing 2; runs by depth {1: 11, 2: 3, 3: 2}
+            cycle 1: 6/16 pass  cycle 2: 2/5 pass  cycle 3: 0/2 pass
+            retries after a cycle the hidden tests accept: 2 (the tester said FAILED on correct code)
+
+3. Cost: LLM calls and tokens (estimated as characters / 4, the same for every arm)
+  single    mean   1.0 calls and      282 tokens per run; tokens per passing run: 353; run seconds per LLM call 1.9
+  spl       mean   7.3 calls and    4,207 tokens per run; tokens per passing run: 7,648; run seconds per LLM call 4.3
+  graflang  mean   9.4 calls and    5,024 tokens per run; tokens per passing run: 10,048; run seconds per LLM call 3.9
+  langgraph mean   7.2 calls and    4,369 tokens per run; tokens per passing run: 14,563; run seconds per LLM call 4.4
+
+4. Code hygiene of the final code (judged without the hidden tests; each figure is the share of runs)
+  single    signature matches the spec 100%; self-tests under __main__ 0%; unittest code 0%; other top-level statements 5%; prints 5%; mean LOC 9
+  spl       signature matches the spec 65%; self-tests under __main__ 0%; unittest code 0%; other top-level statements 0%; prints 0%; mean LOC 10
+  graflang  signature matches the spec 65%; self-tests under __main__ 0%; unittest code 0%; other top-level statements 0%; prints 0%; mean LOC 12
+  langgraph signature matches the spec 40%; self-tests under __main__ 0%; unittest code 0%; other top-level statements 0%; prints 0%; mean LOC 8
+
+5. Paired exact McNemar test on the same tasks (b = only the first arm passed, c = only the second)
+  single    vs spl       b=5 c=0 p=0.062 (n=20 tasks)
+  single    vs graflang  b=6 c=0 p=0.031 (n=20 tasks)
+  single    vs langgraph b=11 c=1 p=0.006 (n=20 tasks)
+  spl       vs graflang  b=4 c=3 p=1.000 (n=20 tasks)
+  spl       vs langgraph b=7 c=2 p=0.180 (n=20 tasks)
+  graflang  vs langgraph b=6 c=2 p=0.289 (n=20 tasks)
+
+6. Consistency across repetitions (tasks with two or more runs for an arm)
+  not measurable yet: every (task, arm) has one run (use --reps 2 or more)
+
+7. Similarity of the final code between arms (difflib ratio, 1 = identical; mean over tasks)
+  single    vs spl       0.58  over 17 tasks
+  single    vs graflang  0.46  over 20 tasks
+  single    vs langgraph 0.54  over 16 tasks
+  spl       vs graflang  0.33  over 17 tasks
+  spl       vs langgraph 0.49  over 14 tasks
+  graflang  vs langgraph 0.42  over 16 tasks
+
+8. Reliability (runs that did not finish cleanly)
+  single    errors 0; no code 0; timeouts 0; of 20 runs
+  spl       errors 0; no code 3; timeouts 0; of 20 runs
+  graflang  errors 0; no code 0; timeouts 0; of 20 runs
+  langgraph errors 0; no code 4; timeouts 0; of 20 runs
+
+The pipeline's own LLM tester vs the hidden tests, cycle by cycle (pipeline arms only):
+  spl       23 cycles: says PASSED 15 (hidden tests fail on 4); says FAILED 8 (hidden tests pass on 1)
+  graflang  32 cycles: says PASSED 17 (hidden tests fail on 7); says FAILED 15 (hidden tests pass on 3)
+  langgraph 23 cycles: says PASSED 14 (hidden tests fail on 8); says FAILED 9 (hidden tests pass on 2)
+
+Orchestration size (executable lines; prompts are shared and counted once):
+  graflang   142 lines of graph YAML
+  spl        95 lines of orchestrator .spl
+  langgraph  70 lines of Python (plus a pipeline-agnostic run harness)
+  shared     342 lines in the eight step .spl files (prompts, wrappers and file writes)

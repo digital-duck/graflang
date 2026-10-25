@@ -1,0 +1,101 @@
+⚡ Loading graph: 
+/home/papagame/projects/digital-duck/graflang/cookbook/code_pipeline/code_pipeli
+ne.graph.yaml
+✓ Graph loaded: code_pipeline
+  Nodes: 11
+  Edges: 28
+
+▶ Executing workflow...
+⚡ GENERATE analyze (#1)
+[INFO] [00_analyze_spec] evaluating spec clarity | spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def count_upper(s):
+    """
+    Given a string s, count the number of uppercase vowels in even indices.
+    
+    For example:
+    count_upper('aBCdEf') returns 1
+    count_upper('abcdefg') returns 0
+    count_upper('dBBE') returns 0
+    """"
+[INFO] [00_analyze_spec] verdict: READY — spec is well-defined, pipeline may proceed
+⚡ EVALUATE spec_gate (#1)
+⚡ LOOP test_gated_loop (#1)
+  ⚡ GENERATE loop_gen (#1)
+[INFO] [01_generate_code] started | lang=python spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def count_upper(s):
+    """
+    Given a string s, count the number of uppercase vowels in even indices.
+    
+    For example:
+    count_upper('aBCdEf') returns 1
+    count_upper('abcdefg') returns 0
+    count_upper('dBBE') returns 0
+    """"
+[INFO] [01_generate_code] done | output_len=21
+  ⚡ GENERATE loop_rev (#1)
+[INFO] [02_review_code] started | lang=python
+[INFO] [02_review_code] done | feedback_len=513
+  ⚡ GENERATE loop_imp (#1)
+[INFO] [03_improve_code] started | lang=python
+[INFO] [03_improve_code] done | output_len=292
+  ⚡ SOLVE loop_test (#1)
+[INFO] [04_test_code] started | lang=python
+[INFO] [04_test_code] done | result={@test_result[:50]}
+  ⚡ EVALUATE loop_eval (#1)
+⚡ GENERATE document (#1)
+[INFO] [05_document_code] started | lang=python
+[INFO] [05_document_code] done | docs_len=579
+⚡ GENERATE extract (#1)
+[INFO] [06_extract_spec] reverse-engineering spec from implementation ...
+[INFO] [06_extract_spec] done | out_spec_len=697
+⚡ EVALUATE closure_gate (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'docs': '## Overview\n\n`count_upper` counts the uppercase ASCII vowels
+(`A`, `E`, `I`, `O`, `U`) found at even, 0-based indices of a string (0, 2, 4, 
+…). It slices the string with `s[::2]` and counts matches against a frozenset. 
+It also validates its input type up front, so a non-string argument fails 
+clearly instead of producing a misleading result.\n\n## Function / Class 
+Reference\n\n### `count_upper(s: str) -> int`\n\nCounts uppercase vowels at even
+indices of `s`.\n\n**Parameters**\n- `s` (`str`): The string to 
+scan.\n\n**Returns**\n- `int`: The number of characters at positions 0, 2, 4, … 
+that are one of `A`, `E`, `I`, `O`, `U`.\n\n**Raises**\n- `TypeError`: If `s` is
+not a `str`. The message names the actual type 
+received.\n\n**Examples**\n```python\ncount_upper(\'aBCdEf\')   # 1  (only \'E\'
+at index 4)\ncount_upper(\'abcdefg\')  # 0\ncount_upper(\'dBBE\')     # 0  
+(\'E\' is at odd index 3)\n```\n\n### 
+`count_uppercase_vowels_at_even_indices`\n\nA module-level alias for 
+`count_upper`, with the same behavior and signature.\n\n### `_UPPER_VOWELS`\n\nA
+private module constant, `frozenset("AEIOU")`. It is not part of the public 
+API.\n\n### `test_count_upper()`\n\nA self-contained test function that uses 
+plain `assert` statements. It covers empty input, single characters, the 
+specification examples, non-ASCII letters and the `TypeError` case. It can be 
+run directly or collected by pytest.\n\n## Edge Cases & Assumptions\n\n- 
+**Indexing is 0-based.** The first character is at even index 0 and is counted 
+if it is an uppercase vowel.\n- **Only uppercase ASCII vowels count.** Lowercase
+vowels never match (`\'aAeEiI\'` → 0). `Y` is not treated as a vowel. Non-ASCII 
+uppercase vowels such as `É` or `Ü` are not counted (`\'AÉEÜ\'` → 2, from `A` at
+0 and `E` at 2).\n- **Empty string** returns `0`.\n- **Strict type check.** Any 
+non-`str` input, including `None`, `bytes` and lists, raises `TypeError`. 
+Subclasses of `str` are accepted.\n- **Memory.** `s[::2]` creates a half-length 
+copy of the string. This is negligible for typical inputs.\n\n## Usage 
+Example\n\n```python\nfrom your_module import 
+count_upper\n\nprint(count_upper("EAEAEA"))  # 3 (E, E, E at indices 0, 2, 
+4)\nprint(count_upper("BAB"))     # 0 (\'A\' is at odd index 
+1)\nprint(count_upper(""))        # 0\n\ntry:\n    count_upper(None)\nexcept 
+TypeError as e:\n    print(e)  # s must be a str, got NoneType\n```'}
+output: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-s
+moke2/claude_cli/claude-sonnet-5-5/HumanEval_98/graflang-rep0/graf_out/code_pipe
+line-claude_cli-claude-sonnet-5-5-20261025-030659
+log: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-s
+moke2/claude_cli/claude-sonnet-5-5/HumanEval_98/graflang-rep0/logs/code_pipeline
+-claude_cli-claude-sonnet-5-5-20261025-030659.jsonl
+
+--- stderr ---

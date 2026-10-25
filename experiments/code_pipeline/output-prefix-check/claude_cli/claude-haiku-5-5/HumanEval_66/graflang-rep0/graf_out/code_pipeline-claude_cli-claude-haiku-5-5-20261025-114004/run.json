@@ -1,0 +1,10 @@
+{
+  "graph": "code_pipeline",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "spec": "Implement the following Python function. Return the complete function, including its signature and any imports it needs.\n\n\ndef digitSum(s):\n    \"\"\"Task\n    Write a function that takes a string as input and returns the sum of the upper characters only'\n    ASCII codes.\n\n    Examples:\n        digitSum(\"\") => 0\n        digitSum(\"abAB\") => 131\n        digitSum(\"abcCd\") => 67\n        digitSum(\"helloE\") => 69\n        digitSum(\"woArBld\") => 131\n        digitSum(\"aAaaaXa\") => 153\n    \"\"\"",
+    "check_closure": "false"
+  },
+  "started": "2026-10-25T11:40:04"
+}

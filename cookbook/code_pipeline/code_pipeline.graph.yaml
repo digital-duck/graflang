@@ -65,12 +65,15 @@ nodes:
         final_code: {from: "loop_imp.out_improved_code"}   # out_final_code: code from the latest iteration
         test_passed: {fired: "loop_eval.pass"}             # out_test_passed: did the gate pass last time?
         denied: {fired: "loop_guard.deny"}                 # the policy refused another attempt
+        # carried into the next attempt: the code it tried and the test result it got (empty on the first attempt)
+        prior_code: {from: "loop_imp.out_improved_code"}
+        prior_test: {from: "loop_test.out_result"}
       subgraph:
         nodes:
           - id: "loop_gen"
             type: "GENERATE"
             config: {procedure_ref: "procedures.generate_code"}
-            ports: ["trigger", "complete", "in_spec", "in_lang", "out_code"]
+            ports: ["trigger", "complete", "in_spec", "in_lang", "in_prior_code", "in_prior_test", "out_code"]
           - id: "loop_rev"
             type: "GENERATE"
             config: {procedure_ref: "procedures.review_code"}
@@ -78,7 +81,7 @@ nodes:
           - id: "loop_imp"
             type: "GENERATE"
             config: {procedure_ref: "procedures.improve_code"}
-            ports: ["trigger", "complete", "in_code", "in_feedback", "out_improved_code"]
+            ports: ["trigger", "complete", "in_code", "in_feedback", "in_spec", "out_improved_code"]
           - id: "loop_test"
             type: "SOLVE"
             config: {procedure_ref: "procedures.test_code", engine: "python_eval"}
@@ -101,13 +104,15 @@ nodes:
           - {source: "loop_imp.complete", target: "loop_test.trigger", type: "triggers"}
           - {source: "loop_test.complete", target: "loop_eval.trigger", type: "triggers"}
           - {source: "loop_eval.fail", target: "loop_guard.trigger", type: "triggers"}
-          # Data inside the body (ports with no bind read the LOOP's own inputs: spec, lang)
+          # Data inside the body (ports with no bind read the LOOP's own inputs: spec, lang, or the previous attempt's
+          # prior_code / prior_test, which the LOOP carries from one iteration to the next)
           - {source: "loop_gen.out_code", target: "loop_rev.in_code", type: "binds"}
           - {source: "loop_gen.out_code", target: "loop_imp.in_code", type: "binds"}
           - {source: "loop_rev.out_feedback", target: "loop_imp.in_feedback", type: "binds"}
           - {source: "loop_imp.out_improved_code", target: "loop_test.in_code", type: "binds"}
           - {source: "loop_test.out_result", target: "loop_eval.in_result", type: "binds"}
-    ports: ["trigger", "loop", "exit", "in_spec", "in_lang", "in_max_cycles", "out_final_code", "out_test_passed", "out_denied"]
+    ports: ["trigger", "loop", "exit", "in_spec", "in_lang", "in_max_cycles", "out_final_code", "out_test_passed", "out_denied",
+            "out_prior_code", "out_prior_test"]
 
   - id: "document"
     type: "GENERATE"

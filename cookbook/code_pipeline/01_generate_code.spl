@@ -3,8 +3,11 @@
 --
 -- Artifacts written:
 --   target/{lang}/code.{ext}  — generated source code (ext = py, go, ts, js, …)
+--
+-- On a retry (cycle 2 and later) the previous attempt and its test result are passed in, so the failure reaches the
+-- next attempt. On the first cycle both are empty.
 
-CREATE FUNCTION coder(spec TEXT, lang TEXT)
+CREATE FUNCTION coder(spec TEXT, lang TEXT, prior_code TEXT, prior_test TEXT)
 RETURN TEXT
 AS $$
 You are an expert {lang} developer.
@@ -14,6 +17,15 @@ Return only the code — no explanation, no markdown fences.
 
 Specification:
 {spec}
+
+Previous attempt (empty on the first attempt):
+{prior_code}
+
+Its test result (empty on the first attempt):
+{prior_test}
+
+If there is a previous attempt, fix the failures its test result reports. Whatever you write, keep the function name and
+the signature exactly as the specification gives them.
 $$;
 
 
@@ -21,6 +33,8 @@ WORKFLOW generate_code
     INPUT:
         @spec    TEXT,
         @lang    TEXT DEFAULT 'python',
+        @prior_code TEXT DEFAULT '',
+        @prior_test TEXT DEFAULT '',
         @generate_model   TEXT DEFAULT 'gemma4',
         @log_dir TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
     OUTPUT: @code TEXT
@@ -36,7 +50,7 @@ DO
         WHEN = 'rust' THEN @ext := 'rs'
     END
 
-    GENERATE coder(@spec, @lang)
+    GENERATE coder(@spec, @lang, @prior_code, @prior_test)
         WITH OUTPUT BUDGET 2048 TOKENS
         USING MODEL @generate_model
         INTO @code

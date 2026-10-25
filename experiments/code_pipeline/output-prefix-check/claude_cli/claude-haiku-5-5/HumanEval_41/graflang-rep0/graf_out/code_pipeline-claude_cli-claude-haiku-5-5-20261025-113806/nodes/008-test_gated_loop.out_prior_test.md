@@ -1,0 +1,2 @@
+[PASSED]
+The function returns `n * n`, which matches the spec: each of the n left-to-right cars meets each of the n right-to-left cars exactly once. The return type is `int`, and the signature matches the spec. The `TypeError` and `ValueError` checks are additions the spec does not require, but they do not conflict with it.

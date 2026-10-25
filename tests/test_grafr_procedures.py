@@ -96,3 +96,16 @@ def test_a_tools_py_next_to_the_procedure_is_loaded_for_its_call_statements(tmp_
         'WORKFLOW p\n  INPUT: @word TEXT := "hi"\n  OUTPUT: @out TEXT\nDO\n  CALL shout(@word) INTO @out;\n'
         '  COMMIT @out WITH status = \'complete\'\nEND\n')
     assert run_procedure(tmp_path / "p.spl", {"word": "go"}, "echo") == "GO!"
+
+
+def test_prompts_are_logged_one_folder_per_call_when_asked(tmp_path, monkeypatch):
+    """GRAFLANG_LOG_PROMPTS (set by `graf run --log-prompts`): each call of a procedure gets its own numbered folder, so a
+    procedure that runs again (every cycle of a loop) does not overwrite its earlier prompts."""
+    from graphlang.grafr.procedures import PROMPT_LOG_ENV
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(PROMPT_LOG_ENV, str(tmp_path / "prompts"))
+    for _ in range(2):
+        run_procedure(CODE / "00_analyze_spec.spl", {"spec": "add two numbers"}, "echo", log_dir=tmp_path / "logs")
+    folders = sorted(p.name for p in (tmp_path / "prompts").iterdir())
+    assert len(folders) == 2 and folders[0].endswith("-00_analyze_spec") and folders[0] < folders[1]
+    assert all(list((tmp_path / "prompts" / f).glob("spec_analyst_001.md")) for f in folders)

@@ -53,9 +53,14 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--save-nodes", is_flag=True,
               help="also save every node's output (LLM responses included) under <run folder>/nodes/")
 @click.option("--no-output", is_flag=True, help="do not write result files")
+@click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
+              help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")
 def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
-            no_output):
+            no_output, log_prompts):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
+    if log_prompts:
+        from .procedures import PROMPT_LOG_ENV
+        os.environ[PROMPT_LOG_ENV] = str(Path(log_prompts).resolve())
     graph_path = Path(graph)
     if not graph_path.exists():
         console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")

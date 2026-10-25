@@ -1,0 +1,100 @@
+⚡ Loading graph: 
+/home/papagame/projects/digital-duck/graflang/cookbook/code_pipeline/code_pipeli
+ne.graph.yaml
+✓ Graph loaded: code_pipeline
+  Nodes: 11
+  Edges: 28
+
+▶ Executing workflow...
+⚡ GENERATE analyze (#1)
+[INFO] [00_analyze_spec] evaluating spec clarity | spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def count_upper(s):
+    """
+    Given a string s, count the number of uppercase vowels in even indices.
+    
+    For example:
+    count_upper('aBCdEf') returns 1
+    count_upper('abcdefg') returns 0
+    count_upper('dBBE') returns 0
+    """"
+[INFO] [00_analyze_spec] verdict: READY — spec is well-defined, pipeline may proceed
+⚡ EVALUATE spec_gate (#1)
+⚡ LOOP test_gated_loop (#1)
+  ⚡ GENERATE loop_gen (#1)
+[INFO] [01_generate_code] started | lang=python spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def count_upper(s):
+    """
+    Given a string s, count the number of uppercase vowels in even indices.
+    
+    For example:
+    count_upper('aBCdEf') returns 1
+    count_upper('abcdefg') returns 0
+    count_upper('dBBE') returns 0
+    """"
+[INFO] [01_generate_code] done | output_len=21
+  ⚡ GENERATE loop_rev (#1)
+[INFO] [02_review_code] started | lang=python
+[INFO] [02_review_code] done | feedback_len=543
+  ⚡ GENERATE loop_imp (#1)
+[INFO] [03_improve_code] started | lang=python
+[INFO] [03_improve_code] done | output_len=191
+  ⚡ SOLVE loop_test (#1)
+[INFO] [04_test_code] started | lang=python
+[INFO] [04_test_code] done | result={@test_result[:50]}
+  ⚡ EVALUATE loop_eval (#1)
+⚡ GENERATE document (#1)
+[INFO] [05_document_code] started | lang=python
+[INFO] [05_document_code] done | docs_len=575
+⚡ GENERATE extract (#1)
+[INFO] [06_extract_spec] reverse-engineering spec from implementation ...
+[INFO] [06_extract_spec] done | out_spec_len=531
+⚡ EVALUATE closure_gate (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'docs': '## Overview\n\n`count_upper(s)` counts the uppercase vowels 
+(`A`, `E`, `I`, `O`, `U`) that sit at even, 0-based indices of a string. It 
+takes every second character starting at index 0 and checks each against a fixed
+set of uppercase vowels. The vowel set is a module-level constant, 
+`UPPER_VOWELS`, so it is built once and not on each call.\n\n## Function / Class
+Reference\n\n### `count_upper(s)`\n\n```python\ndef count_upper(s) -> 
+int\n```\n\nCounts the uppercase ASCII vowels at even indices of 
+`s`.\n\n**Parameters**\n\n| Name | Type  | Description                  
+|\n|------|-------|------------------------------|\n| `s`  | `str` | The string 
+to scan. Required. |\n\n**Returns**: `int`. The number of characters at indices 
+0, 2, 4, … that are in `AEIOU`. Returns `0` for an empty string.\n\n**Raises**: 
+`TypeError` if `s` is not a `str`. The message is `s must be a str, got 
+<typename>`.\n\n**Examples**\n\n```python\ncount_upper(\'aBCdEf\')    # 1  (only
+\'E\' at index 4 qualifies; \'B\' and \'C\' are 
+consonants)\ncount_upper(\'abcdefg\')   # 0\ncount_upper(\'dBBE\')      # 0  
+(\'E\' is at odd index 3)\ncount_upper(\'\')          # 0\n```\n\n### 
+`UPPER_VOWELS`\n\n`Final` containing `"A"`, `"E"`, `"I"`, `"O"`, `"U"`. It is a 
+module-level constant and shouldn\'t be modified.\n\n## Edge Cases & 
+Assumptions\n\n- **Indexing is 0-based.** Index 0 counts as even.\n- **ASCII 
+uppercase vowels only.** Accented capitals such as `\'É\'` are not counted. 
+Lowercase vowels, consonants, digits, whitespace and punctuation are ignored.\n-
+**`\'Y\'` is not a vowel** for this function.\n- **Strict type check.** Any 
+non-`str` input (`None`, `bytes`, lists, ints) raises `TypeError`. Subclasses of
+`str` are accepted.\n- **Cost.** It runs in O(n) time, and the `s[::2]` slice 
+makes a copy of about n/2 characters.\n\n## Usage Example\n\n```python\nfrom 
+typing import Final\n\nUPPER_VOWELS: Final = frozenset("AEIOU")\n\n\ndef 
+count_upper(s):\n    if not isinstance(s, str):\n        raise TypeError(f"s 
+must be a str, got {type(s).__name__}")\n    return sum(1 for c in s[::2] if c 
+in UPPER_VOWELS)\n\n\nprint(count_upper("AbEdIf"))   # 3 -> \'A\' (0), \'E\' 
+(2), \'I\' (4)\nprint(count_upper("bAcEd"))    # 0 -> vowels are at odd indices 
+1 and 3\n\ntry:\n    count_upper(None)\nexcept TypeError as exc:\n    print(exc)
+# s must be a str, got NoneType\n```'}
+output: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-f
+ixed-smoke/claude_cli/claude-sonnet-5-5/HumanEval_98/graflang-rep0/graf_out/code
+_pipeline-claude_cli-claude-sonnet-5-5-20261025-113221
+log: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-f
+ixed-smoke/claude_cli/claude-sonnet-5-5/HumanEval_98/graflang-rep0/logs/code_pip
+eline-claude_cli-claude-sonnet-5-5-20261025-113221.jsonl
+
+--- stderr ---

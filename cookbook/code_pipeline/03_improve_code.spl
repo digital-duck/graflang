@@ -4,10 +4,13 @@
 -- Artifacts written:
 --   target/{lang}/code.{ext}  — improved source code, overwrites previous draft (ext = py, go, ts, js, …)
 
-CREATE FUNCTION refactor(code TEXT, feedback TEXT, test_result TEXT, lang TEXT)
+CREATE FUNCTION refactor(spec TEXT, code TEXT, feedback TEXT, test_result TEXT, lang TEXT)
 RETURN TEXT
 AS $$
 You are an expert {lang} developer improving code based on feedback.
+
+Specification (the function name and signature must match it exactly):
+{spec}
 
 Original code:
 {code}
@@ -25,6 +28,7 @@ $$;
 
 WORKFLOW improve_code
     INPUT:
+        @spec        TEXT DEFAULT "",
         @code        TEXT,
         @feedback    TEXT,
         @test_result TEXT DEFAULT "",
@@ -44,7 +48,7 @@ DO
         WHEN = 'rust' THEN @ext := 'rs'
     END
 
-    GENERATE refactor(@code, @feedback, @test_result, @lang)
+    GENERATE refactor(@spec, @code, @feedback, @test_result, @lang)
         WITH OUTPUT BUDGET 2048 TOKENS
         USING MODEL @improve_model
         INTO @improved

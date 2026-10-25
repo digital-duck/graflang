@@ -1,0 +1,33 @@
+⚡ Loading graph: 
+/home/papagame/projects/digital-duck/graflang/cookbook/code_pipeline/code_pipeli
+ne.graph.yaml
+✓ Graph loaded: code_pipeline
+  Nodes: 11
+  Edges: 28
+
+▶ Executing workflow...
+⚡ GENERATE analyze (#1)
+[INFO] [00_analyze_spec] evaluating spec clarity | spec="Implement the following Python function. Return the complete function, including its signature and any imports it needs.
+
+
+def count_upper(s):
+    """
+    Given a string s, count the number of uppercase vowels in even indices.
+    
+    For example:
+    count_upper('aBCdEf') returns 1
+    count_upper('abcdefg') returns 0
+    count_upper('dBBE') returns 0
+    """"
+[WARN] [00_analyze_spec] verdict: VAGUE — spec is too ambiguous, aborting pipeline
+⚡ EVALUATE spec_gate (#1)
+⚡ RECOVER abort_vague (#1)
+
+Workflow ended without reaching an OUTPUT node (a gate routed to a dead end)
+Output: {}
+log: 
+/home/papagame/projects/digital-duck/graflang/experiments/code_pipeline/output-g
+emma-smoke/ollama/gemma4/HumanEval_98/graflang-rep0/logs/code_pipeline-ollama-ge
+mma4-20261025-031750.jsonl
+
+--- stderr ---
