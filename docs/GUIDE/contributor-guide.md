@@ -57,7 +57,7 @@ Cedar skips a policy that errors, for example a `forbid` that reads a context at
 
 - **Cedar compiler in `grafc`**: repair the ~1,500-line hand-written one, or generate Rust that calls the official `cedar-policy` crate (gap #18, a decision for the owner).
 - **Semantics**: whether to document the departure from interaction-net rewriting (#7, #26), and review of the LOOP design (#28).
-- **Stubs**: `SOLVE` without `expression`/`procedure_ref` (#31), PII detection (#30).
+- **Stubs**: PII detection (#30).
 
 ## Conventions
 

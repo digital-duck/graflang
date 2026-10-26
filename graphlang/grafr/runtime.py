@@ -34,8 +34,10 @@ from .cedar_guard import CedarGuard
 from .expr import ExpressionError, evaluate, evaluate_condition
 from ..formats import require_graphlang
 from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
+from .kernel import KernelPool
 from .output import RunOutput
 from .resolver import ResourceResolver
+from .solve_backend import CODE_KEYS, code_keys_in, run_backend
 
 console = Console()
 _log = get_logger("grafr.runtime")
@@ -142,10 +144,12 @@ class GraphLangRuntime:
             self.resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
             self.depth = 0
             self.node_output = node_output              # --save-nodes: where each node's outputs are written
+            self.kernels = KernelPool()                 # kernel SOLVE nodes' Python kernels, closed when the run ends
         else:
             self.llm, self.context, self.budget = _parent.llm, _parent.context, _parent.budget
             self.resolver, self.depth = _parent.resolver, _parent.depth + 1
             self.node_output = _parent.node_output
+            self.kernels = _parent.kernels
         self._build_graph(_nodes if _nodes is not None else graph_data["nodes"],
                           _edges if _edges is not None else graph_data["edges"])
 
@@ -194,6 +198,8 @@ class GraphLangRuntime:
             log_event(_log, "run.fail", level=ERROR, workflow=wf, steps=self.steps, error=f"{type(e).__name__}: {e}",
                       ms=round((time.perf_counter() - started) * 1000))
             raise
+        finally:
+            self.kernels.close()                    # also on Ctrl-C: no kernel outlives its run
         log_event(_log, "run.end", workflow=wf, steps=self.steps, outputs=sorted(outputs),
                   reached_output=bool(outputs), mutations=self.budget.mutations,
                   ms=round((time.perf_counter() - started) * 1000))
@@ -329,6 +335,8 @@ class GraphLangRuntime:
             return self._run_loop(node_data, in_data)
         if node_type == "MUTATE":
             return self._run_mutate(node_data, in_data)
+        if node_type == "SOLVE" and node_data.get("config", {}).get("backend"):
+            return run_backend(node_data, in_data, self.resolver, self.kernels)
         from .nodes import get_node_executor
         executor = get_node_executor(node_type)
         return executor.execute(node_data, in_data, self.context, self.resolver, self.llm)
@@ -474,6 +482,15 @@ class GraphLangRuntime:
     def _check_delta(self, delta: Dict) -> None:
         """Raise ValueError if applying the delta would leave the graph malformed."""
         a, p = delta["action"], delta["payload"]
+        # What runs (a SOLVE's backend, code, result, command, parser) comes from the graph file only. Refused here,
+        # before any policy is consulted, so no policy can grant it; the scan reaches into nested values such as a
+        # LOOP's `subgraph`, which would otherwise be a way to add a node.
+        smuggled = code_keys_in(p.get("config")) if a == "add_node" else code_keys_in(p.get("value")) if a == "update_config" else []
+        if a == "update_config" and p["key"] in CODE_KEYS:
+            smuggled.append(p["key"])
+        if smuggled:
+            raise ValueError(f"a delta may not add or change what runs ({', '.join(sorted(set(smuggled)))}); "
+                             f"code comes only from the graph file")
         if a == "add_node":
             if p["id"] in self.G:
                 raise ValueError(f"node {p['id']!r} already exists")

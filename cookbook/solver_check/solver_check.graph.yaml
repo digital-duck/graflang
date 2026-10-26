@@ -1,0 +1,101 @@
+version: "1.0-graph"
+
+# Two deterministic solvers check the same sum, and an ASSERT compares them with the expected value. No LLM is involved:
+#   sum_kernel  runs Python in a persistent kernel (backend: kernel); the inputs arrive as variables, the `result` expression is the output
+#   sum_script  runs solvers/sum_numbers.py as a black box (backend: subprocess); inputs go in as JSON on stdin, and the
+#               custom parser solvers/parsers.py:total turns its text output into an integer
+# If sum_script fails (non-zero exit, timeout, unreadable output) the node routes to its `error` port and the run reports it.
+# Run it offline:  graf run cookbook/solver_check/solver_check.graph.yaml --adapter mock --param numbers=1,2,3 --param expected=6
+
+workflow:
+  name: "solver_check"
+  inputs:
+    - {name: "numbers", type: "TEXT"}       # comma-separated integers, e.g. 1,2,3
+    - {name: "expected", type: "INTEGER"}
+  outputs:
+    - {name: "verdict", type: "TEXT"}
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_numbers", "out_expected"]
+
+  - id: "sum_kernel"
+    type: "SOLVE"
+    config:
+      backend: "kernel"
+      code: |
+        values = [int(x) for x in numbers.split(",") if x.strip()]
+        total = sum(values)
+      result: "total"
+      out_type: "INTEGER"
+      timeout: 30
+      label: "Sum in a Python kernel"
+    ports: ["trigger", "complete", "in_numbers", "out_total"]
+
+  - id: "sum_script"
+    type: "SOLVE"
+    config:
+      backend: "subprocess"
+      command: ["python3", "-I", "solvers/sum_numbers.py"]
+      parse: {tool: "solvers/parsers.py:total"}
+      out_type: "INTEGER"
+      timeout: 30
+      on_error: "route"
+      label: "Sum in a separate program"
+    ports: ["trigger", "complete", "error", "in_numbers", "out_total", "out_error"]
+
+  - id: "agree"
+    type: "ASSERT"
+    config: {condition: "@in_kernel_total == @in_script_total and @in_script_total == @in_expected", label: "Both agree with the expected value?"}
+    ports: ["trigger", "pass", "fail", "in_kernel_total", "in_script_total", "in_expected"]
+
+  - id: "report_ok"
+    type: "SOLVE"
+    config:
+      expression: "'confirmed: ' + str(@in_total) + ' (kernel and subprocess agree)'"
+    ports: ["trigger", "complete", "in_total", "out_verdict"]
+
+  - id: "report_mismatch"
+    type: "SOLVE"
+    config:
+      expression: "'MISMATCH: kernel ' + str(@in_kernel_total) + ', subprocess ' + str(@in_script_total) + ', expected ' + str(@in_expected)"
+    ports: ["trigger", "complete", "in_kernel_total", "in_script_total", "in_expected", "out_verdict"]
+
+  - id: "report_failed"
+    type: "SOLVE"
+    config:
+      expression: "'solver failed: ' + @in_error"
+    ports: ["trigger", "complete", "in_error", "out_verdict"]
+
+  - id: "done"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_verdict"]
+
+edges:
+  - {source: "wf_entry.entry",             target: "sum_kernel.trigger",   type: "triggers"}
+  - {source: "wf_entry.out_numbers",       target: "sum_kernel.in_numbers", type: "binds"}
+  - {source: "sum_kernel.complete",        target: "sum_script.trigger",   type: "triggers"}
+  - {source: "wf_entry.out_numbers",       target: "sum_script.in_numbers", type: "binds"}
+
+  - {source: "sum_script.complete",        target: "agree.trigger",        type: "triggers"}
+  - {source: "sum_kernel.out_total",       target: "agree.in_kernel_total", type: "binds"}
+  - {source: "sum_script.out_total",       target: "agree.in_script_total", type: "binds"}
+  - {source: "wf_entry.out_expected",      target: "agree.in_expected",    type: "binds"}
+
+  - {source: "agree.pass",                 target: "report_ok.trigger",    type: "triggers"}
+  - {source: "sum_script.out_total",       target: "report_ok.in_total",   type: "binds"}
+  - {source: "agree.fail",                 target: "report_mismatch.trigger", type: "triggers"}
+  - {source: "sum_kernel.out_total",       target: "report_mismatch.in_kernel_total", type: "binds"}
+  - {source: "sum_script.out_total",       target: "report_mismatch.in_script_total", type: "binds"}
+  - {source: "wf_entry.out_expected",      target: "report_mismatch.in_expected", type: "binds"}
+  - {source: "sum_script.error",           target: "report_failed.trigger", type: "triggers"}
+  - {source: "sum_script.out_error",       target: "report_failed.in_error", type: "binds"}
+
+  # exactly one of the three reports runs, so only one writes the verdict
+  - {source: "report_ok.complete",         target: "done.trigger",         type: "triggers"}
+  - {source: "report_ok.out_verdict",      target: "done.in_verdict",      type: "binds"}
+  - {source: "report_mismatch.complete",   target: "done.trigger",         type: "triggers"}
+  - {source: "report_mismatch.out_verdict", target: "done.in_verdict",     type: "binds"}
+  - {source: "report_failed.complete",     target: "done.trigger",         type: "triggers"}
+  - {source: "report_failed.out_verdict",  target: "done.in_verdict",      type: "binds"}

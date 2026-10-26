@@ -121,14 +121,14 @@ def test_loop_validation_errors():
 
 def test_a_body_that_retries_forever_hits_the_shared_step_budget():
     register_executor("EVALUATE", Func(lambda d, n: {"_route": "fail"}))
-    body = [{"id": "a", "type": "SOLVE", "ports": ["trigger", "complete"]},
+    body = [{"id": "a", "type": "SOLVE", "config": {"expression": "1"}, "ports": ["trigger", "complete"]},
             {"id": "g", "type": "EVALUATE", "ports": ["trigger", "pass", "fail"]}]
     edges = [trig("a.complete", "g.trigger"), trig("g.fail", "a.trigger")]
     # `a` is triggered by g, so nothing starts the body: no start nodes -> nothing runs, loop ends by max_iterations
     rt = GraphLangRuntime(loop_graph({"max_iterations": 2}, body, edges), verbose=False)
     rt.execute({"n": 1})                                                # no start node: nothing runs, no hang
     assert set(rt.fired) == {"lp", "end"}                               # the LOOP and the OUTPUT fired; no body node
-    body2 = body + [{"id": "s", "type": "SOLVE", "ports": ["trigger", "complete"]}]
+    body2 = body + [{"id": "s", "type": "SOLVE", "config": {"expression": "1"}, "ports": ["trigger", "complete"]}]
     edges2 = edges + [trig("s.complete", "a.trigger")]
     with pytest.raises(RunLimitExceeded):
         GraphLangRuntime(loop_graph({"max_iterations": 2}, body2, edges2), verbose=False, max_steps=50).execute({"n": 1})

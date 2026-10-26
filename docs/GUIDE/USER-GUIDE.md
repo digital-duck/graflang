@@ -170,7 +170,7 @@ Each node has `id`, `type`, `ports`, and optional `config`. Port names carry the
 | `OUTPUT` | exit point: its `in_*` ports become the workflow outputs |
 | `GENERATE` | LLM call: `prompt_ref`, `prompt_inline`, or `procedure_ref`. The result goes on the first `out_*` port |
 | `EVALUATE` / `ASSERT` | evaluate `config.condition`; route to `pass` or `fail` |
-| `SOLVE` | deterministic: `config.expression` or a `procedure_ref` |
+| `SOLVE` | deterministic: `config.expression`, a `procedure_ref`, or a `backend` (`kernel` or `subprocess`; see "SOLVE backends") |
 | `FORK` | emits on all its control output ports |
 | `JOIN` | barrier: fires when every incoming trigger has arrived |
 | `LOOP` | repeats a `subgraph` (see below) |
@@ -178,6 +178,46 @@ Each node has `id`, `type`, `ports`, and optional `config`. Port names carry the
 | `MUTATE` | applies an LLM-proposed graph delta if every check passes; routes to `applied` or `rejected` |
 
 The schema also lists `QUERY`, `RECOVER`, `CONTEXT`, `OBSERVE`, `EMIT`; check the runtime before relying on one.
+
+## SOLVE backends
+
+A `SOLVE` can run real code. `backend: kernel` runs Python in a persistent Jupyter kernel (`pip install 'graflang[kernel]'`);
+`backend: subprocess` runs any program as a black box (SymPy, Z3, Lean, a Rust binary). Both follow one contract: each `in_<name>`
+port is a named JSON value, the node's one `out_*` port (besides `out_error`) gets a value of `out_type` (`BOOL`, `INTEGER`,
+`REAL`, `TEXT` or `JSON`, default `JSON`), and an exception, a timeout or a bad output fails the node. `cookbook/solver_check/` uses both.
+
+```yaml
+- id: "sum_kernel"
+  type: "SOLVE"
+  config:
+    backend: "kernel"
+    code: |                      # trusted: it is in the graph file, reviewed like code
+      total = sum(values)        # in_values arrives as the variable `values`
+    result: "total"              # an expression; its JSON value goes to out_total
+    out_type: "INTEGER"
+    timeout: 30                  # seconds
+    scope: "run"                 # "run": one kernel for the whole run (default); "node": a fresh kernel for every firing
+  ports: ["trigger", "complete", "in_values", "out_total"]
+
+- id: "solve_sat"
+  type: "SOLVE"
+  config:
+    backend: "subprocess"
+    command: ["python3", "-I", "solvers/sat_check.py"]    # relative paths start in the graph's folder
+    parse: {tool: "solvers/parsers.py:sat"}               # how to read stdout, see below
+    out_type: "BOOL"
+    timeout: 60
+    memory_mb: 2048
+    on_error: "route"            # a failure goes to the `error` port, with the message on out_error, instead of ending the run
+  ports: ["trigger", "complete", "error", "in_formula", "out_result", "out_error"]
+```
+
+- **Inputs are data, never code.** Values are passed as JSON (stdin for a subprocess, a string literal bound to variables for the kernel), so a value that looks like Python is still just a value.
+- **`parse` (subprocess)** reads the solver's stdout; nothing is guessed. Built in: `last_json` (default; the last JSON object or fenced block), `first_line` (optionally `{first_line: [sat, unsat]}`), `{regex: "result: (?P<value>\\d+)"}` (text only), or `{tool: "file.py:function"}`, a function you write next to the graph that returns the value. A value of the wrong type, or no match, fails the node with the raw stdout and stderr in the log.
+- **The kernel** starts on the first kernel node and is shut down when the run ends, Ctrl-C included. A timeout restarts it (its variables are gone). `seed` seeds `random` (and numpy, if installed) when the kernel starts. It talks over a Unix socket, not TCP.
+- **Not a sandbox.** Code runs with your privileges. It may come only from the graph file: a MUTATE delta that adds or changes `backend`, `code`, `result`, `command` or `parse`, at any depth, is refused before any policy is consulted.
+- **`graf validate`** reports as errors what graflang cannot run (a syntax error, a missing `result`, an unknown backend, parser or type, two result ports, `on_error: route` without an `error` port, a SOLVE that computes nothing) and as warnings what the machine running the graph may supply (a command or `requirements` item not found, a parser file that is missing or does not define the function, an input the code never uses). It never runs your code or your parser.
+- **Logging:** each firing logs `solve.kernel.exec` or `solve.subprocess.exec` with the node, a hash of the code or of the input and output, the duration and the outcome.
 
 ## Edges and data
 
@@ -267,10 +307,11 @@ Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (
 | `cookbook/self_refine/` | draft, critique, refine an essay |
 | `cookbook/concept_book/` | builds a concept book chapter by chapter in a `LOOP` that collects chapters |
 | `cookbook/code_pipeline/` | the flagship: analyse a spec, generate/review/test code in a `LOOP`, Cedar-guarded retries, optional closure check; SPL procedures `00`-`07` sit next to the graph |
+| `cookbook/solver_check/` | both SOLVE backends, no LLM: a Python kernel and a subprocess compute the same sum, an `ASSERT` compares them with the expected value, and a failing solver routes to an error report |
 
 ## Known limits
 
-- `SOLVE` with neither `expression` nor `procedure_ref` is a stub that returns True.
+- A `SOLVE` with no `expression`, `procedure_ref` or `backend` computes nothing: `graf validate` and the runtime both report it.
 - `contains_pii` in the Cedar context is always false, so the data-sovereignty policy cannot trigger.
 - `graf compile` does not produce a working Rust project yet.
 

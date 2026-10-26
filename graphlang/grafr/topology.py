@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
+from .solve_backend import check_solve
 
 CONTROL_EXCLUDED = ("in_", "out_")
 
@@ -96,6 +97,10 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             for p in ("applied", "rejected", "in_delta"):
                 if p not in n["ports"]:
                     errors.append(f"{where}: missing port {p!r}")
+        elif typ == "SOLVE":
+            solve_errors, solve_warnings = check_solve(n, resolver.base_dir)
+            errors += [f"{where}: {m}" for m in solve_errors]
+            warnings += [f"{where}: {m}" for m in solve_warnings]
         elif typ == "LOOP":
             _check_loop(n, prefix, resolver, errors, warnings)
 

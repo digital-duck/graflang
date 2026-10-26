@@ -116,7 +116,7 @@ def test_retry_wire_loops_until_the_gate_passes():
 
 def test_a_loop_that_never_exits_is_stopped():
     register_executor("EVALUATE", Func(lambda d, s: {"_route": "fail"}))
-    g = graph([ENTRY, {"id": "work", "type": "SOLVE", "ports": ["trigger", "complete"]},
+    g = graph([ENTRY, {"id": "work", "type": "SOLVE", "config": {"expression": "1"}, "ports": ["trigger", "complete"]},
                {"id": "gate", "type": "EVALUATE", "ports": ["trigger", "pass", "fail"]}],
               [trig("start.entry", "work.trigger"), trig("work.complete", "gate.trigger"),
                trig("gate.fail", "work.trigger")])

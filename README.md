@@ -38,7 +38,7 @@ failing on a schema error. The two share graph code: `graf vis` draws through zi
 GraphLang is grounded in **Lafont's Interaction Nets** — a mathematically proven model for deterministic, concurrent graph rewriting. Computation occurs via local rewrite rules when agents interact:
 
 - **`GENERATE`** — probabilistic agents (LLM calls)
-- **`SOLVE` / `ASSERT`** — deterministic agents (SymPy, Lean, Python eval)
+- **`SOLVE` / `ASSERT`** — deterministic agents: an expression, a persistent Python kernel, or any program run as a subprocess (SymPy, Z3, Lean, a Rust binary), read through a declared parser
 - **`FORK` / `JOIN`** — explicit fan-out and barrier (parallelism without race conditions)
 - **`LOOP`** — cyclic control flow (test-gated retry)
 - **`MUTATE`** — the self-revising operator (LLM outputs validated graph deltas)

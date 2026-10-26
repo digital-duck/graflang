@@ -7,7 +7,7 @@ Contract (see the design note, solver backends):
   failure, and the raw stdout and stderr are kept in the error.
 - exit code: non-zero, a timeout, or a memory-limit kill is a failure.
 
-This module is standalone: nothing in the runtime imports it yet (the SOLVE wiring is a separate step).
+The runtime reaches it through solve_backend.py (`SOLVE` with `backend: subprocess`); this module itself knows nothing about graphs.
 """
 from __future__ import annotations
 
