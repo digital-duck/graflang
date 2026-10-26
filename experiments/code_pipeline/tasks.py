@@ -4,8 +4,12 @@ from __future__ import annotations
 import gzip
 import json
 import random
+import re
 import urllib.request
 from pathlib import Path
+
+import click
+import yaml
 
 URL = "https://raw.githubusercontent.com/openai/human-eval/master/data/HumanEval.jsonl.gz"
 DATA = Path(__file__).parent / "data" / "HumanEval.jsonl.gz"
@@ -14,11 +18,15 @@ INSTRUCTION = ("Implement the following Python function. Return the complete fun
                "imports it needs.\n\n")
 
 
-def load_all() -> list[dict]:
-    if not DATA.exists():
+def load_all(path: str | Path | None = None) -> list[dict]:
+    """All tasks from `path` (default: the committed copy in data/, downloaded if it is missing)."""
+    src = Path(path) if path else DATA
+    if not src.exists():
+        if path:
+            raise FileNotFoundError(src)
         DATA.parent.mkdir(parents=True, exist_ok=True)
         DATA.write_bytes(urllib.request.urlopen(URL, timeout=30).read())
-    with gzip.open(DATA, "rt", encoding="utf-8") as f:
+    with gzip.open(src, "rt", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
@@ -37,13 +45,13 @@ def spec_for(task: dict) -> str:
     return (INSTRUCTION + task["prompt"]).rstrip()
 
 
-def select(n: int | None, seed: int = 0, ids: str | None = None) -> list[dict]:
-    """The tasks to run: exactly the listed ones (`98,107` or `HumanEval/98`), else the fixed sample of n, else all."""
+def select(n: int | None, seed: int = 0, ids: str | None = None, path: str | Path | None = None) -> list[dict]:
+    """The tasks to run: exactly the listed ones (`98,107` or `98 107` or `HumanEval/98`), else the fixed sample of n, else all."""
     if not ids:
         return sample(n, seed)
-    by_id = {t["task_id"]: t for t in load_all()}
+    by_id = {t["task_id"]: t for t in load_all(path)}
     chosen = []
-    for raw in (x.strip() for x in ids.split(",") if x.strip()):
+    for raw in (x for x in re.split(r"[,\s]+", ids) if x):
         key = raw if "/" in raw else f"HumanEval/{raw}"
         if key not in by_id:
             raise ValueError(f"no such task {raw!r} (HumanEval/0 to HumanEval/{len(by_id) - 1})")
@@ -101,3 +109,59 @@ def stratified_sample(per_group: int, seed: int = 0) -> list[dict]:
         picked = random.Random(f"{seed}/{g}").sample(ids, min(per_group, len(ids)))
         chosen += [by_id[tid] for tid in picked]
     return sorted(chosen, key=lambda t: int(t["task_id"].split("/")[1]))
+
+
+# ---- export for reading ------------------------------------------------------------------------------------------------
+# The jsonl.gz is not something to open in an editor. `python tasks.py` writes chosen tasks as one file each.
+
+def _readable(text: str) -> str:
+    """Remove trailing spaces and tabs at line ends. PyYAML cannot write a block (`|`) scalar when a line ends in
+    whitespace and falls back to one quoted line full of `\\n`; 78 of the 164 tasks have such lines in the prompt, solution or test."""
+    return "\n".join(line.rstrip(" \t") for line in text.split("\n"))
+
+
+class _BlockDumper(yaml.SafeDumper):
+    """Multi-line strings as `|` blocks, so a prompt or a test reads as it does in the source."""
+
+
+_BlockDumper.add_representer(str, lambda dumper, s: dumper.represent_scalar(
+    "tag:yaml.org,2002:str", s, style="|" if "\n" in s else None))
+
+
+def render_task(task: dict, fmt: str = "yaml") -> str:
+    """One task as text. `json` is an exact copy; `yaml` drops trailing whitespace at line ends (see `_readable`)."""
+    if fmt == "json":
+        return json.dumps(task, indent=2, ensure_ascii=False) + "\n"
+    readable = {k: _readable(v) if isinstance(v, str) else v for k, v in task.items()}
+    return yaml.dump(readable, Dumper=_BlockDumper, sort_keys=False, allow_unicode=True, width=10 ** 6)
+
+
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--tasks", "task_ids", default=None,
+              help="Tasks to extract: numbers or ids separated by commas or spaces, e.g. \"98,107 HumanEval/10\". Default: all.")
+@click.option("--out-dir", type=click.Path(file_okay=False, path_type=Path), default=None,
+              help="Where to write the files (created if missing). Default: the folder of the input file.")
+@click.option("--in", "in_path", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help=f"HumanEval .jsonl.gz to read. Default: {DATA}.")
+@click.option("--format", "fmt", type=click.Choice(["json", "yaml"]), default="yaml", show_default=True,
+              help="yaml writes multi-line text as blocks and drops trailing whitespace at line ends; json is an exact copy.")
+def main(task_ids: str | None, out_dir: Path | None, in_path: Path | None, fmt: str) -> None:
+    """Write HumanEval tasks as individual HumanEval_<N>.yaml (or .json) files, so they can be read in an editor."""
+    src = in_path or DATA
+    try:
+        chosen = select(None, ids=task_ids, path=in_path) if task_ids else load_all(in_path)
+    except FileNotFoundError as e:
+        raise click.ClickException(f"input file not found: {e}")
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    out = out_dir or src.parent
+    out.mkdir(parents=True, exist_ok=True)
+    for task in chosen:
+        path = out / f"{task['task_id'].replace('/', '_')}.{fmt}"
+        path.write_text(render_task(task, fmt), encoding="utf-8")
+        click.echo(path)
+    click.echo(f"{len(chosen)} task(s) written to {out}")
+
+
+if __name__ == "__main__":
+    main()
