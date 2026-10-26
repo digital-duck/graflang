@@ -204,7 +204,7 @@ graf run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="rain"
 
 `cookbook/compliance_audit/` mixes everything above: an LLM for the fuzzy part, fixed rules for the decision, a retry path and a Cedar guard. An LLM reads a document and lists the **types** of personal data in it (never the values). Boolean rules then decide, with no LLM, whether the document may go to a destination. A failing document is redacted, read again and re-checked once. A Cedar `GUARD` has the last word, and anything that cannot be shown compliant ends at the `escalated` output.
 
-The rule check is an SPL.py procedure, so install SPL.py first (see [SETUP.md](SETUP.md)), then run it with a real model:
+The rule check is a small Python program that a `SOLVE` node runs as a subprocess (`backend: subprocess`), so it needs no extra install. Run it with a real model:
 
 ```bash
 graf run cookbook/compliance_audit/compliance_audit.graph.yaml --llm claude_cli:claude-sonnet-5-5 \

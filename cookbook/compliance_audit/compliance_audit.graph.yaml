@@ -1,7 +1,7 @@
 version: "1.0-graph"
 
-# PII compliance audit. An LLM finds the personal data in a document; deterministic rules (procedures/compliance_check.spl,
-# engine stdlib | sympy | z3) decide whether it may go to the destination. A failing document is redacted, re-extracted and
+# PII compliance audit. An LLM finds the personal data in a document; deterministic rules (procedures/compliance_check.py,
+# a Python program run by a SOLVE node, engine stdlib | sympy | z3) decide whether it may go to the destination. A failing document is redacted, re-extracted and
 # re-checked once. A Cedar guard decides the release. Anything that cannot be shown compliant ends at `escalated`.
 
 workflow:
@@ -19,8 +19,6 @@ resources:
   prompts:
     extract_pii: "./prompts/extract_pii.md"
     redact: "./prompts/redact.md"
-  procedures:
-    compliance_check: "./procedures/compliance_check.spl"
   policies:
     release_policy: "./policies/release_policy.cedar"
 
@@ -38,7 +36,13 @@ nodes:
   # 2. Deterministic: do the facts satisfy the rules? Returns JSON {compliant, violated, facts, ...}
   - id: "check"
     type: "SOLVE"
-    config: {procedure_ref: "procedures.compliance_check", label: "Check the rules"}
+    config: &check_rules
+      backend: "subprocess"
+      command: ["python3", "-I", "procedures/compliance_check.py"]   # inputs arrive as JSON on stdin; stdout's first line is the verdict
+      parse: "first_line"
+      out_type: "TEXT"                                              # the verdict stays JSON text: json_get and the prompts read it
+      timeout: 60
+      label: "Check the rules"
     ports: ["trigger", "complete", "in_pii_map", "in_destination", "in_engine", "in_rules_file", "out_verdict"]
 
   - id: "compliant_first"
@@ -59,7 +63,7 @@ nodes:
 
   - id: "recheck"
     type: "SOLVE"
-    config: {procedure_ref: "procedures.compliance_check", label: "Check the rules again"}
+    config: {<<: *check_rules, label: "Check the rules again"}
     ports: ["trigger", "complete", "in_pii_map", "in_destination", "in_engine", "in_rules_file", "out_verdict"]
 
   - id: "compliant_second"

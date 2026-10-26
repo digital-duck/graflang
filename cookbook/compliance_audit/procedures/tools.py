@@ -1,4 +1,6 @@
-"""Recipe 127 — PII data-flow compliance with three deterministic engines.
+"""PII data-flow compliance with three deterministic engines (the library behind compliance_check.py).
+
+Derived from SPL.py's recipe 127 and now independent of it: plain Python, no SPL.py needed.
 
 An LLM reads a document and reports which kinds of personal data it contains (a PII map). Boolean facts are
 derived from that map and the destination, and a set of Boolean rules decides whether the document may be sent.
@@ -9,10 +11,12 @@ The rules are checked by one of three engines that must agree:
   z3      the Z3 SMT solver
 
 A solver pays off on *search* questions (are the rules consistent? is there any compliant assignment?), so
-`rules_consistent` asks one. The default rules are an ILLUSTRATION, not legal advice or a real GDPR/PCI rule set.
+`consistent` asks one. The default rules are an ILLUSTRATION, not legal advice or a real GDPR/PCI rule set.
 
 Rule format (JSON). A rule is {"id", "desc", "expr"}; an expression is one of
   {"var": name}   {"not": e}   {"and": [e, ...]}   {"or": [e, ...]}   {"implies": [a, b]}   {"const": true|false}
+
+Check a rules file you edited:  python tools.py [rules.json]
 """
 
 import itertools
@@ -20,8 +24,6 @@ import json
 import re
 import sys
 from pathlib import Path
-
-from spl.tools import spl_tool
 
 EXTERNAL_DESTINATIONS = ("external_api", "third_party_vendor")      # used when the rules file does not list its own
 ENGINES = ("stdlib", "sympy", "z3")
@@ -295,100 +297,15 @@ def check_pii_map(pii_map: dict, destination: str, engine: str = "stdlib", rules
     return result
 
 
-# ── SPL tools ────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────
 
-@spl_tool
-def default_rules() -> str:
-    """The default rules (rules.json next to this file) as JSON."""
-    return json.dumps(DEFAULT_RULES)
-
-
-@spl_tool
-def load_rules(rules_file: str) -> str:
-    """The rules from a JSON file as JSON text ("" means the default rules.json). A bad file gives {"error": ...},
-    which the check reports, so a mistake in your rules is shown instead of silently falling back to the defaults."""
-    try:
-        return json.dumps(load_rules_file(rules_file))
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-@spl_tool
 def normalize_engine(engine: str) -> str:
-    """The engine name, lower-cased and trimmed: stdlib | sympy | z3. An unknown name is reported by the check as an
-    error (there is no silent fallback; the LLM-only ablation is `use_solver=false`, not an engine)."""
+    """The engine name, lower-cased and trimmed: stdlib | sympy | z3 (empty means stdlib). An unknown name is reported by
+    `check` as an error: there is no silent fallback."""
     return str(engine).strip().lower() or "stdlib"
 
 
-@spl_tool
-def parse_pii_map(raw: str) -> str:
-    """Clean the LLM's PII map reply into JSON; unreadable replies are marked so the check fails closed."""
-    return json.dumps(parse_pii_map_text(raw))
-
-
-@spl_tool
-def check_compliance(pii_map_json: str, destination: str, engine: str, rules_json: str = "") -> str:
-    """Check a PII map against the rules with the chosen engine. Returns JSON:
-    {"status": "OK"|"ERROR", "engine", "compliant", "violated": [rule ids], "facts": {...}}."""
-    try:
-        rules = json.loads(rules_json) if str(rules_json).strip() else None
-        if isinstance(rules, dict) and rules.get("error"):               # load_rules reported a bad rules file
-            return json.dumps({"status": "ERROR", "error": rules["error"]})
-        # the PII map may be the model's raw reply: parse it here, so an unreadable one fails closed instead of erroring
-        result = check_pii_map(parse_pii_map_text(pii_map_json), destination, normalize_engine(engine), rules)
-    except (ValueError, TypeError) as e:
-        result = {"status": "ERROR", "error": f"{type(e).__name__}: {e}"}
-    return json.dumps(result)
-
-
-@spl_tool
-def check_succeeded(result_json: str) -> bool:
-    """ASSERT gate: the engine ran (a violation is a result, not a failure; an engine error is a failure)."""
-    try:
-        return json.loads(result_json).get("status") == "OK"
-    except (ValueError, AttributeError):
-        return False
-
-
-@spl_tool
-def rules_consistent(rules_json: str, engine: str) -> str:
-    """Search question: can the rules all hold at once? JSON with an example assignment if so."""
-    try:
-        rules = json.loads(rules_json) if str(rules_json).strip() else DEFAULT_RULES
-        return json.dumps(consistent(rules, normalize_engine(engine)))
-    except (ValueError, TypeError) as e:
-        return json.dumps({"status": "ERROR", "error": f"{type(e).__name__}: {e}"})
-
-
-@spl_tool
-def format_report(result_json: str, destination: str, rules_json: str = "") -> str:
-    """A short Markdown report of a compliance check."""
-    try:
-        res = json.loads(result_json)
-        rules = {r["id"]: r["desc"] for r in (json.loads(rules_json) if str(rules_json).strip() else DEFAULT_RULES)["rules"]}
-    except (ValueError, KeyError, TypeError):
-        return f"(could not format: {result_json})"
-    if res.get("status") != "OK":
-        return f"## Compliance check\n\n**Engine error:** {res.get('error', 'unknown')}"
-    lines = ["## Compliance check", "", f"**Destination:** {destination}  ",
-             f"**Engine:** {res['engine']}  ", f"**Verdict:** {'COMPLIANT' if res['compliant'] else 'NOT COMPLIANT'}", ""]
-    if res.get("error"):
-        lines += [f"The PII map could not be read ({res['error']}), so the document is treated as not compliant.", ""]
-    for rule_id in res.get("violated", []):
-        lines.append(f"- {rule_id}: {rules.get(rule_id, 'the PII map was unreadable')}")
-    return "\n".join(lines)
-
-
-@spl_tool
-def format_llm_report(llm_verdict: str, destination: str) -> str:
-    """Report for the solver=OFF ablation: the LLM's own verdict, labelled as unverified."""
-    return (f"## Compliance check (LLM judgement, unverified)\n\n**Destination:** {destination}  \n"
-            f"**LLM verdict:** {str(llm_verdict).strip()}\n\n"
-            "Run with --param use_solver=true to check the rules deterministically.")
-
-
 if __name__ == "__main__":
-    # Check a rules file you edited:  python tools.py [rules.json]
     try:
         loaded = load_rules_file(sys.argv[1] if len(sys.argv) > 1 else "")
     except ValueError as err:

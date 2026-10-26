@@ -1,16 +1,16 @@
 """cookbook/compliance_audit: extract the PII, check deterministic rules, redact and re-check, release through a Cedar guard.
 
 A stub LLM stands in for the model (no network): it finds SSNs and card numbers with regexes and redacts them, so every
-path of the graph is exercised and the result does not depend on a model. The rule check is the real procedure
-(procedures/compliance_check.spl through SPL.py's executor with its `echo` adapter), so this needs SPL.py importable.
+path of the graph is exercised and the result does not depend on a model. The rule check is the real program
+(procedures/compliance_check.py, run by a SOLVE node with backend: subprocess); no SPL.py is needed.
 """
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-
-pytest.importorskip("spl3.executor")
 
 from graphlang.grafr.cedar_guard import CedarGuard
 from graphlang.grafr.runtime import GraphLangRuntime, load_graph
@@ -140,14 +140,39 @@ def test_the_policy_has_no_catch_all_forbid():
     assert not re.search(r"forbid\s*\(\s*principal\s*,\s*action\s*,\s*resource\s*\)\s*;", POLICY)
 
 
-# ---- the example stays in step with SPL.py's recipe ---------------------------------------------------------------------
+# ---- the check program on its own ----------------------------------------------------------------------------------
 
-def test_the_copied_tools_match_spl_pys_recipe_when_both_exist():
-    recipe = Path(__file__).resolve().parent.parent.parent / "SPL.py" / "cookbook-solver" / "127_pii_compliance"
-    if not recipe.is_dir():
-        pytest.skip("no sibling SPL.py checkout")
-    for name, copy in (("tools.py", "tools.py"), ("compliance_check.spl", "compliance_check.spl")):
-        assert (recipe / name).read_text() == (EXAMPLE / "procedures" / copy).read_text(), f"{copy} drifted from SPL.py"
+CHECK = EXAMPLE / "procedures" / "compliance_check.py"
+
+
+def check_program(inputs):
+    return subprocess.run([sys.executable, "-I", str(CHECK)], input=json.dumps(inputs), capture_output=True, text=True)
+
+
+def test_the_check_program_prints_the_verdict_as_one_json_line():
+    run_ = check_program({"pii_map": '{"entities": [{"type": "SSN"}]}', "destination": "external_api", "engine": "stdlib"})
+    verdict = json.loads(run_.stdout)
+    assert run_.returncode == 0 and len(run_.stdout.strip().splitlines()) == 1
+    assert verdict["compliant"] is False and verdict["violated"] == ["R1", "R2"]
+
+
+def test_the_check_program_exits_1_with_the_reason_when_it_cannot_run(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ nope", encoding="utf-8")
+    run_ = check_program({"pii_map": "{}", "destination": "x", "engine": "stdlib", "rules_file": str(bad)})
+    assert run_.returncode == 1 and run_.stdout == "" and "not valid JSON" in run_.stderr
+    run_ = check_program({"pii_map": '{"entities": []}', "destination": "x", "engine": "magic"})
+    assert run_.returncode == 1 and "unknown engine" in run_.stderr
+
+
+def test_the_example_does_not_depend_on_spl():
+    data = load_graph(GRAPH)
+    assert not any("procedure_ref" in n.get("config", {}) for n in data["nodes"])
+    assert "procedures" not in data.get("resources", {})
+    assert not list((EXAMPLE / "procedures").glob("*.spl"))
+    imports = [line for line in (EXAMPLE / "procedures" / "tools.py").read_text(encoding="utf-8").splitlines()
+               if line.startswith(("import ", "from "))]
+    assert not any("spl" in line for line in imports)
 
 
 # ---- your own rules --------------------------------------------------------------------------------------------------
@@ -165,7 +190,7 @@ def test_a_rules_file_input_replaces_the_default_rules(tmp_path):
 def test_a_bad_rules_file_stops_the_run_instead_of_falling_back_to_the_defaults(tmp_path):
     path = tmp_path / "broken.json"
     path.write_text("{ nope", encoding="utf-8")
-    with pytest.raises(Exception, match="not valid JSON"):                       # the procedure's ASSERT fails; nothing is released
+    with pytest.raises(Exception, match="not valid JSON"):                       # the check program exits 1; nothing is released
         run(CLEAN, "internal_db", rules_file=str(path))
 
 

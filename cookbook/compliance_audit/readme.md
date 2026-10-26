@@ -14,14 +14,14 @@ It is an illustration of the pattern, not legal advice. The default rules are no
 ## Run
 
 ```bash
-pip install -e /path/to/SPL.py            # the rule check is an SPL.py procedure
+# no extra install: the rule check is a plain Python program (no SPL.py, no kernel); sympy or z3 only if you pick those engines
 graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
     --adapter claude_cli --model <id> \
     --param document="Customer John Doe, SSN 123-45-6789, asks to update his address." \
     --param destination=external_api --param engine=stdlib --param rules_file=
 ```
 
-`engine` is `stdlib` (no dependency, the default), `sympy` or `z3`. All three give the same verdicts; see recipe 127 in SPL.py for the measurements. A real run with `claude_cli` on the example above redacted the SSN, re-read the result, passed the rules and was released by the Cedar guard. `tests/test_compliance_audit.py` covers every path with a stub model, so it needs no LLM.
+`engine` is `stdlib` (no dependency, the default), `sympy` or `z3`. All three give the same verdicts; see recipe 127 in SPL.py for the measurements (made with the SPL version of the check). A real run with `claude_cli` on the example above redacted the SSN, re-read the result, passed the rules and was released by the Cedar guard. `tests/test_compliance_audit.py` covers every path with a stub model, so it needs no LLM.
 
 ## Your own rules
 
@@ -33,7 +33,8 @@ graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
 |---|---|
 | `compliance_audit.graph.yaml` | the workflow |
 | `prompts/extract_pii.md`, `prompts/redact.md` | the two LLM prompts |
-| `procedures/compliance_check.spl`, `procedures/tools.py`, `procedures/rules.json` | the deterministic check (copied from SPL.py recipe `cookbook-solver/127_pii_compliance`; GraphLang loads `tools.py` next to the procedure) |
+| `procedures/compliance_check.py` | the deterministic check as a program: JSON in on stdin, the verdict as one JSON line on stdout, exit 1 when it cannot run. The two `SOLVE` nodes (`check`, `recheck`) run it with `backend: subprocess` |
+| `procedures/tools.py`, `procedures/rules.json` | the rule engines (stdlib, sympy, z3) and the demo rules, plain Python |
 | `policies/release_policy.cedar` | permit only a compliant release; anything else is denied |
 
-The procedure files are a copy; when you change one, change it in both places.
+The check started as SPL.py's recipe `cookbook-solver/127_pii_compliance` and is now independent of it: plain Python, no SPL.py. (The folder is still called `procedures/`.) Each firing starts a Python process, about 20 ms for `stdlib` and 165 ms for `sympy` on one machine; the interpreter on your PATH (`python3`) must be the one that has sympy or z3 if you choose those engines.

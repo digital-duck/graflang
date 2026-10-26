@@ -36,7 +36,7 @@ GraphLang is not a second implementation of SPL. SPL.py is the SPL language and 
 | One run of `self_refine`, mock LLM | not measured | 0.30 s from the command line, about 7 ms in-process |
 | Heaviest dependencies | none that stood out | networkx 19 MB, cedarpy 16 MB |
 
-In a real `claude_cli` run of `cookbook/compliance_audit` the whole run took 18.0 s. Each LLM call took 3.4 to 9.9 s, and the deterministic rule check took 4 to 7 ms. Graph traversal costs microseconds to milliseconds per node, under 0.1% of the run, so a faster interpreter would not change the wall time.
+In a real `claude_cli` run of `cookbook/compliance_audit` the whole run took 18.0 s. Each LLM call took 3.4 to 9.9 s, and the deterministic rule check took 4 to 7 ms (measured when it was an in-process SPL procedure; as a subprocess it is about 20 ms for the `stdlib` engine and 165 ms for `sympy`, on one machine). Graph traversal costs microseconds to milliseconds per node, under 0.1% of the run, so a faster interpreter would not change the wall time.
 
 ### Is a Rust target worth it for speed?
 
