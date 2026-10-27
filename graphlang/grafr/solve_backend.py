@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
 import shutil
 import time
@@ -27,10 +28,11 @@ from .solver import BUILTIN_PARSERS, MEMORY_MB, OUT_TYPES, TIMEOUT, SolverError,
 _log = get_logger("grafr.solve")
 
 BACKENDS = ("kernel", "subprocess")
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SCOPES = ("run", "node")
 # Config keys that decide what runs. They come from the graph file, never from a model: a MUTATE delta that adds or changes
 # one is refused before any policy is consulted (see `code_keys_in`).
-CODE_KEYS = frozenset({"backend", "code", "result", "command", "parse"})
+CODE_KEYS = frozenset({"backend", "code", "result", "command", "parse", "env_passthrough"})   # env can change what runs (NODE_OPTIONS, PYTHONPATH)
 
 
 class SolveError(RuntimeError):
@@ -76,10 +78,15 @@ def run_backend(node_data: Dict, in_data: Dict[str, Any], resolver, kernels: Ker
             with kernels.session(cfg.get("scope", "run"), cfg.get("seed")) as kernel:
                 value = check_type(kernel.execute(inputs, cfg["code"], cfg["result"], timeout), out_type)
         elif backend == "subprocess":
-            fields.update(command=cfg["command"], input_sha=_digest(json.dumps(inputs, default=str, sort_keys=True)))
+            names = cfg.get("env_passthrough", [])
+            unset = [n for n in names if n not in os.environ]
+            if unset:                                          # declared means needed: fail, never run without it
+                raise ValueError(f"env_passthrough names {unset}, which are not set in the environment this run started in")
+            fields.update(command=cfg["command"], input_sha=_digest(json.dumps(inputs, default=str, sort_keys=True)),
+                          env=list(names))                       # names only, never values
             res = run_solver(cfg["command"], inputs, parse=cfg.get("parse", "last_json"), out_type=out_type,
                              base_dir=resolver.base_dir, timeout=timeout, memory_mb=cfg.get("memory_mb", MEMORY_MB),
-                             cwd=resolver.base_dir)
+                             cwd=resolver.base_dir, env={n: os.environ[n] for n in names})
             value, fields["output_sha"], fields["parser"] = res.value, _digest(res.stdout), res.parser
         else:
             raise ValueError(f"unknown backend {backend!r} (one of {', '.join(BACKENDS)})")
@@ -139,6 +146,8 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
     in_names = [p[3:] for p in ports if p.startswith("in_")]
 
     if backend == "kernel":
+        if "env_passthrough" in cfg:
+            errors.append("env_passthrough applies to backend: subprocess; a kernel inherits the runtime's environment")
         used = None
         if not isinstance(cfg.get("code"), str) or not isinstance(cfg.get("result"), str):
             errors.append("a kernel SOLVE needs `code` and `result` (text)")
@@ -163,6 +172,12 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
         elif not ((base_dir / command[0]).exists() if "/" in command[0] else shutil.which(command[0])):
             warnings.append(f"command {command[0]!r} was not found on this machine")
         errors += _check_parse(cfg.get("parse", "last_json"), base_dir, warnings)
+        names = cfg.get("env_passthrough", [])
+        if not (isinstance(names, list) and all(isinstance(n, str) and ENV_NAME.fullmatch(n) for n in names)):
+            errors.append("env_passthrough must be a list of environment variable names, e.g. [HOME, NODE_PATH]")
+        else:
+            warnings += [f"env_passthrough: {n} is not set here; the run fails unless it is set where it runs"
+                         for n in names if n not in os.environ]
         for item in cfg.get("requirements", []):
             if not isinstance(item, str):
                 errors.append("requirements must be a list of names")

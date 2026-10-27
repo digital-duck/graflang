@@ -1,0 +1,119 @@
+version: "1.0-graph"
+
+# An LLM writes a TypeScript function; the TypeScript toolchain judges it, and the compiler's errors drive the retry.
+#   write       GENERATE     the model writes the function (on a retry it sees its last attempt and what failed)
+#   typecheck   SOLVE        node tools/typecheck.mjs: the real TypeScript compiler, strict mode (check_types=false skips it)
+#   run_cases   SOLVE        node tools/run_cases.mjs: runs the function on your test cases in a restricted Node process
+#   finalize    SOLVE        python3 tools/finalize.py: the clean code and a Markdown report
+# Three languages, one graph: the model's text, TypeScript, Python. Each tool reads JSON on stdin and prints one line of JSON.
+#
+# Run (needs Node 22.18+; `npm install` in this folder for type checking):
+#   graf run cookbook/ts_verify/ts_verify.graph.yaml --llm claude_cli:claude-sonnet-5-5 \
+#       --param function=slugify --param cases=examples/slugify.cases.json \
+#       --param spec="slugify(title): lowercase; treat anything that is not an ASCII letter or digit as a separator; join the words with single hyphens; no leading or trailing hyphen"
+
+workflow:
+  name: "ts_verify"
+  inputs:
+    - {name: "spec", type: "TEXT"}
+    - {name: "function", type: "TEXT"}                 # the name the function must export
+    - {name: "cases", type: "TEXT"}                    # test cases as JSON, or a path (relative paths start in this folder)
+    - {name: "check_types", type: "BOOL", default: true}
+    - {name: "max_cycles", type: "INTEGER", default: 3}
+  outputs:
+    - {name: "result", type: "JSON"}                   # {passed, attempts, code, report}
+
+resources:
+  prompts:
+    write_ts: "./prompts/write_ts.md"
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_spec", "out_function", "out_cases", "out_check_types", "out_max_cycles"]
+
+  - id: "repair"
+    type: "LOOP"
+    config:
+      condition: "NOT @passed AND @cycle < @in_max_cycles"
+      max_iterations: "@in_max_cycles"
+      outputs:
+        final_code: {from: "write.out_code"}
+        passed: {fired: "tests_ok.pass"}
+        attempts: {collect: "write.out_code"}
+        # carried into the next attempt (empty on the first): what it wrote and what the toolchain said
+        prior_code: {from: "write.out_code"}
+        type_report: {from: "typecheck.out_check"}
+        case_report: {from: "run_cases.out_run"}       # none if the types failed, so the cases did not run
+      subgraph:
+        nodes:
+          - id: "write"
+            type: "GENERATE"
+            config: {prompt_ref: "prompts.write_ts", label: "Write the TypeScript"}
+            ports: ["trigger", "complete", "in_spec", "in_function", "in_prior_code", "in_type_report", "in_case_report", "out_code"]
+          - id: "typecheck"
+            type: "SOLVE"
+            config: &tool
+              backend: "subprocess"
+              command: ["node", "tools/typecheck.mjs"]
+              parse: "first_line"                      # each tool prints its verdict as one line of JSON
+              out_type: "TEXT"                         # kept as JSON text: json_get and the prompt read it
+              timeout: 60
+              label: "Type-check with tsc"
+            ports: ["trigger", "complete", "in_code", "in_function", "in_check_types", "out_check"]
+          - id: "types_ok"
+            type: "EVALUATE"
+            config: {condition: "json_get(@in_check, 'ok') == TRUE"}
+            ports: ["trigger", "pass", "fail", "in_check"]
+          - id: "run_cases"
+            type: "SOLVE"
+            config: {<<: *tool, command: ["node", "tools/run_cases.mjs"], label: "Run the test cases"}
+            ports: ["trigger", "complete", "in_code", "in_function", "in_cases", "out_run"]
+          - id: "tests_ok"
+            type: "EVALUATE"
+            config: {condition: "json_get(@in_run, 'ok') == TRUE"}
+            ports: ["trigger", "pass", "fail", "in_run"]
+        edges:
+          - {source: "write.complete", target: "typecheck.trigger", type: "triggers"}
+          - {source: "typecheck.complete", target: "types_ok.trigger", type: "triggers"}
+          - {source: "types_ok.pass", target: "run_cases.trigger", type: "triggers"}
+          - {source: "run_cases.complete", target: "tests_ok.trigger", type: "triggers"}
+          # ports with no bind read the LOOP's inputs (spec, function, cases, check_types) or the carried values
+          - {source: "write.out_code", target: "typecheck.in_code", type: "binds"}
+          - {source: "write.out_code", target: "run_cases.in_code", type: "binds"}
+          - {source: "typecheck.out_check", target: "types_ok.in_check", type: "binds"}
+          - {source: "run_cases.out_run", target: "tests_ok.in_run", type: "binds"}
+    ports: ["trigger", "loop", "exit", "in_spec", "in_function", "in_cases", "in_check_types", "in_max_cycles",
+            "out_final_code", "out_passed", "out_attempts", "out_prior_code", "out_type_report", "out_case_report"]
+
+  - id: "finalize"
+    type: "SOLVE"
+    config:
+      backend: "subprocess"
+      command: ["python3", "-I", "tools/finalize.py"]
+      out_type: "JSON"                                 # the default parser reads the JSON line
+      timeout: 30
+      label: "Clean code and report (Python)"
+    ports: ["trigger", "complete", "in_code", "in_passed", "in_type_report", "in_case_report", "in_attempts", "out_result"]
+
+  - id: "done"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_result"]
+
+edges:
+  - {source: "wf_entry.entry", target: "repair.trigger", type: "triggers"}
+  - {source: "wf_entry.out_spec", target: "repair.in_spec", type: "binds"}
+  - {source: "wf_entry.out_function", target: "repair.in_function", type: "binds"}
+  - {source: "wf_entry.out_cases", target: "repair.in_cases", type: "binds"}
+  - {source: "wf_entry.out_check_types", target: "repair.in_check_types", type: "binds"}
+  - {source: "wf_entry.out_max_cycles", target: "repair.in_max_cycles", type: "binds"}
+
+  - {source: "repair.exit", target: "finalize.trigger", type: "triggers"}
+  - {source: "repair.out_final_code", target: "finalize.in_code", type: "binds"}
+  - {source: "repair.out_passed", target: "finalize.in_passed", type: "binds"}
+  - {source: "repair.out_type_report", target: "finalize.in_type_report", type: "binds"}
+  - {source: "repair.out_case_report", target: "finalize.in_case_report", type: "binds"}
+  - {source: "repair.out_attempts", target: "finalize.in_attempts", type: "binds"}
+
+  - {source: "finalize.complete", target: "done.trigger", type: "triggers"}
+  - {source: "finalize.out_result", target: "done.in_result", type: "binds"}

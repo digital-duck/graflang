@@ -27,7 +27,8 @@ class GenerateExecutor(NodeExecutor):
             raise ValueError(f"GENERATE node {node_data['id']!r} needs prompt_ref, prompt_inline or procedure_ref")
 
         for key, value in in_data.items():                 # {{in_topic}} <- the value on port in_topic
-            prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
+            text = "" if value is None else str(value)     # a LOOP's carried value is None before the first iteration
+            prompt = prompt.replace(f"{{{{{key}}}}}", text)
 
         model = resolve_model(llm.name, config.get('model'), getattr(llm, 'model_override', None))
         started = time.perf_counter()

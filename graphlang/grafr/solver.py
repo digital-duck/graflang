@@ -166,16 +166,19 @@ def _limits(memory_mb: int):
 
 
 def run_solver(command: List[str], inputs: Dict[str, Any], *, parse: Any, out_type: str, base_dir: Path,
-               timeout: float = TIMEOUT, memory_mb: int = MEMORY_MB, cwd: Optional[Path] = None) -> SolverResult:
+               timeout: float = TIMEOUT, memory_mb: int = MEMORY_MB, cwd: Optional[Path] = None,
+               env: Optional[Dict[str, str]] = None) -> SolverResult:
     """Run `command` with `inputs` as JSON on stdin, read stdout through `parse`, type-check against `out_type`.
 
     Raises SolverError (with the raw stdout and stderr) on a non-zero exit, a timeout, an unparseable output, or a value
-    of the wrong type. A missing command is a SolverError too, so the caller reports it like any other failure."""
+    of the wrong type. A missing command is a SolverError too, so the caller reports it like any other failure.
+
+    The solver sees only PATH and what is in `env`: nothing else of the caller's environment (no keys, no HOME) leaks to it."""
     payload = json.dumps(inputs, default=str)
     start = time.perf_counter()
     try:
         done = subprocess.run(command, input=payload, capture_output=True, text=True, timeout=timeout,
-                              cwd=str(cwd) if cwd else None, env={"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1"},
+                              cwd=str(cwd) if cwd else None, env={"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1", **(env or {})},
                               preexec_fn=lambda: _limits(memory_mb))
     except subprocess.TimeoutExpired as e:
         raise SolverError(f"solver timed out after {timeout}s", stdout=_text(e.stdout), stderr=_text(e.stderr)) from None

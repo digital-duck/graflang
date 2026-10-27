@@ -113,7 +113,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")
         result = runtime.execute(params)
     except (ValueError, RuntimeError, NotImplementedError) as e:
-        console.print(f"[red]✗ Run failed:[/red] {e}")
+        console.print(f"[red]✗ Run failed:[/red] {escape(str(e))}")
         if log_path:
             console.print(f"[dim]log: {log_path}[/dim]")
         sys.exit(1)
@@ -122,7 +122,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
         console.print("\n[yellow]Workflow ended without reaching an OUTPUT node (a gate routed to a dead end)[/yellow]")
     else:
         console.print(f"\n[bold green]✓ Workflow completed[/bold green]")
-    console.print(f"[bold]Output:[/bold] {result}")
+    console.print(f"[bold]Output:[/bold] {escape(str(result))}")        # values may hold [brackets], not markup
     if run_output and result:
         run_output.save_result(result)
         console.print(f"[dim]output: {run_output.dir}[/dim]")
@@ -146,9 +146,9 @@ def cmd_validate(graph):
         sys.exit(1)
     errors, warnings = check(graph_data)
     for w in warnings:
-        console.print(f"[yellow]warning:[/yellow] {w}")
+        console.print(f"[yellow]warning:[/yellow] {escape(str(w))}")
     for e in errors:
-        console.print(f"[red]error:[/red] {e}")
+        console.print(f"[red]error:[/red] {escape(str(e))}")
     if errors:
         console.print(f"[red]✗ {len(errors)} problem(s)[/red] in {graph_data['workflow']['name']}")
         sys.exit(1)

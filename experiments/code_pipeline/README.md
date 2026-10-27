@@ -223,8 +223,9 @@ tail -f logs/pilot-*.log
 Three arms (`single`, `graflang`, `langgraph`) on 20 tasks from each complexity group (60 tasks), one repetition, seed 0. Both models use `claude_cli` and their own database (`results/full-claude-sonnet-5-5.db`, `results/full-claude-haiku-4-5.db`). The two runs are started one at a time, since they share an account. Plan first, then start:
 
 ```bash
-cd ~/projects/digital-duck/graflang/experiments/code_pipeline
 conda activate graf
+
+cd ~/projects/digital-duck/graflang/experiments/code_pipeline
 
 PER_GROUP=2 ./run_full.sh --dry-run                          # the plan for the default model (sonnet)
 PER_GROUP=2 MODEL=claude-haiku-4-5 ./run_full.sh --dry-run   # the plan for haiku

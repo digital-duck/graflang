@@ -130,3 +130,22 @@ def test_explicit_model_beats_the_default(app, monkeypatch):
     assert run(app, "--llm", "claude_cli:claude-haiku-5-5").exit_code == 0
     (run_dir,) = run_dirs(app / "output")
     assert "claude-haiku-5-5" in run_dir.name and "sonnet" not in run_dir.name
+
+
+def test_square_brackets_in_outputs_and_errors_are_printed_as_they_are(tmp_path):
+    """rich reads [x] as markup: output such as `lower[i]` in generated code lost its brackets on the terminal."""
+    graph = tmp_path / "t.graph.yaml"
+    graph.write_text("""version: "1.0-graph"
+workflow: {name: t, inputs: [], outputs: [{name: r, type: TEXT}]}
+nodes:
+  - {id: start, type: INPUT, ports: [entry]}
+  - {id: s, type: SOLVE, config: {expression: "'a[i] [bold]b[/bold]'"}, ports: [trigger, complete, out_r]}
+  - {id: end, type: OUTPUT, ports: [trigger, exit, in_r]}
+edges:
+  - {source: start.entry, target: s.trigger, type: triggers}
+  - {source: s.complete, target: end.trigger, type: triggers}
+  - {source: s.out_r, target: end.in_r, type: binds}
+""", encoding="utf-8")
+    result = CliRunner().invoke(main, ["run", str(graph), "--adapter", "mock", "--no-log", "--no-output"])
+    disable_logging()
+    assert "a[i] [bold]b[/bold]" in result.output.replace("\n", " ")

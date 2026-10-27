@@ -209,13 +209,15 @@ port is a named JSON value, the node's one `out_*` port (besides `out_error`) ge
     timeout: 60
     memory_mb: 2048
     on_error: "route"            # a failure goes to the `error` port, with the message on out_error, instead of ending the run
+    env_passthrough: ["HOME", "NODE_PATH"]   # host variables the program may see (see below); default: none
   ports: ["trigger", "complete", "error", "in_formula", "out_result", "out_error"]
 ```
 
 - **Inputs are data, never code.** Values are passed as JSON (stdin for a subprocess, a string literal bound to variables for the kernel), so a value that looks like Python is still just a value.
 - **`parse` (subprocess)** reads the solver's stdout; nothing is guessed. Built in: `last_json` (default; the last JSON object or fenced block), `first_line` (optionally `{first_line: [sat, unsat]}`), `{regex: "result: (?P<value>\\d+)"}` (text only), or `{tool: "file.py:function"}`, a function you write next to the graph that returns the value. A value of the wrong type, or no match, fails the node with the raw stdout and stderr in the log.
+- **Environment (subprocess).** The program sees only `PATH` and the variables named in `env_passthrough`; the rest of your environment (API keys, `HOME`, proxies) does not reach it. The value is taken from the environment the run started in, so the graph file holds names, never secrets, and the run log records names, never values. A named variable that is not set fails the node (it is a declaration of need); `graf validate` only warns, because the machine that validates may not be the one that runs. It cannot be used with `backend: kernel`, which inherits the runtime's whole environment.
 - **The kernel** starts on the first kernel node and is shut down when the run ends, Ctrl-C included. A timeout restarts it (its variables are gone). `seed` seeds `random` (and numpy, if installed) when the kernel starts. It talks over a Unix socket, not TCP.
-- **Not a sandbox.** Code runs with your privileges. It may come only from the graph file: a MUTATE delta that adds or changes `backend`, `code`, `result`, `command` or `parse`, at any depth, is refused before any policy is consulted.
+- **Not a sandbox.** Code runs with your privileges. It may come only from the graph file: a MUTATE delta that adds or changes `backend`, `code`, `result`, `command`, `parse` or `env_passthrough` (a variable such as `NODE_OPTIONS` changes what runs), at any depth, is refused before any policy is consulted.
 - **`graf validate`** reports as errors what graflang cannot run (a syntax error, a missing `result`, an unknown backend, parser or type, two result ports, `on_error: route` without an `error` port, a SOLVE that computes nothing) and as warnings what the machine running the graph may supply (a command or `requirements` item not found, a parser file that is missing or does not define the function, an input the code never uses). It never runs your code or your parser.
 - **Logging:** each firing logs `solve.kernel.exec` or `solve.subprocess.exec` with the node, a hash of the code or of the input and output, the duration and the outcome.
 
@@ -308,6 +310,7 @@ Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (
 | `cookbook/concept_book/` | builds a concept book chapter by chapter in a `LOOP` that collects chapters |
 | `cookbook/code_pipeline/` | the flagship: analyse a spec, generate/review/test code in a `LOOP`, Cedar-guarded retries, optional closure check; SPL procedures `00`-`07` sit next to the graph |
 | `cookbook/solver_check/` | both SOLVE backends, no LLM: a Python kernel and a subprocess compute the same sum, an `ASSERT` compares them with the expected value, and a failing solver routes to an error report |
+| `cookbook/ts_verify/` | a polyglot loop: an LLM writes a TypeScript function, the TypeScript compiler and Node (run as subprocess tools) judge it, their errors drive the retry, and a Python tool builds the report. Needs Node 22.18+ (`npm install` there adds type checking) |
 
 ## Known limits
 

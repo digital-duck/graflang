@@ -14,7 +14,12 @@ Install GraphLang, check that it works, and (optionally) connect a real LLM. Nex
 From the repository root:
 
 ```bash
+conda create -n graf python=3.11
+conda activate graf
+
 pip install -e ".[dev]"     # runtime + pytest; dd-llm, dd-logging and zinet (all >=0.2.0) come from PyPI
+
+pip install -e ../SPL.py
 ```
 
 To work on those libraries at the same time, install them from sibling checkouts first (`pip install -e ../dd-llm -e ../dd-logging -e ../zinet`).

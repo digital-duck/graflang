@@ -133,6 +133,37 @@ def test_a_failing_subprocess_fails_the_node_or_routes():
     assert "caught" in runtime.fired and "exited 3" in runtime.values[("s", "out_error")]
 
 
+def test_the_solver_sees_only_path_and_the_variables_the_graph_names(monkeypatch):
+    monkeypatch.setenv("GRAFLANG_TEST_SECRET", "s3cret")
+    monkeypatch.setenv("GRAFLANG_TEST_SHARED", "visible")
+    show = PY + ["import json,os,sys; sys.stdin.read(); print(json.dumps({k: v for k, v in os.environ.items() if k.startswith('GRAFLANG_TEST')}))"]
+    _, none = run([("s", {"backend": "subprocess", "command": show}, [])])
+    assert none == {"result": {}}                                                    # the host's variables do not leak
+    _, some = run([("s", {"backend": "subprocess", "command": show, "env_passthrough": ["GRAFLANG_TEST_SHARED"]}, [])])
+    assert some == {"result": {"GRAFLANG_TEST_SHARED": "visible"}}                    # only the one that was named
+
+
+def test_a_variable_that_is_not_set_fails_the_node_or_routes(monkeypatch):
+    monkeypatch.delenv("GRAFLANG_TEST_MISSING", raising=False)
+    config = {"backend": "subprocess", "command": PY + ["print(1)"], "env_passthrough": ["GRAFLANG_TEST_MISSING"]}
+    with pytest.raises(SolveError, match="GRAFLANG_TEST_MISSING"):
+        run([("s", config, [])])
+    routed = build([("s", {**config, "on_error": "route"}, ["error", "out_error"])])
+    routed["nodes"].append({"id": "caught", "type": "OBSERVE", "ports": ["trigger", "complete"]})
+    routed["edges"].append(trig("s.error", "caught.trigger"))
+    runtime = GraphLangRuntime(routed, verbose=False)
+    runtime.execute({})
+    assert "caught" in runtime.fired and "GRAFLANG_TEST_MISSING" in runtime.values[("s", "out_error")]
+
+
+def test_the_run_log_names_the_variables_but_never_their_values(monkeypatch, caplog):
+    monkeypatch.setenv("GRAFLANG_TEST_SHARED", "do-not-log-me")
+    with caplog.at_level("INFO"):
+        run([("s", {"backend": "subprocess", "command": PY + ["print('{}')"], "env_passthrough": ["GRAFLANG_TEST_SHARED"]}, [])])
+    text = "\n".join(r.getMessage() for r in caplog.records) + str([getattr(r, "__dict__", {}) for r in caplog.records])
+    assert "GRAFLANG_TEST_SHARED" in text and "do-not-log-me" not in text
+
+
 def test_a_subprocess_result_of_the_wrong_type_fails_the_node():
     wrong = {"backend": "subprocess", "command": PY + ["print('{\"a\": 1}')"], "out_type": "BOOL"}
     with pytest.raises(SolveError, match="expected BOOL"):
@@ -178,6 +209,9 @@ def test_graf_validate_reports_backend_errors_through_the_topology_check():
     ({"backend": "kernel", "code": "x = 1", "result": "x", "expression": "1"}, ("trigger", "out_r"), "cannot also have expression"),
     ({"backend": "teleport"}, ("trigger", "out_r"), "unknown backend"),
     ({"backend": "subprocess"}, ("trigger", "out_r"), "needs `command`"),
+    ({"backend": "subprocess", "command": ["x"], "env_passthrough": "HOME"}, ("trigger", "out_r"), "list of environment variable names"),
+    ({"backend": "subprocess", "command": ["x"], "env_passthrough": ["NOT A NAME"]}, ("trigger", "out_r"), "list of environment variable names"),
+    ({"backend": "kernel", "code": "x = 1", "result": "x", "env_passthrough": ["HOME"]}, ("trigger", "out_r"), "applies to backend: subprocess"),
     ({"backend": "subprocess", "command": "python x.py"}, ("trigger", "out_r"), "needs `command`"),
     ({"backend": "subprocess", "command": ["x"], "parse": "magic"}, ("trigger", "out_r"), "unknown parser"),
     ({"backend": "subprocess", "command": ["x"], "parse": {"regex": "("}}, ("trigger", "out_r"), "does not compile"),
@@ -205,6 +239,13 @@ def test_things_the_user_supplies_are_warnings_not_errors(tmp_path):
     assert "no-such-solver-xyz" in text and "does not define a function 'z3_result'" in text and "no_such_requirement_xyz" in text
     errors, warnings = problems({**config, "parse": {"tool": "missing.py:f"}}, base_dir=tmp_path)
     assert errors == [] and any("was not found next to the graph" in w for w in warnings)
+
+
+def test_a_passthrough_variable_that_is_not_set_here_is_a_warning(monkeypatch):
+    monkeypatch.delenv("GRAFLANG_TEST_MISSING", raising=False)
+    errors, warnings = problems({"backend": "subprocess", "command": ["python3"], "env_passthrough": ["GRAFLANG_TEST_MISSING"]},
+                                ("trigger", "out_r"))
+    assert errors == [] and any("GRAFLANG_TEST_MISSING is not set here" in w for w in warnings)
 
 
 def test_validation_never_runs_a_custom_parser(tmp_path):
