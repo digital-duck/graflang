@@ -37,6 +37,20 @@ On the interactive page the first view is the control flow: the data edges are h
 
 If Graphviz (`dot`) is installed, the interactive page also uses it to lay the nodes out (it keeps a loop's body together and picks a left-to-right or top-to-bottom shape that fits the screen); without it the page falls back to Cytoscape's own layouts.
 
+### Installing Graphviz (optional)
+
+Graphviz is a system program (`dot`), not a pip package, so `pip install` cannot add it. Without it, `--engine graphviz` writes the DOT text instead of an image, and the interactive page uses Cytoscape's own layouts.
+
+| System | Command |
+|---|---|
+| Ubuntu / Debian | `sudo apt install graphviz` |
+| Fedora | `sudo dnf install graphviz` |
+| macOS (Homebrew) | `brew install graphviz` |
+| Windows | `winget install Graphviz.Graphviz`, or `choco install graphviz`; then open a new terminal so `dot` is on the PATH |
+| conda | `conda install -c conda-forge graphviz` |
+
+Check with `dot -V` (it prints the version), then `graf vis --list-engines`: the `graphviz` line should say `ok`.
+
 ### `graf run` options
 
 | Option | Meaning |

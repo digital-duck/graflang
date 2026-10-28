@@ -23,6 +23,12 @@ Run everything from the repository root (`graflang/`), in the environment where 
 
 ## Walkthrough
 
+### 0. Visualize graph.yaml
+
+```bash
+graf viz cookbook/ts_verify/ts_verify.graph.yaml
+```
+
 ### 1. Check the graph and run the tests (no model, no install)
 
 ```bash

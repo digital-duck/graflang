@@ -31,8 +31,10 @@ Optional extras:
 | `dev` | `pytest`, `pytest-asyncio` | running the tests |
 | `anthropic`, `gemini` | the provider SDK, through dd-llm | those providers (the `openai` SDK is already a core dependency; only `claude_cli`, `gemini_cli` and `echo` need none; see below) |
 | `spl` | SPL.py (`spl-llm`) | only `procedure_ref` nodes, which run SPL.py workflows |
-| `vis`, `graphify` | `pyvis`, `graphify` | `graf vis --engine pyvis` / `--engine graphify` (the default engine, `graphviz` and `mermaid` need nothing extra) |
+| `vis`, `graphify` | `pyvis`, `graphify` | `graf vis --engine pyvis` / `--engine graphify` (the default engine, `mermaid` and `ascii` need nothing extra; `graphviz` needs the system program, see below) |
 | `grafc` | `jinja2` | the compiler templates |
+
+**Graphviz** (for `graf vis --engine graphviz` images, and a better layout on the interactive page) is a system program, not a pip package: Ubuntu/Debian `sudo apt install graphviz`, Fedora `sudo dnf install graphviz`, macOS `brew install graphviz`, Windows `winget install Graphviz.Graphviz`, conda `conda install -c conda-forge graphviz`. Check with `dot -V`. Full table in the User Guide, under `graf vis`.
 
 Core dependencies (`click`, `ruamel.yaml`, `networkx`, `jsonschema`, `cedarpy`, `dd-llm`, `rich`, `dd-llm[openai]`, `dd-logging`, `zinet`) come with the base install. `zinet` is the shared graph library: `graf vis` draws through it. `dd-llm` is the shared LLM layer that provides the adapters, and its `openai` SDK serves openai, openrouter, ollama, deepseek and qwen. `cedarpy` is the official Cedar engine and is required: `grafr` imports it at startup.
 

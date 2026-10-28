@@ -10,11 +10,20 @@ wf_entry -> sum_kernel (Python kernel) -> sum_script (subprocess) -> agree (ASSE
 
 ## Run
 
+### Visualize graph.yaml
+```bash
+graf vis cookbook/solver_check/solver_check.graph.yaml
+```
+
+![graf vis of solver_check: the Python kernel sum, the separate-program sum, then an assert that routes to report ok, report mismatch or report failed](graf-vis.png)
+
+### Test
+
 ```bash
 pip install -e ".[kernel]"          # jupyter_client and ipykernel, for the kernel node
-graf run cookbook/solver_check/solver_check.graph.yaml --adapter mock --param numbers=1,2,3 --param expected=6
+graf run cookbook/solver_check/solver_check.graph.yaml --adapter claude_cli --param numbers=1,2,3 --param expected=6
 # confirmed: 6 (kernel and subprocess agree)
-graf run cookbook/solver_check/solver_check.graph.yaml --adapter mock --param numbers=1,2,3 --param expected=7
+graf run cookbook/solver_check/solver_check.graph.yaml --adapter claude_cli --param numbers=1,2,3 --param expected=7
 # MISMATCH: kernel 6, subprocess 6, expected 7
 ```
 

@@ -1,4 +1,5 @@
 """The visualization command of `graf`: vis (registered in graphlang/cli.py)."""
+import shutil
 import sys
 import webbrowser
 from pathlib import Path
@@ -28,6 +29,10 @@ def cmd_vis(graph, engine, list_engines, out, no_open):
             ok, why = spec["ready"]()
             console.print(f"{name:<10} {'ok ' if ok else '!! '} {hint(spec['about'])}" + ("" if ok else f"  [{hint(why)}]")
                           + ("  (default)" if name == DEFAULT_ENGINE else ""), highlight=False, soft_wrap=True, markup=False)
+        if shutil.which("dot") is None:
+            console.print("\nGraphviz is a system program, not a pip package. Install it with: sudo apt install graphviz (Ubuntu/Debian), "
+                          "brew install graphviz (macOS), winget install Graphviz.Graphviz (Windows), "
+                          "conda install -c conda-forge graphviz. Then check: dot -V", highlight=False, soft_wrap=True, markup=False)
         return
     if not graph:
         raise click.UsageError("missing GRAPH (the path to a .graph.yaml file)")
