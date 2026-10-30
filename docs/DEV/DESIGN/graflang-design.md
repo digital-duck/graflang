@@ -320,6 +320,7 @@ Persistent MUTATE across loop iterations (G14), optional Rust/WASM packaging, zi
 
 - **Real LLM, not mock.** The `mock` adapter stays in the code and in this design, but from the start of the build, new tests, examples and acceptance runs use `claude_cli` with the default model `claude-sonnet-5-5` (`--llm claude_cli:claude-sonnet-5-5`). Keep calls small: short prompts, few cases per test.
 - **Status of R0 items:** G12 README honesty is done (interaction nets, "confluent" and Rust compilation removed; internal module names no longer shown); G10 hardcoded `/home/papagame/` paths are removed from code (recorded run outputs under `experiments/` keep them as history); decide G9 remains.
+- **Build status (R0 and R0.5 done):** R0: suite green on a clean checkout apart from the known `grafc/cedar` failures (left alone); the `spl` experiment arm no longer depends on `spl3` being on `PATH`. R0.5: S1 `graflang-semantics.md`; S2 race and JOIN-deadlock checks in `graf validate` (`topology.py`); S3 `MUTATE` re-checks the guarantees on a trial copy and refuses to touch `GUARD`/`MUTATE` nodes or the `risky` flag (`runtime.py`); S4 `tests/test_semantics.py` pins rules R1 to R10. Run tests with the `graf` conda env (`~/anaconda3/envs/graf/bin/python -m pytest`).
 
 ## 11. graph-code `ide` Review (input to the migration)
 

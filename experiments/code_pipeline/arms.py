@@ -183,7 +183,7 @@ def run_spl(spec: str, model: str, run_dir: Path) -> ArmResult:
     logs = run_dir / "spl"
     start = time.time()
     # cwd is the run folder, so the `.spl/` working files spl3 creates land there and not in the SPL.py checkout
-    cmd = ["spl3", "run", str(SPL_DIR / "code_pipeline.spl"), "--adapter", ADAPTER, "--model", model, "--persistence", "none",
+    cmd = [sys.executable, "-c", "from spl3.cli import main; main()", "run", str(SPL_DIR / "code_pipeline.spl"), "--adapter", ADAPTER, "--model", model, "--persistence", "none",
            "--log-prompts", str(run_dir / "prompts"), "-p", f"spec={spec}", "-p", f"pipeline_model={model}",
            "-p", "check_closure=false", "-p", f"log_dir={logs}"]
     try:

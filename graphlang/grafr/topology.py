@@ -109,6 +109,89 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
                 warnings.append(f"{where}: input {port!r} is not fed by any binds edge")
         if typ not in ("INPUT", "LOOP") and "trigger" in n["ports"] and nid not in triggered and not prefix:
             warnings.append(f"{where}: nothing triggers it")
+    _check_races(nodes, edges, prefix, errors)
+
+
+class _Order:
+    """Control-flow order inside one scope, read from its `triggers` edges.
+
+    `ordered(a, b)`: one node can reach the other, so one of them runs after the other (happens-before).
+    `exclusive(a, b)`: some node routes to only one of its control ports per firing (everything but a FORK), and `a`
+    is reachable only from one of those ports and `b` only from another, so at most one of them runs.
+    """
+
+    def __init__(self, nodes: List[Dict], edges: List[Dict]):
+        self.type = {n["id"]: n["type"] for n in nodes}
+        self.by_port: Dict[Tuple[str, str], Set[str]] = {}
+        self.by_node: Dict[str, Set[str]] = {}
+        for e in edges:
+            if e["type"] != "triggers":
+                continue
+            (src, _, sport), (tgt, _, _) = e["source"].partition("."), e["target"].partition(".")
+            if src in self.type and tgt in self.type:
+                self.by_port.setdefault((src, sport), set()).add(tgt)
+                self.by_node.setdefault(src, set()).add(tgt)
+        self._reach_cache: Dict[Any, Set[str]] = {}
+
+    def _reach(self, starts: Set[str]) -> Set[str]:
+        key = frozenset(starts)
+        if key not in self._reach_cache:
+            seen, todo = set(), list(starts)
+            while todo:
+                n = todo.pop()
+                if n not in seen:
+                    seen.add(n)
+                    todo += self.by_node.get(n, ())
+            self._reach_cache[key] = seen
+        return self._reach_cache[key]
+
+    def ordered(self, a: str, b: str) -> bool:
+        return b in self._reach({a}) or a in self._reach({b})
+
+    def exclusive(self, a: str, b: str) -> bool:
+        for node, typ in self.type.items():
+            if typ == "FORK":
+                continue
+            ports = {port: self._reach(t) for (n, port), t in self.by_port.items() if n == node}
+            for p1, r1 in ports.items():
+                for p2, r2 in ports.items():
+                    if p1 < p2 and ((a in r1 and a not in r2 and b in r2 and b not in r1)
+                                    or (b in r1 and b not in r2 and a in r2 and a not in r1)):
+                        return True
+        return False
+
+
+def _check_races(nodes: List[Dict], edges: List[Dict], prefix: str, errors: List[str]) -> None:
+    """Report a race and a deadlock, both found by counting tokens on the control graph.
+
+    Race: two nodes write the same input port through `binds` edges, and neither runs after the other nor excludes the
+    other. The port then holds whichever the scheduler ran last, which is not part of the program.
+    Deadlock: a JOIN waits for a token on every incoming `triggers` edge, so two sources of which at most one can run
+    mean it never fires.
+    """
+    order = _Order(nodes, edges)
+    writers: Dict[str, Set[str]] = {}
+    for e in edges:
+        if e["type"] == "binds":
+            tgt, src = e["target"], e["source"].partition(".")[0]
+            if src in order.type:
+                writers.setdefault(tgt, set()).add(src)
+    for port, srcs in sorted(writers.items()):
+        srcs = sorted(srcs)
+        for i, a in enumerate(srcs):
+            for b in srcs[i + 1:]:
+                if not order.ordered(a, b) and not order.exclusive(a, b):
+                    errors.append(f"{prefix}race: {a!r} and {b!r} both write {port!r} and neither runs after the other "
+                                  f"or excludes it; order them with a `triggers` path, or route them from one branch")
+    for n in nodes:
+        if n["type"] != "JOIN":
+            continue
+        srcs = sorted({e["source"].partition(".")[0] for e in edges
+                       if e["type"] == "triggers" and e["target"] == f"{n['id']}.trigger" and e["source"].partition(".")[0] in order.type})
+        for i, a in enumerate(srcs):
+            for b in srcs[i + 1:]:
+                if order.exclusive(a, b):
+                    errors.append(f"{prefix}deadlock: JOIN {n['id']!r} waits for both {a!r} and {b!r}, but at most one of them runs")
 
 
 def _check_loop(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[str], warnings: List[str]) -> None:
@@ -211,6 +294,15 @@ def _check_guarded(nodes: List[Dict], edges: List[Dict], errors: List[str]) -> N
     for g, targets in deny_from.items():
         for nid in sorted(set(risky) & reach(targets)):
             errors.append(f"{risky[nid]} can run after GUARD {g!r} denies")
+
+
+def invariants(nodes: List[Dict], edges: List[Dict]) -> List[str]:
+    """The structural guarantees that must hold for every graph that exists, the loaded one and each one a MUTATE
+    produces: risky nodes stay behind a GUARD, no race, no deadlock. A delta is refused if it adds an error to this list."""
+    errors: List[str] = []
+    _check_guarded(nodes, edges, errors)
+    _check_races(nodes, edges, "", errors)
+    return errors
 
 
 def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:

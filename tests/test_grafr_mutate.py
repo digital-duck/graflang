@@ -284,3 +284,50 @@ def test_mutate_is_deny_by_default_and_must_declare_its_routes():
     rt = GraphLangRuntime(g, verbose=False)
     rt.execute({"d": "x"})
     assert "refused" in rt.fired and "no delta" in rt.values[("mut", "out_reason")]
+
+
+# ---- the safety layer and the invariants a mutation must keep ---------------------------------------------
+
+def guarded_graph(delta, **cfg):
+    """start -> gd -allow-> act (risky); gd -deny-> refused. The MUTATE runs first, from the INPUT's entry port."""
+    return graph(
+        [{"id": "start", "type": "INPUT", "ports": ["entry", "out_d"]},
+         {"id": "mut", "type": "MUTATE", "ports": ["trigger", "applied", "rejected", "in_delta", "out_reason"],
+          "config": {"policy_ref": "policies.m", **cfg}},
+         {"id": "gd", "type": "GUARD", "ports": ["trigger", "allow", "deny"], "config": {"policy_ref": "policies.g"}},
+         {"id": "act", "type": "OBSERVE", "ports": ["trigger", "complete"], "config": {"risky": True}},
+         {"id": "refused", "type": "OBSERVE", "ports": ["trigger", "complete"]}],
+        [trig("start.entry", "mut.trigger"), trig("mut.applied", "gd.trigger"), trig("mut.rejected", "refused.trigger"),
+         trig("gd.allow", "act.trigger"), bind("start.out_d", "mut.in_delta")],
+        inputs=[{"name": "d", "type": "TEXT"}], resources={**RES, "policies": {**RES["policies"], "g": RES["policies"]["m"]}})
+
+
+def run_guarded(delta):
+    rt = GraphLangRuntime(guarded_graph(delta), verbose=False)
+    rt.execute({"d": json.dumps(delta)})
+    return rt, rt.values.get(("mut", "out_reason")), "refused" in rt.fired
+
+
+@pytest.mark.parametrize("delta, why", [
+    ({"action": "remove_node", "payload": {"id": "gd"}}, "cannot be removed"),
+    ({"action": "update_config", "payload": {"node_id": "gd", "key": "policy_ref", "value": "policies.m"}}, "safety layer"),
+    ({"action": "update_config", "payload": {"node_id": "mut", "key": "max_mutations", "value": 99}}, "safety layer"),
+    ({"action": "update_config", "payload": {"node_id": "act", "key": "risky", "value": False}}, "safety layer"),
+])
+def test_a_delta_cannot_touch_the_safety_layer(delta, why):
+    rt, reason, refused = run_guarded(delta)
+    assert refused and why in reason, reason
+    assert rt.G.nodes["act"]["config"]["risky"] is True and "gd" in rt.G
+
+
+def test_a_delta_that_routes_around_a_guard_is_rejected_by_the_graph_check_even_if_the_policy_permits_it(tmp_path):
+    (tmp_path / "all.cedar").write_text("permit(principal, action, resource);\n")
+    around = {"action": "add_edge", "payload": {"source": "mut.applied", "target": "act.trigger", "type": "triggers"}}
+    g = guarded_graph(around)
+    g["resources"]["policies"]["m"] = "all.cedar"
+    g["_source_dir"] = str(tmp_path)
+    rt = GraphLangRuntime(g, verbose=False)
+    rt.execute({"d": json.dumps(around)})
+    reason = rt.values.get(("mut", "out_reason"))
+    assert "refused" in rt.fired and "would break the graph" in reason and "'act'" in reason, reason
+    assert rt.budget.mutations == 0

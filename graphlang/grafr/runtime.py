@@ -18,6 +18,7 @@ nodes, or several edges of the same kind on different ports, are all kept.
 """
 from __future__ import annotations
 
+import copy
 import json
 import time
 from collections import deque
@@ -38,6 +39,7 @@ from .kernel import KernelPool
 from .output import RunOutput
 from .resolver import ResourceResolver
 from .solve_backend import CODE_KEYS, code_keys_in, run_backend
+from .topology import invariants
 
 console = Console()
 _log = get_logger("grafr.runtime")
@@ -46,6 +48,8 @@ SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "graflang-ir.j
 DELTA_SCHEMA_PATH = SCHEMA_PATH.with_name("graph_delta.schema.json")
 IMMUTABLE_KEYS = {"id", "type", "ports"}            # update_config may not touch these
 PROTECTED_TYPES = {"INPUT", "OUTPUT"}               # remove_node may not remove the workflow's ends
+SAFETY_TYPES = {"GUARD", "MUTATE"}                  # the safety layer: a delta may not remove these nor change their config
+SAFETY_KEYS = {"risky"}                             # nor mark or unmark any node as risky
 DEFAULT_MAX_MUTATIONS = 3
 DEFAULT_EMIT = ("complete", "exit", "entry")
 DEFAULT_MAX_STEPS = 1000
@@ -449,6 +453,9 @@ class GraphLangRuntime:
                                 self._delta_context(delta, cfg))
         if not decision.allowed:
             return outcome(False, decision.explain())
+        broken = self._broken_by(delta)
+        if broken:
+            return outcome(False, "the delta would break the graph: " + "; ".join(broken))
         self._apply_delta(delta)
         self.budget.mutations += 1
         return outcome(True, f"{delta['action']} {json.dumps(delta['payload'], sort_keys=True)}")
@@ -497,7 +504,7 @@ class GraphLangRuntime:
         elif a == "remove_node":
             if p["id"] not in self.G:
                 raise ValueError(f"no node {p['id']!r}")
-            if self.G.nodes[p["id"]]["type"] in PROTECTED_TYPES:
+            if self.G.nodes[p["id"]]["type"] in PROTECTED_TYPES | SAFETY_TYPES:
                 raise ValueError(f"{self.G.nodes[p['id']]['type']} nodes cannot be removed")
         elif a in ("add_edge", "remove_edge"):
             (src, sport), (tgt, tport) = split_ref(p["source"]), split_ref(p["target"])
@@ -520,6 +527,8 @@ class GraphLangRuntime:
                 raise ValueError(f"no node {p['node_id']!r}")
             if p["key"] in IMMUTABLE_KEYS:
                 raise ValueError(f"config key {p['key']!r} cannot be changed")
+            if self.G.nodes[p["node_id"]]["type"] in SAFETY_TYPES or p["key"] in SAFETY_KEYS:
+                raise ValueError(f"the safety layer cannot be changed by a delta ({p['node_id']!r}.{p['key']})")
 
     def _delta_context(self, delta: Dict, cfg: Dict) -> Dict[str, Any]:
         """The Cedar context. Every attribute the shipped policies read is always present (a missing one makes
@@ -547,21 +556,37 @@ class GraphLangRuntime:
                 "human_approval": bool(cfg.get("human_approval", False)),
                 "contains_pii": False}                                # PII detection is not implemented
 
-    def _apply_delta(self, delta: Dict) -> None:
+    @staticmethod
+    def _lists(G: "nx.MultiDiGraph") -> tuple[List[Dict], List[Dict]]:
+        nodes = [dict(d) for _, d in G.nodes(data=True)]
+        edges = [{"source": f"{u}.{d['source_port']}", "target": f"{v}.{d['target_port']}", "type": d["type"]}
+                 for u, v, d in G.edges(data=True)]
+        return nodes, edges
+
+    def _broken_by(self, delta: Dict) -> List[str]:
+        """Errors the delta would add to topology.invariants (empty if it keeps the graph valid). The delta is tried on a
+        copy, so an accepted mutation never leaves the guarantees `graf validate` gave the loaded graph."""
+        trial = copy.deepcopy(self.G)
+        self._apply_delta(delta, trial)
+        before, after = set(invariants(*self._lists(self.G))), invariants(*self._lists(trial))
+        return [m for m in after if m not in before]
+
+    def _apply_delta(self, delta: Dict, G: Optional["nx.MultiDiGraph"] = None) -> None:
+        G = self.G if G is None else G
         a, p = delta["action"], delta["payload"]
         if a == "add_node":
-            self.G.add_node(p["id"], id=p["id"], type=p["type"], ports=list(p["ports"]), config=dict(p.get("config", {})))
+            G.add_node(p["id"], id=p["id"], type=p["type"], ports=list(p["ports"]), config=dict(p.get("config", {})))
         elif a == "remove_node":
-            self.G.remove_node(p["id"])
+            G.remove_node(p["id"])
         elif a == "add_edge":
             (src, sport), (tgt, tport) = split_ref(p["source"]), split_ref(p["target"])
-            self.G.add_edge(src, tgt, source_port=sport, target_port=tport, type=p["type"])
+            G.add_edge(src, tgt, source_port=sport, target_port=tport, type=p["type"])
         elif a == "remove_edge":
             (src, sport), (tgt, tport) = split_ref(p["source"]), split_ref(p["target"])
-            for _, t, key, d in list(self.G.out_edges(src, keys=True, data=True)):
+            for _, t, key, d in list(G.out_edges(src, keys=True, data=True)):
                 if t == tgt and d["type"] == p["type"] and d["source_port"] == sport and d["target_port"] == tport:
-                    self.G.remove_edge(src, tgt, key)
+                    G.remove_edge(src, tgt, key)
                     break
         else:
-            node = self.G.nodes[p["node_id"]]
+            node = G.nodes[p["node_id"]]
             node.setdefault("config", {})[p["key"]] = p["value"]

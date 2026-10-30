@@ -117,3 +117,52 @@ def test_a_loop_whose_body_holds_a_risky_node_must_be_guarded_as_a_whole():
     assert guarded(loop=True) == []
     msgs = guarded(loop=True, extra_path=True)
     assert len(msgs) == 1 and "LOOP 'r'" in msgs[0] and "body holds risky r/inner" in msgs[0]
+
+
+def _flow(*node_defs):
+    n = lambda i, t, ports: {"id": i, "type": t, "ports": ports, "config": {"condition": "@in_x"} if t in ("EVALUATE", "ASSERT") else {}}
+    return [n(*d) for d in node_defs]
+
+
+def _e(a, b, t="triggers"):
+    return {"source": a, "target": b, "type": t}
+
+
+W = ("trigger", "complete", "in_x", "out_y")
+
+
+def test_two_unordered_writers_to_one_port_are_a_race():
+    nodes = _flow(("f", "FORK", ["trigger", "a", "b"]), ("A", "SOLVE", W), ("B", "SOLVE", W), ("C", "SOLVE", W))
+    edges = [_e("s.entry", "f.trigger"), _e("f.a", "A.trigger"), _e("f.b", "B.trigger"),
+             _e("A.out_y", "C.in_x", "binds"), _e("B.out_y", "C.in_x", "binds")]
+    assert any("race" in m and "'A'" in m and "'B'" in m for m in errs(nodes, edges))
+
+
+def test_writers_ordered_by_triggers_are_not_a_race():
+    nodes = _flow(("A", "SOLVE", W), ("B", "SOLVE", W), ("C", "SOLVE", W))
+    edges = [_e("s.entry", "A.trigger"), _e("A.complete", "B.trigger"), _e("B.complete", "C.trigger"),
+             _e("A.out_y", "C.in_x", "binds"), _e("B.out_y", "C.in_x", "binds")]
+    assert not any("race" in m for m in errs(nodes, edges))
+
+
+def test_writers_on_exclusive_branches_are_not_a_race():
+    nodes = _flow(("g", "EVALUATE", ["trigger", "pass", "fail", "in_x"]), ("A", "SOLVE", W), ("B", "SOLVE", W), ("C", "SOLVE", W))
+    edges = [_e("s.entry", "g.trigger"), _e("g.pass", "A.trigger"), _e("g.fail", "B.trigger"),
+             _e("A.complete", "C.trigger"), _e("B.complete", "C.trigger"),
+             _e("A.out_y", "C.in_x", "binds"), _e("B.out_y", "C.in_x", "binds")]
+    assert not any("race" in m for m in errs(nodes, edges))
+
+
+def test_a_join_after_exclusive_branches_is_a_deadlock():
+    nodes = _flow(("g", "EVALUATE", ["trigger", "pass", "fail", "in_x"]), ("A", "SOLVE", W), ("B", "SOLVE", W),
+                  ("j", "JOIN", ["trigger", "complete"]))
+    edges = [_e("s.entry", "g.trigger"), _e("g.pass", "A.trigger"), _e("g.fail", "B.trigger"),
+             _e("A.complete", "j.trigger"), _e("B.complete", "j.trigger")]
+    assert any("deadlock" in m and "'j'" in m for m in errs(nodes, edges))
+
+
+def test_a_join_after_a_fork_is_fine():
+    nodes = _flow(("f", "FORK", ["trigger", "a", "b"]), ("A", "SOLVE", W), ("B", "SOLVE", W), ("j", "JOIN", ["trigger", "complete"]))
+    edges = [_e("s.entry", "f.trigger"), _e("f.a", "A.trigger"), _e("f.b", "B.trigger"),
+             _e("A.complete", "j.trigger"), _e("B.complete", "j.trigger")]
+    assert not any("deadlock" in m for m in errs(nodes, edges))
