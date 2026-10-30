@@ -33,7 +33,7 @@
             "enum": [
               "INPUT", "EMIT", "GENERATE", "SOLVE", "QUERY", 
               "EVALUATE", "FORK", "JOIN", "LOOP", "BATCH", 
-              "ASSERT", "RECOVER", "CONTEXT", "MUTATE", 
+              "ASSERT", "RUN", "RECOVER", "CONTEXT", "MUTATE", 
               "GUARD", "OBSERVE", "OUTPUT"
             ] 
           },

@@ -43,6 +43,7 @@ from .lifecycle import run_phases
 from .output import RunOutput
 from .ports import apply_input_types, check_value, normalize_ports
 from .resolver import ResourceResolver
+from .run_node import run_run
 from .solve_backend import CODE_KEYS, code_keys_in, run_backend
 from .topology import invariants
 
@@ -311,7 +312,7 @@ class GraphLangRuntime:
     @staticmethod
     def _concurrent(data: Dict) -> bool:
         cfg = data.get("config", {})
-        return data["type"] == "GENERATE" or (data["type"] == "SOLVE" and (cfg.get("backend") == "subprocess" or "procedure_ref" in cfg))
+        return data["type"] in ("GENERATE", "RUN") or (data["type"] == "SOLVE" and (cfg.get("backend") == "subprocess" or "procedure_ref" in cfg))
 
     def _fire(self, node: str, queue: deque) -> None:
         data = self.G.nodes[node]
@@ -416,7 +417,9 @@ class GraphLangRuntime:
             return self._run_batch(node_data, in_data)
         if node_type == "MUTATE":
             return self._run_mutate(node_data, in_data)
-        if node_type == "SOLVE" and node_data.get("config", {}).get("backend"):
+        if node_type == "RUN":
+            run = lambda data: run_run(node_data, data, self.resolver, self.kernels)
+        elif node_type == "SOLVE" and node_data.get("config", {}).get("backend"):
             run = lambda data: run_backend(node_data, data, self.resolver, self.kernels)
         else:
             from .nodes import get_node_executor

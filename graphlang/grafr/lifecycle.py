@@ -52,6 +52,9 @@ def _classify(exc: Exception) -> str:
     """Config and evaluation errors are permanent; I/O, timeout and adapter errors may pass on a second try."""
     if isinstance(exc, InvalidOutput):
         return "invalid_output"
+    retryable = getattr(exc, "retryable", None)               # RUN errors say so themselves
+    if retryable is not None:
+        return "transient" if retryable else "permanent"
     if isinstance(exc, (ValueError, KeyError, TypeError)):
         return "permanent"
     return "transient"

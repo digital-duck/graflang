@@ -32,7 +32,7 @@ ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SCOPES = ("run", "node")
 # Config keys that decide what runs. They come from the graph file, never from a model: a MUTATE delta that adds or changes
 # one is refused before any policy is consulted (see `code_keys_in`).
-CODE_KEYS = frozenset({"backend", "code", "result", "command", "parse", "env_passthrough"})   # env can change what runs (NODE_OPTIONS, PYTHONPATH)
+CODE_KEYS = frozenset({"backend", "code", "result", "command", "parse", "env_passthrough", "executor", "url", "allow_hosts", "headers", "method"})   # env can change what runs (NODE_OPTIONS, PYTHONPATH)
 
 
 class SolveError(RuntimeError):

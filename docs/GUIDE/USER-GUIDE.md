@@ -215,6 +215,18 @@ limits: {max_steps: 200, wall_time_s: 300}
 - **`BATCH`** runs a `subgraph` once per item of a list and collects one value per item, in order. `over` names the `in_*` port holding the list, `item_var` (default `item`) and `index` are visible to the body, `outputs: {texts: {collect: "w.out_text"}}` names what to collect, `concurrency` sets how many items run at once, `max_items` caps the list (default 1000).
 - **`graf run --workers N`** (or `limits.concurrency` in a bindings file) runs the nodes that are released together, such as the branches of a `FORK`, at the same time. The result does not depend on which call finishes first. The default is 1, one node at a time.
 
+## RUN: work done by an executor
+
+`RUN` is deterministic work with one contract whatever does it: each `in_<name>` port is a named JSON value going in, the one `out_*` port (besides `out_error`) gets a value of `out_type`, and a failure, timeout or bad answer fails the node (or goes to the `error` port with `on_error: route`).
+
+| `executor` | does | keys |
+|---|---|---|
+| `subprocess` | runs a program that reads JSON on stdin | the same as `SOLVE` with `backend: subprocess` |
+| `python` | runs code in a Python kernel | the same as `SOLVE` with `backend: kernel` |
+| `http` | posts `{"inputs": {...}}` as JSON to `url`, reads JSON back | `url`, `allow_hosts` (required), `method`, `headers`, `timeout`, `out_type`, `on_error` |
+
+An http answer is `{"result": value}` or the value itself, or `{"error": {"code": "...", "message": "...", "retryable": true}}`. A 5xx, a 429 or `retryable: true` counts as a transient failure, so `phases: {exec: {retry: {max: 3, on: [transient]}}}` tries again; any other error is permanent. The host must be in `allow_hosts`, and redirects are not followed.
+
 ## Nodes and ports
 
 Each node has `id`, `type`, `ports`, and optional `config`. Port names carry their kind:

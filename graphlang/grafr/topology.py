@@ -12,6 +12,7 @@ from .ports import apply_input_types, assignable, check_types, normalize_ports, 
 from .lifecycle import check_phases
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
+from .run_node import check_run
 from .solve_backend import check_solve
 
 CONTROL_EXCLUDED = ("in_", "out_")
@@ -121,6 +122,10 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             solve_errors, solve_warnings = check_solve(n, resolver.base_dir)
             errors += [f"{where}: {m}" for m in solve_errors]
             warnings += [f"{where}: {m}" for m in solve_warnings]
+        elif typ == "RUN":
+            run_errors, run_warnings = check_run(n, resolver.base_dir)
+            errors += [f"{where}: {m}" for m in run_errors]
+            warnings += [f"{where}: {m}" for m in run_warnings]
         elif typ == "LOOP":
             _check_loop(n, prefix, resolver, errors, warnings)
         elif typ == "BATCH":
