@@ -174,7 +174,7 @@ GraphLang takes SPL's proven semantics and gives them a **topological execution 
 - [x] Flagship example (`code_pipeline.graph.yaml`)
 - [x] Python interpreter (NetworkX-based topological executor)
 - [x] `graf vis`: read a workflow as a graph (control flow first, data edges on demand, loops that collapse to one box)
-- [ ] Visual IDE: author and edit a workflow in the graph view (add and connect nodes and ports, edit their config, validate while you edit, write the `*.graph.yaml` with its comments kept, run from the view). Planned.
+- [x] Editor: `graf vis --edit` adds, connects, changes and removes nodes, validates while you edit and saves the `*.graph.yaml` with its comments kept (`pip install 'graflang[edit]'`). Not yet: run from the view, drag-to-connect.
 - [ ] Interactive Streamlit UI (drill-down visualization of Tier 3 composites)
 - [x] SPL recipes as graphs: `spl2graph` (in SPL.py) lifts 265 of 274 cookbook workflows; `graf export-spl` goes back
 - [ ] Paper submission (NeurIPS / ICLR)

@@ -171,6 +171,10 @@ edges: [ ... ]
 
 Schema: `graphlang/schema/graflang-ir.json`. Node ids match `[a-zA-Z0-9_]+`.
 
+## The editor: `graf vis --edit`
+
+`pip install 'graflang[edit]'`, then `graf vis --edit flow.graph.yaml` opens a browser editor on a long-form workflow (a compact `steps:` file is edited as text; `graf expand` gives the long form). The picture is the `graf vis` view. On the right: change a node's ports and config (values are YAML), rename or remove it, add a node, add or remove edges, and read the problems `graf validate` finds as you work. Nothing is written until **Save**, and Save is off while there are errors. Comments in the file stay, edits can be undone, and the file is replaced only after the new one is complete. Alignment spaces inside `{...}` may be normalised on save. A person may set anything a node can hold; the rule that a `MUTATE` can never add code applies to models, not to you. `graf ui` is the same command.
+
 ## Compact form: `steps:`
 
 A short way to write a workflow. `steps:` replaces `nodes:` and `edges:`; `graf expand FILE` prints the long form that runs.

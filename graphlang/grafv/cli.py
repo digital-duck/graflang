@@ -22,7 +22,9 @@ console = Console()
 @click.option("-o", "--out", type=click.Path(dir_okay=False), default=None,
               help="output file (default ~/.graflang/vis/<graph>-<engine>.<html|svg|mmd|txt>)")
 @click.option("--no-open", is_flag=True, help="write the file but do not open it")
-def cmd_vis(graph, engine, list_engines, out, no_open):
+@click.option("--edit", is_flag=True, help="open the editor instead (add, connect, change and remove nodes; saves only a valid graph, keeps "
+                                           "your comments); needs `pip install 'graflang[edit]'`")
+def cmd_vis(graph, engine, list_engines, out, no_open, edit):
     """Draw a GraphLang workflow (GRAPH is the path to the .graph.yaml file) and open it."""
     if list_engines:
         for name, spec in ENGINES.items():
@@ -45,6 +47,9 @@ def cmd_vis(graph, engine, list_engines, out, no_open):
     except ValueError as e:
         console.print(f"[red]✗ Invalid graph:[/red] {escape(str(e))}")
         sys.exit(1)
+    if edit:
+        _run_editor(graph_path)
+        return
     stem = graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
     target = Path(out) if out else Path.home() / ".graflang" / "vis" / f"{stem}-{engine}{ENGINES[engine]['ext']}"
     try:
@@ -55,3 +60,27 @@ def cmd_vis(graph, engine, list_engines, out, no_open):
     console.print(f"{engine}: {n} nodes -> {path}" + (f"\n  {note}" if note else ""), highlight=False, soft_wrap=True, markup=False)
     if ENGINES[engine].get("open", True) and not no_open:
         webbrowser.open(path.resolve().as_uri())
+
+
+def _run_editor(graph_path: Path) -> None:
+    """Open the Streamlit editor on a long-form workflow file."""
+    import os
+    import subprocess
+    from importlib.util import find_spec
+
+    if find_spec("streamlit") is None:
+        console.print("[red]✗ The editor needs Streamlit:[/red] pip install 'graflang\[edit]'")
+        sys.exit(1)
+    from .editor import EditError, GraphEditor
+    try:
+        GraphEditor(graph_path)
+    except (EditError, ValueError) as e:
+        console.print(f"[red]✗ Cannot edit:[/red] {escape(str(e))}")
+        sys.exit(1)
+    app = Path(__file__).with_name("app.py")
+    env = {**os.environ, "GRAF_EDIT_FILE": str(graph_path.resolve())}
+    console.print(f"editing {graph_path}  (Ctrl-C to stop)", highlight=False)
+    try:
+        subprocess.run([sys.executable, "-m", "streamlit", "run", str(app), "--browser.gatherUsageStats", "false"], env=env, check=False)
+    except KeyboardInterrupt:
+        pass

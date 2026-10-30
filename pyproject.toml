@@ -33,6 +33,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+edit = ["streamlit>=1.30"]   # `graf vis --edit`, the workflow editor
 kernel = ["jupyter_client>=8", "ipykernel>=6"]   # `backend: kernel` on SOLVE nodes
 spl = ["spl-llm>=3.4"]        # only for SPL procedure_ref nodes (runs SPL.py workflows); plain GENERATE needs just dd-llm
 anthropic = ["dd-llm[anthropic]>=0.2.0"]

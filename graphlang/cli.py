@@ -23,6 +23,9 @@ for _cmd in (cmd_run, cmd_validate, cmd_info, cmd_compile, cmd_check, cmd_vis, c
 _viz = copy.copy(cmd_vis)                       # `graf viz` is `graf vis` under the spelling people type; the vis summary names it
 _viz.hidden = True
 main.add_command(_viz, "viz")
+_ui = copy.copy(cmd_vis)                        # and `graf ui`, the name of the editor mode
+_ui.hidden = True
+main.add_command(_ui, "ui")
 
 
 if __name__ == "__main__":
