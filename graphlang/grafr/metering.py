@@ -40,6 +40,11 @@ class MeteredLLM:
     def name(self) -> str:
         return self.inner.name
 
+    def __getattr__(self, attr):                       # adapter_name and the rest: a procedure_ref node reads them off the run's LLM
+        if attr == "inner":
+            raise AttributeError(attr)
+        return getattr(self.inner, attr)
+
     @property
     def model_override(self):
         return getattr(self.inner, "model_override", None)
@@ -76,6 +81,11 @@ class RecordingLLM:
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps({"cassette": 1, "adapter": inner.name, "model": getattr(inner, "model_override", None)}) + "\n", encoding="utf-8")
+
+    def __getattr__(self, attr):
+        if attr == "inner":
+            raise AttributeError(attr)
+        return getattr(self.inner, attr)
 
     @property
     def model_override(self):

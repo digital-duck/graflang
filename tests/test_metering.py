@@ -100,3 +100,11 @@ def test_a_bindings_budget_stops_the_run(tmp_path):
     bind.write_text("limits: {max_llm_calls: 1}\n")
     result = CliRunner().invoke(main, ["run", str(graph), "--adapter", "mock", "--bind", str(bind), "--no-log", "--no-output"])
     assert result.exit_code != 0 and "max_llm_calls is 1" in result.output
+
+
+def test_the_wrappers_pass_on_what_a_procedure_node_reads_off_the_llm(tmp_path):
+    class Inner(Scripted):
+        adapter_name = "claude_cli"
+
+    metered = MeteredLLM(RecordingLLM(Inner(), tmp_path / "c.jsonl"))
+    assert metered.adapter_name == "claude_cli" and metered.name == "scripted" and metered.model_override is None
