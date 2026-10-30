@@ -187,11 +187,27 @@ steps:
   - done:     {output: refine}
 ```
 
-- A step is `id: {kind: argument, ...}`. Kinds: `generate` (a `prompts.name` or prompt text), `solve` (an expression), `assert` and `evaluate` (a condition), `guard` (a policy), `fork` (branch names), `join` (the steps it waits for), `output`, and `node` (any other node type, with its `config`).
+- A step is `id: {kind: argument, ...}`. Kinds: `generate` (a `prompts.name` or prompt text), `solve` (an expression), `assert` and `evaluate` (a condition), `guard` (a policy), `fork` (branch names), `join` (the steps it waits for), `output`, `use` (a part, see below), `loop` (a body of its own `steps:`, see below) and `node` (any other node type, with its `config`).
 - `in` maps an input to a value. `$in.topic` is a workflow input, `draft` or `draft.essay` is another step's result, and anything else is a literal that becomes the input's default. Wrap a literal that looks like a reference as `{value: draft}`.
 - `out` names the result port(s); the default is `result`, and a bare step name means the first one.
 - Control is inferred from the order you list the steps. A step with `on: gate.fail` (or a list) hangs there instead, which is how you write the branches of `assert`, `evaluate`, `guard` and `fork`.
 - Other keys (`model`, `phases`, `temperature`, ...) go into the node's `config`. `nodes:` and `edges:` may sit beside `steps:` for anything the compact form cannot say.
+
+### Loops in the compact form
+
+```yaml
+  - chapters:
+      loop: "@in_num_chapters"            # max iterations: a number or an expression; add `while: "@i < @in_n"` for a condition
+      index: i                            # the 0-based counter's name (default `cycle`)
+      in: {outline: outline, subject: $in.subject}
+      out: {chapters: {collect: write.chapter}}      # name: collect | from | fired, naming a body step's result
+      steps:
+        - write:  {generate: prompts.chapter, in: {outline: $loop.outline, i: $loop.i}, out: chapter}
+        - review: {generate: prompts.review,  in: {chapter: write.chapter}}
+  - book: {generate: prompts.compile, in: {chapters: chapters.chapters}}
+```
+
+The body is its own list of steps: the first starts every iteration and the others follow in order. Inside it `$loop.<name>` reads the loop's input or state of that name (the key must be the same name), and `$in` and `output` do not exist. Loops nest. The loop's `in:`, `out:` and `phases` work like any other step's; steps after it read its results as `chapters.chapters`.
 
 ## Parts: a workflow used as a node
 

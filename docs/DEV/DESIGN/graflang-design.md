@@ -340,7 +340,7 @@ Persistent MUTATE across loop iterations (G14), optional Rust/WASM packaging, zi
     - Not yet: the `mcp` and `wasm` executors, and a thin-adapter kit for new languages.
   - **R2 (done).**
     - E7: **`spl2graph` stays in SPL.py**, not graflang (owner rule: graflang does not depend on SPL.py, except that it may emit `.spl` and run `.spl` through `procedure_ref`, as `cookbook/code_pipeline` does). Of 274 workflow files in the SPL.py cookbooks, 265 lift and pass `graf validate` (197 before the fixes). A CREATE FUNCTION body becomes the GENERATE prompt; a Python tool call (`CREATE TOOL_API`, a sibling `tools.py`, or a built-in) becomes a `kernel` SOLVE carrying the tool's source (1435 tool calls carry their source, 158 stay name-only). Examples: `cookbook/chain_of_thought`, `cookbook/lifted_tool`. Still open: a tool call in a WHILE condition, and parallel branches naming workflows that exist nowhere.
-    - E3 compact form (`steps:`, `grafr/compact.py`, expanded inside `load_graph`; `graf expand FILE` prints the long form): kinds generate, solve, assert, evaluate, guard, fork, join, output, use and `node` as the escape hatch; control inferred from order and `on:`; literals become input defaults. Loops written as steps are not in it (a `node: LOOP` carries its `subgraph` in long form).
+    - E3 compact form (`steps:`, `grafr/compact.py`, expanded inside `load_graph`; `graf expand FILE` prints the long form): kinds generate, solve, assert, evaluate, guard, fork, join, output, use and `node` as the escape hatch; control inferred from order and `on:`; literals become input defaults. A `loop` step carries its own `steps:` body (`$loop.<name>` reads the loop's inputs and state; loops nest).
     - E6 bindings (`--bind FILE`, `grafr/bindings.py`): `llm`, `models` for `model: $name`, default `params`, `resources` replacement, `limits`; flags beat the file beats the graph's hints.
     - `graf export-spl` (`graphlang/grafe/`, graflang's own emitter, no SPL.py import): a lifted graph comes back with its CREATE FUNCTION / CREATE TOOL_API and lifts to the same graph again; a hand-written GENERATE becomes a function named after its node; lifecycle phases are dropped with a warning. Limitation: SPL variables are named after out ports, so two nodes writing one port name can alias.
   - **R1 (done).**
@@ -476,4 +476,6 @@ A snapshot after parts, elaboration, loop persistence, the container option and 
 
 ### Owner's take
 
-(to be filled in)
+[WEN] implement #2 - #4 from "Ready to build" sub-section
+no action on all other items
+

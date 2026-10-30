@@ -118,3 +118,89 @@ def test_real_llm_runs_a_compact_graph(tmp_path):
              {"done": {"output": "b"}}]
     out = GraphLangRuntime(expand(doc(steps, inputs=())), adapter="claude_cli", verbose=False).execute({})
     assert out["essay"].strip().isdigit()
+
+
+# ---- loop steps --------------------------------------------------------------------------------------
+
+def loop_doc(**over):
+    step = {"loop": "@in_n", "index": "i", "in": {"outline": "outline", "n": "$in.n"}, "out": {"chapters": {"collect": "write.chapter"}},
+            "steps": [{"write": {"generate": "Chapter {{in_i}}: {{in_outline}}", "in": {"outline": "$loop.outline", "i": "$loop.i"}, "out": "chapter"}},
+                      {"review": {"generate": "Review {{in_chapter}}", "in": {"chapter": "write.chapter"}}}]}
+    step.update(over)
+    d = doc([{"outline": {"generate": "Outline {{in_topic}}", "in": {"topic": "$in.topic"}, "out": "outline"}}, {"chapters": step},
+             {"book": {"generate": "Compile {{in_chapters}}", "in": {"chapters": "chapters.chapters"}, "out": "essay"}}, {"done": {"output": "book"}}],
+            inputs=("topic", "n"), outputs=("essay",))
+    d["workflow"]["inputs"][1].update(type="INTEGER", default=3)
+    return d
+
+
+def test_a_loop_step_becomes_a_loop_node_with_its_body():
+    g = expand(loop_doc())
+    node = next(n for n in g["nodes"] if n["id"] == "chapters")
+    cfg = node["config"]
+    assert node["type"] == "LOOP" and cfg["max_iterations"] == "@in_n" and cfg["index_var"] == "i"
+    assert cfg["outputs"] == {"chapters": {"collect": "write.out_chapter"}}
+    body = cfg["subgraph"]
+    assert [n["id"] for n in body["nodes"]] == ["write", "review"]
+    assert edge_set(body) == {("write.complete", "review.trigger", "triggers"), ("write.out_chapter", "review.in_chapter", "binds")}   # nothing triggers `write`
+    assert {"in_outline", "in_i", "out_chapter"} <= set(body["nodes"][0]["ports"])
+    assert ("outline.complete", "chapters.trigger", "triggers") in edge_set(g) and ("chapters.exit", "book.trigger", "triggers") in edge_set(g)
+    assert ("chapters.out_chapters", "book.in_chapters", "binds") in edge_set(g)
+
+
+def test_a_loop_step_runs_once_per_iteration_and_collects(tmp_path):
+    path = tmp_path / "l.graph.yaml"
+    YAML().dump(loop_doc(), path)
+    graph = load_graph(path)
+    assert check(graph) == ([], [])
+    llm = Scripted("OUT", "c0", "r0", "c1", "r1", "BOOK")
+    assert GraphLangRuntime(graph, llm=llm, verbose=False).execute({"topic": "x", "n": 2}) == {"essay": "BOOK"}
+    assert "Chapter 0: OUT" in llm.prompts[1] and "Chapter 1: OUT" in llm.prompts[3]          # $loop.i is the counter, $loop.outline the outer value
+    assert "c0" in llm.prompts[5] and "c1" in llm.prompts[5]                                   # both chapters were collected
+
+
+def test_while_adds_the_loop_condition():
+    g = expand(loop_doc(**{"while": "@i < @in_n"}))
+    assert next(n for n in g["nodes"] if n["id"] == "chapters")["config"]["condition"] == "@i < @in_n"
+
+
+def test_loops_nest():
+    inner = {"loop": 2, "steps": [{"leaf": {"generate": "leaf {{in_x}}", "in": {"x": "$loop.x"}, "out": "t"}}], "out": {"ts": {"collect": "leaf.t"}}}
+    outer = {"loop": 2, "in": {"x": "$in.topic"}, "out": {"all": {"collect": "inner.ts"}}, "steps": [{"inner": {**inner, "in": {"x": "$loop.x"}}}]}
+    g = expand(doc([{"outer": outer}, {"done": {"output": "outer.all"}}]))
+    body = next(n for n in g["nodes"] if n["id"] == "outer")["config"]["subgraph"]
+    assert body["nodes"][0]["type"] == "LOOP" and body["nodes"][0]["config"]["subgraph"]["nodes"][0]["id"] == "leaf"
+    assert GraphLangRuntime(expand(doc([{"outer": outer}, {"done": {"output": "outer.all"}}])), llm=Scripted(*["a", "b", "c", "d"]), verbose=False).execute(
+        {"topic": "q"}) == {"essay": [["a", "b"], ["c", "d"]]}
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"steps": None}, "needs `steps:`"),
+    ({"steps": []}, "needs `steps:`"),
+    ({"out": {"c": {"collect": "nope.chapter"}}}, "not a step of its body"),
+    ({"out": {"c": {"collect": "write.nope"}}}, "no result 'nope'"),
+    ({"out": {"c": {"sum": "write.chapter"}}}, "exactly one of from / collect / fired"),
+    ({"out": ["c"]}, "`out:` is a mapping"),
+])
+def test_a_bad_loop_is_named(change, message):
+    with pytest.raises(CompactError, match=message):
+        expand(loop_doc(**change))
+
+
+def test_the_body_cannot_use_the_workflow_entry_or_a_renamed_loop_value():
+    body = [{"write": {"generate": "x", "in": {"a": "$in.topic"}}}]
+    with pytest.raises(CompactError, match=r"reads the loop's inputs and state as \$loop"):
+        expand(doc([{"l": {"loop": 1, "steps": body}}]))
+    body = [{"write": {"generate": "x", "in": {"a": "$loop.b"}}}]
+    with pytest.raises(CompactError, match="under the same name"):
+        expand(doc([{"l": {"loop": 1, "steps": body}}]))
+    with pytest.raises(CompactError, match="only meaningful inside a loop body"):
+        expand(doc([{"w": {"generate": "x", "in": {"a": "$loop.a"}}}]))
+
+
+@pytest.mark.llm
+def test_real_llm_runs_a_compact_loop(tmp_path):
+    path = tmp_path / "l.graph.yaml"
+    YAML().dump(loop_doc(), path)
+    out = GraphLangRuntime(load_graph(path), adapter="claude_cli", verbose=False).execute({"topic": "tides", "n": 2})
+    assert len(out["essay"]) > 40

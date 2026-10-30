@@ -19,6 +19,7 @@ A step is a one-key mapping: the step id, then a mapping whose first key names t
   output    a reference, or {workflow output: ref}    trigger  exit
   node      a node type (LOOP, MUTATE, ...)           trigger  complete   (plus any `ports:` given)
   use       parts.<name>, a part file (see parts.py)  trigger  complete   (`out:` must list the part's outputs you read)
+  loop      max iterations (number or @expr)           trigger  exit       (`steps:` is its body; see below)
 
 Other keys of a step: `in` maps input names to values; `out` names the result port(s) (default `result`; a node's
 first one is what a bare reference means); `on` says what triggers the step; every other key goes into the node's
@@ -34,6 +35,21 @@ assert / evaluate / guard / fork are written. A step after a fork or after a ste
 only if it should not follow the previous one. `nodes:` and `edges:` may sit beside `steps:` for anything the compact
 form cannot say; they are added unchanged, and the steps may refer to those nodes as `node.out_name`.
 `graf expand FILE` prints the long form.
+
+A `loop` step runs its own `steps:` once per iteration:
+
+    - chapters:
+        loop: "@in_num_chapters"                  # max iterations (a number or an expression); `while:` adds a condition
+        index: chapter_index                      # the 0-based counter's name (default `cycle`)
+        in: {outline: outline, subject: $in.subject}      # outer values the loop (and so its body) can read
+        out: {chapters: {collect: write.chapter}}         # name: {collect | from | fired: body step.result}
+        steps:
+          - write:  {generate: prompts.chapter, in: {outline: $loop.outline, chapter_index: $loop.chapter_index}, out: chapter}
+          - review: {generate: prompts.review,  in: {chapter: write.chapter}}
+
+In the body the first step starts each iteration and the next follow it; `$loop.<name>` reads the loop's input or state
+of that name (the key must be the same name); `$in` and `output` do not exist there. Later steps read `chapters`
+as a loop result like any other (`chapters.chapters`, or bare `chapters` if it is the first).
 """
 from __future__ import annotations
 
@@ -46,10 +62,12 @@ KINDS = {
     "generate": ("trigger", "complete"), "solve": ("trigger", "complete"), "assert": ("trigger", "pass", "fail"),
     "evaluate": ("trigger", "pass", "fail"), "guard": ("trigger", "allow", "deny"), "join": ("trigger", "complete"),
     "output": ("trigger", "exit"), "fork": ("trigger",), "node": ("trigger", "complete"), "use": ("trigger", "complete"),
+    "loop": ("trigger", "exit"),
 }
 TYPES = {"generate": "GENERATE", "solve": "SOLVE", "assert": "ASSERT", "evaluate": "EVALUATE", "guard": "GUARD",
-         "join": "JOIN", "output": "OUTPUT", "fork": "FORK", "use": "SUBGRAPH"}
+         "join": "JOIN", "output": "OUTPUT", "fork": "FORK", "use": "SUBGRAPH", "loop": "LOOP"}
 RESERVED = {"in", "out", "on", "ports", "config"}
+LOOP_KEYS = {"steps", "while", "index"}                # keys of a `loop` step that are not node config
 ID = re.compile(r"^[a-zA-Z0-9_]+$")
 
 
@@ -79,7 +97,17 @@ def expand(data: Dict) -> Dict:
         raise CompactError("a compact graph still needs a `workflow:` block (name, inputs, outputs)")
     inputs = [i["name"] for i in wf.get("inputs", [])]
     outputs = [o["name"] for o in wf.get("outputs", [])]
+    nodes, edges = _build(steps, inputs, outputs, root=True)
 
+    out = {k: v for k, v in data.items() if k not in ("nodes", "edges")}
+    out["nodes"] = nodes + list(data.get("nodes", []))
+    out["edges"] = edges + list(data.get("edges", []))
+    order = [k for k in ("version", "workflow", "resources", "nodes", "edges") if k in out]
+    return {**{k: out[k] for k in order}, **{k: v for k, v in out.items() if k not in order}}
+
+
+def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tuple[List[Dict], List[Dict]]:
+    """The nodes and edges of a list of steps: a workflow's (`root`) or a loop body's (no entry node, nothing triggers its first step)."""
     parsed: List[Tuple[str, str, Dict]] = []
     for item in steps:
         if not isinstance(item, dict) or len(item) != 1:
@@ -100,7 +128,7 @@ def expand(data: Dict) -> Dict:
         o = body.get("out", ["result"])
         outs[sid] = [o] if isinstance(o, str) else list(o)
 
-    nodes: List[Dict] = [{"id": ENTRY, "type": "INPUT", "ports": ["entry", *[f"out_{i}" for i in inputs]]}]
+    nodes: List[Dict] = [{"id": ENTRY, "type": "INPUT", "ports": ["entry", *[f"out_{i}" for i in inputs]]}] if root else []
     edges: List[Dict] = []
     ctrl: Dict[str, List[str]] = {}                       # step -> its control ports, the default one first
 
@@ -108,6 +136,12 @@ def expand(data: Dict) -> Dict:
         """('node.out_port') a string refers to, or None if it is a literal."""
         if not isinstance(value, str):
             return None
+        if value.startswith("$loop."):
+            if root:
+                raise CompactError(f"step {sid!r}: {value} is only meaningful inside a loop body")
+            return None
+        if value.startswith("$in.") and not root:
+            raise CompactError(f"step {sid!r}: {value}: a loop body reads the loop's inputs and state as $loop.<name>")
         if value.startswith("$in."):
             name = value[4:]
             if name not in inputs:
@@ -125,6 +159,8 @@ def expand(data: Dict) -> Dict:
     def control(sid: str, value: str) -> str:
         head, _, port = str(value).partition(".")
         if head == "$in" or head == ENTRY:
+            if not root:
+                raise CompactError(f"step {sid!r}: a loop body has no entry to hang on; `on:` names an earlier step")
             return f"{ENTRY}.entry"
         if head not in ctrl:
             raise CompactError(f"step {sid!r}: `on: {value}` names no earlier step")
@@ -136,7 +172,8 @@ def expand(data: Dict) -> Dict:
     for sid, kind, body in parsed:
         arg = body[kind]
         cfg: Dict[str, Any] = dict(body.get("config", {}))
-        cfg.update({k: v for k, v in body.items() if k not in RESERVED and k != kind})
+        reserved = RESERVED | LOOP_KEYS if kind == "loop" else RESERVED
+        cfg.update({k: v for k, v in body.items() if k not in reserved and k != kind})
         node_type = str(arg).upper() if kind == "node" else TYPES[kind]
         ports = list(KINDS[kind])
         if kind == "generate":
@@ -145,6 +182,18 @@ def expand(data: Dict) -> Dict:
             cfg["part"] = arg
             if "out" not in body:
                 raise CompactError(f"step {sid!r}: `use` needs `out:`, the part's outputs you want to read")
+        elif kind == "loop":
+            if not isinstance(body.get("steps"), list) or not body["steps"]:
+                raise CompactError(f"step {sid!r}: a loop needs `steps:`, its body, as a non-empty list")
+            if arg not in (None, True):
+                cfg["max_iterations"] = arg
+            if "while" in body:
+                cfg["condition"] = body["while"]
+            if "index" in body:
+                cfg["index_var"] = body["index"]
+            sub_nodes, sub_edges = _build(body["steps"], [], [], root=False)
+            cfg["subgraph"] = {"nodes": sub_nodes, "edges": sub_edges}
+            cfg["outputs"] = _loop_outputs(sid, body.get("out"), sub_nodes)
         elif kind == "solve":
             cfg["expression"] = arg
         elif kind in ("assert", "evaluate"):
@@ -174,8 +223,15 @@ def expand(data: Dict) -> Dict:
                 value, literal = value["value"], True
             else:
                 literal = False
-            target = ref(sid, value) if not literal else None
             port = f"in_{name}"
+            if not literal and isinstance(value, str) and value.startswith("$loop."):
+                if root:
+                    raise CompactError(f"step {sid!r}: {value} is only meaningful inside a loop body")
+                if value[6:] != name:
+                    raise CompactError(f"step {sid!r}: a loop body step reads {value} under the same name: `in: {{{value[6:]}: {value}}}`")
+                ports.append(port)                        # no edge, no default: the runtime reads the loop's input or state of that name
+                continue
+            target = ref(sid, value) if not literal else None
             ports.append(port)
             if target:
                 in_edges.append((target, port))
@@ -206,7 +262,8 @@ def expand(data: Dict) -> Dict:
             for s in ([body["on"]] if isinstance(body["on"], str) else body["on"]):
                 edges.append({"source": control(sid, s), "target": f"{sid}.trigger", "type": "triggers"})
         elif previous is None:
-            edges.append({"source": f"{ENTRY}.entry", "target": f"{sid}.trigger", "type": "triggers"})
+            if root:                                         # a loop body's first step is started by the loop itself
+                edges.append({"source": f"{ENTRY}.entry", "target": f"{sid}.trigger", "type": "triggers"})
         else:
             prev_ctrl = ctrl[previous]
             if parsed_kind(parsed, previous) == "fork":
@@ -214,11 +271,30 @@ def expand(data: Dict) -> Dict:
             edges.append({"source": f"{previous}.{prev_ctrl[1]}", "target": f"{sid}.trigger", "type": "triggers"})
         previous = sid
 
-    out = {k: v for k, v in data.items() if k not in ("nodes", "edges")}
-    out["nodes"] = nodes + list(data.get("nodes", []))
-    out["edges"] = edges + list(data.get("edges", []))
-    order = [k for k in ("version", "workflow", "resources", "nodes", "edges") if k in out]
-    return {**{k: out[k] for k in order}, **{k: v for k, v in out.items() if k not in order}}
+    return nodes, edges
+
+
+def _loop_outputs(sid: str, spec: Any, body_nodes: List[Dict]) -> Dict[str, Any]:
+    """`out: {chapters: {collect: write.chapter}}` -> the LOOP's outputs, naming body ports (`write.out_chapter`)."""
+    if spec is None:
+        return {}
+    if not isinstance(spec, dict):
+        raise CompactError(f"step {sid!r}: a loop's `out:` is a mapping {{name: {{collect|from|fired: step.result}}}}")
+    outs: Dict[str, Any] = {}
+    for name, how in spec.items():
+        if not isinstance(how, dict) or len(how) != 1 or next(iter(how)) not in ("from", "collect", "fired"):
+            raise CompactError(f"step {sid!r}: loop output {name!r} needs exactly one of from / collect / fired")
+        (kind, ref), = how.items()
+        node, _, port = str(ref).partition(".")
+        found = next((n for n in body_nodes if n["id"] == node), None)
+        if found is None:
+            raise CompactError(f"step {sid!r}: loop output {name!r} names {node!r}, which is not a step of its body")
+        if kind != "fired":                                  # a result name; `fired` already names a control port
+            port = f"out_{port}" if port else next((p for p in found["ports"] if p.startswith("out_")), "")
+            if port not in found["ports"]:
+                raise CompactError(f"step {sid!r}: loop output {name!r}: {node!r} has no result {port[4:]!r}")
+        outs[name] = {kind: f"{node}.{port}"}
+    return outs
 
 
 def parsed_kind(parsed: List[Tuple[str, str, Dict]], sid: str) -> str:
