@@ -455,7 +455,10 @@ class GraphLangRuntime:
                 newest[d["target_port"]] = self._stamp[key]
         for port in self.G.nodes[node]["ports"]:
             if port.startswith("in_") and port not in in_data:
-                if port in self.boundary:
+                latest = self.scope.get(port[3:])
+                if latest is not None:                           # loop state (the previous iteration's output) beats the loop's own input of that name
+                    in_data[port] = latest
+                elif port in self.boundary:
                     in_data[port] = self.boundary[port]
                 elif port[3:] in self.scope:
                     in_data[port] = self.scope[port[3:]]
