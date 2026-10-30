@@ -165,6 +165,8 @@ class GraphLangRuntime:
             self.llm = llm or make_llm(adapter, model)
             self.context: Dict[str, Any] = {}           # CONTEXT nodes' persistent state
             self.budget = _Budget(max_steps, wall_time_s)
+            self.stats: Dict[str, Dict[str, Any]] = {}  # node -> {type, n, ms}, shared with LOOP and BATCH bodies
+            self._stats_lock = threading.Lock()
             self.workers = max(1, int(workers))         # >1: nodes released together run concurrently (_drain_waves)
             self.resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
             self.depth = 0
@@ -173,6 +175,7 @@ class GraphLangRuntime:
         else:
             self.llm, self.context, self.budget = _parent.llm, _parent.context, _parent.budget
             self.workers = _parent.workers
+            self.stats, self._stats_lock = _parent.stats, _parent._stats_lock
             self.resolver, self.depth = _parent.resolver, _parent.depth + 1
             self.node_output = _parent.node_output
             self.kernels = _parent.kernels
@@ -230,6 +233,12 @@ class GraphLangRuntime:
                   reached_output=bool(outputs), mutations=self.budget.mutations,
                   ms=round((time.perf_counter() - started) * 1000))
         return outputs
+
+    def summary(self) -> Dict[str, Any]:
+        """What the last run did: steps, per-node firings and time, and the LLM's calls, tokens and cost when it is metered."""
+        llm = self.llm.snapshot() if hasattr(self.llm, "snapshot") else None
+        return {"steps": self.steps, "mutations": self.budget.mutations, "llm": llm,
+                "nodes": {k: dict(v) for k, v in sorted(self.stats.items(), key=lambda kv: -kv[1]["ms"])}}
 
     def _execute(self, inputs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         inputs = dict(inputs or {})
@@ -339,9 +348,13 @@ class GraphLangRuntime:
             log_event(_log, "node.error", level=ERROR, node=node, type=data["type"], n=self.fired[node],
                       depth=self.depth, error=f"{type(e).__name__}: {e}")
             raise
+        ms = round((time.perf_counter() - started) * 1000)
         log_event(_log, "node.done", node=node, type=data["type"], n=self.fired[node], depth=self.depth,
-                  route=result.get("_route"), outputs=sorted(p for p in result if not p.startswith("_")),
-                  ms=round((time.perf_counter() - started) * 1000))
+                  route=result.get("_route"), outputs=sorted(p for p in result if not p.startswith("_")), ms=ms)
+        with self._stats_lock:
+            row = self.stats.setdefault(node, {"type": data["type"], "n": 0, "ms": 0})
+            row["n"] += 1
+            row["ms"] += ms
         for port, value in result.items():
             if not port.startswith("_"):
                 check_value(data, port, value)

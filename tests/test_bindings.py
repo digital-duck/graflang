@@ -77,7 +77,7 @@ def test_resources_are_replaced_relative_to_the_bindings_file(tmp_path):
 
 @pytest.mark.parametrize("data, message", [
     ({"typo": 1}, "unknown key"),
-    ({"limits": {"max_cost": 5}}, "max_cost is not supported"),
+    ({"limits": {"max_cost": 5}}, "use limits.max_cost_usd"),
     ({"limits": {"max_steps": 0}}, "must be a number > 0"),
     ({"limits": {"nope": 1}}, "unknown limit"),
     ({"resources": {"weights": {"a": "b"}}}, "resources.weights"),

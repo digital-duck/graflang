@@ -61,6 +61,13 @@ class RunOutput:
             log_event(_log, "node.saved", node=node, port=port, file=str(path), chars=len(text))
         return paths
 
+    def save_summary(self, summary: Dict[str, Any]) -> Path:
+        """summary.json: steps, per-node time, LLM calls, tokens and cost."""
+        self.dir.mkdir(parents=True, exist_ok=True)
+        path = self.dir / "summary.json"
+        path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        return path
+
     def save_result(self, result: Dict[str, Any]) -> List[Path]:
         """Write result.json and one file per output."""
         self.dir.mkdir(parents=True, exist_ok=True)

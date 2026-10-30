@@ -6,7 +6,7 @@
     params: {topic: tides}                  # default workflow parameters; --param wins
     resources:                              # replaces named resources; paths are relative to this file
       prompts: {draft: ./prod/draft.md}
-    limits: {max_steps: 200, wall_time_s: 300, concurrency: 4}
+    limits: {max_steps: 200, wall_time_s: 300, concurrency: 4, max_llm_calls: 50, max_cost_usd: 1.0}
 
 `graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file, which beats the
 graph's own `model:` hints. A `model: $name` with no binding falls back to the run's default model.
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Tuple
 from ruamel.yaml import YAML
 
 KEYS = {"llm", "models", "params", "resources", "limits"}
-LIMITS = {"max_steps", "wall_time_s", "concurrency"}
+LIMITS = {"max_steps", "wall_time_s", "concurrency", "max_llm_calls", "max_cost_usd"}
 KINDS = ("prompts", "procedures", "policies")
 
 
@@ -34,11 +34,12 @@ def load_bindings(path: Path) -> Dict[str, Any]:
         raise ValueError(f"{path.name}: unknown key(s) {unknown} (use {sorted(KEYS)})")
     limits = data.get("limits") or {}
     if "max_cost" in limits:
-        raise ValueError(f"{path.name}: limits.max_cost is not supported (adapters do not report cost); use max_steps or wall_time_s")
+        raise ValueError(f"{path.name}: use limits.max_cost_usd (counts what the adapter reports; subscription adapters report 0) "
+                         f"or limits.max_llm_calls")
     bad = sorted(set(limits) - LIMITS)
     if bad:
         raise ValueError(f"{path.name}: unknown limit(s) {bad} (use {sorted(LIMITS)})")
-    for key in ("max_steps", "wall_time_s", "concurrency"):
+    for key in ("max_steps", "wall_time_s", "concurrency", "max_llm_calls", "max_cost_usd"):
         if key in limits and not (isinstance(limits[key], (int, float)) and not isinstance(limits[key], bool) and limits[key] > 0):
             raise ValueError(f"{path.name}: limits.{key} must be a number > 0")
     for kind, names in (data.get("resources") or {}).items():

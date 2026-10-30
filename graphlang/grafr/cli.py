@@ -12,7 +12,8 @@ from rich.markup import escape
 from rich.table import Table
 
 from ..logging_config import disable_logging, setup_logging
-from .adapters import default_model
+from .adapters import default_model, make_llm
+from .metering import CassetteError, LimitExceeded, MeteredLLM, RecordingLLM, ReplayLLM
 from .bindings import bind_graph, load_bindings
 from .output import RunOutput
 from .runtime import load_graph, GraphLangRuntime
@@ -44,6 +45,10 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--workers", type=int, default=None,
               help="run nodes released together (the branches of a FORK, ...) on this many threads; default 1, or limits.concurrency "
                    "of a --bind file. Results are applied in a fixed order, so a run does not depend on which call finishes first")
+@click.option("--record", "record_file", type=click.Path(dir_okay=False), default=None,
+              help="write every GENERATE call to this cassette (JSON lines) while running")
+@click.option("--replay", "replay_file", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="answer GENERATE calls from a cassette made with --record: no model is called")
 @click.option("--bind", "bind_file", type=click.Path(dir_okay=False), default=None,
               help="bindings file: the model, files and limits for this environment (llm, models, params, resources, limits)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
@@ -61,7 +66,7 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--no-output", is_flag=True, help="do not write result files")
 @click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
               help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")
-def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
+def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, replay_file, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
             no_output, log_prompts):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
     if log_prompts:
@@ -128,13 +133,19 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, bind_file, para
     console.print(f"\n[bold blue]▶ Executing workflow...[/bold blue]")
 
     try:
-        runtime = GraphLangRuntime(graph_data, adapter=adapter, model=model, max_steps=max_steps, wall_time_s=limits.get("wall_time_s"),
+        if record_file and replay_file:
+            raise click.UsageError("use --record or --replay, not both")
+        llm = ReplayLLM(Path(replay_file)) if replay_file else make_llm(adapter, model)
+        if record_file:
+            llm = RecordingLLM(llm, Path(record_file))
+        llm = MeteredLLM(llm, limits.get("max_llm_calls"), limits.get("max_cost_usd"))
+        runtime = GraphLangRuntime(graph_data, llm=llm, adapter=adapter, model=model, max_steps=max_steps, wall_time_s=limits.get("wall_time_s"),
                                    workers=workers or limits.get("concurrency") or 1,
                                    node_output=run_output if save_nodes else None)
         if adapter == "mock":
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")
         result = runtime.execute(params)
-    except (ValueError, RuntimeError, NotImplementedError) as e:
+    except (ValueError, RuntimeError, NotImplementedError, CassetteError, LimitExceeded) as e:
         console.print(f"[red]✗ Run failed:[/red] {escape(str(e))}")
         if log_path:
             console.print(f"[dim]log: {log_path}[/dim]")
@@ -144,12 +155,32 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, bind_file, para
         console.print("\n[yellow]Workflow ended without reaching an OUTPUT node (a gate routed to a dead end)[/yellow]")
     else:
         console.print(f"\n[bold green]✓ Workflow completed[/bold green]")
-    console.print(f"[bold]Output:[/bold] {escape(str(result))}")        # values may hold [brackets], not markup
+    console.print(f"[bold]Output:[/bold] {escape(str(result))}")
+    summary = runtime.summary()
+    console.print(f"[dim]{_summary_line(summary)}[/dim]")        # values may hold [brackets], not markup
     if run_output and result:
         run_output.save_result(result)
+        run_output.save_summary(summary)
         console.print(f"[dim]output: {run_output.dir}[/dim]")
     if log_path:
         console.print(f"[dim]log: {log_path}[/dim]")
+
+
+def _summary_line(summary: dict) -> str:
+    """One line: steps, LLM calls with tokens and cost, and the slowest node."""
+    parts = [f"{summary['steps']} steps"]
+    llm = summary.get("llm")
+    if llm and llm["calls"]:
+        usage = f"{llm['calls']} LLM calls"
+        if llm["input_tokens"] or llm["output_tokens"]:
+            usage += f", {llm['input_tokens']} tokens in / {llm['output_tokens']} out"
+        if llm["cost_usd"]:
+            usage += f", ${llm['cost_usd']:.4f}"
+        parts.append(usage)
+    if summary["nodes"]:
+        slowest, row = next(iter(summary["nodes"].items()))
+        parts.append(f"slowest: {slowest} {row['ms'] / 1000:.1f}s")
+    return " · ".join(parts)
 
 
 @click.command("validate", short_help="Check a workflow against the schema and wiring rules.")

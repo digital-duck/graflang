@@ -16,6 +16,7 @@ it is used when it is compatible with the chosen adapter and no `--model` was gi
 """
 from __future__ import annotations
 
+import threading
 from typing import Any, Optional
 
 
@@ -77,6 +78,11 @@ class DDLLM:
         self.name = name
         self.adapter_name = name
         self.model_override = model
+        self._local = threading.local()
+
+    def last_usage(self) -> Optional[dict]:
+        """Tokens and cost the adapter reported for this thread's latest call, if it did."""
+        return getattr(self._local, "usage", None)
 
     def generate(self, prompt: str, model: Optional[str] = None, **opts: Any) -> str:
         kwargs = {k: v for k, v in opts.items() if k in ("max_tokens", "temperature", "system") and v is not None}
@@ -84,6 +90,8 @@ class DDLLM:
             result = self._adapter.call(prompt, model=model or "", **kwargs)
         except ImportError as e:                     # the provider's SDK is an optional extra of dd-llm
             raise LLMUnavailable("adapter %r needs an extra package: %s (see `pip install dd-llm[%s]`)" % (self.name, e, self.name)) from e
+        self._local.usage = {"input_tokens": getattr(result, "input_tokens", 0), "output_tokens": getattr(result, "output_tokens", 0),
+                             "cost_usd": getattr(result, "cost_usd", None)}
         if not result.success:
             errors = result.error_history or []
             raise RuntimeError(errors[-1]["error"] if errors else f"{self.name} call failed")

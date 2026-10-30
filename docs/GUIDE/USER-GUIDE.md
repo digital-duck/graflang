@@ -193,6 +193,12 @@ steps:
 
 `graf export-spl flow.graph.yaml -o flow.spl` writes the workflow as an SPL script (structure only, no LLM) that SPL.py's `spl3 run` can run. A prompt becomes a `CREATE FUNCTION`, a lifted Python tool a `CREATE TOOL_API`. What SPL has no word for (lifecycle phases, typed ports) is dropped and listed as a warning.
 
+## Cost, budgets and replay
+
+- Every run prints a one-line summary (steps, LLM calls with tokens and cost when the adapter reports them, the slowest node) and writes `summary.json` in the run folder with the per-node firings and time. Subscription adapters such as `claude_cli` report no cost.
+- `limits.max_llm_calls` and `limits.max_cost_usd` in a bindings file stop a run that reaches them.
+- `graf run flow.graph.yaml --record calls.jsonl` saves every GENERATE call; `--replay calls.jsonl` answers them from the file with no model, so tests and CI cost nothing. A call is found by its model, prompt and temperature, and a call that was not recorded fails loudly. `procedure_ref` nodes run SPL.py's own executor and are not recorded.
+
 ## Bindings: `--bind`
 
 A graph says what to do; a bindings file says which model, which files and how much, so the same graph runs in different places.
