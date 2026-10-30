@@ -438,3 +438,42 @@ Also adopted, already in the plan: typed ports (E2), error model (E1), real conc
 - Concurrency
 - Bindings
 - Authoring ergonomics
+
+---
+
+## Appendix B: Open Items to Build Next (2026-10-30)
+
+A snapshot after parts, elaboration, loop persistence, the container option and the editor Run tab. The owner's priorities are to be added under "Owner's take" below.
+
+### Ready to build (no decision needed)
+
+1. **Rewrite the ConceptBook driver scripts with elaboration.** `build_concept_book.spl` and `build_component.spl` as one template applied to two graphs (13.3 item 2). It tests whether `elaborate:` holds up on real work. Measure lines, errors caught by `graf validate`, and wall-clock time with `--workers`.
+2. **Loops as compact steps.** A `node: LOOP` still carries its `subgraph` in long form.
+3. **Remaining SPL lifting cases.** 9 of 274 files still do not lift: a tool call in a WHILE condition, and parallel branches naming workflows that exist nowhere.
+4. **R1 acceptance corpus.** Run the PocketFlow recipes through the lifecycle features.
+5. **Real Docker test.** Run `tests/test_container.py` where a Docker daemon and `python:3.12-slim` exist; the real-daemon test was skipped on the build machine.
+
+### Needs an owner decision first
+
+6. **Elaboration keyword.** `elaborate` is provisional; 13.3 leaves `ELABORATE`, `EXPAND` or `INSTANTIATE` to the owner.
+7. **ConceptBook section order (13.4 Q1).** Is the sequential order deliberate (style consistency)? If so it must become an edge before elaboration runs sections in parallel.
+8. **13.4 Q2, Q3, Q5.** Declared independence, merge policies, and where the rule language lives.
+9. **`review_chapter` verdict.** Nothing reads it today; wiring it to a revision pass is small but changes the recipe's behaviour.
+
+### Later items (13.3, not started)
+
+10. Shared rule language in zinet (item 3).
+11. Provenance on deltas: origin, confidence and lineage, so Cedar can require human approval for an LLM-origin delta (item 4).
+12. Human nodes and durable runs, on top of checkpointing (item 5).
+13. Step debugger and a graph-level test harness, on top of replay (item 6).
+
+### Deliberately out for now
+
+14. The `mcp` and WASM executors, and a thin-adapter kit for new languages.
+15. Editor: drag-to-connect on the canvas; editing compact `steps:` and `elaborate:` files.
+16. A price table for `max_cost_usd` (adapters that report no cost make the budget fail loudly instead).
+17. The hand-written Cedar compiler (`grafc/cedar`): its 7 known test failures stay.
+
+### Owner's take
+
+(to be filled in)
