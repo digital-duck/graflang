@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
+from .lifecycle import check_phases
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
 from .solve_backend import check_solve
@@ -76,6 +77,7 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
                     warnings.append(f"{where}: {ref_key} {cfg[ref_key]!r} is not listed under resources.{kind}")
                 if not path.exists():
                     errors.append(f"{where}: {ref_key} {cfg[ref_key]!r} -> {path} does not exist")
+        errors += [f"{where}: {m}" for m in check_phases(n)]
         if typ in ("EVALUATE", "ASSERT"):
             if not cfg.get("condition"):
                 errors.append(f"{where}: no condition")

@@ -36,6 +36,7 @@ from .expr import ExpressionError, evaluate, evaluate_condition
 from ..formats import require_graphlang
 from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
 from .kernel import KernelPool
+from .lifecycle import run_phases
 from .output import RunOutput
 from .resolver import ResourceResolver
 from .solve_backend import CODE_KEYS, code_keys_in, run_backend
@@ -340,10 +341,12 @@ class GraphLangRuntime:
         if node_type == "MUTATE":
             return self._run_mutate(node_data, in_data)
         if node_type == "SOLVE" and node_data.get("config", {}).get("backend"):
-            return run_backend(node_data, in_data, self.resolver, self.kernels)
-        from .nodes import get_node_executor
-        executor = get_node_executor(node_type)
-        return executor.execute(node_data, in_data, self.context, self.resolver, self.llm)
+            run = lambda data: run_backend(node_data, data, self.resolver, self.kernels)
+        else:
+            from .nodes import get_node_executor
+            executor = get_node_executor(node_type)
+            run = lambda data: executor.execute(node_data, data, self.context, self.resolver, self.llm)
+        return run_phases(node_data, in_data, run)
 
     # ---- LOOP ---------------------------------------------------------------------------------
     def _run_loop(self, node_data: Dict, in_data: Dict[str, Any]) -> Dict:

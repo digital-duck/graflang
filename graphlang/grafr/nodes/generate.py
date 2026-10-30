@@ -1,5 +1,6 @@
 """GENERATE node executor (probabilistic LLM calls)."""
 
+import json
 import time
 from typing import Dict
 from .base import NodeExecutor
@@ -29,6 +30,12 @@ class GenerateExecutor(NodeExecutor):
         for key, value in in_data.items():                 # {{in_topic}} <- the value on port in_topic
             text = "" if value is None else str(value)     # a LOOP's carried value is None before the first iteration
             prompt = prompt.replace(f"{{{{{key}}}}}", text)
+
+        schema = config.get('phases', {}).get('post', {}).get('out_schema')
+        if schema is not None:
+            prompt += f"\n\nReply with JSON only (no prose), matching this JSON Schema:\n{json.dumps(schema)}"
+        if in_data.get('_validation_error'):
+            prompt += f"\n\nYour previous reply was rejected: {in_data['_validation_error']}\nReply again, corrected."
 
         model = resolve_model(llm.name, config.get('model'), getattr(llm, 'model_override', None))
         started = time.perf_counter()
