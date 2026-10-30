@@ -2,8 +2,8 @@
 
     phases:
       pre:  {require: [in_topic], defaults: {in_style: concise}}
-      exec: {retry: {max: 3, wait_s: 2, on: [transient, invalid_output]}, fallback: {route: error} | {value: ""}}
-      post: {out_schema: {type: object, required: [summary]}}
+      exec: {timeout_s: 60, retry: {max: 3, wait_s: 2, on: [transient, invalid_output]}, fallback: {route: error} | {value: ""}}
+      post: {out_schema: {type: object, required: [summary]}, route: {retry: "@out_summary == ''"}}
 
 * `pre` checks that the required in_* values are present (not None) and fills the defaults.
 * `exec` is the node's executor, the only retried step. Failures are `transient` (an adapter or OS error, a
@@ -11,11 +11,15 @@
   Retries are `max` extra attempts, waiting `wait_s` between them; `on` says which classes are retried
   (default: transient only). A GENERATE retried for invalid_output sees the validation error under
   `_validation_error` and asks again.
+* `timeout_s` gives each attempt that many seconds; a slower one counts as a `transient` failure. The attempt runs on
+  a worker thread that cannot be killed, so a timed-out call may keep running in the background until it ends.
 * `fallback` applies when exec still fails: `{route: <port>}` leaves by that control port (the node must have it;
   the message goes on `out_error` if it has that port) or `{value: X}` puts X on the first out_* port.
   A fallback value goes through `post` like any result.
 * `post` checks the first out_* value against `out_schema` (JSON Schema). A string is parsed as JSON first
   (a ```json fence is allowed) and the parsed value replaces it, so the next node sees data, not text.
+  `route` maps a control port to a condition over the node's in_* and out_* values (as `@out_text`); the first true
+  one in order sends the token there instead of the default port. A node that already chose a `_route` keeps it.
 
 A node without `phases` runs exactly as before.
 """
@@ -23,16 +27,18 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from jsonschema import Draft202012Validator
 
+from .expr import ExpressionError, evaluate_condition, variables
 from ..logging_config import WARNING, get_logger, log_event
 
 _log = get_logger("grafr.lifecycle")
 
-PHASE_KEYS = {"pre": {"require", "defaults"}, "exec": {"retry", "fallback"}, "post": {"out_schema"}}
+PHASE_KEYS = {"pre": {"require", "defaults"}, "exec": {"timeout_s", "retry", "fallback"}, "post": {"out_schema", "route"}}
 RETRY_KEYS = {"max", "wait_s", "on"}
 ERROR_CLASSES = {"transient", "invalid_output"}
 FENCE = re.compile(r"^```[a-zA-Z]*\s*\n(.*?)\n```\s*$", re.DOTALL)
@@ -77,17 +83,44 @@ def _parse(value: Any) -> Any:
         raise InvalidOutput(f"the output is not valid JSON ({e.msg} at char {e.pos})") from None
 
 
-def _post(node_data: Dict, result: Dict, spec: Dict) -> Dict:
+def _post(node_data: Dict, result: Dict, spec: Dict, in_data: Dict) -> Dict:
     schema = spec.get("out_schema")
     port = _first_out(node_data)
-    if schema is None or port is None or "_route" in result:
-        return result
-    value = _parse(result.get(port))
-    error = next(iter(Draft202012Validator(schema).iter_errors(value)), None)
-    if error is not None:
-        where = "/".join(str(p) for p in error.absolute_path) or "(root)"
-        raise InvalidOutput(f"{where}: {error.message}")
-    return {**result, port: value}
+    if schema is not None and port is not None and "_route" not in result:
+        value = _parse(result.get(port))
+        error = next(iter(Draft202012Validator(schema).iter_errors(value)), None)
+        if error is not None:
+            where = "/".join(str(p) for p in error.absolute_path) or "(root)"
+            raise InvalidOutput(f"{where}: {error.message}")
+        result = {**result, port: value}
+    if spec.get("route") and "_route" not in result:
+        scope = {**{k: v for k, v in in_data.items() if not k.startswith("_")},
+                 **{k: v for k, v in result.items() if not k.startswith("_")}}
+        for target, condition in spec["route"].items():
+            if evaluate_condition(condition, scope):
+                return {**result, "_route": target}
+    return result
+
+
+def _call_with_timeout(execute: Callable[[Dict], Dict], data: Dict, seconds: Optional[float]) -> Dict:
+    if not seconds:
+        return execute(data)
+    box: Dict[str, Any] = {}
+
+    def work():
+        try:
+            box["result"] = execute(data)
+        except BaseException as e:                              # re-raised in the caller's thread
+            box["error"] = e
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise TimeoutError(f"exec took longer than {seconds}s")
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
 
 
 def _fallback(node_data: Dict, spec: Dict, error: Exception) -> Dict:
@@ -118,7 +151,7 @@ def run_phases(node_data: Dict, in_data: Dict, execute: Callable[[Dict], Dict],
     for attempt in range(1, attempts + 1):
         try:
             attempt_data = {**data, "_validation_error": feedback} if feedback else data
-            return _post(node_data, execute(attempt_data) or {}, post)
+            return _post(node_data, _call_with_timeout(execute, attempt_data, ex.get("timeout_s")) or {}, post, data)
         except Exception as e:                                  # classified below; permanent ones re-raise or fall back
             error = e
             kind = _classify(e)
@@ -133,7 +166,7 @@ def run_phases(node_data: Dict, in_data: Dict, execute: Callable[[Dict], Dict],
     if fallback is None:
         raise error
     log_event(_log, "node.fallback", level=WARNING, node=nid, **{k: str(v) for k, v in fallback.items()})
-    return _post(node_data, _fallback(node_data, fallback, error), post)
+    return _post(node_data, _fallback(node_data, fallback, error), post, data)
 
 
 def check_phases(node_data: Dict) -> List[str]:
@@ -158,6 +191,23 @@ def check_phases(node_data: Dict) -> List[str]:
     for p in [*pre.get("require", []), *pre.get("defaults", {})]:
         if p not in ports or not p.startswith("in_"):
             errors.append(f"phases.pre names {p!r}, which is not an in_* port of the node")
+    if "timeout_s" in ex and (not isinstance(ex["timeout_s"], (int, float)) or ex["timeout_s"] <= 0):
+        errors.append("phases.exec.timeout_s must be a number > 0")
+    routes = post.get("route", {})
+    if not isinstance(routes, dict):
+        errors.append("phases.post.route must map a control port to a condition")
+    else:
+        known = {p for p in ports if p.startswith(("in_", "out_"))}
+        for target, condition in routes.items():
+            if target not in ports or target.startswith(("in_", "out_")) or target == "trigger":
+                errors.append(f"phases.post.route sends to {target!r}, which is not a control port of the node")
+            try:
+                unknown = variables(condition) - known
+            except (ExpressionError, TypeError) as e:
+                errors.append(f"phases.post.route.{target}: {e}")
+                continue
+            if unknown:
+                errors.append(f"phases.post.route.{target}: uses {sorted('@' + u for u in unknown)}, not an in_* or out_* port")
     retry = ex.get("retry", {})
     if not isinstance(retry, dict):
         errors.append("phases.exec.retry must be a mapping")

@@ -38,7 +38,7 @@ from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
 from .kernel import KernelPool
 from .lifecycle import run_phases
 from .output import RunOutput
-from .ports import check_value, normalize_ports
+from .ports import apply_input_types, check_value, normalize_ports
 from .resolver import ResourceResolver
 from .solve_backend import CODE_KEYS, code_keys_in, run_backend
 from .topology import invariants
@@ -76,6 +76,7 @@ def load_graph(graph_path: Path) -> Dict:
         raise ValueError(f"Schema validation failed at {where}: {e.message}") from e
     graph_data["_source_dir"] = str(graph_path.resolve().parent)
     normalize_ports(graph_data["nodes"])
+    apply_input_types(graph_data)
     return graph_data
 
 
@@ -134,6 +135,7 @@ class GraphLangRuntime:
                  _scope: Optional[Dict[str, Any]] = None):
         self.graph_data = graph_data
         normalize_ports(graph_data["nodes"])
+        apply_input_types(graph_data)
         self.verbose = verbose
         self.G = nx.MultiDiGraph()
         self.values: Dict[tuple, Any] = {}              # (node, port) -> latest value
@@ -315,7 +317,9 @@ class GraphLangRuntime:
         """Send a control token over the `triggers` edges that leave the chosen control port(s)."""
         ports = self._control_ports(node)
         route = result.get("_route")
-        if route is not None:
+        if result.get("_halt"):                           # RECOVER action halt: this branch ends here
+            chosen = []
+        elif route is not None:
             if route not in ports:
                 raise ValueError(f"node {node!r} routed to {route!r}, which is not one of its ports {ports}")
             chosen = [route]

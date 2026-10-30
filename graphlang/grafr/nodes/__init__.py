@@ -8,6 +8,7 @@ from .loop import LoopExecutor
 from .guard import GuardExecutor
 from .context import ContextExecutor
 from .mutate import MutateExecutor
+from .recover import RecoverExecutor
 
 _EXECUTORS = {
     "INPUT": NodeExecutor(),
@@ -22,7 +23,7 @@ _EXECUTORS = {
     "MUTATE": MutateExecutor(),
     "FORK": NodeExecutor(),
     "JOIN": NodeExecutor(),
-    "RECOVER": NodeExecutor(),
+    "RECOVER": RecoverExecutor(),
     "OBSERVE": NodeExecutor(),
     "EMIT": NodeExecutor(),
     "QUERY": NodeExecutor(),

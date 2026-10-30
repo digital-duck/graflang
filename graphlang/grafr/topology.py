@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
-from .ports import assignable, check_types, normalize_ports, port_type
+from .ports import apply_input_types, assignable, check_types, normalize_ports, port_type
 from .lifecycle import check_phases
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
@@ -104,6 +104,15 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             for p in ("applied", "rejected", "in_delta"):
                 if p not in n["ports"]:
                     errors.append(f"{where}: missing port {p!r}")
+        elif typ == "RECOVER":
+            action = cfg.get("action", "halt")
+            if action not in ("halt", "abort", "skip", "retry"):
+                errors.append(f"{where}: action must be halt, abort, skip or retry, not {action!r}")
+            if action == "retry":
+                if "retry" not in n["ports"]:
+                    errors.append(f"{where}: action retry needs a 'retry' port to wire back to the failed node")
+                if cfg.get("then", "abort") not in ("halt", "abort", "skip"):
+                    errors.append(f"{where}: then must be halt, abort or skip")
         elif typ == "SOLVE":
             solve_errors, solve_warnings = check_solve(n, resolver.base_dir)
             errors += [f"{where}: {m}" for m in solve_errors]
@@ -318,6 +327,7 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
     nodes, edges = graph_data["nodes"], graph_data["edges"]
     normalize_ports(nodes)
+    apply_input_types(graph_data)
     entries = [n for n in nodes if n["type"] == "INPUT"]
     if len(entries) != 1:
         errors.append(f"expected exactly one INPUT node, found {len(entries)}")

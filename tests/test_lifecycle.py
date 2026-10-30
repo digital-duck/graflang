@@ -144,3 +144,93 @@ def test_real_llm_returns_json_matching_the_schema():
     g["nodes"][1]["config"]["prompt_inline"] = "What is the capital of France?"
     out = GraphLangRuntime(g, adapter="claude_cli", verbose=False).execute({})
     assert "paris" in out["text"]["capital"].lower()
+
+
+# ---- timeout, post route, RECOVER ------------------------------------------------------------------------------------
+
+def test_a_slow_attempt_times_out_and_is_retried():
+    import time
+
+    class Slow(Scripted):
+        def generate(self, prompt, model=None, **opts):
+            if not self.prompts:
+                self.prompts.append(prompt)
+                time.sleep(2)
+            return super().generate(prompt, model, **opts) if self.replies else "late"
+
+    llm = Slow("fast")
+    rt, out = run({"exec": {"timeout_s": 0.2, "retry": {"max": 1}}}, llm)
+    assert out["text"] == "fast"
+
+
+def test_a_timeout_without_retry_fails():
+    import time
+
+    class Slow(Scripted):
+        def generate(self, prompt, model=None, **opts):
+            time.sleep(2)
+
+    with pytest.raises(TimeoutError):
+        run({"exec": {"timeout_s": 0.1}}, Slow())
+
+
+def test_post_route_picks_the_port_from_the_result():
+    edges = [{"source": "g.empty", "target": "o.trigger", "type": "triggers"}]
+    node_ports = PROMPT["ports"] + ["empty"]
+    g = graph({"post": {"route": {"empty": "@out_text == ''"}}}, extra_edges=edges)
+    g["nodes"][1]["ports"] = node_ports
+    rt = GraphLangRuntime(g, llm=Scripted(""), verbose=False)
+    rt.execute({})
+    assert ("g", "empty") in rt.emitted and ("g", "complete") not in rt.emitted
+    rt = GraphLangRuntime(g, llm=Scripted("full"), verbose=False)
+    rt.execute({})
+    assert ("g", "complete") in rt.emitted
+
+
+def recover_graph(**cfg):
+    """g fails (fallback route error) -> r (RECOVER); `retry` loops back to g."""
+    g = graph({"exec": {"fallback": {"route": "error"}}})
+    g["nodes"].append({"id": "r", "type": "RECOVER", "ports": ["trigger", "retry", "complete", "in_error", "out_error"], "config": cfg})
+    g["edges"] += [{"source": "g.error", "target": "r.trigger", "type": "triggers"},
+                   {"source": "g.out_text", "target": "r.in_error", "type": "binds"},
+                   {"source": "r.retry", "target": "g.trigger", "type": "triggers"}]
+    return g
+
+
+def test_recover_retry_sends_the_token_back_then_gives_up():
+    llm = Scripted(OSError("1"), OSError("2"), OSError("3"))
+    rt = GraphLangRuntime(recover_graph(action="retry", max_retries=1, then="halt"), llm=llm, verbose=False)
+    rt.execute({})
+    assert rt.fired["g"] == 2 and rt.fired["r"] == 2                # one retry, then halt
+    assert ("r", "complete") not in rt.emitted
+
+
+def test_recover_retry_ends_in_success():
+    rt = GraphLangRuntime(recover_graph(action="retry", max_retries=2), llm=Scripted(OSError("1"), "fine"), verbose=False)
+    assert rt.execute({})["text"] == "fine"
+
+
+def test_recover_abort_fails_the_run_and_skip_carries_on():
+    with pytest.raises(RuntimeError, match="aborted the run: stop"):
+        GraphLangRuntime(recover_graph(action="abort", message="stop"), llm=Scripted(OSError("x")), verbose=False).execute({})
+    rt = GraphLangRuntime(recover_graph(action="skip"), llm=Scripted(OSError("x")), verbose=False)
+    rt.execute({})
+    assert ("r", "complete") in rt.emitted
+
+
+def test_recover_checks_in_validate():
+    g = recover_graph(action="retry")
+    g["nodes"][-1]["ports"].remove("retry")
+    g["edges"].pop()
+    assert any("needs a 'retry' port" in m for m in check(g)[0])
+    assert any("action must be" in m for m in check(recover_graph(action="explode"))[0])
+    assert not any("RECOVER" in m for m in check(recover_graph(action="retry", then="halt"))[0])
+
+
+@pytest.mark.parametrize("phases, fragment", [
+    ({"exec": {"timeout_s": 0}}, "timeout_s"),
+    ({"post": {"route": {"nope": "@out_text"}}}, "not a control port"),
+    ({"post": {"route": {"error": "@out_zzz"}}}, "not an in_* or out_* port"),
+])
+def test_validate_reports_bad_timeout_and_route(phases, fragment):
+    assert any(fragment in m for m in check_phases({**PROMPT, "config": {"phases": phases}})), phases

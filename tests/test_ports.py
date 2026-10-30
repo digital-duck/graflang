@@ -58,3 +58,25 @@ def test_json_port_with_a_schema_checks_the_value():
     bad = GraphLangRuntime(graph(ports, "JSON"), llm=Scripted("plain text"), verbose=False)
     with pytest.raises(ValueError):
         bad.execute({})
+
+
+def test_trust_labels_need_the_sink_labels_on_the_source():
+    assert assignable("TEXT!sql_safe", "TEXT!sql_safe") and assignable("TEXT!sql_safe!x", "TEXT!sql_safe")
+    assert assignable("TEXT!sql_safe", "TEXT") and assignable("TEXT", "TEXT")
+    assert not assignable("TEXT", "TEXT!sql_safe") and not assignable("TEXT!untrusted", "TEXT!sql_safe")
+    errs = check(graph({"trigger": "control", "complete": "control", "out_text": "TEXT!untrusted"}, out_type="TEXT!sql_safe"))[0]
+    assert any("cannot be bound" in m for m in errs)
+    assert check(graph({"trigger": "control", "complete": "control", "out_text": "TEXT!sql_safe"}, out_type="TEXT!sql_safe"))[0] == []
+    # the label does not change the runtime value check
+    rt = GraphLangRuntime(graph({"trigger": "control", "complete": "control", "out_text": "TEXT!sql_safe"}, "TEXT!sql_safe"),
+                          llm=Scripted("select 1"), verbose=False)
+    assert rt.execute({})["text"] == "select 1"
+
+
+def test_workflow_input_types_type_the_input_ports():
+    g = graph(TEXT_GEN)
+    g["workflow"]["inputs"] = [{"name": "n", "type": "INTEGER"}]
+    g["nodes"][0]["ports"] = ["entry", "out_n"]
+    g["nodes"][2]["ports"] = {"trigger": "control", "in_text": "TEXT", "in_n": "TEXT"}
+    g["edges"].append({"source": "s.out_n", "target": "o.in_n", "type": "binds"})
+    assert any("INTEGER cannot be bound to a TEXT port" in m for m in check(g)[0])
