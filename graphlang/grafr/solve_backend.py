@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Tuple
 
 from ..logging_config import ERROR, WARNING, get_logger, log_event
 from .kernel import KernelError, KernelPool
-from .solver import BUILTIN_PARSERS, MEMORY_MB, OUT_TYPES, TIMEOUT, SolverError, check_type, run_solver
+from .solver import BUILTIN_PARSERS, CONTAINER_KEYS, MEMORY_MB, OUT_TYPES, TIMEOUT, SolverError, check_type, run_solver
 
 _log = get_logger("grafr.solve")
 
@@ -32,7 +32,7 @@ ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SCOPES = ("run", "node")
 # Config keys that decide what runs. They come from the graph file, never from a model: a MUTATE delta that adds or changes
 # one is refused before any policy is consulted (see `code_keys_in`).
-CODE_KEYS = frozenset({"backend", "code", "result", "command", "parse", "env_passthrough", "executor", "url", "allow_hosts", "headers", "method"})   # env can change what runs (NODE_OPTIONS, PYTHONPATH)
+CODE_KEYS = frozenset({"backend", "code", "result", "command", "parse", "env_passthrough", "executor", "url", "allow_hosts", "headers", "method", "container"})   # env can change what runs (NODE_OPTIONS, PYTHONPATH)
 
 
 class SolveError(RuntimeError):
@@ -86,7 +86,7 @@ def run_backend(node_data: Dict, in_data: Dict[str, Any], resolver, kernels: Ker
                           env=list(names))                       # names only, never values
             res = run_solver(cfg["command"], inputs, parse=cfg.get("parse", "last_json"), out_type=out_type,
                              base_dir=resolver.base_dir, timeout=timeout, memory_mb=cfg.get("memory_mb", MEMORY_MB),
-                             cwd=resolver.base_dir, env={n: os.environ[n] for n in names})
+                             cwd=resolver.base_dir, env={n: os.environ[n] for n in names}, container=cfg.get("container"))
             value, fields["output_sha"], fields["parser"] = res.value, _digest(res.stdout), res.parser
         else:
             raise ValueError(f"unknown backend {backend!r} (one of {', '.join(BACKENDS)})")
@@ -172,6 +172,7 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
         elif not ((base_dir / command[0]).exists() if "/" in command[0] else shutil.which(command[0])):
             warnings.append(f"command {command[0]!r} was not found on this machine")
         errors += _check_parse(cfg.get("parse", "last_json"), base_dir, warnings)
+        errors += _check_container(cfg.get("container"), warnings)
         names = cfg.get("env_passthrough", [])
         if not (isinstance(names, list) and all(isinstance(n, str) and ENV_NAME.fullmatch(n) for n in names)):
             errors.append("env_passthrough must be a list of environment variable names, e.g. [HOME, NODE_PATH]")
@@ -184,6 +185,24 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
             elif shutil.which(item) is None and find_spec(item.split(".")[0]) is None:
                 warnings.append(f"requirement {item!r} is not installed (neither a command on PATH nor a Python module)")
     return errors, warnings
+
+
+def _check_container(spec: Any, warnings: List[str]) -> List[str]:
+    if spec is None:
+        return []
+    if not isinstance(spec, dict) or not isinstance(spec.get("image"), str) or not spec["image"]:
+        return ["container must be a mapping with an `image`, e.g. {image: python:3.12-slim}"]
+    errors = [f"container: unknown key {k!r} (one of {', '.join(sorted(CONTAINER_KEYS))})" for k in spec if k not in CONTAINER_KEYS]
+    if spec.get("network", "none") not in ("none", "bridge"):
+        errors.append("container.network must be 'none' (the default) or 'bridge'")
+    if spec.get("mount", "ro") not in ("ro", "rw", "none"):
+        errors.append("container.mount must be 'ro' (the default), 'rw' or 'none'")
+    for key in ("memory_mb", "cpus", "pids"):
+        if key in spec and not (isinstance(spec[key], (int, float)) and not isinstance(spec[key], bool) and spec[key] > 0):
+            errors.append(f"container.{key} must be a positive number")
+    if shutil.which("docker") is None:
+        warnings.append("container: the docker command was not found on this machine")
+    return errors
 
 
 def _check_parse(parse: Any, base_dir: Path, warnings: List[str]) -> List[str]:

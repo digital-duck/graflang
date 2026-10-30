@@ -18,6 +18,7 @@ import re
 import resource
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -165,9 +166,27 @@ def _limits(memory_mb: int):
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
 
+CONTAINER_KEYS = {"image", "network", "mount", "memory_mb", "cpus", "pids"}
+DOCKER_ENV = ("HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "XDG_RUNTIME_DIR")      # the docker client needs these; the program in the container never sees them
+
+
+def container_command(command: List[str], container: Dict[str, Any], *, base_dir: Path, memory_mb: int, env_names: List[str], name: str) -> List[str]:
+    """`docker run` for the program: no network, a read-only root, the graph's folder mounted read-only at /work, no
+    capabilities, a memory/CPU/process cap. Environment values travel by name (`-e NAME`), never on the command line."""
+    network, mount = container.get("network", "none"), container.get("mount", "ro")
+    argv = ["docker", "run", "--rm", "-i", "--name", name, "--network", network, "--read-only", "--tmpfs", "/tmp",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", str(container.get("pids", 128)),
+            "--memory", f"{container.get('memory_mb', memory_mb)}m", "--cpus", str(container.get("cpus", 1))]
+    if mount != "none":
+        argv += ["-v", f"{base_dir.resolve()}:/work:{mount}", "-w", "/work"]
+    for n in env_names:
+        argv += ["-e", n]
+    return [*argv, container["image"], *command]
+
+
 def run_solver(command: List[str], inputs: Dict[str, Any], *, parse: Any, out_type: str, base_dir: Path,
                timeout: float = TIMEOUT, memory_mb: int = MEMORY_MB, cwd: Optional[Path] = None,
-               env: Optional[Dict[str, str]] = None) -> SolverResult:
+               env: Optional[Dict[str, str]] = None, container: Optional[Dict[str, Any]] = None) -> SolverResult:
     """Run `command` with `inputs` as JSON on stdin, read stdout through `parse`, type-check against `out_type`.
 
     Raises SolverError (with the raw stdout and stderr) on a non-zero exit, a timeout, an unparseable output, or a value
@@ -176,14 +195,24 @@ def run_solver(command: List[str], inputs: Dict[str, Any], *, parse: Any, out_ty
     The solver sees only PATH and what is in `env`: nothing else of the caller's environment (no keys, no HOME) leaks to it."""
     payload = json.dumps(inputs, default=str)
     start = time.perf_counter()
+    base_env = {"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1", **(env or {})}
+    name = ""
+    if container:                                   # the program runs in `docker run`; docker, not rlimit, holds its memory
+        name = f"graf-{uuid.uuid4().hex[:12]}"
+        argv = container_command(command, container, base_dir=base_dir, memory_mb=memory_mb, env_names=sorted(env or {}), name=name)
+        base_env.update({k: os.environ[k] for k in DOCKER_ENV if k in os.environ})
+        limit = None
+    else:
+        argv, limit = command, (lambda: _limits(memory_mb))
     try:
-        done = subprocess.run(command, input=payload, capture_output=True, text=True, timeout=timeout,
-                              cwd=str(cwd) if cwd else None, env={"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1", **(env or {})},
-                              preexec_fn=lambda: _limits(memory_mb))
+        done = subprocess.run(argv, input=payload, capture_output=True, text=True, timeout=timeout,
+                              cwd=str(cwd) if cwd else None, env=base_env, preexec_fn=limit)
     except subprocess.TimeoutExpired as e:
+        if name:                                    # killing the client leaves the container running
+            subprocess.run(["docker", "kill", name], capture_output=True, env=base_env, timeout=30, check=False)
         raise SolverError(f"solver timed out after {timeout}s", stdout=_text(e.stdout), stderr=_text(e.stderr)) from None
     except FileNotFoundError:
-        raise SolverError(f"solver command not found: {command[0]!r}") from None
+        raise SolverError("container: the docker command was not found" if container else f"solver command not found: {command[0]!r}") from None
     seconds = time.perf_counter() - start
     if done.returncode != 0:
         tail = (done.stderr.strip().splitlines() or [f"exit {done.returncode}"])[-1]
