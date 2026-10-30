@@ -412,6 +412,8 @@ class GraphLangRuntime:
     def _execute_node(self, node_type: str, node_data: Dict, in_data: Dict) -> Dict:
         if node_type == "LOOP":                       # control structures: they need the runtime, not an executor
             return self._run_loop(node_data, in_data)
+        if node_type == "BATCH":
+            return self._run_batch(node_data, in_data)
         if node_type == "MUTATE":
             return self._run_mutate(node_data, in_data)
         if node_type == "SOLVE" and node_data.get("config", {}).get("backend"):
@@ -482,6 +484,62 @@ class GraphLangRuntime:
         self.loop_iterations[node_data["id"]] = cycle
         log_event(_log, "loop.end", node=node_data["id"], iterations=cycle, depth=self.depth)
         result = {f"out_{name}": value for name, value in state.items()}
+        result["_route"] = "exit"
+        return result
+
+    # ---- BATCH --------------------------------------------------------------------------------
+    def _run_batch(self, node_data: Dict, in_data: Dict[str, Any]) -> Dict:
+        """Run the node's `subgraph` once per item of a list and collect one value per item (design E5, map).
+
+        config:
+          over         the in_* port holding the list (default: the node's first in_* port); a JSON text is parsed
+          item_var     name of the current item inside the body (default `item`; `index` is its position)
+          concurrency  items processed at the same time (default: the run's workers); results keep the item order
+          max_items    refuse longer lists (default 1000)
+          outputs      the BATCH's out_* ports, each {collect: "node.out_port"}: the list of that value, one per item
+          subgraph     {nodes, edges}: the body, as in LOOP. An in_* port with no `binds` edge reads the BATCH's input of
+                       that name, else `item` / `index`.
+
+        Every item runs in a fresh copy of the body, like a LOOP iteration, so items cannot see each other. Routes to `exit`.
+        """
+        cfg, nid = node_data.get("config", {}), node_data["id"]
+        body = cfg.get("subgraph")
+        if not body:
+            raise ValueError(f"BATCH {nid!r} has no subgraph")
+        over = cfg.get("over") or next((p for p in node_data["ports"] if p.startswith("in_")), None)
+        items = in_data.get(over)
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except json.JSONDecodeError:
+                pass
+        if not isinstance(items, (list, tuple)):
+            raise ValueError(f"BATCH {nid!r}: {over!r} must hold a list, got {type(items).__name__}")
+        if len(items) > int(cfg.get("max_items", 1000)):
+            raise ValueError(f"BATCH {nid!r}: {len(items)} items is over max_items ({cfg.get('max_items', 1000)})")
+        specs: Dict[str, Dict] = cfg.get("outputs", {})
+        for name, spec in specs.items():
+            if set(spec) != {"collect"}:
+                raise ValueError(f"BATCH {nid!r} output {name!r} must be {{collect: node.out_port}}")
+        item_var = cfg.get("item_var", "item")
+        concurrency = max(1, int(cfg.get("concurrency", self.workers)))
+
+        def one(index: int, item: Any) -> Dict[str, Any]:
+            scope = {**in_data, item_var: item, "index": index}
+            sub = GraphLangRuntime(self.graph_data, _parent=self, _nodes=body["nodes"], _edges=body["edges"],
+                                   _boundary=in_data, _scope=scope, verbose=self.verbose)
+            if concurrency > 1:
+                sub.workers = 1                                     # the items are the parallelism
+            sub._drain(deque((n, None) for n in sub._start_nodes()))
+            return {name: sub.values.get(split_ref(spec["collect"])) for name, spec in specs.items()}
+
+        if concurrency == 1 or len(items) < 2:
+            rows = [one(i, item) for i, item in enumerate(items)]
+        else:
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                rows = list(pool.map(lambda pair: one(*pair), enumerate(items)))
+        log_event(_log, "batch.end", node=nid, items=len(items), concurrency=concurrency, depth=self.depth)
+        result: Dict[str, Any] = {f"out_{name}": [row[name] for row in rows] for name in specs}
         result["_route"] = "exit"
         return result
 

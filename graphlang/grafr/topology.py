@@ -123,12 +123,14 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             warnings += [f"{where}: {m}" for m in solve_warnings]
         elif typ == "LOOP":
             _check_loop(n, prefix, resolver, errors, warnings)
+        elif typ == "BATCH":
+            _check_batch(n, prefix, resolver, errors, warnings)
 
         defaulted = set(cfg.get("phases", {}).get("pre", {}).get("defaults", {})) if isinstance(cfg.get("phases"), dict) else set()
         for port in sorted(in_ports - defaulted):
             if (nid, port) not in fed and not (port in boundary or port[3:] in loop_vars) and typ not in ("OUTPUT",):
                 warnings.append(f"{where}: input {port!r} is not fed by any binds edge")
-        if typ not in ("INPUT", "LOOP") and "trigger" in n["ports"] and nid not in triggered and not prefix:
+        if typ not in ("INPUT", "LOOP", "BATCH") and "trigger" in n["ports"] and nid not in triggered and not prefix:
             warnings.append(f"{where}: nothing triggers it")
     _check_races(nodes, edges, prefix, errors)
 
@@ -251,6 +253,38 @@ def _check_loop(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[s
     _check_scope(body["nodes"], body["edges"], f"{prefix}{nid}/", resolver, scope, loop_in, errors, warnings)
 
 
+def _check_batch(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[str], warnings: List[str]) -> None:
+    cfg, nid = n.get("config", {}), n["id"]
+    where = f"{prefix}BATCH {nid!r}"
+    body = cfg.get("subgraph")
+    if not body:
+        errors.append(f"{where}: no subgraph")
+        return
+    ins = [p for p in n["ports"] if p.startswith("in_")]
+    over = cfg.get("over") or (ins[0] if ins else None)
+    if over not in ins:
+        errors.append(f"{where}: needs an in_* port holding the list" + (f" ({over!r} is not one)" if over else ""))
+    if "exit" not in n["ports"]:
+        errors.append(f"{where}: missing port 'exit'")
+    for key in ("concurrency", "max_items"):
+        if key in cfg and not (isinstance(cfg[key], int) and not isinstance(cfg[key], bool) and cfg[key] > 0):
+            errors.append(f"{where}: {key} must be a whole number > 0")
+    body_nodes = {b["id"]: b for b in body["nodes"]}
+    for name, spec in cfg.get("outputs", {}).items():
+        if not isinstance(spec, dict) or set(spec) != {"collect"}:
+            errors.append(f"{where}: output {name!r} must be {{collect: node.out_port}}")
+            continue
+        node, _, port = spec["collect"].partition(".")
+        if node not in body_nodes:
+            errors.append(f"{where}: output {name!r} refers to {spec['collect']!r}, but the subgraph has no node {node!r}")
+        elif port not in body_nodes[node]["ports"]:
+            errors.append(f"{where}: output {name!r} refers to {spec['collect']!r}, but {node!r} has no port {port!r}")
+        if f"out_{name}" not in n["ports"]:
+            warnings.append(f"{where}: output {name!r} has no port 'out_{name}' on the node, so nothing can read it")
+    scope = set(ins) | {cfg.get("item_var", "item"), "index"}
+    _check_scope(body["nodes"], body["edges"], f"{prefix}{nid}/", resolver, scope, set(ins), errors, warnings)
+
+
 RISKY_TYPES = ("EMIT", "QUERY")       # reach outside the workflow; anything else is risky only when marked `risky: true`
 
 
@@ -264,7 +298,7 @@ def _contains_risky(node: Dict) -> List[str]:
     for b in node.get("config", {}).get("subgraph", {}).get("nodes", []):
         if _risky(b):
             found.append(f"{node['id']}/{b['id']}")
-        if b["type"] == "LOOP":
+        if b["type"] in ("LOOP", "BATCH"):
             found += [f"{node['id']}/{f}" for f in _contains_risky(b)]
     return found
 
@@ -305,7 +339,7 @@ def _check_guarded(nodes: List[Dict], edges: List[Dict], errors: List[str]) -> N
 
     risky = {}
     for n in nodes:
-        inside = _contains_risky(n) if n["type"] == "LOOP" else []
+        inside = _contains_risky(n) if n["type"] in ("LOOP", "BATCH") else []
         if _risky(n) or inside:
             risky[n["id"]] = f"{n['type']} {n['id']!r}" + (f" (its body holds risky {', '.join(inside)})" if inside else "")
     unguarded = reach(n["id"] for n in nodes if n["type"] == "INPUT")

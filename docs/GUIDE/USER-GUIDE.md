@@ -209,6 +209,12 @@ limits: {max_steps: 200, wall_time_s: 300}
 
 `graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file, which beats the graph's own `model:` hint. A `model: $name` with no binding uses the run's default model (with a warning). `limits.max_cost` is not supported: adapters do not report cost.
 
+## Several things at once: JOIN, BATCH and `--workers`
+
+- **JOIN as fan-in.** A `JOIN` with `in_*` ports and one `out_*` port waits for all its branches, then puts their values in one object keyed by the port names (`in_x` becomes `x`). A node downstream reads a field with `@in_args.x`. Expressions also read `@list[0]` and `@obj['key']`.
+- **`BATCH`** runs a `subgraph` once per item of a list and collects one value per item, in order. `over` names the `in_*` port holding the list, `item_var` (default `item`) and `index` are visible to the body, `outputs: {texts: {collect: "w.out_text"}}` names what to collect, `concurrency` sets how many items run at once, `max_items` caps the list (default 1000).
+- **`graf run --workers N`** (or `limits.concurrency` in a bindings file) runs the nodes that are released together, such as the branches of a `FORK`, at the same time. The result does not depend on which call finishes first. The default is 1, one node at a time.
+
 ## Nodes and ports
 
 Each node has `id`, `type`, `ports`, and optional `config`. Port names carry their kind:

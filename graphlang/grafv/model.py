@@ -15,7 +15,7 @@ TYPE_COLORS = {
     "INPUT": "#8a8f98", "OUTPUT": "#8a8f98", "EMIT": "#8a8f98",
     "GENERATE": "#4f8ef7",
     "EVALUATE": "#e0a21e", "ASSERT": "#e0a21e",
-    "LOOP": "#9b59b6", "FORK": "#9b59b6", "JOIN": "#9b59b6",
+    "LOOP": "#9b59b6", "BATCH": "#9b59b6", "FORK": "#9b59b6", "JOIN": "#9b59b6",
     "GUARD": "#e5484d", "MUTATE": "#e5484d", "RECOVER": "#e5484d",
     "SOLVE": "#2fa84f", "QUERY": "#2fa84f", "CONTEXT": "#2fa84f", "OBSERVE": "#2fa84f",
 }
@@ -66,6 +66,8 @@ def _summary(node: Dict[str, Any]) -> str:
         return f"{cfg['action']} {out}".strip()
     if kind in ("EVALUATE", "ASSERT") and cfg.get("condition"):
         return str(cfg["condition"]).replace("@in_", "@").replace("@", "")
+    if kind == "BATCH":
+        return "for each " + cfg.get("item_var", "item")
     if kind == "LOOP" and cfg.get("condition"):
         return "repeat while " + str(cfg["condition"]).replace("@in_", "@").replace("@", "")
     return node["id"]
