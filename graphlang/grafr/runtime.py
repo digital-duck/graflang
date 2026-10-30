@@ -43,6 +43,7 @@ from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
 from .kernel import KernelPool
 from .lifecycle import run_phases
 from .output import RunOutput
+from .parts import flatten_parts
 from .ports import apply_input_types, check_value, normalize_ports
 from .resolver import ResourceResolver
 from .run_node import run_run
@@ -73,6 +74,8 @@ def load_graph(graph_path: Path) -> Dict:
         graph_data = YAML(typ="safe").load(f)
     if is_compact(graph_data):
         graph_data = expand(graph_data)
+    graph_data["_source_dir"] = str(graph_path.resolve().parent)
+    flatten_parts(graph_data)                           # SUBGRAPH nodes become the part's own nodes
     require_graphlang(graph_data, graph_path)
     if not SCHEMA_PATH.is_file():
         raise FileNotFoundError(f"GraphLang schema not found at {SCHEMA_PATH}")
@@ -149,6 +152,7 @@ class GraphLangRuntime:
                  _edges: Optional[List[Dict]] = None, _boundary: Optional[Dict[str, Any]] = None,
                  _scope: Optional[Dict[str, Any]] = None):
         self.graph_data = graph_data
+        flatten_parts(graph_data)
         normalize_ports(graph_data["nodes"])
         apply_input_types(graph_data)
         self.verbose = verbose

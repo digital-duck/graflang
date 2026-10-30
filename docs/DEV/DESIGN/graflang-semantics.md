@@ -38,6 +38,10 @@ For the loaded graph and for every graph a `MUTATE` produces:
 
 A delta that adds any error to this list is rejected. The safety layer (`GUARD` and `MUTATE` nodes, the `risky` flag) cannot be removed or edited by a delta.
 
+## 3a. Named subgraphs
+
+A `SUBGRAPH` node (a *use* of a part listed under `resources.parts`) has no runtime semantics of its own: before anything runs, `load_graph` replaces it by a copy of the part's nodes (ids `<use>__<node>`), wiring the part's INPUT and OUTPUT into direct edges. Every rule above therefore applies to the expanded graph, and two uses of one part are two independent copies with separate state.
+
 ## 4. Known gaps, decided in the roadmap
 
 - R6 stale reads and the single-store data model: E5 (explicit fan-in with `JOIN`, merge rules).

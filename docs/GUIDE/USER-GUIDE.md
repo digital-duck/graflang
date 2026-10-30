@@ -193,6 +193,20 @@ steps:
 - Control is inferred from the order you list the steps. A step with `on: gate.fail` (or a list) hangs there instead, which is how you write the branches of `assert`, `evaluate`, `guard` and `fork`.
 - Other keys (`model`, `phases`, `temperature`, ...) go into the node's `config`. `nodes:` and `edges:` may sit beside `steps:` for anything the compact form cannot say.
 
+## Parts: a workflow used as a node
+
+A workflow file with one `INPUT` and one `OUTPUT` node can be reused inside another. List it under `resources.parts`, then use it:
+
+```yaml
+resources:
+  parts: {polish: ./parts/polish.graph.yaml}
+steps:
+  - first:  {use: parts.polish, in: {essay: draft, tone: formal}, out: [essay]}
+  - second: {use: parts.polish, in: {essay: first.essay}, out: [essay]}
+```
+
+The part's `workflow.inputs` and `outputs` are its interface: `in:` names must be inputs of the part, `out:` names its outputs, an input with no default must be bound, and types must be assignable. A literal in `in:` overrides the part's default. Each use is its own copy (`first__rewrite`, `second__rewrite`), so state is not shared; parts may use parts, but not themselves. In long form the use is a `SUBGRAPH` node with `config: {part: parts.polish}` and ports `trigger`, `complete`, `in_<name>`, `out_<name>`. `graf expand` shows the expanded graph. See `cookbook/parts_demo`.
+
 ## Export to SPL: `graf export-spl`
 
 `graf export-spl flow.graph.yaml -o flow.spl` writes the workflow as an SPL script (structure only, no LLM) that SPL.py's `spl3 run` can run. A prompt becomes a `CREATE FUNCTION`, a lifted Python tool a `CREATE TOOL_API`. What SPL has no word for (lifecycle phases, typed ports) is dropped and listed as a warning.

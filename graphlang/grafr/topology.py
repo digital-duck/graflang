@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 from .ports import apply_input_types, assignable, check_types, normalize_ports, port_type
 from .lifecycle import check_phases
+from .parts import flatten_parts
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
 from .run_node import check_run
@@ -369,6 +370,7 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
     resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
+    flatten_parts(graph_data)
     nodes, edges = graph_data["nodes"], graph_data["edges"]
     normalize_ports(nodes)
     apply_input_types(graph_data)

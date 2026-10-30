@@ -33,7 +33,7 @@
             "type": "string", 
             "enum": [
               "INPUT", "EMIT", "GENERATE", "SOLVE", "QUERY", 
-              "EVALUATE", "FORK", "JOIN", "LOOP", "BATCH", 
+              "EVALUATE", "FORK", "JOIN", "LOOP", "BATCH", "SUBGRAPH", 
               "ASSERT", "RUN", "RECOVER", "CONTEXT", "MUTATE", 
               "GUARD", "OBSERVE", "OUTPUT"
             ] 

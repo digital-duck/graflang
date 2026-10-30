@@ -121,7 +121,7 @@ def test_a_hand_edit_may_set_what_a_model_may_not(work):
     assert "calc" in ed.node_ids()                                                    # CODE_KEYS bind a MUTATE delta, not a person
 
 
-ALL = sorted((Path(__file__).parent.parent / "cookbook").rglob("*.graph.yaml"))
+ALL = sorted(p for p in (Path(__file__).parent.parent / "cookbook").rglob("*.graph.yaml") if "\nsteps:" not in p.read_text())   # the editor takes the long form only
 
 
 @pytest.mark.parametrize("path", ALL, ids=lambda p: p.parent.name)

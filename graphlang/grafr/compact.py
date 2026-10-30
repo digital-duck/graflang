@@ -18,6 +18,7 @@ A step is a one-key mapping: the step id, then a mapping whose first key names t
   join      [step or step.port, ...] it waits for     trigger  complete
   output    a reference, or {workflow output: ref}    trigger  exit
   node      a node type (LOOP, MUTATE, ...)           trigger  complete   (plus any `ports:` given)
+  use       parts.<name>, a part file (see parts.py)  trigger  complete   (`out:` must list the part's outputs you read)
 
 Other keys of a step: `in` maps input names to values; `out` names the result port(s) (default `result`; a node's
 first one is what a bare reference means); `on` says what triggers the step; every other key goes into the node's
@@ -44,10 +45,10 @@ ENTRY = "wf_entry"
 KINDS = {
     "generate": ("trigger", "complete"), "solve": ("trigger", "complete"), "assert": ("trigger", "pass", "fail"),
     "evaluate": ("trigger", "pass", "fail"), "guard": ("trigger", "allow", "deny"), "join": ("trigger", "complete"),
-    "output": ("trigger", "exit"), "fork": ("trigger",), "node": ("trigger", "complete"),
+    "output": ("trigger", "exit"), "fork": ("trigger",), "node": ("trigger", "complete"), "use": ("trigger", "complete"),
 }
 TYPES = {"generate": "GENERATE", "solve": "SOLVE", "assert": "ASSERT", "evaluate": "EVALUATE", "guard": "GUARD",
-         "join": "JOIN", "output": "OUTPUT", "fork": "FORK"}
+         "join": "JOIN", "output": "OUTPUT", "fork": "FORK", "use": "SUBGRAPH"}
 RESERVED = {"in", "out", "on", "ports", "config"}
 ID = re.compile(r"^[a-zA-Z0-9_]+$")
 
@@ -140,6 +141,10 @@ def expand(data: Dict) -> Dict:
         ports = list(KINDS[kind])
         if kind == "generate":
             cfg["prompt_ref" if isinstance(arg, str) and re.fullmatch(r"prompts\.\w+", arg) else "prompt_inline"] = arg
+        elif kind == "use":
+            cfg["part"] = arg
+            if "out" not in body:
+                raise CompactError(f"step {sid!r}: `use` needs `out:`, the part's outputs you want to read")
         elif kind == "solve":
             cfg["expression"] = arg
         elif kind in ("assert", "evaluate"):
