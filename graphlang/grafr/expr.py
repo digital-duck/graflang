@@ -5,6 +5,7 @@ interpreted by `_eval` below. What it accepts:
 
 * variables written `@name`  (`@in_analysis`, `@cycle`); a bare name is an error
 * literals: numbers, 'strings', TRUE / FALSE / NULL (any case)
+* `@obj.field` and `@list[0]` / `@obj['key']` (no slices, no private fields)
 * `AND`, `OR`, `NOT` (any case; `and`/`or`/`not` also work), comparisons (== != < <= > >= in, not in),
   arithmetic (+ - * / // %), parentheses, list/tuple literals
 * calls to a fixed set of functions: contains, startswith, endswith, len, lower, upper, strip, abs,
@@ -81,7 +82,7 @@ FUNCS: Dict[str, Callable[..., Any]] = {
 _ALLOWED = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.USub, ast.UAdd,
             ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
             ast.Compare, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
-            ast.Constant, ast.Name, ast.Load, ast.Call, ast.List, ast.Tuple)
+            ast.Constant, ast.Name, ast.Load, ast.Call, ast.List, ast.Tuple, ast.Attribute, ast.Subscript)
 _BINOPS = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b,
            ast.Div: lambda a, b: a / b, ast.FloorDiv: lambda a, b: a // b, ast.Mod: lambda a, b: a % b}
 _CMPS = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
@@ -187,6 +188,21 @@ def _eval(node: ast.AST, scope: Dict[str, Any]) -> Any:
                 return False
             left = right
         return True
+    if isinstance(node, ast.Attribute):                     # @in_args.topic: a field of an object (what a JOIN bundles)
+        base = _eval(node.value, scope)
+        if not isinstance(base, dict) or node.attr.startswith("_"):
+            raise ExpressionError(f"cannot read field {node.attr!r} of {type(base).__name__}")
+        if node.attr not in base:
+            raise ExpressionError(f"no field {node.attr!r}; the object has {sorted(map(str, base))}")
+        return base[node.attr]
+    if isinstance(node, ast.Subscript):
+        base, index = _eval(node.value, scope), _eval(node.slice, scope)
+        if not isinstance(base, (dict, list, tuple, str)):
+            raise ExpressionError(f"cannot index a {type(base).__name__}")
+        try:
+            return base[index]
+        except (KeyError, IndexError, TypeError):
+            raise ExpressionError(f"no item {index!r}") from None
     if isinstance(node, ast.Call):
         return FUNCS[node.func.id](*[_eval(a, scope) for a in node.args])
     raise ExpressionError(f"cannot evaluate {type(node).__name__}")        # unreachable after parse()

@@ -53,7 +53,6 @@ def test_variables_lists_what_an_expression_uses():
     "().__class__.__bases__",
     "[c for c in 'abc']",
     "(lambda: 1)()",
-    "@x[0]",
     "2 ** 10",
     "exec('1')",
     "eval('1')",
@@ -103,3 +102,12 @@ def test_json_get_tolerates_a_code_fence_and_falls_back_to_the_default():
     assert evaluate("json_get(@v, 'a', 'none')", {"v": "not json"}) == "none"
     assert evaluate("json_get(@v, 'a.b')", {"v": '{"a": 1}'}) == ""
     assert evaluate("json_get(@v, 'a.5')", {"v": '{"a": [1]}'}) == ""
+
+
+def test_fields_and_items():
+    scope = {"args": {"topic": "tides", "n": 2}, "xs": [10, 20], "d": {"k": 1}}
+    assert evaluate("@args.topic", scope) == "tides" and evaluate("@args.n + 1", scope) == 3
+    assert evaluate("@xs[1]", scope) == 20 and evaluate("@d['k']", scope) == 1
+    for bad in ("@args.missing", "@args.__class__", "@xs[9]", "@xs[0:1]", "@args.topic.upper"):
+        with pytest.raises(ExpressionError):
+            evaluate(bad, scope)

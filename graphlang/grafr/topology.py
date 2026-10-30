@@ -104,6 +104,10 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             for p in ("applied", "rejected", "in_delta"):
                 if p not in n["ports"]:
                     errors.append(f"{where}: missing port {p!r}")
+        elif typ == "JOIN":
+            outs = [p for p in n["ports"] if p.startswith("out_")]
+            if in_ports and len(outs) != 1:
+                errors.append(f"{where}: a JOIN that bundles inputs needs exactly one out_* port for the object, found {len(outs)}")
         elif typ == "RECOVER":
             action = cfg.get("action", "halt")
             if action not in ("halt", "abort", "skip", "retry"):

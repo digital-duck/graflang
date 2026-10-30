@@ -132,3 +132,21 @@ def test_loop_iterations_do_not_share_body_values():
     lp = {"id": "lp", "type": "LOOP", "ports": ["trigger", "exit"], "config": {"max_iterations": 2, "subgraph": body}}
     run([lp], [e("s.entry", "lp.trigger")])
     assert read("w") == [{}, {}]    # `w` starts each iteration, before `r` writes; in iteration 2 it still sees nothing from iteration 1
+
+
+# ---- JOIN as fan-in (design decision 2) -------------------------------------------------------------------------------
+
+def test_join_bundles_named_inputs_into_one_object_and_a_reader_takes_a_field():
+    nodes = [n("s", "INPUT", ("entry",)), n("f", "FORK", ("trigger", "a", "b")),
+             n("A", out=3), n("B", out=4),
+             n("j", "JOIN", ("trigger", "complete", "in_x", "in_y", "out_args")),
+             n("C", "SOLVE", ("trigger", "complete", "in_args", "out_y"), expression="@in_args.x + @in_args.y")]
+    edges = [e("s.entry", "f.trigger"), e("f.a", "A.trigger"), e("f.b", "B.trigger"),
+             e("A.complete", "j.trigger"), e("B.complete", "j.trigger"),
+             e("A.out_y", "j.in_x", "binds"), e("B.out_y", "j.in_y", "binds"),
+             e("j.out_args", "C.in_args", "binds"), e("j.complete", "C.trigger")]
+    rt = GraphLangRuntime({"version": "1.0-graph", "_source_dir": ".", "resources": {},
+                           "workflow": {"name": "t", "inputs": [], "outputs": []}, "nodes": nodes, "edges": edges},
+                          verbose=False)
+    rt.execute({})
+    assert rt.values[("j", "out_args")] == {"x": 3, "y": 4} and rt.values[("C", "out_y")] == 7
