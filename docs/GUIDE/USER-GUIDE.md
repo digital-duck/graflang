@@ -173,7 +173,7 @@ Schema: `graphlang/schema/graflang-ir.json`. Node ids match `[a-zA-Z0-9_]+`.
 
 ## The editor: `graf vis --edit`
 
-`pip install 'graflang[edit]'`, then `graf vis --edit flow.graph.yaml` opens a browser editor on a long-form workflow (a compact `steps:` file is edited as text; `graf expand` gives the long form). The picture is the `graf vis` view. On the right: change a node's ports and config (values are YAML), rename or remove it, add a node, add or remove edges, and read the problems `graf validate` finds as you work. Nothing is written until **Save**, and Save is off while there are errors. Comments in the file stay, edits can be undone, and the file is replaced only after the new one is complete. Alignment spaces inside `{...}` may be normalised on save. A person may set anything a node can hold; the rule that a `MUTATE` can never add code applies to models, not to you. `graf ui` is the same command.
+`pip install 'graflang[edit]'`, then `graf vis --edit flow.graph.yaml` opens a browser editor on a long-form workflow (a compact `steps:` or `elaborate:` file is edited as text, since being short is its point; `graf expand` gives the long form). The picture is the `graf vis` view. On the right: change a node's ports and config (values are YAML), rename or remove it, add a node, add or remove edges, read the problems `graf validate` finds as you work, and **Run** the graph as it is now (the `mock` model by default; `claude_cli` makes real calls) to see its output and which nodes fired. Edges are made from lists, not by dragging on the picture. Nothing is written until **Save**, and Save is off while there are errors. Comments in the file stay, edits can be undone, and the file is replaced only after the new one is complete. Alignment spaces inside `{...}` may be normalised on save. A person may set anything a node can hold; the rule that a `MUTATE` can never add code applies to models, not to you. `graf ui` is the same command.
 
 ## Compact form: `steps:`
 
@@ -206,6 +206,23 @@ steps:
 ```
 
 The part's `workflow.inputs` and `outputs` are its interface: `in:` names must be inputs of the part, `out:` names its outputs, an input with no default must be bound, and types must be assignable. A literal in `in:` overrides the part's default. Each use is its own copy (`first__rewrite`, `second__rewrite`), so state is not shared; parts may use parts, but not themselves. In long form the use is a `SUBGRAPH` node with `config: {part: parts.polish}` and ports `trigger`, `complete`, `in_<name>`, `out_<name>`. `graf expand` shows the expanded graph. See `cookbook/parts_demo`.
+
+## Elaboration: a part for every node of a graph
+
+When the same step must run for every item of a small graph, say every concept of a knowledge graph, write the step once as a part and let an `elaborate:` block make the workflow:
+
+```yaml
+resources: {parts: {explain: ./parts/explain.graph.yaml}}
+elaborate:
+  part: parts.explain
+  over: ./concepts.yaml          # {nodes: [{id, ...attributes}], edges: [{source, target}]}, or the same written inline
+  with: {concept: title}         # the part's input <- the node's attribute
+  shared: [audience]             # workflow inputs passed to every use
+  pass: {from: text, to: context}  # optional: a prerequisite's output becomes an input of what follows
+  result: text                   # the part output collected (default: its first output)
+```
+
+An edge `a -> b` means b runs after a. Nodes with no incoming edge start together; a node with several waits for all of them, and with `pass` receives their values as one object keyed by node id. The workflow's first output is one object, node id to `result`. The graph must have no cycle. The result is ordinary nodes and edges (`graf expand` prints them), so `--workers N` runs independent nodes together. See `cookbook/elaborate_demo`.
 
 ## Export to SPL: `graf export-spl`
 

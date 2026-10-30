@@ -257,6 +257,9 @@ def _flatten_scope(parent: Dict, nodes: List[Dict], edges: List[Dict], base: Pat
 
 def flatten_parts(graph_data: Dict[str, Any], base_dir: Optional[Path] = None, _stack: Tuple[Path, ...] = ()) -> None:
     """Expand every SUBGRAPH node of the graph in place. Does nothing when there are none."""
+    if "elaborate" in graph_data:
+        from .elaborate import elaborate
+        elaborate(graph_data)
     if not has_parts(graph_data.get("nodes", [])):
         return
     base = Path(base_dir or graph_data.get("_source_dir", "."))

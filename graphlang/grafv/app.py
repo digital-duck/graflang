@@ -162,6 +162,31 @@ def problems_tab(editor: GraphEditor) -> None:
         st.warning(w)
 
 
+def run_tab(editor: GraphEditor) -> None:
+    inputs = editor.data()["workflow"].get("inputs", [])
+    adapter = str(st.selectbox("LLM", ["mock", "claude_cli"], key="run_adapter",
+                               help="mock answers with placeholder text; claude_cli makes real, billed model calls"))
+    if adapter != "mock":
+        st.caption("This runs the graph as it is now with a real model; every GENERATE node is a call.")
+    params = {}
+    for p in inputs:
+        default = p.get("default")
+        params[p["name"]] = st.text_input(f"{p['name']} ({p.get('type', 'TEXT')})", "" if default is None else str(default), key=f"run_in_{p['name']}")
+    if st.button("Run", key="run_go"):
+        with st.spinner("running"):
+            st.session_state["run_result"] = editor.run({k: v for k, v in params.items() if v != ""}, adapter=adapter)
+    result = st.session_state.get("run_result")
+    if not result:
+        return
+    if not result["ok"]:
+        st.error(result["error"])
+        return
+    st.success(f"{result['summary']['steps']} steps")
+    st.json(result["outputs"])
+    rows = [{"node": k, "fired": v["n"], "ms": v["ms"]} for k, v in result["summary"]["nodes"].items()]
+    st.dataframe(rows, hide_index=True)
+
+
 def main() -> None:
     st.set_page_config(page_title="GraphLang editor", layout="wide")
     target = os.environ.get("GRAF_EDIT_FILE")
@@ -201,8 +226,8 @@ def main() -> None:
     with left:
         picture(editor)
     with right:
-        tabs = st.tabs(["Node", "Add node", "Edges", "Problems"])
-        for tab, body in zip(tabs, (node_tab, add_tab, edge_tab, problems_tab)):
+        tabs = st.tabs(["Node", "Add node", "Edges", "Problems", "Run"])
+        for tab, body in zip(tabs, (node_tab, add_tab, edge_tab, problems_tab, run_tab)):
             with tab:
                 body(editor)
 

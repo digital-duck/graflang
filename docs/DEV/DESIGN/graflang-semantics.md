@@ -38,6 +38,10 @@ For the loaded graph and for every graph a `MUTATE` produces:
 
 A delta that adds any error to this list is rejected. The safety layer (`GUARD` and `MUTATE` nodes, the `risky` flag) cannot be removed or edited by a delta.
 
+## 3c. Elaboration
+
+An `elaborate:` block, like a part use, has no runtime semantics: it is rewritten into SUBGRAPH nodes, a FORK over the roots, a JOIN before each node with several predecessors, and a final JOIN that gathers results. The things' graph must be acyclic. Ordering exists only where the things' graph has an edge (ConceptBook question: a required order is an edge).
+
 ## 3b. Persistent self-revision in a LOOP
 
 `persist_mutations: true` on a LOOP: after an iteration whose body was mutated, the mutated body (nodes and edges) replaces the written body for the following iterations. The invariants of section 3 were checked on every delta, so they hold on the carried body. Off by default, which is rule R10.

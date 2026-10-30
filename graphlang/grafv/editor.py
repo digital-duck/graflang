@@ -53,6 +53,8 @@ class GraphEditor:
         if not isinstance(self.doc, dict) or "nodes" not in self.doc or "workflow" not in self.doc:
             if is_compact(self.doc):
                 raise EditError("this file uses the compact `steps:` form; edit the YAML text, or run `graf expand` to get the long form")
+            if isinstance(self.doc, dict) and "elaborate" in self.doc:
+                raise EditError("this file uses an `elaborate:` block; edit the YAML text, or run `graf expand` to get the long form")
             raise EditError("not a GraphLang workflow (needs workflow:, nodes: and edges:)")
         self.doc.setdefault("edges", [])
         self._undo: List[str] = []
@@ -99,6 +101,21 @@ class GraphEditor:
             return check(graph)
         except (KeyError, ValueError) as e:
             return [f"cannot check the graph: {e}"], []
+
+    def run(self, params: Dict[str, Any] | None = None, adapter: str = "mock", model: str | None = None, max_steps: int = 200) -> Dict[str, Any]:
+        """Run the graph as it is now (saved or not) and report {ok, outputs, error, summary}. Never raises for a failed run."""
+        from graphlang.grafr.adapters import make_llm
+        from graphlang.grafr.metering import MeteredLLM
+        from graphlang.grafr.runtime import GraphLangRuntime
+        errors, _ = self.problems()
+        if errors:
+            return {"ok": False, "outputs": None, "error": "fix these first: " + "; ".join(errors), "summary": None}
+        try:
+            rt = GraphLangRuntime(self.data(), llm=MeteredLLM(make_llm(adapter, model)), max_steps=max_steps, verbose=False)
+            outputs = rt.execute(params or {})
+        except Exception as e:                                 # a run can fail in many ways; the editor shows the reason
+            return {"ok": False, "outputs": None, "error": f"{type(e).__name__}: {e}", "summary": None}
+        return {"ok": True, "outputs": outputs, "error": None, "summary": rt.summary()}
 
     @property
     def changed(self) -> bool:

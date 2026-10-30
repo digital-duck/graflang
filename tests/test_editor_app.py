@@ -79,3 +79,10 @@ def test_a_node_can_be_removed(at):
     pick(at, "critique")
     button(at, "rm_critique").click().run()
     assert "critique" not in [o for o in at.selectbox(key="node_pick").options]
+
+
+def test_the_run_tab_runs_the_graph_as_it_is_with_the_mock(at):
+    at.text_input(key="run_in_topic").set_value("ducks").run()
+    button(at, "run_go").click().run()
+    assert not at.exception and any("steps" in s.value for s in at.success)
+    assert any("essay" in str(j.value) for j in at.json)

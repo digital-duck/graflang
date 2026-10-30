@@ -121,7 +121,7 @@ def test_a_hand_edit_may_set_what_a_model_may_not(work):
     assert "calc" in ed.node_ids()                                                    # CODE_KEYS bind a MUTATE delta, not a person
 
 
-ALL = sorted(p for p in (Path(__file__).parent.parent / "cookbook").rglob("*.graph.yaml") if "\nsteps:" not in p.read_text())   # the editor takes the long form only
+ALL = sorted(p for p in (Path(__file__).parent.parent / "cookbook").rglob("*.graph.yaml") if not any(f"\n{k}:" in p.read_text() for k in ("steps", "elaborate")))   # the editor takes the long form only
 
 
 @pytest.mark.parametrize("path", ALL, ids=lambda p: p.parent.name)
@@ -133,3 +133,22 @@ def test_every_shipped_graph_round_trips_with_its_comments(path):
     assert YAML(typ="safe").load(dumped) == YAML(typ="safe").load(path.read_text())
     comments = lambda text: [line.strip() for line in text.splitlines() if "#" in line and not line.lstrip().startswith("-")]
     assert comments(dumped) == comments(path.read_text())
+
+
+def test_run_executes_the_graph_as_it_is_now_not_as_saved(work):
+    ed = GraphEditor(work)
+    res = ed.run({"topic": "ducks"})
+    assert res["ok"] and "essay" in res["outputs"] and res["summary"]["steps"] >= 3
+    ed.set_config("draft", "prompt_ref", "prompts.nope")
+    res = ed.run({"topic": "ducks"})
+    assert not res["ok"] and "fix these first" in res["error"]                         # an unsaved bad edit is what runs, and it is refused
+
+
+def test_run_reports_a_failed_run_instead_of_raising(work):
+    res = GraphEditor(work).run({})                                                    # the required input is missing
+    assert not res["ok"] and "topic" in res["error"]
+
+
+def test_a_file_with_an_elaborate_block_is_pointed_to_graf_expand():
+    with pytest.raises(EditError, match="elaborate"):
+        GraphEditor(Path(__file__).parent.parent / "cookbook" / "elaborate_demo" / "elaborate_demo.graph.yaml")
