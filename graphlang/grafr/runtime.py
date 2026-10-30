@@ -117,11 +117,15 @@ class RunLimitExceeded(RuntimeError):
 
 
 class _Budget:
-    def __init__(self, max_steps: int):
+    def __init__(self, max_steps: int, wall_time_s: Optional[float] = None):
         self.max_steps, self.steps, self.mutations = max_steps, 0, 0
+        self.deadline = time.monotonic() + wall_time_s if wall_time_s else None
+        self.wall_time_s = wall_time_s
 
     def spend(self, fired: Dict[str, int]) -> None:
         self.steps += 1
+        if self.deadline is not None and time.monotonic() > self.deadline:
+            raise RunLimitExceeded(f"stopped after {self.wall_time_s}s of wall time (limits.wall_time_s) at step {self.steps}")
         if self.steps > self.max_steps:
             raise RunLimitExceeded(f"stopped after {self.max_steps} node firings; "
                                    f"most fired: {sorted(fired.items(), key=lambda x: -x[1])[:3]}")
@@ -132,7 +136,7 @@ class GraphLangRuntime:
 
     def __init__(self, graph_data: Dict, adapter: str = "mock", max_steps: int = DEFAULT_MAX_STEPS,
                  verbose: bool = True, model: Optional[str] = None, llm=None,
-                 node_output: Optional[RunOutput] = None, *,
+                 node_output: Optional[RunOutput] = None, wall_time_s: Optional[float] = None, *,
                  _parent: "GraphLangRuntime | None" = None, _nodes: Optional[List[Dict]] = None,
                  _edges: Optional[List[Dict]] = None, _boundary: Optional[Dict[str, Any]] = None,
                  _scope: Optional[Dict[str, Any]] = None):
@@ -153,7 +157,7 @@ class GraphLangRuntime:
         if _parent is None:
             self.llm = llm or make_llm(adapter, model)
             self.context: Dict[str, Any] = {}           # CONTEXT nodes' persistent state
-            self.budget = _Budget(max_steps)
+            self.budget = _Budget(max_steps, wall_time_s)
             self.resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
             self.depth = 0
             self.node_output = node_output              # --save-nodes: where each node's outputs are written

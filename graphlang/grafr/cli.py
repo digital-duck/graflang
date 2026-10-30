@@ -13,6 +13,7 @@ from rich.table import Table
 
 from ..logging_config import disable_logging, setup_logging
 from .adapters import default_model
+from .bindings import bind_graph, load_bindings
 from .output import RunOutput
 from .runtime import load_graph, GraphLangRuntime
 from .topology import check
@@ -33,13 +34,15 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.argument("graph")
 @click.option("--llm", "llm_spec", default=None, metavar="ADAPTER[:MODEL]",
               help="adapter and model in one value, e.g. claude_cli:claude-haiku-5-5 or ollama:gemma3:12b; wins over --adapter/--model")
-@click.option("--adapter", default="claude_cli", show_default=True,
+@click.option("--adapter", default=None,
               help="LLM adapter: claude_cli (default), mock (no LLM, placeholder text), or another dd-llm adapter such as ollama, openrouter")
 @click.option("--model", default=None,
               help="model for every GENERATE node (overrides the model hints in the graph); default claude-sonnet-5-5 "
                    "for claude_cli, none for other adapters")
-@click.option("--max-steps", type=int, default=1000, show_default=True,
-              help="stop after this many node firings (guards against endless loops)")
+@click.option("--max-steps", type=int, default=None,
+              help="stop after this many node firings (guards against endless loops; default 1000)")
+@click.option("--bind", "bind_file", type=click.Path(dir_okay=False), default=None,
+              help="bindings file: the model, files and limits for this environment (llm, models, params, resources, limits)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
 @click.option("--log-level", type=click.Choice(["debug", "info", "warning", "error"]), default=None,
               help="file log level (default info, or $DD_LOG_LEVEL); debug adds every node firing and LLM text previews")
@@ -55,7 +58,7 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--no-output", is_flag=True, help="do not write result files")
 @click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
               help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")
-def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
+def cmd_run(graph, llm_spec, adapter, model, max_steps, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
             no_output, log_prompts):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
     if log_prompts:
@@ -66,11 +69,22 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
         console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
         sys.exit(1)
 
+    bindings = {}
+    if bind_file:
+        try:
+            bindings = load_bindings(Path(bind_file))
+        except (ValueError, OSError) as e:
+            raise click.BadParameter(str(e), param_hint="--bind")
+        if not llm_spec and not adapter and not model and bindings.get("llm"):
+            llm_spec = bindings["llm"]
     if llm_spec:
         try:
             adapter, model = parse_llm_spec(llm_spec)
         except ValueError as e:
             raise click.BadParameter(str(e), param_hint="--llm")
+    adapter = adapter or "claude_cli"
+    limits = bindings.get("limits", {})
+    max_steps = max_steps or limits.get("max_steps") or 1000
 
     model = model or default_model(adapter)          # claude_cli: claude-sonnet-5-5; ollama etc.: none
 
@@ -85,13 +99,17 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
 
     console.print(f"[bold blue]⚡ Loading graph:[/bold blue] {graph_path}")
     graph_data = _load_or_exit(graph_path)
+    if bindings:
+        graph_data, notes = bind_graph(graph_data, bindings)
+        for note in notes:
+            console.print(f"[yellow]warning:[/yellow] {escape(note)}")
 
     console.print(f"[bold green]✓[/bold green] Graph loaded: {graph_data['workflow']['name']}")
     console.print(f"  Nodes: {len(graph_data['nodes'])}")
     console.print(f"  Edges: {len(graph_data['edges'])}")
 
     # Parse parameters
-    params = {}
+    params = dict(bindings.get("params", {}))
     for p in param:
         if '=' not in p:
             raise click.BadParameter(f"expected key=value, got {p!r}", param_hint="--param")
@@ -107,7 +125,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, param, log_level, log_fo
     console.print(f"\n[bold blue]▶ Executing workflow...[/bold blue]")
 
     try:
-        runtime = GraphLangRuntime(graph_data, adapter=adapter, model=model, max_steps=max_steps,
+        runtime = GraphLangRuntime(graph_data, adapter=adapter, model=model, max_steps=max_steps, wall_time_s=limits.get("wall_time_s"),
                                    node_output=run_output if save_nodes else None)
         if adapter == "mock":
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")

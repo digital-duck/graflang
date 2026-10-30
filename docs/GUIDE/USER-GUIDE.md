@@ -189,6 +189,22 @@ steps:
 - Control is inferred from the order you list the steps. A step with `on: gate.fail` (or a list) hangs there instead, which is how you write the branches of `assert`, `evaluate`, `guard` and `fork`.
 - Other keys (`model`, `phases`, `temperature`, ...) go into the node's `config`. `nodes:` and `edges:` may sit beside `steps:` for anything the compact form cannot say.
 
+## Bindings: `--bind`
+
+A graph says what to do; a bindings file says which model, which files and how much, so the same graph runs in different places.
+
+```yaml
+# prod.bind.yaml
+llm: claude_cli:claude-sonnet-5-5       # adapter[:model], like --llm
+models: {fast: claude-haiku-5-5}        # what `model: $fast` in a node means
+params: {topic: tides}                  # default parameters; --param wins
+resources:                              # replaces named prompts / procedures / policies; paths relative to this file
+  prompts: {draft: ./prod/draft.md}
+limits: {max_steps: 200, wall_time_s: 300}
+```
+
+`graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file, which beats the graph's own `model:` hint. A `model: $name` with no binding uses the run's default model (with a warning). `limits.max_cost` is not supported: adapters do not report cost.
+
 ## Nodes and ports
 
 Each node has `id`, `type`, `ports`, and optional `config`. Port names carry their kind:
