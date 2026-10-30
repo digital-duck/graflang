@@ -385,7 +385,7 @@ Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (
 ## Known limits
 
 - A `SOLVE` with no `expression`, `procedure_ref` or `backend` computes nothing: `graf validate` and the runtime both report it.
-- `contains_pii` in the Cedar context is always false, so the data-sovereignty policy cannot trigger.
+- `has_pii(value)` finds only what has a recognisable shape (emails, phone numbers, US social security numbers, Luhn-valid card numbers, IBANs), not names or addresses; a clean result does not mean there is no personal data. Use it in a `GUARD`'s `context_mapping` (`contains_pii: "has_pii(@in_text)"`); a `MUTATE` sets `contains_pii` from the proposed delta.
 - `graf compile` does not produce a working Rust project yet.
 
 The full list is the gap table in the maintainer's design notes (see [`../DEV/readme.md`](../DEV/readme.md)).

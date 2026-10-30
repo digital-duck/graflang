@@ -34,6 +34,7 @@ from ruamel.yaml import YAML
 
 from .adapters import make_llm
 from .cedar_guard import CedarGuard
+from .pii import has_pii
 from .compact import expand, is_compact
 from .expr import ExpressionError, evaluate, evaluate_condition
 from ..formats import require_graphlang
@@ -692,7 +693,7 @@ class GraphLangRuntime:
         return {"proposed_delta": info, "mutation_count": self.budget.mutations,
                 "max_allowed_mutations": int(cfg.get("max_mutations", DEFAULT_MAX_MUTATIONS)),
                 "human_approval": bool(cfg.get("human_approval", False)),
-                "contains_pii": False}                                # PII detection is not implemented
+                "contains_pii": has_pii(delta["payload"])}
 
     @staticmethod
     def _lists(G: "nx.MultiDiGraph") -> tuple[List[Dict], List[Dict]]:

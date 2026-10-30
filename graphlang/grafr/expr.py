@@ -9,9 +9,9 @@ interpreted by `_eval` below. What it accepts:
 * `AND`, `OR`, `NOT` (any case; `and`/`or`/`not` also work), comparisons (== != < <= > >= in, not in),
   arithmetic (+ - * / // %), parentheses, list/tuple literals
 * calls to a fixed set of functions: contains, startswith, endswith, len, lower, upper, strip, abs,
-  min, max, int, float, str, bool, is_empty, json_get
+  min, max, int, float, str, bool, is_empty, json_get, has_pii
 
-Everything else is rejected: attribute access, subscripts, lambdas, comprehensions, imports, `**`,
+Everything else is rejected: attribute access beyond `@obj.field`, slices, lambdas, comprehensions, imports, `**`,
 keyword arguments, calls to anything not listed. Expressions are limited in length and size, and
 string/list repetition is capped, so an expression cannot exhaust memory or time.
 """
@@ -23,6 +23,8 @@ import json
 import re
 import tokenize
 from typing import Any, Callable, Dict
+
+from .pii import has_pii
 
 MAX_LEN = 2000
 MAX_NODES = 300
@@ -76,6 +78,7 @@ FUNCS: Dict[str, Callable[..., Any]] = {
     "strip": lambda a: str(a).strip(),
     "abs": abs, "min": min, "max": max,
     "int": int, "float": float, "str": str, "bool": bool,
+    "has_pii": has_pii,
     "is_empty": lambda a: a is None or (hasattr(a, "__len__") and len(a) == 0),
 }
 
