@@ -32,6 +32,7 @@ from ruamel.yaml import YAML
 
 from .adapters import make_llm
 from .cedar_guard import CedarGuard
+from .compact import expand, is_compact
 from .expr import ExpressionError, evaluate, evaluate_condition
 from ..formats import require_graphlang
 from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
@@ -65,6 +66,8 @@ def load_graph(graph_path: Path) -> Dict:
     graph_path = Path(graph_path)
     with open(graph_path, "r", encoding="utf-8") as f:
         graph_data = YAML(typ="safe").load(f)
+    if is_compact(graph_data):
+        graph_data = expand(graph_data)
     require_graphlang(graph_data, graph_path)
     if not SCHEMA_PATH.is_file():
         raise FileNotFoundError(f"GraphLang schema not found at {SCHEMA_PATH}")

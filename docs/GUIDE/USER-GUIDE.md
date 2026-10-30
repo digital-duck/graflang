@@ -171,6 +171,24 @@ edges: [ ... ]
 
 Schema: `graphlang/schema/graflang-ir.json`. Node ids match `[a-zA-Z0-9_]+`.
 
+## Compact form: `steps:`
+
+A short way to write a workflow. `steps:` replaces `nodes:` and `edges:`; `graf expand FILE` prints the long form that runs.
+
+```yaml
+steps:
+  - draft:    {generate: prompts.draft,    in: {topic: $in.topic}, out: essay}
+  - critique: {generate: prompts.critique, in: {essay: draft}, out: feedback}
+  - refine:   {generate: prompts.refine,   in: {essay: draft, feedback: critique, tone: plain}, out: essay}
+  - done:     {output: refine}
+```
+
+- A step is `id: {kind: argument, ...}`. Kinds: `generate` (a `prompts.name` or prompt text), `solve` (an expression), `assert` and `evaluate` (a condition), `guard` (a policy), `fork` (branch names), `join` (the steps it waits for), `output`, and `node` (any other node type, with its `config`).
+- `in` maps an input to a value. `$in.topic` is a workflow input, `draft` or `draft.essay` is another step's result, and anything else is a literal that becomes the input's default. Wrap a literal that looks like a reference as `{value: draft}`.
+- `out` names the result port(s); the default is `result`, and a bare step name means the first one.
+- Control is inferred from the order you list the steps. A step with `on: gate.fail` (or a list) hangs there instead, which is how you write the branches of `assert`, `evaluate`, `guard` and `fork`.
+- Other keys (`model`, `phases`, `temperature`, ...) go into the node's `config`. `nodes:` and `edges:` may sit beside `steps:` for anything the compact form cannot say.
+
 ## Nodes and ports
 
 Each node has `id`, `type`, `ports`, and optional `config`. Port names carry their kind:

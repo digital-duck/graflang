@@ -120,7 +120,8 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
         elif typ == "LOOP":
             _check_loop(n, prefix, resolver, errors, warnings)
 
-        for port in sorted(in_ports):
+        defaulted = set(cfg.get("phases", {}).get("pre", {}).get("defaults", {})) if isinstance(cfg.get("phases"), dict) else set()
+        for port in sorted(in_ports - defaulted):
             if (nid, port) not in fed and not (port in boundary or port[3:] in loop_vars) and typ not in ("OUTPUT",):
                 warnings.append(f"{where}: input {port!r} is not fed by any binds edge")
         if typ not in ("INPUT", "LOOP") and "trigger" in n["ports"] and nid not in triggered and not prefix:

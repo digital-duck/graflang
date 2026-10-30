@@ -185,3 +185,20 @@ def cmd_info(graph):
             for name, path in res_dict.items():
                 console.print(f"    {name} → {path}")
 
+
+
+@click.command("expand", short_help="Print a compact (steps:) workflow in its long nodes/edges form.")
+@click.argument("graph")
+def cmd_expand(graph):
+    """Print the long form of a workflow written with `steps:`; a file already in long form prints as it is."""
+    from ruamel.yaml import YAML
+    graph_path = Path(graph)
+    if not graph_path.exists():
+        console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
+        sys.exit(1)
+    data = _load_or_exit(graph_path)
+    data.pop("_source_dir", None)
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    yaml.sort_base_mapping_type_on_output = False
+    yaml.dump(data, sys.stdout)
