@@ -37,7 +37,7 @@ def test_a_failed_run_resumes_at_the_failed_step(tmp_path):
     again = GraphLangRuntime(CHAIN, llm=healthy, verbose=False)
     out = again.resume(ckpt)
     assert out == {"c": "C"} and healthy.prompts == ["b A", "c B"]               # a was not run again; b saw a's answer
-    assert again.fired == {"s": 1, "a": 1, "b": 1, "c": 1, "o": 1}                 # a fired once, in the first run
+    assert again.fired == {"a": 1, "b": 1, "c": 1, "o": 1}                 # a fired once, in the first run
 
 
 def test_a_join_waiting_for_a_branch_survives_the_resume(tmp_path):
