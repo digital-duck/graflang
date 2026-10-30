@@ -27,7 +27,7 @@ MAX_LEN = 2000
 MAX_NODES = 300
 MAX_REPEAT = 10_000
 VAR_PREFIX = "_v_"
-WORDS = {"AND": "and", "OR": "or", "NOT": "not", "TRUE": "True", "FALSE": "False", "NULL": "None"}
+WORDS = {"AND": "and", "OR": "or", "NOT": "not", "IN": "in", "TRUE": "True", "FALSE": "False", "NULL": "None"}
 
 
 class ExpressionError(ValueError):
