@@ -386,6 +386,8 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             warnings.append(f"INPUT {n['id']!r}: declared input {d!r} has no out_{d} port")
     _check_scope(nodes, edges, "", resolver, set(), set(), errors, warnings)
     _check_guarded(nodes, edges, errors)
+    from .capabilities import capability_errors          # imported here: capabilities uses _risky from this module
+    errors += capability_errors(graph_data, resolver)
     for kind in SUFFIX:
         for name, rel in graph_data.get("resources", {}).get(kind, {}).items():
             if not (resolver.base_dir / rel).exists():

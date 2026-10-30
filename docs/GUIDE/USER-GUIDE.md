@@ -193,6 +193,20 @@ steps:
 
 `graf export-spl flow.graph.yaml -o flow.spl` writes the workflow as an SPL script (structure only, no LLM) that SPL.py's `spl3 run` can run. A prompt becomes a `CREATE FUNCTION`, a lifted Python tool a `CREATE TOOL_API`. What SPL has no word for (lifecycle phases, typed ports) is dropped and listed as a warning.
 
+## What a workflow may contain: `workflow.policy`
+
+An organisation can write down what its workflows may contain, in Cedar, and have `graf validate` and `graf run` enforce it before anything runs. Name the policy in the workflow header and list it under `resources.policies`:
+
+```yaml
+workflow: {name: report, policy: policies.capabilities, inputs: [...], outputs: [...]}
+```
+
+For every node (LOOP and BATCH bodies too) Cedar is asked whether `Workflow::"report"` may do `Action::"run_node"` on `Node::"<id>"`, with the context `type`, `risky`, `needs` (the node's `config.needs`, a list of capability names you choose, such as `network`, `fs_write`, `shell`), `executor` and `host` (of an http `RUN`). `graphlang/policies/capabilities.cedar` is a worked example: a node that needs a capability must be marked `risky` (so it sits behind a `GUARD`), nothing may need `shell`, and an http `RUN` may only call named hosts. A `GUARD` asks the same engine at run time.
+
+## What the executors do not confine
+
+`subprocess` and `python` (kernel) run code from the graph file with your privileges. What they limit: a subprocess gets only `PATH` and the variables the node names in `env_passthrough`, at most `memory_mb` of memory, and `timeout` seconds; every executor has a timeout. What they do **not** limit: files (a subprocess or kernel can read and write anywhere you can), the network, and, for a kernel, the environment (it inherits the runtime's, secrets included). Run untrusted graphs in a container or VM. A `MUTATE` can never add or change what runs (`CODE_KEYS`), and an http `RUN` must name its hosts.
+
 ## Cost, budgets and replay
 
 - Every run prints a one-line summary (steps, LLM calls with tokens and cost when the adapter reports them, the slowest node) and writes `summary.json` in the run folder with the per-node firings and time. Subscription adapters such as `claude_cli` report no cost.

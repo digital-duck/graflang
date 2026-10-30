@@ -10,6 +10,7 @@
       "required": ["name"],
       "properties": {
         "name": { "type": "string" },
+        "policy": { "type": "string", "description": "policies.<name>: Cedar rules for which nodes this workflow may contain (checked by graf validate and graf run)" },
         "inputs": { "type": "array", "items": { "$ref": "#/defs/Param" } },
         "outputs": { "type": "array", "items": { "$ref": "#/defs/Param" } }
       }

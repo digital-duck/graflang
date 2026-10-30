@@ -112,6 +112,15 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, re
         for note in notes:
             console.print(f"[yellow]warning:[/yellow] {escape(note)}")
 
+    from .capabilities import capability_errors
+    from .resolver import ResourceResolver
+    denied = capability_errors(graph_data, ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources")))
+    if denied:
+        for message in denied:
+            console.print(f"[red]error:[/red] {escape(message)}")
+        console.print("[red]✗ The workflow policy does not allow this graph; nothing was run[/red]")
+        sys.exit(1)
+
     console.print(f"[bold green]✓[/bold green] Graph loaded: {graph_data['workflow']['name']}")
     console.print(f"  Nodes: {len(graph_data['nodes'])}")
     console.print(f"  Edges: {len(graph_data['edges'])}")

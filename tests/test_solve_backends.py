@@ -312,3 +312,30 @@ def test_code_cannot_be_smuggled_in_a_nested_value():
     assert verdict == "rejected" and "subgraph" not in runtime.G.nodes["after"].get("config", {})
     assert code_keys_in({"a": [{"b": {"command": 1}}], "code": 2}) == ["code", "command"]
     assert code_keys_in({"expression": "1", "label": "x"}) == []
+
+
+# ---- what the executors confine, and what they do not (design E8; see "What the executors do not confine" in the user guide) ----
+
+def test_a_subprocess_cannot_use_more_memory_than_memory_mb():
+    hog = PY + ["import sys; sys.stdin.read(); x = bytearray(600 * 1024 * 1024); print(1)"]
+    with pytest.raises(SolveError):
+        run([("s", {"backend": "subprocess", "command": hog, "memory_mb": 256, "timeout": 30, "parse": "first_line", "out_type": "TEXT"}, [])])
+    _, ok = run([("s", {"backend": "subprocess", "command": PY + ["import sys; sys.stdin.read(); print(1)"], "memory_mb": 256,
+                                          "parse": "first_line", "out_type": "TEXT"}, [])])
+    assert ok == {"result": "1"}
+
+
+def test_KNOWN_a_subprocess_can_read_files_outside_the_graph_folder(tmp_path):
+    """Pinned so a change is deliberate: there is no filesystem or network confinement, only memory, time and environment limits."""
+    secret = tmp_path / "outside.txt"
+    secret.write_text("42")
+    read = PY + [f"import sys; sys.stdin.read(); print(open({str(secret)!r}).read())"]
+    _, out = run([("s", {"backend": "subprocess", "command": read, "out_type": "TEXT", "parse": "first_line"}, [])])
+    assert out == {"result": "42"}
+
+
+@needs_kernel
+def test_KNOWN_a_kernel_runs_with_the_runtime_environment(monkeypatch):
+    monkeypatch.setenv("GRAFLANG_TEST_SECRET", "s3cret")
+    _, out = run([("k", {"backend": "kernel", "code": "import os", "result": "os.environ.get('GRAFLANG_TEST_SECRET')", "out_type": "TEXT"}, [])])
+    assert out == {"result": "s3cret"}
