@@ -38,8 +38,12 @@
             ] 
           },
           "ports": {
-            "type": "array",
-            "items": { "type": "string" },
+            "oneOf": [
+              { "type": "array", "items": { "type": "string" } },
+              { "type": "object", "additionalProperties": { "oneOf": [
+                  { "type": "string" },
+                  { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" }, "schema": { "type": "object" } } } ] } }
+            ],
             "description": "Must include at least one control port (trigger/complete/exit) and relevant data ports (in_*/out_*)."
           },
           "config": { 

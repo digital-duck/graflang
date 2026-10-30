@@ -38,6 +38,7 @@ from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
 from .kernel import KernelPool
 from .lifecycle import run_phases
 from .output import RunOutput
+from .ports import check_value, normalize_ports
 from .resolver import ResourceResolver
 from .solve_backend import CODE_KEYS, code_keys_in, run_backend
 from .topology import invariants
@@ -74,6 +75,7 @@ def load_graph(graph_path: Path) -> Dict:
         where = "/".join(str(p) for p in e.absolute_path) or "<root>"
         raise ValueError(f"Schema validation failed at {where}: {e.message}") from e
     graph_data["_source_dir"] = str(graph_path.resolve().parent)
+    normalize_ports(graph_data["nodes"])
     return graph_data
 
 
@@ -131,6 +133,7 @@ class GraphLangRuntime:
                  _edges: Optional[List[Dict]] = None, _boundary: Optional[Dict[str, Any]] = None,
                  _scope: Optional[Dict[str, Any]] = None):
         self.graph_data = graph_data
+        normalize_ports(graph_data["nodes"])
         self.verbose = verbose
         self.G = nx.MultiDiGraph()
         self.values: Dict[tuple, Any] = {}              # (node, port) -> latest value
@@ -271,6 +274,7 @@ class GraphLangRuntime:
                   ms=round((time.perf_counter() - started) * 1000))
         for port, value in result.items():
             if not port.startswith("_"):
+                check_value(data, port, value)
                 self._write(node, port, value)
         if self.node_output:
             self.node_output.save_node(self.steps, node, result)

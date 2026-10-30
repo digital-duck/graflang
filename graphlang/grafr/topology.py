@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
+from .ports import assignable, check_types, normalize_ports, port_type
 from .lifecycle import check_phases
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
@@ -35,6 +36,7 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
                  loop_vars: Set[str], boundary: Set[str], errors: List[str], warnings: List[str]) -> None:
     by_id: Dict[str, Dict] = {}
     for n in nodes:
+        errors += [f"{prefix}{n['type']} {n['id']!r}: {m}" for m in check_types(n)]
         if n["id"] in by_id:
             errors.append(f"{prefix}duplicate node id {n['id']!r}")
         by_id[n["id"]] = n
@@ -64,6 +66,9 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             if not sport.startswith("out_") or not tport.startswith("in_"):
                 errors.append(f"{prefix}{e['source']} -> {e['target']}: a binds edge goes from an out_ port to an in_ port")
             fed.add((tgt, tport))
+            (st, _), (dt, _) = port_type(by_id[src], sport), port_type(by_id[tgt], tport)
+            if not assignable(st, dt):
+                errors.append(f"{prefix}{e['source']} -> {e['target']}: {st} cannot be bound to a {dt} port")
 
     for n in nodes:
         nid, typ, cfg = n["id"], n["type"], n.get("config", {})
@@ -312,6 +317,7 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     warnings: List[str] = []
     resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
     nodes, edges = graph_data["nodes"], graph_data["edges"]
+    normalize_ports(nodes)
     entries = [n for n in nodes if n["type"] == "INPUT"]
     if len(entries) != 1:
         errors.append(f"expected exactly one INPUT node, found {len(entries)}")
