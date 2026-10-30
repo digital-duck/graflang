@@ -143,6 +143,17 @@ edges:
 
 ---
 
+## What you can do today
+
+- **Write less.** A compact `steps:` form expands to the full graph (`graf expand`); a bindings file (`--bind`) sets the model, files and limits per environment.
+- **Make it dependable.** Per-node retry, timeout, fallback and output schemas; typed ports; `graf validate` finds races, deadlocks and unguarded risky nodes before anything runs.
+- **Do more at once.** `--workers` runs parallel branches concurrently, `BATCH` maps a subgraph over a list, `RUN` calls a subprocess, a Python kernel or an http service.
+- **Keep it affordable and repeatable.** A run summary with calls, tokens and time; budgets; `--record` / `--replay` of model calls so tests need no model; `--checkpoint` / `--resume` after a failure.
+- **Stay in control.** Cedar guards at run time, a workflow policy for which nodes are allowed at all, and a `MUTATE` that can never touch the safety layer or what runs.
+- **Come from and go to SPL.** SPL.py's `spl2graph` lifts SPL workflows into graphs (265 of its 274 cookbook workflows validate); `graf export-spl` writes a graph back as SPL.
+
+---
+
 ## Relationship to SPL.py
 
 [**SPL.py**](https://github.com/digital-duck/SPL.py) is the declarative workflow language that GraphLang elevates. SPL provides:
@@ -150,9 +161,8 @@ edges:
 - The `GENERATE` / `EVALUATE` (probabilistic) and `SOLVE` / `ASSERT` (deterministic) vocabulary
 - The 78-recipe cookbook and its empirical validation
 - The neurosymbolic verifier ladder (SymPy → SageMath → Lean 4)
-- The LLM adapters (Ollama, Claude, OpenAI, Momagrid, etc.)
 
-GraphLang takes SPL's proven semantics and gives them a **topological execution model**. SPL workflows can be automatically ported to GraphLang via the `spl2graph` transpiler.
+GraphLang takes SPL's proven semantics and gives them a **topological execution model**. SPL workflows are lifted into GraphLang graphs by SPL.py's `spl2graph`; GraphLang itself does not depend on SPL.py (LLM calls go through the shared `dd-llm` package), and can run an `.spl` procedure when you ask it to.
 
 ---
 
@@ -166,7 +176,7 @@ GraphLang takes SPL's proven semantics and gives them a **topological execution 
 - [x] `graf vis`: read a workflow as a graph (control flow first, data edges on demand, loops that collapse to one box)
 - [ ] Visual IDE: author and edit a workflow in the graph view (add and connect nodes and ports, edit their config, validate while you edit, write the `*.graph.yaml` with its comments kept, run from the view). Planned.
 - [ ] Interactive Streamlit UI (drill-down visualization of Tier 3 composites)
-- [ ] `spl2graph` transpiler (port all 78 SPL recipes)
+- [x] SPL recipes as graphs: `spl2graph` (in SPL.py) lifts 265 of 274 cookbook workflows; `graf export-spl` goes back
 - [ ] Paper submission (NeurIPS / ICLR)
 
 ---
