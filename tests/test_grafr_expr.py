@@ -111,3 +111,9 @@ def test_fields_and_items():
     for bad in ("@args.missing", "@args.__class__", "@xs[9]", "@xs[0:1]", "@args.topic.upper"):
         with pytest.raises(ExpressionError):
             evaluate(bad, scope)
+
+
+def test_latest_is_the_value_before_a_loop_until_an_iteration_sets_it():
+    assert evaluate("latest(@in_n, @n)", {"in_n": 0, "n": None}) == 0           # zero and empty text are values, not "unset"
+    assert evaluate("latest(@in_n, @n)", {"in_n": 0, "n": 2}) == 2
+    assert evaluate("latest(@in_s, @s)", {"in_s": "", "s": None}) == ""

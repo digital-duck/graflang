@@ -1,0 +1,593 @@
+# Lifted from SPL.py cookbook-pocketflow/055_flow/text_transformer.spl by spl2graph; kept as an R1 acceptance sample (see readme.md).
+version: 1.0-graph
+workflow:
+  name: text_transformer
+  inputs:
+  - name: commands
+    type: TEXT
+    default: uppercase:hello world|lowercase:HELLO WORLD|reverse:abcdef|collapse whitespace:hello   world   foo|exit
+  - name: max_iterations
+    type: INTEGER
+    default: 20
+  outputs:
+  - name: session_log
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_commands
+  - out_max_iterations
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''=== Text Transformation Tool ===\nOptions: uppercase | lowercase
+      | reverse | collapse whitespace | exit\n'''
+  ports:
+  - trigger
+  - complete
+  - out_menu
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_session_log
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      session_log:
+        from:
+        - set_5.out_session_log
+        - set_8.out_session_log
+      command:
+        from: tool_2.out_command
+      is_exit:
+        from: tool_3.out_is_exit
+      i:
+        from:
+        - set_6.out_i
+        - set_9.out_i
+      transform_type:
+        from: tool_4.out_transform_type
+      input_text:
+        from: tool_5.out_input_text
+      result:
+        from:
+        - tool_6.out_result
+        - tool_7.out_result
+        - tool_8.out_result
+        - tool_9.out_result
+    subgraph:
+      nodes:
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_session_log + @in_menu'
+        ports:
+        - trigger
+        - complete
+        - in_session_log
+        - in_menu
+        - out_session_log
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@commands'
+          - '@i'
+          - '''|'''
+          code: "import json\n\ndef list_get(value: str, index: str, delimiter: str=',')\
+            \ -> str:\n    \"\"\"LIST_GET(value, index, delimiter) — 1-based element\
+            \ from a JSON array\n    or, if value isn't valid JSON, a delimited list.\"\
+            \"\"\n    s = str(value).strip()\n    idx = int(index) - 1\n    if s.startswith('[')\
+            \ and s.endswith(']'):\n        try:\n            parts = json.loads(s)\n\
+            \            return str(parts[idx]) if 0 <= idx < len(parts) else ''\n\
+            \        except (json.JSONDecodeError, TypeError):\n            pass\n\
+            \    parts = s.split(str(delimiter))\n    return parts[idx].strip() if\
+            \ 0 <= idx < len(parts) else ''\n_spl_result = list_get(commands, i, '|')\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_commands
+        - in_i
+        - out_command
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: trim
+          backend: kernel
+          arguments:
+          - '@command'
+          code: "def trim(value: str) -> str:\n    \"\"\"TRIM(value) — remove leading\
+            \ and trailing whitespace.\"\"\"\n    return str(value).strip()\n_spl_result\
+            \ = trim(command)\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_command
+        - out_command
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: contains
+          backend: kernel
+          arguments:
+          - '@command'
+          - '''exit'''
+          code: "def contains(value: str, substring: str) -> str:\n    \"\"\"CONTAINS(value,\
+            \ substring) — returns 'true' or 'false'.\"\"\"\n    return 'true' if\
+            \ str(substring) in str(value) else 'false'\n_spl_result = contains(command,\
+            \ 'exit')\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - substring
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_command
+        - out_is_exit
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_session_log + ''[exit] Session ended.\n'''
+        ports:
+        - trigger
+        - complete
+        - in_session_log
+        - out_session_log
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_iterations'
+        ports:
+        - trigger
+        - complete
+        - in_max_iterations
+        - out_i
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: split_part
+          backend: kernel
+          arguments:
+          - '@command'
+          - ''':'''
+          - '''1'''
+          - '''true'''
+          code: "def trim(value: str) -> str:\n    \"\"\"TRIM(value) — remove leading\
+            \ and trailing whitespace.\"\"\"\n    return str(value).strip()\n\ndef\
+            \ split_part(value: str, delimiter: str, part: str, trim: str='true')\
+            \ -> str:\n    \"\"\"SPLIT_PART(value, delimiter, part [, trim]) — 1-based\
+            \ part after splitting on delimiter.\n\n    The part comes back whitespace-trimmed\
+            \ by default: delimited protocol\n    lines ('a | b') are padded for readability\
+            \ and virtually every caller\n    wants the bare field (list_get behaves\
+            \ the same way). Pass trim='false'\n    to keep the raw part, padding\
+            \ included.\n    \"\"\"\n    parts = str(value).split(str(delimiter))\n\
+            \    idx = int(part) - 1\n    if not 0 <= idx < len(parts):\n        return\
+            \ ''\n    raw = parts[idx]\n    if str(trim).strip().lower() in {'false',\
+            \ '0', 'no'}:\n        return raw\n    return raw.strip()\n_spl_result\
+            \ = split_part(command, ':', '1', 'true')\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - delimiter
+          - part
+          - trim
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_command
+        - out_transform_type
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: split_part
+          backend: kernel
+          arguments:
+          - '@command'
+          - ''':'''
+          - '''2'''
+          - '''true'''
+          code: "def trim(value: str) -> str:\n    \"\"\"TRIM(value) — remove leading\
+            \ and trailing whitespace.\"\"\"\n    return str(value).strip()\n\ndef\
+            \ split_part(value: str, delimiter: str, part: str, trim: str='true')\
+            \ -> str:\n    \"\"\"SPLIT_PART(value, delimiter, part [, trim]) — 1-based\
+            \ part after splitting on delimiter.\n\n    The part comes back whitespace-trimmed\
+            \ by default: delimited protocol\n    lines ('a | b') are padded for readability\
+            \ and virtually every caller\n    wants the bare field (list_get behaves\
+            \ the same way). Pass trim='false'\n    to keep the raw part, padding\
+            \ included.\n    \"\"\"\n    parts = str(value).split(str(delimiter))\n\
+            \    idx = int(part) - 1\n    if not 0 <= idx < len(parts):\n        return\
+            \ ''\n    raw = parts[idx]\n    if str(trim).strip().lower() in {'false',\
+            \ '0', 'no'}:\n        return raw\n    return raw.strip()\n_spl_result\
+            \ = split_part(command, ':', '2', 'true')\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - delimiter
+          - part
+          - trim
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_command
+        - out_input_text
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: ''''''
+        ports:
+        - trigger
+        - complete
+        - out_result
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'uppercase')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: upper
+          backend: kernel
+          arguments:
+          - '@input_text'
+          code: "def upper(value: str) -> str:\n    \"\"\"UPPER(value) — convert to\
+            \ uppercase.\"\"\"\n    return str(value).upper()\n_spl_result = upper(input_text)\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_input_text
+        - out_result
+      - id: eval_3
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'lowercase')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: lower
+          backend: kernel
+          arguments:
+          - '@input_text'
+          code: "def lower(value: str) -> str:\n    \"\"\"LOWER(value) — convert to\
+            \ lowercase.\"\"\"\n    return str(value).lower()\n_spl_result = lower(input_text)\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_input_text
+        - out_result
+      - id: eval_4
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'reverse')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: reverse
+          backend: kernel
+          arguments:
+          - '@input_text'
+          code: "def reverse(value: str) -> str:\n    \"\"\"REVERSE(value) — reverse\
+            \ a string.\"\"\"\n    return str(value)[::-1]\n_spl_result = reverse(input_text)\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_input_text
+        - out_result
+      - id: tool_9
+        type: SOLVE
+        config:
+          tool: collapse_whitespace
+          backend: kernel
+          arguments:
+          - '@input_text'
+          code: "import re\ndef collapse_whitespace(text: str) -> str:\n    try:\n\
+            \        return re.sub(r'\\s+', ' ', text).strip()\n    except Exception\
+            \ as e:\n        return f\"error: {e}\"\n_spl_result = collapse_whitespace(input_text)\n"
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_input_text
+        - out_result
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_session_log + ''['' + @in_transform_type + "] ''" + @in_input_text
+            + "'' => ''" + @in_result + "''\n"'
+        ports:
+        - trigger
+        - complete
+        - in_session_log
+        - in_transform_type
+        - in_input_text
+        - in_result
+        - out_session_log
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: set_4.complete
+        target: tool_1.trigger
+        type: triggers
+      - source: tool_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_1.out_command
+        target: tool_2.in_command
+        type: binds
+      - source: tool_2.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: tool_2.out_command
+        target: tool_3.in_command
+        type: binds
+      - source: tool_3.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_3.out_is_exit
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_5.trigger
+        type: triggers
+      - source: set_4.out_session_log
+        target: set_5.in_session_log
+        type: binds
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_2.out_command
+        target: tool_4.in_command
+        type: binds
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_2.out_command
+        target: tool_5.in_command
+        type: binds
+      - source: tool_5.complete
+        target: set_7.trigger
+        type: triggers
+      - source: set_7.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_4.out_transform_type
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_5.out_input_text
+        target: tool_6.in_input_text
+        type: binds
+      - source: eval_2.fail
+        target: eval_3.trigger
+        type: triggers
+      - source: tool_4.out_transform_type
+        target: eval_3.in_subject
+        type: binds
+      - source: eval_3.pass
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_5.out_input_text
+        target: tool_7.in_input_text
+        type: binds
+      - source: eval_3.fail
+        target: eval_4.trigger
+        type: triggers
+      - source: tool_4.out_transform_type
+        target: eval_4.in_subject
+        type: binds
+      - source: eval_4.pass
+        target: tool_8.trigger
+        type: triggers
+      - source: tool_5.out_input_text
+        target: tool_8.in_input_text
+        type: binds
+      - source: eval_4.fail
+        target: tool_9.trigger
+        type: triggers
+      - source: tool_5.out_input_text
+        target: tool_9.in_input_text
+        type: binds
+      - source: tool_6.complete
+        target: set_8.trigger
+        type: triggers
+      - source: tool_7.complete
+        target: set_8.trigger
+        type: triggers
+      - source: tool_8.complete
+        target: set_8.trigger
+        type: triggers
+      - source: tool_9.complete
+        target: set_8.trigger
+        type: triggers
+      - source: set_4.out_session_log
+        target: set_8.in_session_log
+        type: binds
+      - source: tool_4.out_transform_type
+        target: set_8.in_transform_type
+        type: binds
+      - source: tool_5.out_input_text
+        target: set_8.in_input_text
+        type: binds
+      - source: tool_6.out_result
+        target: set_8.in_result
+        type: binds
+      - source: tool_7.out_result
+        target: set_8.in_result
+        type: binds
+      - source: tool_8.out_result
+        target: set_8.in_result
+        type: binds
+      - source: tool_9.out_result
+        target: set_8.in_result
+        type: binds
+      - source: set_8.complete
+        target: set_9.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_session_log
+  - in_menu
+  - in_commands
+  - in_i
+  - in_max_iterations
+  - out_session_log
+  - out_command
+  - out_is_exit
+  - out_i
+  - out_transform_type
+  - out_input_text
+  - out_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_session_log
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_2.out_session_log
+  target: loop_1.in_session_log
+  type: binds
+- source: set_1.out_menu
+  target: loop_1.in_menu
+  type: binds
+- source: wf_entry.out_commands
+  target: loop_1.in_commands
+  type: binds
+- source: set_3.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: loop_1.out_session_log
+  target: wf_exit.in_session_log
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

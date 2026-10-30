@@ -387,7 +387,7 @@ NOT @test_passed AND @cycle < @in_max_cycles
 contains(@in_analysis, '[READY]')
 ```
 
-Literals, `AND`/`OR`/`NOT`, comparisons, arithmetic, and these functions: `contains`, `startswith`, `endswith`, `len`, `lower`, `upper`, `strip`, `abs`, `min`, `max`, `int`, `float`, `str`, `bool`, `is_empty`, and `json_get(value, "a.b.0", default)`, which reads a typed field out of JSON text (for example a procedure's verdict; a JSON `true` stays a boolean). There is no `eval`, attribute access, subscripts, lambdas or `**`; expression length and repetition are capped. `EVALUATE`/`ASSERT` see their own `in_*` ports, so bind what they need. LLM-judged (semantic) conditions are not implemented.
+Literals, `AND`/`OR`/`NOT`, comparisons, arithmetic, and these functions: `contains`, `startswith`, `endswith`, `latest`, `len`, `lower`, `upper`, `strip`, `abs`, `min`, `max`, `int`, `float`, `str`, `bool`, `is_empty`, and `json_get(value, "a.b.0", default)`, which reads a typed field out of JSON text (for example a procedure's verdict; a JSON `true` stays a boolean). There is no `eval`, attribute access, subscripts, lambdas or `**`; expression length and repetition are capped. `EVALUATE`/`ASSERT` see their own `in_*` ports, so bind what they need. LLM-judged (semantic) conditions are not implemented.
 
 ## LOOP
 
@@ -400,7 +400,7 @@ Literals, `AND`/`OR`/`NOT`, comparisons, arithmetic, and these functions: `conta
     max_iterations: "@in_max_cycles"     # number or expression; default 100
     index_var: cycle                     # 0-based counter name; default `cycle`
     outputs:                             # become the LOOP's out_* ports
-      final_code:  {from: "imp.out_code"}       # latest iteration's value
+      final_code:  {from: "imp.out_code"}       # the value the latest iteration wrote (a list of ports: whichever wrote last)
       chapters:    {collect: "write.out_text"}  # list, one entry per iteration
       test_passed: {fired: "eval.pass"}         # did a token leave that port last iteration?
     subgraph: {nodes: [...], edges: [...]}
@@ -408,7 +408,7 @@ Literals, `AND`/`OR`/`NOT`, comparisons, arithmetic, and these functions: `conta
 
 - One iteration runs the body from its start nodes (nodes nothing triggers) until no tokens remain. The body is a DAG; repetition is the loop's job, so no back-edge inside it.
 - The condition sees the loop's `in_*` values, the previous iteration's outputs by name, and the counter.
-- A body `in_X` port with no `binds` edge reads the loop's `in_X`, else the loop-state variable `X`.
+- A body `in_X` port with no `binds` edge reads the loop-state variable `X` once an iteration has set it, else the loop's `in_X`. A `from` output starts as the loop's `in_X` of the same name, and an iteration that writes it on no branch leaves it as it was. In a condition, `latest(@in_X, @X)` is that same choice: the value before the loop until an iteration sets it.
 - When the loop ends it routes to `exit`. Body nodes share the run's step budget.
 
 ## Resources and composition

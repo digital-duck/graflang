@@ -9,7 +9,7 @@ interpreted by `_eval` below. What it accepts:
 * `AND`, `OR`, `NOT` (any case; `and`/`or`/`not` also work), comparisons (== != < <= > >= in, not in),
   arithmetic (+ - * / // %), parentheses, list/tuple literals
 * calls to a fixed set of functions: contains, startswith, endswith, len, lower, upper, strip, abs,
-  min, max, int, float, str, bool, is_empty, json_get, has_pii
+  min, max, int, float, str, bool, is_empty, json_get, has_pii, latest
 
 Everything else is rejected: attribute access beyond `@obj.field`, slices, lambdas, comprehensions, imports, `**`,
 keyword arguments, calls to anything not listed. Expressions are limited in length and size, and
@@ -79,6 +79,7 @@ FUNCS: Dict[str, Callable[..., Any]] = {
     "abs": abs, "min": min, "max": max,
     "int": int, "float": float, "str": str, "bool": bool,
     "has_pii": has_pii,
+    "latest": lambda initial, state: initial if state is None else state,      # a LOOP variable: its value before the loop until an iteration sets it
     "is_empty": lambda a: a is None or (hasattr(a, "__len__") and len(a) == 0),
 }
 

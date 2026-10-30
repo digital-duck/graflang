@@ -524,7 +524,9 @@ class GraphLangRuntime:
           max_iterations  a number or an expression such as "@in_max_cycles" (default 100)
           index_var       name of the iteration counter, 0-based (default `cycle`)
           outputs         the LOOP's out_* ports, each one of
-                            {from: "node.out_port"}     the value from the latest iteration
+                            {from: "node.out_port"}     the value the latest iteration wrote; if that iteration wrote none, the
+                                                        previous one (it starts as the LOOP's input of the same name). A list
+                                                        of ports: whichever wrote last, for a variable set on exclusive branches
                             {collect: "node.out_port"}  a list, one value per iteration
                             {fired: "node.port"}        true if a token left that port in the latest iteration
           persist_mutations  true: what a MUTATE in the body changed stays for the next iterations (default: each
@@ -549,7 +551,8 @@ class GraphLangRuntime:
             kinds = [k for k in ("from", "collect", "fired") if k in spec]
             if len(kinds) != 1:
                 raise ValueError(f"LOOP {node_data['id']!r} output {name!r} needs exactly one of from/collect/fired")
-            state[name] = [] if kinds[0] == "collect" else False if kinds[0] == "fired" else None
+            # a `from` variable starts as the LOOP's input of the same name (its value before the loop), if there is one
+            state[name] = [] if kinds[0] == "collect" else False if kinds[0] == "fired" else in_data.get(f"in_{name}")
 
         persist = bool(cfg.get("persist_mutations"))
         body = {"nodes": body["nodes"], "edges": body.get("edges", [])}
@@ -574,7 +577,10 @@ class GraphLangRuntime:
                 log_event(_log, "loop.persisted", level=DEBUG, node=node_data["id"], cycle=cycle, nodes=len(nodes), depth=self.depth)
             for name, spec in specs.items():
                 if "from" in spec:
-                    state[name] = sub.values.get(split_ref(spec["from"]))
+                    refs = [split_ref(r) for r in ([spec["from"]] if isinstance(spec["from"], str) else spec["from"])]
+                    written = [k for k in refs if k in sub.values]
+                    if written:                                      # an iteration that sets it on no branch leaves it as it was
+                        state[name] = sub.values[max(written, key=lambda k: sub._stamp[k])]
                 elif "collect" in spec:
                     state[name].append(sub.values.get(split_ref(spec["collect"])))
                 else:

@@ -1,0 +1,618 @@
+# Lifted from SPL.py cookbook-pocketflow/018_debate/debate.spl by spl2graph; kept as an R1 acceptance sample (see readme.md).
+version: 1.0-graph
+workflow:
+  name: debate
+  inputs:
+  - name: claim
+    type: TEXT
+    default: Artificial intelligence will create more jobs than it eliminates
+  - name: max_iterations
+    type: INTEGER
+    default: 5
+  outputs:
+  - name: result
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_claim
+  - out_max_iterations
+- id: fork_1
+  type: FORK
+  ports:
+  - trigger
+  - branch_1
+  - branch_2
+- id: gen_1
+  type: GENERATE
+  config:
+    function: argue_for
+    params:
+    - claim
+    prompt_inline: 'You are Advocate A, a skilled debater. Argue strongly IN FAVOR
+      of the following claim.
+
+
+      Claim: {{in_claim}}
+
+
+      Present 3-5 compelling arguments supporting this claim. Be persuasive, logical,
+      and cite evidence where possible.
+
+      Label your response: ARGUMENT FOR THE CLAIM'
+    arguments:
+    - '@claim'
+  ports:
+  - trigger
+  - complete
+  - in_claim
+  - out_argument_for
+- id: gen_2
+  type: GENERATE
+  config:
+    function: argue_against
+    params:
+    - claim
+    prompt_inline: 'You are Advocate B, a skilled debater. Argue strongly AGAINST
+      the following claim.
+
+
+      Claim: {{in_claim}}
+
+
+      Present 3-5 compelling counter-arguments against this claim. Be persuasive,
+      logical, and cite evidence where possible.
+
+      Label your response: ARGUMENT AGAINST THE CLAIM'
+    arguments:
+    - '@claim'
+  ports:
+  - trigger
+  - complete
+  - in_claim
+  - out_argument_against
+- id: join_1
+  type: JOIN
+  ports:
+  - trigger
+  - complete
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_clarification_context
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_score
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_result
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      review:
+        from: gen_3.out_review
+      score:
+        from: gen_4.out_score
+      winner_gate:
+        from: gen_5.out_winner_gate
+      result:
+        from: gen_6.out_result
+      i:
+        from:
+        - set_5.out_i
+        - set_6.out_i
+      clarification_context:
+        from: gen_7.out_clarification_context
+    subgraph:
+      nodes:
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: judge_review
+          params:
+          - claim
+          - argument_for
+          - argument_against
+          - clarification_context
+          prompt_inline: 'You are an impartial Judge evaluating a debate. Carefully
+            review both arguments.
+
+
+            Claim under debate: {{in_claim}}
+
+
+            ARGUMENT FOR:
+
+            {{in_argument_for}}
+
+
+            ARGUMENT AGAINST:
+
+            {{in_argument_against}}
+
+
+            Context from prior rounds (empty on first pass): {{in_clarification_context}}
+
+
+            Analyze each side''''s logical strength, use of evidence, and persuasiveness.
+            Be thorough and impartial.'
+          arguments:
+          - '@claim'
+          - '@argument_for'
+          - '@argument_against'
+          - '@clarification_context'
+        ports:
+        - trigger
+        - complete
+        - in_claim
+        - in_argument_for
+        - in_argument_against
+        - in_clarification_context
+        - out_review
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: judge_score
+          params:
+          - claim
+          - review
+          - argument_for
+          - argument_against
+          prompt_inline: 'You are a Judge scoring the arguments in a debate.
+
+
+            Claim: {{in_claim}}
+
+
+            Your review: {{in_review}}
+
+
+            FOR argument: {{in_argument_for}}
+
+
+            AGAINST argument: {{in_argument_against}}
+
+
+            Score each argument on a scale of 1-10 for logical strength, evidence
+            quality, and persuasiveness (max 30 each).
+
+            Output exactly in this format:
+
+            SCORE_FOR: [score]/30
+
+            SCORE_AGAINST: [score]/30
+
+            WINNER_DETERMINABLE: [YES or NO]
+
+            REASON: [one-sentence explanation]'
+          arguments:
+          - '@claim'
+          - '@review'
+          - '@argument_for'
+          - '@argument_against'
+        ports:
+        - trigger
+        - complete
+        - in_claim
+        - in_review
+        - in_argument_for
+        - in_argument_against
+        - out_score
+      - id: gen_5
+        type: GENERATE
+        config:
+          function: check_winner
+          params:
+          - score
+          prompt_inline: 'Read this debate scoring result and decide if a winner has
+            been clearly determined.
+
+
+            {{in_score}}
+
+
+            If WINNER_DETERMINABLE is YES or one side''''s score clearly surpasses
+            the other, respond: yes
+
+            If the result is inconclusive or too close to call, respond: no
+
+            Reply with only "yes" or "no" — no other text.'
+          arguments:
+          - '@score'
+        ports:
+        - trigger
+        - complete
+        - in_score
+        - out_winner_gate
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'yes')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: gen_6
+        type: GENERATE
+        config:
+          function: declare_winner
+          params:
+          - claim
+          - argument_for
+          - argument_against
+          - score
+          prompt_inline: 'You are the Judge. Declare the final verdict for this debate.
+
+
+            Claim debated: {{in_claim}}
+
+
+            ARGUMENT FOR:
+
+            {{in_argument_for}}
+
+
+            ARGUMENT AGAINST:
+
+            {{in_argument_against}}
+
+
+            Final scores: {{in_score}}
+
+
+            Announce the winner (FOR or AGAINST), highlight the decisive arguments
+            that swung the verdict, and deliver a clear final verdict statement.'
+          arguments:
+          - '@claim'
+          - '@argument_for'
+          - '@argument_against'
+          - '@score'
+        ports:
+        - trigger
+        - complete
+        - in_claim
+        - in_argument_for
+        - in_argument_against
+        - in_score
+        - out_result
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_iterations'
+        ports:
+        - trigger
+        - complete
+        - in_max_iterations
+        - out_i
+      - id: gen_7
+        type: GENERATE
+        config:
+          function: request_clarification
+          params:
+          - claim
+          - argument_for
+          - argument_against
+          - review
+          - score
+          prompt_inline: 'You are a Judge who cannot yet determine a clear winner
+            in this debate. Identify what is still unclear.
+
+
+            Claim: {{in_claim}}
+
+
+            FOR argument: {{in_argument_for}}
+
+
+            AGAINST argument: {{in_argument_against}}
+
+
+            Your review: {{in_review}}
+
+
+            Scoring attempt: {{in_score}}
+
+
+            Pinpoint the specific contested points, unsubstantiated claims, or missing
+            evidence that prevent a verdict.
+
+            Describe exactly what clarification or further argumentation would allow
+            you to reach a decision.
+
+            This will be passed as context into the next review round.'
+          arguments:
+          - '@claim'
+          - '@argument_for'
+          - '@argument_against'
+          - '@review'
+          - '@score'
+        ports:
+        - trigger
+        - complete
+        - in_claim
+        - in_argument_for
+        - in_argument_against
+        - in_review
+        - in_score
+        - out_clarification_context
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: gen_3.complete
+        target: gen_4.trigger
+        type: triggers
+      - source: gen_3.out_review
+        target: gen_4.in_review
+        type: binds
+      - source: gen_4.complete
+        target: gen_5.trigger
+        type: triggers
+      - source: gen_4.out_score
+        target: gen_5.in_score
+        type: binds
+      - source: gen_5.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: gen_5.out_winner_gate
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: gen_6.trigger
+        type: triggers
+      - source: gen_4.out_score
+        target: gen_6.in_score
+        type: binds
+      - source: gen_6.complete
+        target: set_5.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: gen_7.trigger
+        type: triggers
+      - source: gen_3.out_review
+        target: gen_7.in_review
+        type: binds
+      - source: gen_4.out_score
+        target: gen_7.in_score
+        type: binds
+      - source: gen_7.complete
+        target: set_6.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_claim
+  - in_argument_for
+  - in_argument_against
+  - in_clarification_context
+  - in_max_iterations
+  - in_i
+  - in_score
+  - in_result
+  - out_review
+  - out_score
+  - out_winner_gate
+  - out_result
+  - out_i
+  - out_clarification_context
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: isblank
+    backend: kernel
+    arguments:
+    - '@result'
+    code: "def isblank(value: str) -> str:\n    \"\"\"ISBLANK(value) — returns 'true'\
+      \ if value is empty or only whitespace.\"\"\"\n    return 'true' if str(value).strip()\
+      \ == '' else 'false'\n_spl_result = isblank(result)\n"
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_result
+  - out_result_is_blank
+- id: eval_2
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'true')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: gen_8
+  type: GENERATE
+  config:
+    function: declare_winner
+    params:
+    - claim
+    - argument_for
+    - argument_against
+    - score
+    prompt_inline: 'You are the Judge. Declare the final verdict for this debate.
+
+
+      Claim debated: {{in_claim}}
+
+
+      ARGUMENT FOR:
+
+      {{in_argument_for}}
+
+
+      ARGUMENT AGAINST:
+
+      {{in_argument_against}}
+
+
+      Final scores: {{in_score}}
+
+
+      Announce the winner (FOR or AGAINST), highlight the decisive arguments that
+      swung the verdict, and deliver a clear final verdict statement.'
+    arguments:
+    - '@claim'
+    - '@argument_for'
+    - '@argument_against'
+    - '@score'
+  ports:
+  - trigger
+  - complete
+  - in_claim
+  - in_argument_for
+  - in_argument_against
+  - in_score
+  - out_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+edges:
+- source: wf_entry.entry
+  target: fork_1.trigger
+  type: triggers
+- source: fork_1.branch_1
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_claim
+  target: gen_1.in_claim
+  type: binds
+- source: fork_1.branch_2
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_claim
+  target: gen_2.in_claim
+  type: binds
+- source: gen_1.complete
+  target: join_1.trigger
+  type: triggers
+- source: gen_2.complete
+  target: join_1.trigger
+  type: triggers
+- source: join_1.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_claim
+  target: loop_1.in_claim
+  type: binds
+- source: gen_1.out_argument_for
+  target: loop_1.in_argument_for
+  type: binds
+- source: gen_2.out_argument_against
+  target: loop_1.in_argument_against
+  type: binds
+- source: set_1.out_clarification_context
+  target: loop_1.in_clarification_context
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: set_3.out_i
+  target: loop_1.in_i
+  type: binds
+- source: set_2.out_score
+  target: loop_1.in_score
+  type: binds
+- source: set_4.out_result
+  target: loop_1.in_result
+  type: binds
+- source: loop_1.exit
+  target: tool_1.trigger
+  type: triggers
+- source: loop_1.out_result
+  target: tool_1.in_result
+  type: binds
+- source: tool_1.complete
+  target: eval_2.trigger
+  type: triggers
+- source: tool_1.out_result_is_blank
+  target: eval_2.in_subject
+  type: binds
+- source: eval_2.pass
+  target: gen_8.trigger
+  type: triggers
+- source: wf_entry.out_claim
+  target: gen_8.in_claim
+  type: binds
+- source: gen_1.out_argument_for
+  target: gen_8.in_argument_for
+  type: binds
+- source: gen_2.out_argument_against
+  target: gen_8.in_argument_against
+  type: binds
+- source: loop_1.out_score
+  target: gen_8.in_score
+  type: binds
+- source: gen_8.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: loop_1.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: gen_8.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: eval_2.fail
+  target: wf_exit.trigger
+  type: triggers
