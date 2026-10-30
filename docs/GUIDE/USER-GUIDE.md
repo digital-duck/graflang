@@ -189,6 +189,10 @@ steps:
 - Control is inferred from the order you list the steps. A step with `on: gate.fail` (or a list) hangs there instead, which is how you write the branches of `assert`, `evaluate`, `guard` and `fork`.
 - Other keys (`model`, `phases`, `temperature`, ...) go into the node's `config`. `nodes:` and `edges:` may sit beside `steps:` for anything the compact form cannot say.
 
+## Export to SPL: `graf export-spl`
+
+`graf export-spl flow.graph.yaml -o flow.spl` writes the workflow as an SPL script (structure only, no LLM) that SPL.py's `spl3 run` can run. A prompt becomes a `CREATE FUNCTION`, a lifted Python tool a `CREATE TOOL_API`. What SPL has no word for (lifecycle phases, typed ports) is dropped and listed as a warning.
+
 ## Bindings: `--bind`
 
 A graph says what to do; a bindings file says which model, which files and how much, so the same graph runs in different places.
