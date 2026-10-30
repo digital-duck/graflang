@@ -1,0 +1,58 @@
+# Lifted by SPL.py's spl2graph from an SPL workflow with a CREATE TOOL_API. The tool's Python source travels in the
+# node (backend: kernel), so the graph runs without SPL.py or an LLM:  graf run cookbook/lifted_tool/lifted_tool.graph.yaml --param word=hello
+version: 1.0-graph
+workflow:
+  name: w
+  inputs:
+  - name: word
+    type: TEXT
+    default: hi
+  outputs:
+  - name: loud
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_word
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: shout
+    backend: kernel
+    arguments:
+    - '@word'
+    - '''!'''
+    code: "def shout(text: str, suffix: str) -> str:\n    return text.strip().upper()\
+      \ + suffix\n_spl_result = shout(word, '!')\n"
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - text
+    - suffix
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_word
+  - out_loud
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_loud
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_word
+  target: tool_1.in_word
+  type: binds
+- source: tool_1.out_loud
+  target: wf_exit.in_loud
+  type: binds
+- source: tool_1.complete
+  target: wf_exit.trigger
+  type: triggers

@@ -56,7 +56,7 @@ def test_cookbook_graphs_all_build():
     from graphlang.grafr.runtime import load_graph
     for path in COOKBOOK.glob("*/*.graph.yaml"):
         G, note = build(load_graph(path))
-        assert G.number_of_nodes() >= 4 and note == "", path
+        assert G.number_of_nodes() >= 3 and note == "", path
 
 
 def _page_data(page):
