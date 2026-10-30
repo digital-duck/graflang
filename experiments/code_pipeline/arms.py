@@ -33,7 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPL_DIR = Path("/home/papagame/projects/digital-duck/SPL.py/cookbook/050_code_pipeline")
+SPL_PY = Path(os.environ.get("SPL_PY_PATH", ROOT.parent / "SPL.py"))   # SPL.py checkout
+SPL_DIR = SPL_PY / "cookbook" / "050_code_pipeline"
 GRAPH = ROOT / "cookbook" / "code_pipeline" / "code_pipeline.graph.yaml"
 ADAPTER = os.environ.get("ADAPTER", "claude_cli")     # claude_cli (default), ollama, ... any dd-llm adapter; all four arms use it
 TIMEOUT = 1800

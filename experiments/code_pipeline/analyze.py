@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import arms  # noqa: E402
 import store  # noqa: E402
 import tasks as tasks_module  # noqa: E402
 
@@ -388,7 +389,7 @@ def main(paths: list[str], model: str | None = None, batch: str | None = None, a
 def sizes() -> None:
     print("Orchestration size (executable lines; prompts are shared and counted once):")
     cp = ROOT / "cookbook" / "code_pipeline"
-    spl = Path("/home/papagame/projects/digital-duck/SPL.py/cookbook/050_code_pipeline/code_pipeline.spl")
+    spl = arms.SPL_DIR / "code_pipeline.spl"
     prompts = sum(loc(p) for p in sorted(cp.glob("0[0-7]_*.spl")))
     print(f"  graflang   {loc(cp / 'code_pipeline.graph.yaml')} lines of graph YAML")
     if spl.exists():

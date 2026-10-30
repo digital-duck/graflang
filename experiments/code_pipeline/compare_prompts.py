@@ -20,9 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import arms  # noqa: E402
 import lg_pipeline  # noqa: E402  (load_prompts reads the templates from graflang's cookbook)
 
-SPL_COPY = Path("/home/papagame/projects/digital-duck/SPL.py/cookbook/050_code_pipeline")
+SPL_COPY = arms.SPL_DIR
 
 
 def body(path: Path) -> str:

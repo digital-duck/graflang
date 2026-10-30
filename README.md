@@ -16,8 +16,8 @@ GraphLang flips the script on agentic AI. Where LangGraph and AutoGen use Python
 |---|---|---|
 | **Source of truth** | Python code that describes a graph | The graph itself |
 | **LLM's role** | Generate text/code | Mutate the topology |
-| **Parallelism** | `asyncio.gather` + race conditions | Interaction Nets (confluent for the deterministic core; LLM-sampling nodes and `LOOP` are not) |
-| **Safety** | Scattered `if/else` guardrails | Declarative Cedar policies, enforced at runtime (Rust compilation planned) |
+| **Parallelism** | `asyncio.gather` + race conditions | Explicit `FORK` / `JOIN` nodes in the topology |
+| **Safety** | Scattered `if/else` guardrails | Declarative Cedar policies, enforced at runtime |
 | **Self-revision** | Rewrite the Python file | Output a validated graph delta |
 | **Visualization** | Lossy Mermaid translation | First-class, interactive topology |
 
@@ -25,7 +25,7 @@ GraphLang flips the script on agentic AI. Where LangGraph and AutoGen use Python
 
 ## Two graph formats, one family
 
-GraphLang workflows live in `*.graph.yaml` and are run, checked, compiled and drawn by the one command `graf`. They are not
+GraphLang workflows live in `*.graph.yaml` and are run, checked and drawn by the one command `graf`. They are not
 [zinet](https://github.com/digital-duck/zinet) graphs: zinet stores a *static* dependency graph (`primitives:`, `concepts:`,
 `applications:`), while a workflow is *executable* (typed nodes with ports, `triggers` and `binds` edges, loops and retries,
 Cedar policies). Both are plain YAML that persists a graph, and the file name is only a convention, so `graf` tells the files
@@ -35,7 +35,7 @@ failing on a schema error. The two share graph code: `graf vis` draws through zi
 ## Core Innovations
 
 ### 1. Physics-Inspired Execution
-GraphLang is grounded in **Lafont's Interaction Nets** — a mathematically proven model for deterministic, concurrent graph rewriting. Computation occurs via local rewrite rules when agents interact:
+A workflow runs as tokens passing through typed nodes. Each node type plays one role:
 
 - **`GENERATE`** — probabilistic agents (LLM calls)
 - **`SOLVE` / `ASSERT`** — deterministic agents: an expression, a persistent Python kernel, or any program run as a subprocess (SymPy, Z3, Lean, a Rust binary), read through a declared parser
@@ -53,33 +53,22 @@ Keep the topology clean while preserving the full expressive power of SPL:
 
 ### 3. Policy-Grounded Safety
 Safety isn't an afterthought. [Cedar](https://www.cedarpolicy.com/) policies are first-class topological constructs (`GUARD` nodes) that are:
-- Evaluated at runtime by `grafr` (dynamic, hot-reloadable)
-- Planned: compiled to zero-cost Rust `match` statements by `grafc` (deployment; `grafc` is still a stub)
+- Evaluated at runtime (dynamic, hot-reloadable)
 
 The LLM can propose mutations, but only those that pass the Cedar policy check are applied.
-
-### 4. Compilation to Rust (Downstream)
-**Planned; `grafc` is currently a stub.** `grafc` is meant to compile the Graph IR + Cedar policies into a memory-safe, high-performance Rust binary. This is a **downstream deployment optimization**, not the core innovation. The innovation is the topological execution model itself.
 
 ---
 
 ## Quick Start
 
 ```bash
-# Install the dynamic interpreter (development)
+# Install (development)
 pip install -e ".[dev]"        # `claude_cli`, `ollama`, `openai`, `openrouter` work as is; `.[anthropic]`, `.[gemini]` add SDKs
 
 # Run a workflow (default adapter is `claude_cli`; `--adapter mock` calls no LLM)
 graf run cookbook/code_pipeline/code_pipeline.graph.yaml \
     --adapter ollama \
     --param spec="Write a binary search function"
-
-# Compile to Rust (deployment; planned, grafc is a stub)
-# Cedar policies are referenced from the graph's `resources.policies` block
-# (shared policies live in graphlang/policies/).
-graf compile cookbook/code_pipeline/code_pipeline.graph.yaml \
-    --target rust \
-    -o code_pipeline
 ```
 
 ---
@@ -154,28 +143,6 @@ edges:
 
 ---
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  GraphLang Toolchain                                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   Source              IR              Runtime     Deployment │
-│   ──────              ──              ───────     ────────── │
-│                                                             │
-│   *.graph.yaml ──► grafr ──► NetworkX/Python (dev)          │
-│                  │                                          │
-│                  └──► grafc ──► Rust binary (prod)          │
-│                                                             │
-│   *.cedar ─────────┘  (compiled inline to Rust match)       │
-│   *.spl ───────────┘  (Tier 2 procedure references)         │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## Relationship to SPL.py
 
 [**SPL.py**](https://github.com/digital-duck/SPL.py) is the declarative workflow language that GraphLang elevates. SPL provides:
@@ -193,10 +160,9 @@ GraphLang takes SPL's proven semantics and gives them a **topological execution 
 
 - [x] Core vocabulary design (physics-inspired, pruned from SPL)
 - [x] JSON Schema for Graph IR (3-tier composition)
-- [x] Cedar integration in `grafr` (`GUARD` and `MUTATE` checks via `cedarpy`)
+- [x] Cedar integration (`GUARD` and `MUTATE` checks via `cedarpy`)
 - [x] Flagship example (`code_pipeline.graph.yaml`)
-- [x] `grafr` Python interpreter (NetworkX-based topological executor)
-- [ ] `grafc` Rust compiler (Graph IR + Cedar → Rust AST)
+- [x] Python interpreter (NetworkX-based topological executor)
 - [x] `graf vis`: read a workflow as a graph (control flow first, data edges on demand, loops that collapse to one box)
 - [ ] Visual IDE: author and edit a workflow in the graph view (add and connect nodes and ports, edit their config, validate while you edit, write the `*.graph.yaml` with its comments kept, run from the view). Planned.
 - [ ] Interactive Streamlit UI (drill-down visualization of Tier 3 composites)
