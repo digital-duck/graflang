@@ -34,6 +34,7 @@ class MeteredLLM:
         self.calls = self.input_tokens = self.output_tokens = 0
         self.cost_usd = 0.0
         self.ms = 0
+        self.cost_unreported = False                   # a call finished without a cost, so max_cost_usd cannot be enforced
         self._lock = threading.Lock()
 
     @property
@@ -53,6 +54,9 @@ class MeteredLLM:
         with self._lock:
             if self.max_calls is not None and self.calls >= self.max_calls:
                 raise LimitExceeded(f"stopped before call {self.calls + 1}: limits.max_llm_calls is {self.max_calls}")
+            if self.max_cost_usd is not None and self.cost_unreported:
+                raise LimitExceeded(f"limits.max_cost_usd is {self.max_cost_usd} but adapter {self.name!r} reports no cost; "
+                                    "use limits.max_llm_calls instead")
             if self.max_cost_usd is not None and self.cost_usd >= self.max_cost_usd:
                 raise LimitExceeded(f"stopped at ${self.cost_usd:.4f}: limits.max_cost_usd is {self.max_cost_usd}")
             self.calls += 1
@@ -66,6 +70,8 @@ class MeteredLLM:
                 self.input_tokens += int(usage.get("input_tokens") or 0)
                 self.output_tokens += int(usage.get("output_tokens") or 0)
                 self.cost_usd += float(usage.get("cost_usd") or 0.0)
+                if usage.get("cost_usd") is None and getattr(self.inner, "name", "") != "mock":
+                    self.cost_unreported = True
 
     def snapshot(self) -> Dict[str, Any]:
         return {"adapter": self.name, "calls": self.calls, "input_tokens": self.input_tokens, "output_tokens": self.output_tokens,

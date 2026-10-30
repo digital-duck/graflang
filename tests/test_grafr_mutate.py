@@ -331,3 +331,31 @@ def test_a_delta_that_routes_around_a_guard_is_rejected_by_the_graph_check_even_
     reason = rt.values.get(("mut", "out_reason"))
     assert "refused" in rt.fired and "would break the graph" in reason and "'act'" in reason, reason
     assert rt.budget.mutations == 0
+
+
+# ---- MUTATE inside a LOOP ----------------------------------------------------------------------------
+
+def loop_adding_a_node(tmp_path, persist):
+    (tmp_path / "all.cedar").write_text("permit(principal, action, resource);\n")
+    delta = {"action": "add_node", "payload": {"id": "extra", "type": "OBSERVE", "ports": ["trigger", "complete"]}}
+    body = {"nodes": [{"id": "mut", "type": "MUTATE", "ports": ["trigger", "applied", "rejected", "in_delta", "out_reason"],
+                       "config": {"policy_ref": "policies.all", "max_mutations": 10}}],
+            "edges": []}
+    loop = {"id": "lp", "type": "LOOP", "ports": ["trigger", "exit", "in_delta", "out_reasons"],
+            "config": {"max_iterations": 2, "persist_mutations": persist, "outputs": {"reasons": {"collect": "mut.out_reason"}}, "subgraph": body}}
+    g = graph([{"id": "s", "type": "INPUT", "ports": ["entry", "out_delta"]}, loop], [trig("s.entry", "lp.trigger"), bind("s.out_delta", "lp.in_delta")],
+              inputs=[{"name": "delta", "type": "JSON", "default": delta}], resources={"policies": {"all": str(tmp_path / "all.cedar")}})
+    return g
+
+
+def test_a_mutation_in_a_loop_body_lasts_one_iteration_unless_persisted(tmp_path):
+    rt = GraphLangRuntime(loop_adding_a_node(tmp_path, False), verbose=False)
+    rt.execute({})
+    assert rt.values[("lp", "out_reasons")] == ["add_node " + json.dumps({"id": "extra", "ports": ["trigger", "complete"], "type": "OBSERVE"}, sort_keys=True)] * 2
+
+
+def test_persist_mutations_carries_the_changed_body_to_the_next_iteration(tmp_path):
+    rt = GraphLangRuntime(loop_adding_a_node(tmp_path, True), verbose=False)
+    rt.execute({})
+    first, second = rt.values[("lp", "out_reasons")]
+    assert first.startswith("add_node") and "extra" in second and not second.startswith("add_node")

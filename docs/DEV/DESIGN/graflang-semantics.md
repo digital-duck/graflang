@@ -38,6 +38,10 @@ For the loaded graph and for every graph a `MUTATE` produces:
 
 A delta that adds any error to this list is rejected. The safety layer (`GUARD` and `MUTATE` nodes, the `risky` flag) cannot be removed or edited by a delta.
 
+## 3b. Persistent self-revision in a LOOP
+
+`persist_mutations: true` on a LOOP: after an iteration whose body was mutated, the mutated body (nodes and edges) replaces the written body for the following iterations. The invariants of section 3 were checked on every delta, so they hold on the carried body. Off by default, which is rule R10.
+
 ## 3a. Named subgraphs
 
 A `SUBGRAPH` node (a *use* of a part listed under `resources.parts`) has no runtime semantics of its own: before anything runs, `load_graph` replaces it by a copy of the part's nodes (ids `<use>__<node>`), wiring the part's INPUT and OUTPUT into direct edges. Every rule above therefore applies to the expanded graph, and two uses of one part are two independent copies with separate state.

@@ -228,7 +228,7 @@ For every node (LOOP and BATCH bodies too) Cedar is asked whether `Workflow::"re
 ## Cost, budgets and replay
 
 - Every run prints a one-line summary (steps, LLM calls with tokens and cost when the adapter reports them, the slowest node) and writes `summary.json` in the run folder with the per-node firings and time. Subscription adapters such as `claude_cli` report no cost.
-- `limits.max_llm_calls` and `limits.max_cost_usd` in a bindings file stop a run that reaches them.
+- `limits.max_llm_calls` and `limits.max_cost_usd` in a bindings file stop a run that reaches them. `max_cost_usd` needs an adapter that reports cost; with one that does not (`claude_cli` reports tokens only), the run stops at the second call and says so, so use `max_llm_calls` there.
 - `graf run flow.graph.yaml --record calls.jsonl` saves every GENERATE call; `--replay calls.jsonl` answers them from the file with no model, so tests and CI cost nothing. A call is found by its model, prompt and temperature, and a call that was not recorded fails loudly. `procedure_ref` nodes run SPL.py's own executor and are not recorded.
 
 ## Checkpoint and resume
@@ -412,7 +412,7 @@ Safety is Cedar policy. Policies live in `graphlang/policies/` (`graph_safety.ce
 {"action": "add_edge", "payload": {"source": "mut.applied", "target": "rec.trigger", "type": "triggers"}}
 ```
 
-Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (schema: `graphlang/schema/graph_delta.schema.json`). A delta is applied only if it parses, matches the schema, keeps the graph well formed (known nodes and ports, no duplicates, `INPUT`/`OUTPUT` not removable, `id`/`type`/`ports` not editable), Cedar allows it under `config.policy_ref`, and the count is under `config.max_mutations` (default 3). No `policy_ref` means no mutation. The reason goes on `out_reason`. A `MUTATE` inside a `LOOP` body changes only that iteration's copy of the body. A `MUTATE` cannot add another `MUTATE` node.
+Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (schema: `graphlang/schema/graph_delta.schema.json`). A delta is applied only if it parses, matches the schema, keeps the graph well formed (known nodes and ports, no duplicates, `INPUT`/`OUTPUT` not removable, `id`/`type`/`ports` not editable), Cedar allows it under `config.policy_ref`, and the count is under `config.max_mutations` (default 3). No `policy_ref` means no mutation. The reason goes on `out_reason`. A `MUTATE` inside a `LOOP` body changes only that iteration's copy of the body, unless the LOOP sets `persist_mutations: true`: then the changed body is the start of the next iteration (the `max_mutations` count is shared across iterations). A `MUTATE` cannot add another `MUTATE` node.
 
 ## Bundled workflows
 

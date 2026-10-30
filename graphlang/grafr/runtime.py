@@ -187,6 +187,7 @@ class GraphLangRuntime:
             self.resolver, self.depth = _parent.resolver, _parent.depth + 1
             self.node_output = _parent.node_output
             self.kernels = _parent.kernels
+        self.mutated = False                            # a MUTATE changed this runtime's graph (a LOOP can carry it on)
         self._build_graph(_nodes if _nodes is not None else graph_data["nodes"],
                           _edges if _edges is not None else graph_data["edges"])
 
@@ -523,6 +524,8 @@ class GraphLangRuntime:
                             {from: "node.out_port"}     the value from the latest iteration
                             {collect: "node.out_port"}  a list, one value per iteration
                             {fired: "node.port"}        true if a token left that port in the latest iteration
+          persist_mutations  true: what a MUTATE in the body changed stays for the next iterations (default: each
+                          iteration starts from the body as written; the mutation budget is still shared)
           subgraph        {nodes, edges}: the body. Nodes nothing triggers start each iteration, and an
                           in_* port with no `binds` edge reads the LOOP's input of that name, else a
                           loop-state variable of that name.
@@ -545,6 +548,8 @@ class GraphLangRuntime:
                 raise ValueError(f"LOOP {node_data['id']!r} output {name!r} needs exactly one of from/collect/fired")
             state[name] = [] if kinds[0] == "collect" else False if kinds[0] == "fired" else None
 
+        persist = bool(cfg.get("persist_mutations"))
+        body = {"nodes": body["nodes"], "edges": body.get("edges", [])}
         cycle = 0
         while True:
             scope = {**in_data, **state, index_var: cycle, "cycle": cycle}
@@ -560,6 +565,10 @@ class GraphLangRuntime:
                                    _boundary=in_data, _scope=scope, verbose=self.verbose)
             queue: deque = deque((n, None) for n in sub._start_nodes())
             sub._drain(queue)
+            if persist and sub.mutated:
+                nodes, edges = self._lists(sub.G)
+                body = {"nodes": nodes, "edges": edges}
+                log_event(_log, "loop.persisted", level=DEBUG, node=node_data["id"], cycle=cycle, nodes=len(nodes), depth=self.depth)
             for name, spec in specs.items():
                 if "from" in spec:
                     state[name] = sub.values.get(split_ref(spec["from"]))
@@ -679,6 +688,7 @@ class GraphLangRuntime:
         if broken:
             return outcome(False, "the delta would break the graph: " + "; ".join(broken))
         self._apply_delta(delta)
+        self.mutated = True
         self.budget.mutations += 1
         return outcome(True, f"{delta['action']} {json.dumps(delta['payload'], sort_keys=True)}")
 

@@ -75,7 +75,7 @@ This document reviews the existing prototype at `~/projects/digital-duck/graflan
 - Core depends on sibling editable installs (`dd-llm`, `dd-logging`, `zinet`, optionally SPL.py). Fine for a monorepo workflow, fragile for anyone else.
 
 ### 3.8 Other
-- A MUTATE inside a LOOP changes only that iteration's copy (accepted limitation, #32): self-revision cannot persist across iterations.
+- A MUTATE inside a LOOP changes only that iteration's copy by default (#32); `persist_mutations: true` on the LOOP carries the changed body into the next iteration.
 - Executor extension point (`register_executor`) is in-process Python only. No out-of-process executor protocol, so JS/Go tools must be wrapped as SOLVE subprocesses, and only for deterministic nodes.
 - No bindings layer: model choice is a node `model:` hint plus CLI flags; kernel/executor choice lives inside the graph, which weakens DODA.
 

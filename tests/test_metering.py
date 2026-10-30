@@ -39,6 +39,13 @@ def test_the_meter_stops_a_run_at_a_budget():
         llm.generate("p2")
 
 
+def test_a_cost_budget_on_an_adapter_that_reports_no_cost_fails_loudly():
+    llm = MeteredLLM(Scripted("a", "b"), max_cost_usd=1.0)
+    llm.generate("p1")
+    with pytest.raises(LimitExceeded, match="reports no cost"):
+        llm.generate("p2")
+
+
 def test_a_recording_replays_without_the_model(tmp_path):
     cassette = tmp_path / "c.jsonl"
     rec = RecordingLLM(Scripted("one", "two"), cassette)
