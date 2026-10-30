@@ -161,3 +161,10 @@ def test_real_llm_runs_the_demo():
     """claude_cli (claude-sonnet-5-5): three short calls, the part's prompt used twice."""
     out = GraphLangRuntime(load_graph(GRAPH), adapter="claude_cli", verbose=False).execute({"topic": "tides"})
     assert len(out["essay"].strip()) > 20
+
+
+def test_the_picture_draws_each_use_of_a_part_as_a_box():
+    from graphlang.grafv.model import build
+    G, _ = build(load_graph(GRAPH))
+    assert G.nodes["first"]["kind"] == "SUBGRAPH" and G.nodes["first__rewrite"]["parent"] == "first"
+    assert G.nodes["second__rewrite"]["parent"] == "second" and "parent" not in G.nodes["draft"]

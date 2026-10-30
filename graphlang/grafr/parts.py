@@ -165,6 +165,8 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
         return node
 
     new_nodes = [rewrite(n) for n in inner]
+    members = parent.setdefault("_part_of", {})                      # for `graf vis`: which use each copied node came from
+    members.update({n["id"]: (uid, pname) for n in new_nodes})
 
     p_edges = part["edges"]
     entry_id, exit_id = entry["id"], exit_["id"]

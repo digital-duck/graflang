@@ -90,13 +90,18 @@ def _edge_label(etype: str, sport: str, tport: str) -> str:
 
 
 def _add(G: nx.MultiDiGraph, nodes: List[Dict], edges: List[Dict], prefix: str, parent: str | None,
-         notes: List[str]) -> None:
+         notes: List[str], part_of: Dict[str, Tuple[str, str]] | None = None) -> None:
     ids = {}
+    part_of = part_of or {}
+    for use, pname in dict.fromkeys(part_of[n["id"]] for n in nodes if n["id"] in part_of):    # a used part is drawn as a box
+        G.add_node(prefix + use, label=f"{use} ({pname})", kind="SUBGRAPH", color=color("SUBGRAPH"), info=f"part {pname}",
+                   **({"parent": parent} if parent else {}))
     for n in nodes:
         qid = prefix + n["id"]
         ids[n["id"]] = qid
+        box = prefix + part_of[n["id"]][0] if n["id"] in part_of else parent
         G.add_node(qid, label=display_label(n), kind=n["type"], color=color(n["type"]), info=_info(n),
-                   **({"parent": parent} if parent else {}))
+                   **({"parent": box} if box else {}))
     for e in edges:
         try:
             (s, sp), (t, tp) = (e["source"].split(".", 1), e["target"].split(".", 1))
@@ -119,5 +124,5 @@ def build(graph_data: Dict[str, Any]) -> Tuple[nx.MultiDiGraph, str]:
     """The workflow as a graph, and a one-line note on anything that could not be drawn."""
     G = nx.MultiDiGraph(name=graph_data.get("workflow", {}).get("name", "workflow"))
     notes: List[str] = []
-    _add(G, graph_data.get("nodes", []), graph_data.get("edges", []), "", None, notes)
+    _add(G, graph_data.get("nodes", []), graph_data.get("edges", []), "", None, notes, graph_data.get("_part_of"))
     return G, "; ".join(notes)

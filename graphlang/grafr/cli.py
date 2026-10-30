@@ -266,6 +266,7 @@ def cmd_expand(graph):
         sys.exit(1)
     data = _load_or_exit(graph_path)
     data.pop("_source_dir", None)
+    data.pop("_part_of", None)
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
     yaml.sort_base_mapping_type_on_output = False
