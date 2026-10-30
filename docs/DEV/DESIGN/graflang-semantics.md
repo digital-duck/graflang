@@ -25,6 +25,8 @@ The edge list is a **set**: its order means nothing. A run starts at the `INPUT`
 - **R10 Iteration scope.** Each iteration runs the body in a fresh copy: body values are not visible in the next iteration except through the LOOP's declared `outputs` (`from`, `collect`, `fired`).
 - **R11 Failure.** An exception in any node ends the run. The only graceful paths are `SOLVE ... on_error: route` and E1's planned error routes.
 - **R12 Mutation.** A `MUTATE` applies one delta per firing, only if it passes: parse, schema, well-formedness, the code-key refusal, the safety-layer refusal, the Cedar policy, the mutation budget, and the invariants of section 3. Otherwise it routes to `rejected` and nothing changes.
+- **R13 Concurrency (opt-in).** With one worker (the default) nodes fire one at a time in token order, as above. With `--workers N` (or `limits.concurrency`) the tokens waiting together form a wave: GENERATE nodes and slow SOLVE nodes (`subprocess` backend, `procedure_ref`) in it run on a thread pool and read the values from before the wave started; every other node runs in token order on its turn. Results are written and routed strictly in token order, so the outcome does not depend on which call finishes first. A node released in the same wave as the node it reads from, with nothing ordering them, sees the earlier value (R6 again); `graf validate` reports unordered writers of one port as a race.
+- **R14 JOIN as fan-in.** A `JOIN` with `in_*` ports and one `out_*` port bundles those inputs into an object keyed by the port names; a reader takes a field with `@in_args.name`.
 
 ## 3. Guarantees `graf validate` gives, and mutations must keep
 
@@ -40,5 +42,5 @@ A delta that adds any error to this list is rejected. The safety layer (`GUARD` 
 
 - R6 stale reads and the single-store data model: E5 (explicit fan-in with `JOIN`, merge rules).
 - R11 failure as abort: E1 (retry, fallback, error routes).
-- FORK branches run one after another, not concurrently: E5.
+- FORK branches run one after another unless concurrent mode is on (R13); BATCH over a list is the remaining E5 item.
 - Back edges and LOOP bodies behave differently (shared store versus a fresh copy per iteration); their interaction is unspecified beyond R8 and R10.

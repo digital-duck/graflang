@@ -41,6 +41,9 @@ def _load_or_exit(graph_path: Path) -> dict:
                    "for claude_cli, none for other adapters")
 @click.option("--max-steps", type=int, default=None,
               help="stop after this many node firings (guards against endless loops; default 1000)")
+@click.option("--workers", type=int, default=None,
+              help="run nodes released together (the branches of a FORK, ...) on this many threads; default 1, or limits.concurrency "
+                   "of a --bind file. Results are applied in a fixed order, so a run does not depend on which call finishes first")
 @click.option("--bind", "bind_file", type=click.Path(dir_okay=False), default=None,
               help="bindings file: the model, files and limits for this environment (llm, models, params, resources, limits)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
@@ -58,7 +61,7 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--no-output", is_flag=True, help="do not write result files")
 @click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
               help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")
-def cmd_run(graph, llm_spec, adapter, model, max_steps, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
+def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
             no_output, log_prompts):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
     if log_prompts:
@@ -126,6 +129,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, bind_file, param, log_le
 
     try:
         runtime = GraphLangRuntime(graph_data, adapter=adapter, model=model, max_steps=max_steps, wall_time_s=limits.get("wall_time_s"),
+                                   workers=workers or limits.get("concurrency") or 1,
                                    node_output=run_output if save_nodes else None)
         if adapter == "mock":
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")

@@ -6,7 +6,7 @@
     params: {topic: tides}                  # default workflow parameters; --param wins
     resources:                              # replaces named resources; paths are relative to this file
       prompts: {draft: ./prod/draft.md}
-    limits: {max_steps: 200, wall_time_s: 300}
+    limits: {max_steps: 200, wall_time_s: 300, concurrency: 4}
 
 `graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file, which beats the
 graph's own `model:` hints. A `model: $name` with no binding falls back to the run's default model.
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Tuple
 from ruamel.yaml import YAML
 
 KEYS = {"llm", "models", "params", "resources", "limits"}
-LIMITS = {"max_steps", "wall_time_s"}
+LIMITS = {"max_steps", "wall_time_s", "concurrency"}
 KINDS = ("prompts", "procedures", "policies")
 
 
@@ -38,7 +38,7 @@ def load_bindings(path: Path) -> Dict[str, Any]:
     bad = sorted(set(limits) - LIMITS)
     if bad:
         raise ValueError(f"{path.name}: unknown limit(s) {bad} (use {sorted(LIMITS)})")
-    for key in ("max_steps", "wall_time_s"):
+    for key in ("max_steps", "wall_time_s", "concurrency"):
         if key in limits and not (isinstance(limits[key], (int, float)) and not isinstance(limits[key], bool) and limits[key] > 0):
             raise ValueError(f"{path.name}: limits.{key} must be a number > 0")
     for kind, names in (data.get("resources") or {}).items():

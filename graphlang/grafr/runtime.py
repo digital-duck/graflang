@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -120,13 +122,16 @@ class _Budget:
     def __init__(self, max_steps: int, wall_time_s: Optional[float] = None):
         self.max_steps, self.steps, self.mutations = max_steps, 0, 0
         self.deadline = time.monotonic() + wall_time_s if wall_time_s else None
+        self._lock = threading.Lock()                   # BATCH iterations spend from several threads
         self.wall_time_s = wall_time_s
 
     def spend(self, fired: Dict[str, int]) -> None:
-        self.steps += 1
+        with self._lock:
+            self.steps += 1
+            steps = self.steps
         if self.deadline is not None and time.monotonic() > self.deadline:
-            raise RunLimitExceeded(f"stopped after {self.wall_time_s}s of wall time (limits.wall_time_s) at step {self.steps}")
-        if self.steps > self.max_steps:
+            raise RunLimitExceeded(f"stopped after {self.wall_time_s}s of wall time (limits.wall_time_s) at step {steps}")
+        if steps > self.max_steps:
             raise RunLimitExceeded(f"stopped after {self.max_steps} node firings; "
                                    f"most fired: {sorted(fired.items(), key=lambda x: -x[1])[:3]}")
 
@@ -136,7 +141,7 @@ class GraphLangRuntime:
 
     def __init__(self, graph_data: Dict, adapter: str = "mock", max_steps: int = DEFAULT_MAX_STEPS,
                  verbose: bool = True, model: Optional[str] = None, llm=None,
-                 node_output: Optional[RunOutput] = None, wall_time_s: Optional[float] = None, *,
+                 node_output: Optional[RunOutput] = None, wall_time_s: Optional[float] = None, workers: int = 1, *,
                  _parent: "GraphLangRuntime | None" = None, _nodes: Optional[List[Dict]] = None,
                  _edges: Optional[List[Dict]] = None, _boundary: Optional[Dict[str, Any]] = None,
                  _scope: Optional[Dict[str, Any]] = None):
@@ -158,12 +163,14 @@ class GraphLangRuntime:
             self.llm = llm or make_llm(adapter, model)
             self.context: Dict[str, Any] = {}           # CONTEXT nodes' persistent state
             self.budget = _Budget(max_steps, wall_time_s)
+            self.workers = max(1, int(workers))         # >1: nodes released together run concurrently (_drain_waves)
             self.resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
             self.depth = 0
             self.node_output = node_output              # --save-nodes: where each node's outputs are written
             self.kernels = KernelPool()                 # kernel SOLVE nodes' Python kernels, closed when the run ends
         else:
             self.llm, self.context, self.budget = _parent.llm, _parent.context, _parent.budget
+            self.workers = _parent.workers
             self.resolver, self.depth = _parent.resolver, _parent.depth + 1
             self.node_output = _parent.node_output
             self.kernels = _parent.kernels
@@ -248,22 +255,70 @@ class GraphLangRuntime:
         return self.outputs
 
     def _drain(self, queue: deque) -> None:
+        if self.workers > 1:
+            return self._drain_waves(queue)
         pending_join: Dict[str, set] = {}
         while queue:
-            node, edge_key = queue.popleft()
-            if node not in self.G:                          # removed by a MUTATE while the token was in flight
-                continue
-            if self.G.nodes[node]["type"] == "JOIN" and edge_key is not None:
-                need = set(self._trigger_edges_in(node))
-                got = pending_join.setdefault(node, set())
-                got.add(edge_key)
-                if got < need:
-                    continue
-                pending_join[node] = set()
-            self.budget.spend(self.fired)
-            self._fire(node, queue)
+            node = self._take(queue, pending_join)
+            if node is not None:
+                self._fire(node, queue)
+
+    def _take(self, queue: deque, pending_join: Dict[str, set]) -> Optional[str]:
+        """The next node that fires from the queue, or None (a token for a removed node, or a JOIN still waiting)."""
+        node, edge_key = queue.popleft()
+        if node not in self.G:                          # removed by a MUTATE while the token was in flight
+            return None
+        if self.G.nodes[node]["type"] == "JOIN" and edge_key is not None:
+            need = set(self._trigger_edges_in(node))
+            got = pending_join.setdefault(node, set())
+            got.add(edge_key)
+            if got < need:
+                return None
+            pending_join[node] = set()
+        self.budget.spend(self.fired)
+        return node
+
+    def _drain_waves(self, queue: deque) -> None:
+        """Concurrent mode (workers > 1). All tokens waiting in the queue form a wave: the nodes in it are released together.
+        GENERATE and slow SOLVE nodes in a wave run on a thread pool, reading the values from before the wave started; every
+        other node runs in token order when its turn comes. Results are applied (written, routed) strictly in token order, so
+        a run does not depend on which call finishes first. With one worker none of this applies."""
+        pending_join: Dict[str, set] = {}
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            while queue:
+                wave = []
+                while queue:
+                    node = self._take(queue, pending_join)
+                    if node is not None:
+                        wave.append(node)
+                jobs: Dict[int, Any] = {}
+                for i, node in enumerate(wave):                    # submit the slow ones first, so they overlap
+                    data = self.G.nodes[node]
+                    if self._concurrent(data):
+                        began = self._begin(node)
+                        jobs[i] = (began, pool.submit(self._execute_node, data["type"], data, began[0]))
+                try:
+                    for i, node in enumerate(wave):
+                        if node not in self.G:
+                            continue
+                        data = self.G.nodes[node]
+                        began, future = jobs[i] if i in jobs else (self._begin(node), None)
+                        self._complete(node, data, began, future, queue)
+                finally:
+                    for _, future in jobs.values():                # on an error let the other calls finish before the pool closes
+                        future.cancel()
+
+    @staticmethod
+    def _concurrent(data: Dict) -> bool:
+        cfg = data.get("config", {})
+        return data["type"] == "GENERATE" or (data["type"] == "SOLVE" and (cfg.get("backend") == "subprocess" or "procedure_ref" in cfg))
 
     def _fire(self, node: str, queue: deque) -> None:
+        data = self.G.nodes[node]
+        self._complete(node, data, self._begin(node), None, queue)
+
+    def _begin(self, node: str) -> tuple:
+        """Count the firing and read the node's inputs now; returns (inputs, start time)."""
         data = self.G.nodes[node]
         self.fired[node] = self.fired.get(node, 0) + 1
         if self.verbose:
@@ -271,9 +326,13 @@ class GraphLangRuntime:
         in_data = self._gather_inputs(node)
         log_event(_log, "node.fire", level=DEBUG, node=node, type=data["type"], n=self.fired[node], depth=self.depth,
                   inputs=sorted(in_data))
-        started = time.perf_counter()
+        return in_data, time.perf_counter()
+
+    def _complete(self, node: str, data: Dict, began: tuple, future, queue: deque) -> None:
+        """Get the node's result (run it now, or wait for its future), then write it, save it and route the token."""
+        in_data, started = began
         try:
-            result = self._execute_node(data["type"], data, in_data) or {}
+            result = (future.result() if future is not None else self._execute_node(data["type"], data, in_data)) or {}
         except Exception as e:
             log_event(_log, "node.error", level=ERROR, node=node, type=data["type"], n=self.fired[node],
                       depth=self.depth, error=f"{type(e).__name__}: {e}")
