@@ -213,6 +213,10 @@ For every node (LOOP and BATCH bodies too) Cedar is asked whether `Workflow::"re
 - `limits.max_llm_calls` and `limits.max_cost_usd` in a bindings file stop a run that reaches them.
 - `graf run flow.graph.yaml --record calls.jsonl` saves every GENERATE call; `--replay calls.jsonl` answers them from the file with no model, so tests and CI cost nothing. A call is found by its model, prompt and temperature, and a call that was not recorded fails loudly. `procedure_ref` nodes run SPL.py's own executor and are not recorded.
 
+## Checkpoint and resume
+
+`graf run flow.graph.yaml --checkpoint run.ckpt.json` saves the run's state to that file before every step. If the run fails (a model was down, a budget was hit), `graf run flow.graph.yaml --resume run.ckpt.json` continues from the step that failed instead of starting over, with the values, JOIN progress and any `MUTATE` changes as they were. The checkpoint belongs to one graph: a changed graph is refused. A `LOOP` or `BATCH` counts as one step, so a failure inside one re-runs that node; kernel variables are not saved, so a graph whose later `python` nodes rely on variables set by earlier ones cannot be resumed after those ran. A value that is not JSON turns checkpointing off for that run with a warning in the log.
+
 ## Bindings: `--bind`
 
 A graph says what to do; a bindings file says which model, which files and how much, so the same graph runs in different places.

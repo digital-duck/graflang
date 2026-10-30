@@ -19,6 +19,7 @@ nodes, or several edges of the same kind on different ports, are all kept.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import threading
 import time
@@ -159,6 +160,9 @@ class GraphLangRuntime:
         self.emitted: set = set()                       # (node, control port) that sent a token
         self.outputs: Dict[str, Any] = {}
         self.loop_iterations: Dict[str, int] = {}
+        self._pending_join: Dict[str, set] = {}          # JOIN tokens that have arrived, per node
+        self.checkpoint_path: Optional[Path] = None      # set by the caller (graf run --checkpoint) on the top-level runtime
+        self._checkpoint_failed = False
         self.boundary = _boundary or {}                 # in_* values a LOOP hands to its subgraph
         self.scope = _scope or {}                       # loop state (cycle, previous outputs)
         if _parent is None:
@@ -240,6 +244,66 @@ class GraphLangRuntime:
         return {"steps": self.steps, "mutations": self.budget.mutations, "llm": llm,
                 "nodes": {k: dict(v) for k, v in sorted(self.stats.items(), key=lambda kv: -kv[1]["ms"])}}
 
+    # ---- checkpoint and resume -------------------------------------------------------------------
+    def _graph_id(self) -> str:
+        """Identifies the graph as loaded, so a checkpoint is never resumed on a different one."""
+        return hashlib.sha256(json.dumps([self.graph_data["nodes"], self.graph_data["edges"]], sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+    def _checkpoint(self, queue: deque) -> None:
+        """Save the run's state before the next node is taken, so a run that fails there can be resumed from here. Top level only:
+        a LOOP or BATCH is one step, and a failure inside one re-runs that node. Kernel variables are not saved."""
+        if self.checkpoint_path is None or self.depth or self._checkpoint_failed:
+            return
+        state = {"checkpoint": 1, "workflow": self.graph_data["workflow"]["name"], "graph_id": self._graph_id(), "clock": self._clock,
+                 "values": [[n, p, v, self._stamp[(n, p)]] for (n, p), v in self.values.items()],
+                 "fired": self.fired, "emitted": sorted(self.emitted), "outputs": self.outputs, "context": self.context,
+                 "steps": self.budget.steps, "mutations": self.budget.mutations,
+                 "queue": [[node, list(key) if key else None] for node, key in queue],
+                 "pending_join": {n: [list(k) for k in keys] for n, keys in self._pending_join.items()},
+                 "loop_iterations": self.loop_iterations}
+        if self.budget.mutations:
+            nodes, edges = self._lists(self.G)
+            state["graph"] = {"nodes": nodes, "edges": edges}
+        try:
+            text = json.dumps(state, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            self._checkpoint_failed = True
+            log_event(_log, "checkpoint.skipped", level=WARNING, reason=f"a value is not JSON: {e}")
+            return
+        tmp = self.checkpoint_path.with_suffix(self.checkpoint_path.suffix + ".tmp")
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(self.checkpoint_path)                       # a crash while writing never leaves a half file
+
+    def resume(self, path: Path) -> Dict[str, Any]:
+        """Continue a run from a checkpoint made by this same graph and return its outputs."""
+        try:
+            state = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            raise ValueError(f"cannot read checkpoint {path}: {e}") from None
+        if state.get("checkpoint") != 1:
+            raise ValueError(f"{path} is not a graflang checkpoint")
+        if state.get("graph_id") != self._graph_id():
+            raise ValueError(f"checkpoint {Path(path).name} was made by a different graph (or a different version of this one)")
+        if "graph" in state:                                    # a MUTATE had changed the graph by then
+            self.G.clear()
+            self._build_graph(state["graph"]["nodes"], state["graph"]["edges"])
+        self._clock, self.fired, self.outputs = state["clock"], state["fired"], state["outputs"]
+        self.values = {(n, p): v for n, p, v, _ in state["values"]}
+        self._stamp = {(n, p): t for n, p, _, t in state["values"]}
+        self.emitted = {tuple(e) for e in state["emitted"]}
+        self.context.update(state["context"])
+        self.budget.steps, self.budget.mutations = state["steps"], state["mutations"]
+        self.loop_iterations = state.get("loop_iterations", {})
+        self._pending_join = {n: {tuple(k) for k in keys} for n, keys in state["pending_join"].items()}
+        queue = deque((node, tuple(key) if key else None) for node, key in state["queue"])
+        log_event(_log, "run.resume", workflow=state["workflow"], steps=state["steps"], queued=len(queue))
+        try:
+            self._drain(queue)
+        finally:
+            self.kernels.close()
+        return self.outputs
+
     def _execute(self, inputs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         inputs = dict(inputs or {})
         declared = {p["name"]: p for p in self.graph_data["workflow"].get("inputs", [])}
@@ -268,8 +332,9 @@ class GraphLangRuntime:
     def _drain(self, queue: deque) -> None:
         if self.workers > 1:
             return self._drain_waves(queue)
-        pending_join: Dict[str, set] = {}
+        pending_join = self._pending_join
         while queue:
+            self._checkpoint(queue)
             node = self._take(queue, pending_join)
             if node is not None:
                 self._fire(node, queue)
@@ -294,9 +359,10 @@ class GraphLangRuntime:
         GENERATE and slow SOLVE nodes in a wave run on a thread pool, reading the values from before the wave started; every
         other node runs in token order when its turn comes. Results are applied (written, routed) strictly in token order, so
         a run does not depend on which call finishes first. With one worker none of this applies."""
-        pending_join: Dict[str, set] = {}
+        pending_join = self._pending_join
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
             while queue:
+                self._checkpoint(queue)
                 wave = []
                 while queue:
                     node = self._take(queue, pending_join)

@@ -49,6 +49,10 @@ def _load_or_exit(graph_path: Path) -> dict:
               help="write every GENERATE call to this cassette (JSON lines) while running")
 @click.option("--replay", "replay_file", type=click.Path(exists=True, dir_okay=False), default=None,
               help="answer GENERATE calls from a cassette made with --record: no model is called")
+@click.option("--checkpoint", "checkpoint_file", type=click.Path(dir_okay=False), default=None,
+              help="save the run's state to this file before every step, so a failed run can be continued with --resume")
+@click.option("--resume", "resume_file", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="continue a run from a --checkpoint file (the same graph; kernel variables are not restored)")
 @click.option("--bind", "bind_file", type=click.Path(dir_okay=False), default=None,
               help="bindings file: the model, files and limits for this environment (llm, models, params, resources, limits)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
@@ -66,7 +70,7 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--no-output", is_flag=True, help="do not write result files")
 @click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
               help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")
-def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, replay_file, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
+def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, replay_file, checkpoint_file, resume_file, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
             no_output, log_prompts):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
     if log_prompts:
@@ -153,7 +157,9 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, re
                                    node_output=run_output if save_nodes else None)
         if adapter == "mock":
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")
-        result = runtime.execute(params)
+        if checkpoint_file or resume_file:
+            runtime.checkpoint_path = Path(checkpoint_file or resume_file)
+        result = runtime.resume(Path(resume_file)) if resume_file else runtime.execute(params)
     except (ValueError, RuntimeError, NotImplementedError, CassetteError, LimitExceeded) as e:
         console.print(f"[red]✗ Run failed:[/red] {escape(str(e))}")
         if log_path:
