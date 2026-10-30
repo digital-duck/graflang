@@ -1,0 +1,94 @@
+# Lifted from SPL.py cookbook/009_chain_of_thought/chain.spl by `spl3 util spl2graph`; the three CREATE FUNCTION bodies are the prompts.
+version: 1.0-graph
+workflow:
+  name: chain_of_thought
+  inputs:
+  - name: topic
+    type: TEXT
+    default: distributed AI inference
+  outputs:
+  - name: summary
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_topic
+- id: gen_1
+  type: GENERATE
+  config:
+    function: research
+    params:
+    - topic
+    prompt_inline: Research and provide key facts about {{in_topic}}.
+    arguments:
+    - '@topic'
+  ports:
+  - trigger
+  - complete
+  - in_topic
+  - out_research
+- id: gen_2
+  type: GENERATE
+  config:
+    function: analyze
+    params:
+    - research
+    prompt_inline: 'Analyze the following research findings for key trends and implications.
+
+      Research: {{in_research}}'
+    arguments:
+    - '@research'
+  ports:
+  - trigger
+  - complete
+  - in_research
+  - out_analysis
+- id: gen_3
+  type: GENERATE
+  config:
+    function: summarize_analysis
+    params:
+    - analysis
+    prompt_inline: 'Summarize the following analysis into a concise executive brief.
+
+      Analysis: {{in_analysis}}'
+    arguments:
+    - '@analysis'
+  ports:
+  - trigger
+  - complete
+  - in_analysis
+  - out_summary
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_summary
+edges:
+- source: wf_entry.entry
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_topic
+  target: gen_1.in_topic
+  type: binds
+- source: gen_1.complete
+  target: gen_2.trigger
+  type: triggers
+- source: gen_1.out_research
+  target: gen_2.in_research
+  type: binds
+- source: gen_2.complete
+  target: gen_3.trigger
+  type: triggers
+- source: gen_2.out_analysis
+  target: gen_3.in_analysis
+  type: binds
+- source: gen_3.out_summary
+  target: wf_exit.in_summary
+  type: binds
+- source: gen_3.complete
+  target: wf_exit.trigger
+  type: triggers
