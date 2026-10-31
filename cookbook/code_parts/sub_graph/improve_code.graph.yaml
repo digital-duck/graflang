@@ -1,0 +1,36 @@
+version: "1.0-graph"
+
+# A part (named subgraph): one GENERATE, with the prompt of ../../code_pipeline/03_improve_code.spl. See ../code_parts.graph.yaml.
+
+workflow:
+  name: "improve_code"
+  inputs:
+    - {name: "spec", type: "TEXT"}
+    - {name: "code", type: "TEXT"}
+    - {name: "feedback", type: "TEXT"}
+    - {name: "test_result", type: "TEXT", default: ""}
+    - {name: "lang", type: "TEXT", default: "python"}
+  outputs:
+    - {name: "code", type: "TEXT"}
+
+resources:
+  prompts:
+    improve_code: "./prompts/improve_code.md"
+
+nodes:
+  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_spec", "out_code", "out_feedback", "out_test_result", "out_lang"]}
+  - id: "gen"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.improve_code"}
+    ports: ["trigger", "complete", "in_spec", "in_code", "in_feedback", "in_test_result", "in_lang", "out_code"]
+  - {id: "wf_exit", type: "OUTPUT", ports: ["trigger", "exit", "in_code"]}
+
+edges:
+  - {source: "wf_entry.entry", target: "gen.trigger", type: "triggers"}
+  - {source: "gen.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "wf_entry.out_spec", target: "gen.in_spec", type: "binds"}
+  - {source: "wf_entry.out_code", target: "gen.in_code", type: "binds"}
+  - {source: "wf_entry.out_feedback", target: "gen.in_feedback", type: "binds"}
+  - {source: "wf_entry.out_test_result", target: "gen.in_test_result", type: "binds"}
+  - {source: "wf_entry.out_lang", target: "gen.in_lang", type: "binds"}
+  - {source: "gen.out_code", target: "wf_exit.in_code", type: "binds"}

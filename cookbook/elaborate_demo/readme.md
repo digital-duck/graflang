@@ -1,6 +1,6 @@
 # elaborate_demo
 
-One template applied to a graph of things. `concepts.yaml` is a small knowledge graph (an edge `a -> b` means a is a prerequisite of b); the part `parts/explain.graph.yaml` explains one concept. The `elaborate:` block in `elaborate_demo.graph.yaml` makes one use of the part per concept and turns the edges into order and data.
+One template applied to a graph of things. `concepts.yaml` is a small knowledge graph (an edge `a -> b` means a is a prerequisite of b); the part `sub_graph/explain.graph.yaml` explains one concept. The `elaborate:` block in `elaborate_demo.graph.yaml` makes one use of the part per concept and turns the edges into order and data.
 
 ```
 probability --\                 
@@ -13,7 +13,7 @@ counting ------/
 | Input | `audience` (TEXT, default `curious beginners`), passed to every concept |
 | Output | `explanations` (JSON): one explanation per concept id |
 | LLM calls | 1 per concept (4) |
-| Files | `elaborate_demo.graph.yaml`, `concepts.yaml`, `parts/explain.graph.yaml`, `parts/prompts/explain.md` |
+| Files | `elaborate_demo.graph.yaml`, `concepts.yaml`, `sub_graph/explain.graph.yaml`, `sub_graph/prompts/explain.md` |
 
 ## What elaboration does
 

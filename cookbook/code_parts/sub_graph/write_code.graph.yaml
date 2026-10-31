@@ -1,0 +1,34 @@
+version: "1.0-graph"
+
+# A part (named subgraph): one GENERATE, with the prompt of ../../code_pipeline/01_generate_code.spl. See ../code_parts.graph.yaml.
+
+workflow:
+  name: "write_code"
+  inputs:
+    - {name: "spec", type: "TEXT"}
+    - {name: "lang", type: "TEXT", default: "python"}
+    - {name: "prior_code", type: "TEXT", default: ""}
+    - {name: "prior_test", type: "TEXT", default: ""}
+  outputs:
+    - {name: "code", type: "TEXT"}
+
+resources:
+  prompts:
+    write_code: "./prompts/write_code.md"
+
+nodes:
+  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_spec", "out_lang", "out_prior_code", "out_prior_test"]}
+  - id: "gen"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.write_code"}
+    ports: ["trigger", "complete", "in_spec", "in_lang", "in_prior_code", "in_prior_test", "out_code"]
+  - {id: "wf_exit", type: "OUTPUT", ports: ["trigger", "exit", "in_code"]}
+
+edges:
+  - {source: "wf_entry.entry", target: "gen.trigger", type: "triggers"}
+  - {source: "gen.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "wf_entry.out_spec", target: "gen.in_spec", type: "binds"}
+  - {source: "wf_entry.out_lang", target: "gen.in_lang", type: "binds"}
+  - {source: "wf_entry.out_prior_code", target: "gen.in_prior_code", type: "binds"}
+  - {source: "wf_entry.out_prior_test", target: "gen.in_prior_test", type: "binds"}
+  - {source: "gen.out_code", target: "wf_exit.in_code", type: "binds"}

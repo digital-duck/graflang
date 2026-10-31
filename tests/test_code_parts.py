@@ -20,7 +20,7 @@ def test_it_needs_no_spl_file_and_no_procedure():
 def test_the_prompts_are_the_ones_the_spl_sub_workflows_carry():
     for part, spl in (("analyze_spec", "00_analyze_spec"), ("write_code", "01_generate_code"), ("review_code", "02_review_code"), ("improve_code", "03_improve_code")):
         body = (PIPELINE / f"{spl}.spl").read_text().split("AS $$\n", 1)[1].split("\n$$;", 1)[0]
-        assert (DIR / "parts" / "prompts" / f"{part}.md").read_text().strip() == re.sub(r"\{(\w+)\}", r"{{in_\1}}", body).strip()
+        assert (DIR / "sub_graph" / "prompts" / f"{part}.md").read_text().strip() == re.sub(r"\{(\w+)\}", r"{{in_\1}}", body).strip()
 
 
 def test_a_ready_spec_flows_through_write_review_and_improve():

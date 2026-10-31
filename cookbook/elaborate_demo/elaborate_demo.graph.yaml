@@ -15,7 +15,7 @@ workflow:
 
 resources:
   parts:
-    explain: "./parts/explain.graph.yaml"
+    explain: "./sub_graph/explain.graph.yaml"
 
 elaborate:
   part: parts.explain

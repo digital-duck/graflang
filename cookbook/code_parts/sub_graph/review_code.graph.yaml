@@ -1,0 +1,30 @@
+version: "1.0-graph"
+
+# A part (named subgraph): one GENERATE, with the prompt of ../../code_pipeline/02_review_code.spl. See ../code_parts.graph.yaml.
+
+workflow:
+  name: "review_code"
+  inputs:
+    - {name: "code", type: "TEXT"}
+    - {name: "lang", type: "TEXT", default: "python"}
+  outputs:
+    - {name: "feedback", type: "TEXT"}
+
+resources:
+  prompts:
+    review_code: "./prompts/review_code.md"
+
+nodes:
+  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_code", "out_lang"]}
+  - id: "gen"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.review_code"}
+    ports: ["trigger", "complete", "in_code", "in_lang", "out_feedback"]
+  - {id: "wf_exit", type: "OUTPUT", ports: ["trigger", "exit", "in_feedback"]}
+
+edges:
+  - {source: "wf_entry.entry", target: "gen.trigger", type: "triggers"}
+  - {source: "gen.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "wf_entry.out_code", target: "gen.in_code", type: "binds"}
+  - {source: "wf_entry.out_lang", target: "gen.in_lang", type: "binds"}
+  - {source: "gen.out_feedback", target: "wf_exit.in_feedback", type: "binds"}

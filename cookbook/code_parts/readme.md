@@ -12,13 +12,13 @@ analyze -> gate --[READY]--> write -> review -> improve -> done
 | Inputs | `spec` (TEXT, required), `lang` (TEXT, default `python`) |
 | Outputs | `code` (TEXT, the improved code), `review` (TEXT, the review feedback) |
 | LLM calls | 4 (1 if the spec is rejected) |
-| Files | `code_parts.graph.yaml` (compact form), `parts/*.graph.yaml` (one part per step), `parts/prompts/*.md` |
+| Files | `code_parts.graph.yaml` (compact form), `sub_graph/*.graph.yaml` (one part per step), `sub_graph/prompts/*.md` |
 
 ## SPL sub-workflow or part
 
 | In `code_pipeline` | Here |
 |---|---|
-| `01_generate_code.spl`: a `CREATE FUNCTION` with the prompt, a `WORKFLOW` that calls it and writes a file | `parts/write_code.graph.yaml` + `parts/prompts/write_code.md` |
+| `01_generate_code.spl`: a `CREATE FUNCTION` with the prompt, a `WORKFLOW` that calls it and writes a file | `sub_graph/write_code.graph.yaml` + `sub_graph/prompts/write_code.md` |
 | `procedure_ref: procedures.review_code`, run by SPL.py's executor | `use: parts.review_code`, expanded to ordinary nodes (`review__gen`) |
 | `{spec}` placeholders | `{{in_spec}}` ports |
 | `EVALUATE ... WHEN contains('[READY]')` | an `evaluate` step, with a `RECOVER` halt on the other branch |
