@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `concept_book` takes `audience` (`intro`, `intermediate`, `advanced`, `research`; default `intro`) and `style` (free text), and every prompt uses them: the outline, each chapter, the review (which now also checks fit to the audience and style), the revision and the compile step (a "How to read this book"). This replaces `target_audience`, which was declared but never reached a node.
+
 - `concept_book`: the second chapter could repeat the first. The chapter prompt was given the loop's 0-based counter ("write chapter 1") while the outline numbers chapters from 1; a `chapter_number` step now passes the 1-based number and the total.
 
 - `concept_book` revises: the reviewer's verdict now routes an `EVALUATE`; `REVISION_NEEDED` sends the chapter and the feedback to a new `revise_chapter` step, and the book is compiled from the revised chapters (before, the verdict was collected and never used). To collect "the chapter, revised or not", a LOOP's `collect` (and the compact `out:`) now accepts a list of results, taking the one written last in each iteration, as `from` already did.

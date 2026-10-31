@@ -4,7 +4,8 @@ workflow:
   name: "build_concept_book"
   inputs:
     - {name: "subject", type: "TEXT"}
-    - {name: "target_audience", type: "TEXT", default: "beginners"}
+    - {name: "audience", type: "TEXT", default: "intro"}          # intro | intermediate | advanced | research: who the book is written for
+    - {name: "style", type: "TEXT", default: "clear and conversational, with concrete examples"}   # how to explain
     - {name: "num_chapters", type: "INTEGER", default: 5}
   outputs:
     - {name: "book", type: "TEXT"}
@@ -20,13 +21,13 @@ resources:
 nodes:
   - id: "wf_entry"
     type: "INPUT"
-    ports: ["entry", "out_subject", "out_target_audience", "out_num_chapters"]
+    ports: ["entry", "out_subject", "out_audience", "out_style", "out_num_chapters"]
 
   - id: "generate_outline"
     type: "GENERATE"
     config:
       prompt_ref: "prompts.outline"
-    ports: ["trigger", "complete", "in_subject", "in_num_chapters", "out_outline"]
+    ports: ["trigger", "complete", "in_subject", "in_num_chapters", "in_audience", "in_style", "out_outline"]
 
   - id: "chapter_loop"
     type: "LOOP"
@@ -49,12 +50,12 @@ nodes:
             type: "GENERATE"
             config:
               prompt_ref: "prompts.chapter"
-            ports: ["trigger", "complete", "in_outline", "in_chapter_number", "in_num_chapters", "in_subject", "out_chapter"]
+            ports: ["trigger", "complete", "in_outline", "in_chapter_number", "in_num_chapters", "in_subject", "in_audience", "in_style", "out_chapter"]
           - id: "review_chapter"
             type: "GENERATE"
             config:
               prompt_ref: "prompts.review"
-            ports: ["trigger", "complete", "in_chapter", "out_verdict"]
+            ports: ["trigger", "complete", "in_chapter", "in_chapter_number", "in_audience", "in_style", "out_verdict"]
           - id: "needs_revision"
             type: "EVALUATE"
             config:
@@ -64,7 +65,7 @@ nodes:
             type: "GENERATE"
             config:
               prompt_ref: "prompts.revise"
-            ports: ["trigger", "complete", "in_chapter", "in_verdict", "in_subject", "in_outline", "out_chapter"]
+            ports: ["trigger", "complete", "in_chapter", "in_verdict", "in_subject", "in_outline", "in_audience", "in_style", "out_chapter"]
         edges:
           - {source: "chapter_number.complete", target: "write_chapter.trigger", type: "triggers"}
           - {source: "chapter_number.out_number", target: "write_chapter.in_chapter_number", type: "binds"}
@@ -72,17 +73,18 @@ nodes:
           - {source: "review_chapter.complete", target: "needs_revision.trigger", type: "triggers"}
           - {source: "needs_revision.pass", target: "revise_chapter.trigger", type: "triggers"}     # pass: the condition holds, a revision is needed
           - {source: "write_chapter.out_chapter", target: "review_chapter.in_chapter", type: "binds"}
+          - {source: "chapter_number.out_number", target: "review_chapter.in_chapter_number", type: "binds"}
           - {source: "review_chapter.out_verdict", target: "needs_revision.in_verdict", type: "binds"}
           - {source: "write_chapter.out_chapter", target: "revise_chapter.in_chapter", type: "binds"}
           - {source: "review_chapter.out_verdict", target: "revise_chapter.in_verdict", type: "binds"}
-          # in_subject and in_outline of revise_chapter read the loop's inputs
-    ports: ["trigger", "loop", "exit", "in_outline", "in_subject", "in_num_chapters", "out_chapters"]
+          # in_subject, in_outline, in_audience and in_style of the body's nodes read the loop's inputs
+    ports: ["trigger", "loop", "exit", "in_outline", "in_subject", "in_num_chapters", "in_audience", "in_style", "out_chapters"]
 
   - id: "compile_book"
     type: "GENERATE"
     config:
       prompt_ref: "prompts.compile"
-    ports: ["trigger", "complete", "in_outline", "in_chapters", "in_subject", "out_book"]
+    ports: ["trigger", "complete", "in_outline", "in_chapters", "in_subject", "in_audience", "in_style", "out_book"]
 
   - id: "wf_exit"
     type: "OUTPUT"
@@ -98,10 +100,16 @@ edges:
   # Data flow
   - {source: "wf_entry.out_subject", target: "generate_outline.in_subject", type: "binds"}
   - {source: "wf_entry.out_num_chapters", target: "generate_outline.in_num_chapters", type: "binds"}
+  - {source: "wf_entry.out_audience", target: "generate_outline.in_audience", type: "binds"}
+  - {source: "wf_entry.out_style", target: "generate_outline.in_style", type: "binds"}
   - {source: "generate_outline.out_outline", target: "chapter_loop.in_outline", type: "binds"}
   - {source: "wf_entry.out_subject", target: "chapter_loop.in_subject", type: "binds"}
   - {source: "wf_entry.out_num_chapters", target: "chapter_loop.in_num_chapters", type: "binds"}
+  - {source: "wf_entry.out_audience", target: "chapter_loop.in_audience", type: "binds"}
+  - {source: "wf_entry.out_style", target: "chapter_loop.in_style", type: "binds"}
   - {source: "generate_outline.out_outline", target: "compile_book.in_outline", type: "binds"}
   - {source: "chapter_loop.out_chapters", target: "compile_book.in_chapters", type: "binds"}
   - {source: "wf_entry.out_subject", target: "compile_book.in_subject", type: "binds"}
+  - {source: "wf_entry.out_audience", target: "compile_book.in_audience", type: "binds"}
+  - {source: "wf_entry.out_style", target: "compile_book.in_style", type: "binds"}
   - {source: "compile_book.out_book", target: "wf_exit.in_result", type: "binds"}

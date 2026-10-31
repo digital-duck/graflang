@@ -44,3 +44,30 @@ def test_each_chapter_is_asked_for_by_the_number_the_outline_uses():
     assert "Write chapter 1 of 2" in first and 'heads "Chapter 1"' in first
     assert "Write chapter 2 of 2" in second and 'heads "Chapter 2"' in second and "OUTLINE" in second
     assert "chapter index" not in second.lower()
+
+
+def run_with(inputs, *replies):
+    llm = Scripted(*replies)
+    out = GraphLangRuntime(load_graph(GRAPH), llm=llm, verbose=False).execute({"subject": "entropy", "num_chapters": 1, **inputs})
+    return out, llm
+
+
+def test_audience_and_style_reach_every_prompt():
+    _, llm = run_with({"audience": "research", "style": "Socratic, one question at a time"},
+                      "OUTLINE", "CH1", "REVISION_NEEDED\nmore rigour", "CH1-V2", "BOOK")
+    names = ["outline", "chapter", "review", "revise", "compile"]
+    assert len(llm.prompts) == 5
+    for name, prompt in zip(names, llm.prompts):
+        assert "Audience: research" in prompt and "Socratic, one question at a time" in prompt, name
+
+
+def test_the_defaults_are_the_intro_audience_and_a_plain_style():
+    _, llm = run_with({}, "OUTLINE", "CH1", "APPROVED", "BOOK")
+    assert "Audience: intro" in llm.prompts[0] and "clear and conversational, with concrete examples" in llm.prompts[1]
+
+
+def test_the_four_levels_are_described_where_the_audience_matters():
+    _, llm = run_with({}, "OUTLINE", "CH1", "APPROVED", "BOOK")
+    for prompt in llm.prompts[:3]:                                  # outline, chapter and review all carry the level guide
+        for level in ("intro:", "intermediate:", "advanced:", "research:"):
+            assert level in prompt

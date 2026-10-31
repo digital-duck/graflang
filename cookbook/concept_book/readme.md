@@ -11,10 +11,30 @@ wf_entry -> generate_outline -> chapter_loop -> compile_book -> wf_exit
 
 | | |
 |---|---|
-| Inputs | `subject` (TEXT, required), `target_audience` (TEXT, default `beginners`), `num_chapters` (INTEGER, default 5) |
+| Inputs | `subject` (TEXT, required), `audience` (TEXT, default `intro`: `intro`, `intermediate`, `advanced` or `research`), `style` (TEXT, default "clear and conversational, with concrete examples"), `num_chapters` (INTEGER, default 5) |
 | Output | `book` (TEXT): the compiled book |
 | LLM calls | 2 + 2 x `num_chapters` (outline, compile, and a write plus a review per chapter), plus one revision for each chapter the reviewer sends back (at most `num_chapters`) |
 | Prompts | `prompts/outline.md`, `chapter.md`, `review.md`, `revise.md`, `compile.md` |
+
+## Audience and style
+
+The same subject reads very differently for different readers, so two inputs shape the whole book (the outline, every chapter, every review and revision, and the compile step all receive them):
+
+| `audience` | The book assumes and does |
+|---|---|
+| `intro` | no background; every term defined at first use; an everyday analogy before any formalism; arithmetic at most; a few lines of code at most |
+| `intermediate` | knows the basics; worked examples, some maths and code, connections across topics, the usual pitfalls |
+| `advanced` | a practitioner; precise terms, stated assumptions, failure modes and trade-offs; derivations and non-trivial code where they teach |
+| `research` | at or near the frontier; formal claims with their conditions; competing approaches and the quality of the evidence; what is open or contested; named primary work only when the model is sure it exists |
+
+`style` is free text: "conversational, analogy first", "Socratic, one question at a time", "worked examples", "textbook". A value of `audience` that is not one of the four words is read as a description of the learner ("a product manager with no coding background") and mapped to the closest level. The level guide is written into the outline, chapter and review prompts, which is where the level changes what is produced; the reviewer also checks fit to the audience and the style, not only accuracy. Every chapter has the same shape (opening, ideas with a worked example, mistakes or, for `research`, open questions, check-yourself questions, takeaways), and the compile step adds a short "How to read this book".
+
+```bash
+graf run cookbook/concept_book/build_concept_book.graph.yaml --llm claude_cli:claude-haiku-5-5 \
+    --param subject="applied AI" --param audience=intermediate --param style="worked examples, code first"
+```
+
+Before this, `target_audience` was declared but no node received it, so every book was written for no particular reader. The input is now `audience`; the old name is gone.
 
 ## Chapter numbers
 
