@@ -331,7 +331,7 @@ Persistent MUTATE across loop iterations (G14), optional Rust/WASM packaging, zi
     - Budgets: `limits.max_llm_calls`, and `limits.max_cost_usd`, which fails loudly (at the second call) when the adapter reports no cost, as `claude_cli` does.
     - Cassettes: `graf run --record FILE` / `--replay FILE`, keyed by model, prompt and temperature; an unrecorded call fails loudly; `cookbook/chain_of_thought` ships one recorded with `claude_cli`.
     - E8: `has_pii` (email, phone, US SSN, Luhn card, IBAN) for guards, and MUTATE sets `contains_pii` from the delta; `workflow.policy` (`grafr/capabilities.py`), a Cedar policy about the nodes a workflow may contain, enforced by `graf validate` and refused at `graf run`.
-    - Sandbox: memory limit and environment scrubbing are tested; a `subprocess` node may add `container: {image, ...}` (`docker run`: no network, read-only root, capabilities dropped, graph folder mounted read-only, caps on memory, CPU and processes, a timeout kills the container; `container` is a code key a MUTATE can never set). Tested against a stub `docker`; the test with a real daemon is skipped where none runs. Kernel nodes and plain subprocess nodes still run with the user's privileges (pinned as KNOWN tests).
+    - Sandbox: memory limit and environment scrubbing are tested; a `subprocess` node may add `container: {image, ...}` (`docker run`: no network, read-only root, capabilities dropped, graph folder mounted read-only, caps on memory, CPU and processes, a timeout kills the container; `container` is a code key a MUTATE can never set). Verified against a real Docker Desktop daemon (2026-10-30: no network, read-only mount and root, timeout removes the container, `cookbook/container_demo` end to end) as well as a stub `docker`. Docker Desktop shares only the home directory, and mounting any other folder hangs rather than failing, so `check_mount_shared` refuses it up front (`GRAF_DOCKER_SHARED` lists extra shared folders). Kernel nodes and plain subprocess nodes still run with the user's privileges (pinned as KNOWN tests).
     - E9 checkpoint/resume: `--checkpoint FILE` before every top-level step, `--resume FILE`; JOIN progress and MUTATE changes included; a LOOP or BATCH is one step; kernel variables are not restored.
     - Not yet: a WASM sandbox.
   - **R3 (done).**
@@ -451,7 +451,7 @@ A snapshot after parts, elaboration, loop persistence, the container option and 
 2. **Loops as compact steps.** *Done 2026-10-30:* a `loop` step with its own `steps:` body (`grafr/compact.py`, user guide "Loops in the compact form").
 3. **Remaining SPL lifting cases.** *Done 2026-10-30:* a tool call in a `WHILE` condition is lifted; loop counters and assigned variables now work (they did not run before); the other 8 files are not lifter faults (see R2 above).
 4. **R1 acceptance corpus.** *Done 2026-10-30:* all 83 PocketFlow workflows lift and validate; three samples run (`cookbook/pocketflow`). Found and left open: `RETURN` inside a `WHILE` (see R1 above).
-5. **Real Docker test.** Run `tests/test_container.py` where a Docker daemon and `python:3.12-slim` exist; the real-daemon test was skipped on the build machine.
+5. **Real Docker test.** *Done 2026-10-30:* run against Docker Desktop; it found that a mount outside the home directory hangs, now guarded.
 
 ### Needs an owner decision first
 

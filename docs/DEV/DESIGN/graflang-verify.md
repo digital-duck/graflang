@@ -28,7 +28,7 @@ python -m pytest -q -m "not llm"        # offline: no model
 
 Expected (2026-10-30): **729 passed, 4 skipped, 7 failed**, about 45 s. The 7 failures are the known, left-alone ones in the hand-written Cedar compiler: `tests/test_cedar_compiler.py` (6) and `tests/test_policy_slicer.py::test_slice_by_context_keys` (1). Anything else failing is a regression.
 
-Skips: the Streamlit editor tests (no Streamlit in the `graf` env), the real-Docker test (no daemon), and two environment skips.
+Skips: the Streamlit editor tests (no Streamlit in the `graf` env), and environment skips. The real-Docker tests skip without a daemon and the `python:3.12-slim` image.
 
 ```bash
 python -m pytest -q -m llm              # 8 real-model tests, claude_cli, claude-sonnet-5-5, about 5 min, billed
@@ -51,7 +51,7 @@ Which file pins which feature:
 | Parts and elaboration | `test_parts` 14, `test_elaborate` 16 |
 | Bindings, metering, budgets, cassettes, checkpoint | `test_bindings` 12, `test_metering` 10, `test_checkpoint` 5 |
 | Concurrency, JOIN, BATCH, RUN | `test_concurrency` 10, `test_batch` 7, `test_run_node` 13 |
-| SOLVE backends, subprocess, kernel, container | `test_solve_backends` 47, `test_solver_backend` 15, `test_solver_check_example` 4, `test_container` 15 |
+| SOLVE backends, subprocess, kernel, container | `test_solve_backends` 47, `test_solver_backend` 15, `test_solver_check_example` 4, `test_container` 19 (4 need Docker) |
 | GUARD, MUTATE (including loop persistence), Cedar | `test_grafr_mutate` 37 |
 | Capabilities policy, PII | `test_capabilities` 9, `test_pii` 16 |
 | Editor | `test_editor` 38, `test_editor_app` (needs Streamlit) |
@@ -86,6 +86,7 @@ Expected: every line `✓ Valid GraphLang workflow: <name>`.
 | `lifted_tool` | a Python tool as a kernel SOLVE | `graf run cookbook/lifted_tool/lifted_tool.graph.yaml --param word=hello` | yes |
 | `parts_demo` | one part used twice | `graf run cookbook/parts_demo/parts_demo.graph.yaml --adapter mock --param topic=tides` | yes |
 | `elaborate_demo` | a template applied to a graph | `graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --adapter mock --workers 2` | yes |
+| `container_demo` | a program run inside Docker | `graf run cookbook/container_demo/container_demo.graph.yaml --adapter mock` (needs Docker) | yes |
 | `pocketflow` | R1 acceptance samples | section 11 | yes |
 
 ## 3. Core commands
@@ -284,13 +285,25 @@ graf run cookbook/lifted_tool/lifted_tool.graph.yaml --param word=hello --no-out
 
 **What the executors do not confine** (pinned as `test_KNOWN_*` tests): a subprocess or kernel can read files anywhere you can, and a kernel inherits the runtime's environment. They do limit memory (`memory_mb`), time (`timeout`), and a subprocess's environment (only `PATH` and `env_passthrough`).
 
-**Container option** (a `subprocess` node with `container: {image: python:3.12-slim}`):
+**Container option** (a `subprocess` node with `container: {image: python:3.12-slim}`). Needs a running Docker daemon (Docker Desktop is fine: start it, then `docker version` should show a server) and the image:
 
 ```bash
-pytest tests/test_container.py -q        # 14 pass with a stub docker; 1 real-daemon test skips
+docker pull python:3.12-slim
+pytest tests/test_container.py -q        # 19 pass: stub-docker tests plus 4 real ones (no skips when the daemon and image are there)
+graf run cookbook/container_demo/container_demo.graph.yaml --adapter mock --param numbers=4,5,6
+#   Output: {'report': {'sum': 15, 'hostname': '<container id>', 'network': False, 'write_graph_folder': False, 'write_root': False}}
+docker ps -a --filter name=graf-         # nothing left behind
 ```
 
-To verify for real you need a Docker daemon and `docker pull python:3.12-slim`; then the same command runs `test_real_docker_has_no_network_and_a_read_only_mount` (no network, read-only mount). **This is the one feature not yet verified against a real daemon.** `graf validate` on a node with a bad `container:` names the problem (unknown key, `network: host`, non-positive limits).
+The report is the proof: the container had no network and could not write to the graph folder or its root. Without Docker the real tests skip and the stub ones still pass.
+
+**Docker Desktop shares only your home directory.** Mounting any other folder hangs forever. graflang checks first: copy the demo to `/tmp` and run it, and it stops in a fraction of a second with `Docker Desktop shares only your home directory ... mounting it would hang`:
+
+```bash
+cp -r cookbook/container_demo /tmp/cd && graf run /tmp/cd/container_demo.graph.yaml --adapter mock --no-output --no-log; rm -rf /tmp/cd
+```
+
+To allow another folder, add it in Docker Desktop (Settings, Resources, File sharing) and export `GRAF_DOCKER_SHARED=/that/folder` (colon-separated list); `container: {mount: none}` skips the mount altogether. `graf validate` on a node with a bad `container:` names the problem (unknown key, `network: host`, non-positive limits).
 
 ## 9. Safety: GUARD, MUTATE, policies, PII
 
@@ -369,13 +382,14 @@ Do **not** run `017_judge` from the PocketFlow set unattended: the lifter skips 
 |---|---|---|
 | 7 Cedar compiler tests | `test_cedar_compiler` (6), `test_policy_slicer` (1) fail | known, `grafc/cedar` left alone |
 | `RETURN` inside `WHILE` | the lifter warns `COMMIT inside a WHILE body was skipped`; the lifted loop runs until `max_steps` (`017_judge`) | open lifter gap |
-| Container sandbox | stub-tested only; real-daemon test skipped without Docker | verify on a machine with Docker |
+| Container sandbox | verified against Docker Desktop; stub tests cover the rest | done; needs a running daemon and `python:3.12-slim` |
 | Kernel and plain subprocess confinement | files and network not confined; kernel inherits the environment | by design, pinned as KNOWN tests |
 | `max_cost_usd` | stops at the second call with `reports no cost` on `claude_cli` | by design; use `max_llm_calls` |
 | Editor | no drag-to-connect; compact and `elaborate:` files are edited as text | by decision |
 | `mcp` and WASM executors | not built | out of scope for now |
 | `chain_of_thought` from PocketFlow (`014_thinking`) | the model declines the "reveal your reasoning" prompt | not a graflang fault |
 | `ts_verify` | needs Node 22.18+; 11 tests skip or pass accordingly | environment |
+| Docker Desktop file sharing | only the home directory is shared; other folders are refused up front | by design (`GRAF_DOCKER_SHARED`) |
 | README claims | Rust compilation (`graf compile`) is a stub; Cedar compiler is experimental | README is partly aspirational |
 
 ## 14. If something does not behave

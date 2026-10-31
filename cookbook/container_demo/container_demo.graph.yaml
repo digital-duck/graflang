@@ -1,0 +1,40 @@
+version: "1.0-graph"
+
+# A program run inside a Docker container. The SOLVE node sums the numbers and then reports what the container allowed:
+# no network, a read-only root filesystem, a read-only mount of this folder. No LLM.
+#   graf run cookbook/container_demo/container_demo.graph.yaml --adapter mock --param numbers=1,2,3
+# Needs a running Docker daemon and the image:  docker pull python:3.12-slim
+# Under Docker Desktop this folder must be under your home directory (the only folder it shares by default).
+
+workflow:
+  name: "container_demo"
+  inputs:
+    - {name: "numbers", type: "TEXT", default: "1,2,3"}
+  outputs:
+    - {name: "report", type: "JSON"}
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_numbers"]
+
+  - id: "probe"
+    type: "SOLVE"
+    config:
+      backend: "subprocess"
+      command: ["python", "solvers/probe.py"]        # looked up inside the image; /work is this folder
+      container: {image: "python:3.12-slim", memory_mb: 256}
+      parse: "last_json"
+      out_type: "JSON"
+      timeout: 60
+    ports: ["trigger", "complete", "in_numbers", "out_report"]
+
+  - id: "done"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_report"]
+
+edges:
+  - {source: "wf_entry.entry",       target: "probe.trigger",   type: "triggers"}
+  - {source: "wf_entry.out_numbers", target: "probe.in_numbers", type: "binds"}
+  - {source: "probe.complete",       target: "done.trigger",    type: "triggers"}
+  - {source: "probe.out_report",     target: "done.in_report",  type: "binds"}

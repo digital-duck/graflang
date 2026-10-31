@@ -11,6 +11,7 @@ The runtime reaches it through solve_backend.py (`SOLVE` with `backend: subproce
 """
 from __future__ import annotations
 
+import functools
 import importlib.util
 import json
 import os
@@ -170,6 +171,31 @@ CONTAINER_KEYS = {"image", "network", "mount", "memory_mb", "cpus", "pids"}
 DOCKER_ENV = ("HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "XDG_RUNTIME_DIR")      # the docker client needs these; the program in the container never sees them
 
 
+@functools.lru_cache(maxsize=1)
+def _docker_desktop() -> bool:
+    """Is the daemon Docker Desktop? It runs containers in a VM that sees only the folders shared with it."""
+    env = {"PATH": os.environ.get("PATH", ""), **{k: os.environ[k] for k in DOCKER_ENV if k in os.environ}}
+    try:
+        done = subprocess.run(["docker", "info", "--format", "{{.OperatingSystem}}"], capture_output=True, text=True, timeout=30, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "Docker Desktop" in done.stdout
+
+
+def check_mount_shared(base_dir: Path) -> None:
+    """Under Docker Desktop a bind mount of a folder it does not share does not fail: `docker run` hangs. Say so up front.
+    Shared by default: the user's home directory. Others, added in Docker Desktop's Resources > File sharing, are named in
+    GRAF_DOCKER_SHARED (a colon-separated list of folders)."""
+    if not _docker_desktop():
+        return
+    roots = [Path.home(), *(Path(p) for p in os.environ.get("GRAF_DOCKER_SHARED", "").split(":") if p)]
+    path = Path(base_dir).resolve()
+    if not any(path == r.resolve() or r.resolve() in path.parents for r in roots):
+        raise SolverError(f"container: Docker Desktop shares only your home directory with its containers, and {path} is outside it, "
+                          "so mounting it would hang. Move the graph under your home directory, or add the folder in Docker Desktop "
+                          "(Settings > Resources > File sharing) and list it in GRAF_DOCKER_SHARED, or set container.mount: none.")
+
+
 def container_command(command: List[str], container: Dict[str, Any], *, base_dir: Path, memory_mb: int, env_names: List[str], name: str) -> List[str]:
     """`docker run` for the program: no network, a read-only root, the graph's folder mounted read-only at /work, no
     capabilities, a memory/CPU/process cap. Environment values travel by name (`-e NAME`), never on the command line."""
@@ -199,6 +225,8 @@ def run_solver(command: List[str], inputs: Dict[str, Any], *, parse: Any, out_ty
     name = ""
     if container:                                   # the program runs in `docker run`; docker, not rlimit, holds its memory
         name = f"graf-{uuid.uuid4().hex[:12]}"
+        if container.get("mount", "ro") != "none":
+            check_mount_shared(base_dir)
         argv = container_command(command, container, base_dir=base_dir, memory_mb=memory_mb, env_names=sorted(env or {}), name=name)
         base_env.update({k: os.environ[k] for k in DOCKER_ENV if k in os.environ})
         limit = None
@@ -208,8 +236,8 @@ def run_solver(command: List[str], inputs: Dict[str, Any], *, parse: Any, out_ty
         done = subprocess.run(argv, input=payload, capture_output=True, text=True, timeout=timeout,
                               cwd=str(cwd) if cwd else None, env=base_env, preexec_fn=limit)
     except subprocess.TimeoutExpired as e:
-        if name:                                    # killing the client leaves the container running
-            subprocess.run(["docker", "kill", name], capture_output=True, env=base_env, timeout=30, check=False)
+        if name:                                    # killing the client leaves the container behind, running or not
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True, env=base_env, timeout=30, check=False)
         raise SolverError(f"solver timed out after {timeout}s", stdout=_text(e.stdout), stderr=_text(e.stderr)) from None
     except FileNotFoundError:
         raise SolverError("container: the docker command was not found" if container else f"solver command not found: {command[0]!r}") from None
