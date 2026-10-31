@@ -12,8 +12,9 @@
 
 DODA: the graph says *what* to generate; the provider and model are chosen when you run it
 (`graf run --llm claude_cli:claude-haiku-5-5`). The model for a call is chosen in this order:
-an explicit choice on the command line (`--model`, or the model in `--llm adapter:model`, or `llm:` in a bindings file) wins for every node;
-else the node's own `model:` if it fits the adapter; else the adapter's default (claude_cli: claude-sonnet-5-5).
+the node's own `model:` if it fits the adapter (fine-grained control);
+else the choice on the command line (`--model`, the model in `--llm adapter:model`, or `llm:` in a bindings file), the run-wide setting;
+else the adapter's default (claude_cli: claude-sonnet-5-5).
 """
 from __future__ import annotations
 
@@ -35,11 +36,11 @@ class LLMUnavailable(RuntimeError):
 
 
 def resolve_model(adapter: str, node_model: Optional[str], override: Optional[str], default: Optional[str] = None) -> Optional[str]:
-    """Pick the model for one call: the explicit run-time choice, else the node's own model if it fits the adapter, else the default."""
-    return override or _node_hint(adapter, node_model) or default
+    """Pick the model for one call: the node's own model if it fits the adapter, else the run-wide choice, else the default."""
+    return node_hint(adapter, node_model) or override or default
 
 
-def _node_hint(adapter: str, node_model: Optional[str]) -> Optional[str]:
+def node_hint(adapter: str, node_model: Optional[str]) -> Optional[str]:
     """The node's `model:` as this adapter can use it, or None (a hint for another provider, or a model the adapter does not offer)."""
     if not node_model or adapter == "mock":
         return node_model or None
@@ -81,7 +82,7 @@ class DDLLM:
             raise LLMUnavailable(str(e)) from e
         self.name = name
         self.adapter_name = name
-        self.model_override = model                  # chosen on the command line: beats every node's own model
+        self.model_override = model                  # chosen on the command line: applies to nodes that name no usable model of their own
         self.default_model = default                 # used when a node names no usable model
         self._local = threading.local()
 

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Model choice per node: `--model` / `--llm adapter:model` / `llm:` in a bindings file beats every node's `model:`; without one a node's own `model:` is used if the adapter can run it, else the adapter default (`claude-sonnet-5-5` for `claude_cli`). Before, the default acted as an override and node `model:` hints were ignored under `claude_cli`. A cassette records the default too (old ones still replay).
+- Model choice per node: a node's own `model:` (if the adapter can run it) beats the run-wide model from `--model` / `--llm adapter:model` / `llm:` in a bindings file, which beats the adapter default (`claude-sonnet-5-5` for `claude_cli`). A hint for another adapter is ignored with an `llm.hint_ignored` warning. Before, the default acted as an override and node `model:` hints were ignored under `claude_cli`. A cassette records the default too (old ones still replay).
 
 - `graf compile` takes `--lang rust|spl` (default rust) and `--dry-run`; `graf export-spl` is now `graf compile --lang spl`. Both languages run `graf validate`'s checks first and read compact, parts and elaborate files like `graf run` does. `graf check` is removed: it duplicated `validate` (schema, resources) and its extra analysis crashed on every graph; `graf compile --dry-run` is its replacement. `--target` is replaced by `--lang`.
 

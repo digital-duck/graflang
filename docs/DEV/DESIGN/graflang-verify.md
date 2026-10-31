@@ -275,7 +275,7 @@ params: {max_iterations: 2}
 limits: {max_steps: 500}
 ```
 
-`graf run cookbook/pocketflow/text_transformer.graph.yaml --bind b.bind.yaml --no-output --no-log` runs two rounds instead of 20. Other keys: `llm`, `models` (for `model: $name`), `resources` (replace a prompt or policy), `limits.max_llm_calls`, `max_cost_usd`, `wall_time_s`, `concurrency`. A flag on the command line beats the file, which beats the graph's own hints. `pytest tests/test_bindings.py -q` (12).
+`graf run cookbook/pocketflow/text_transformer.graph.yaml --bind b.bind.yaml --no-output --no-log` runs two rounds instead of 20. Other keys: `llm`, `models` (for `model: $name`), `resources` (replace a prompt or policy), `limits.max_llm_calls`, `max_cost_usd`, `wall_time_s`, `concurrency`. A flag on the command line beats the file; for the model, a node's own `model:` beats both. `pytest tests/test_bindings.py -q` (12).
 
 **Budgets:** `limits: {max_llm_calls: 2}` stops `self_refine` (3 calls) with `stopped before call 3: limits.max_llm_calls is 2`. `max_cost_usd` needs an adapter that reports cost; with one that does not (`claude_cli`) the run stops at the second call and says so.
 

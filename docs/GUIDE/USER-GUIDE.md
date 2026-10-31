@@ -58,7 +58,7 @@ Check with `dot -V` (it prints the version), then `graf vis --list-engines`: the
 | `--param key=value` | a workflow input; repeatable. Coerced to the declared type (`INTEGER`, `FLOAT`, `BOOL`). A value without `=` is a usage error |
 | `--llm ADAPTER[:MODEL]` | `--adapter` and `--model` in one value, e.g. `claude_cli:claude-haiku-5-5`, `ollama:gemma3:12b`. Only the first `:` splits, so model ids with `:` or `/` work. Wins over `--adapter`/`--model` |
 | `--adapter NAME` | `claude_cli` (default), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
-| `--model ID` | model for every `GENERATE` node; beats a node's own `model:`. Without it a node's `model:` is used if the adapter can run it, else the default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), which use their own |
+| `--model ID` | run-wide model for every `GENERATE` node that names none of its own. A node's `model:` (if the adapter can run it) beats it, so one node can use a stronger or weaker model; a hint for another adapter (`ollama/gemma3` under `claude_cli`) is ignored with a warning (`llm.hint_ignored`). With neither, the default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), which use their own |
 | `--max-steps N` | stop after N node firings (default 1000) |
 | `--output-dir DIR` | where results go (default `<graph folder>/output`); see [Results](#results-the-output-folder) |
 | `--save-nodes` / `--no-save-nodes` | save every node's output, LLM responses included (the default); `--no-save-nodes` keeps only the workflow outputs |
@@ -282,7 +282,7 @@ resources:                              # replaces named prompts / procedures / 
 limits: {max_steps: 200, wall_time_s: 300}
 ```
 
-`graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file, which beats the graph's own `model:` hint. A `model: $name` with no binding uses the run's default model (with a warning). `limits.max_cost` is not supported: adapters do not report cost.
+`graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file for the run-wide model, but a node's own `model:` still beats both. A `model: $name` with no binding uses the run's default model (with a warning). `limits.max_cost` is not supported: adapters do not report cost.
 
 ## Several things at once: JOIN, BATCH and `--workers`
 

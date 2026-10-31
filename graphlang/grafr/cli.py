@@ -98,7 +98,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, re
     limits = bindings.get("limits", {})
     max_steps = max_steps or limits.get("max_steps") or 1000
 
-    explicit_model = model                           # what the user chose: it beats every node's own `model:`
+    explicit_model = model                           # what the user chose: the run-wide model, used by a node that names none of its own
     model = model or default_model(adapter)          # the name used in log and result folders (claude_cli: claude-sonnet-5-5)
 
     if no_log:

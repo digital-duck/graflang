@@ -4,8 +4,8 @@ import json
 import time
 from typing import Dict
 from .base import NodeExecutor
-from ..adapters import resolve_model
-from ...logging_config import DEBUG, get_logger, log_event
+from ..adapters import node_hint, resolve_model
+from ...logging_config import DEBUG, WARNING, get_logger, log_event
 
 _log = get_logger("grafr.nodes.generate")
 PREVIEW_CHARS = 200
@@ -38,6 +38,9 @@ class GenerateExecutor(NodeExecutor):
             prompt += f"\n\nYour previous reply was rejected: {in_data['_validation_error']}\nReply again, corrected."
 
         model = resolve_model(llm.name, config.get('model'), getattr(llm, 'model_override', None), getattr(llm, 'default_model', None))
+        hint = config.get('model')
+        if hint and node_hint(llm.name, hint) is None:
+            log_event(_log, "llm.hint_ignored", level=WARNING, node=node_data['id'], hint=hint, adapter=llm.name, using=model)
         started = time.perf_counter()
         response = llm.generate(prompt, model=model, temperature=config.get('temperature'))
         log_event(_log, "llm.call", node=node_data['id'], adapter=llm.name, model=model,

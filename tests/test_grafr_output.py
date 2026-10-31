@@ -133,7 +133,7 @@ def test_default_model_reaches_the_run_name_and_the_llm(app, monkeypatch):
     assert run_dir.name.startswith("self_refine-claude_cli-claude-sonnet-5-5-")
     assert json.loads((run_dir / "run.json").read_text())["model"] == "claude-sonnet-5-5"
     assert seen["model"] is None and seen["default"] == "claude-sonnet-5-5"     # a default, not an override
-    assert set(seen["calls"]) == {"claude-sonnet-5-5"}
+    assert set(seen["calls"]) == {"claude-sonnet-5-5", "claude-haiku-5-5"}     # critique names its own model
 
 
 def test_explicit_model_beats_the_default(app, monkeypatch):
@@ -164,7 +164,7 @@ edges:
     assert "a[i] [bold]b[/bold]" in result.output.replace("\n", " ")
 
 
-def test_a_node_model_beats_the_default_but_not_an_explicit_model(app, monkeypatch):
+def test_a_node_model_beats_the_cli_model_and_the_default(app, monkeypatch):
     import yaml
     seen = []
 
@@ -181,4 +181,4 @@ def test_a_node_model_beats_the_default_but_not_an_explicit_model(app, monkeypat
     assert "claude-haiku-5-5" in seen and "claude-sonnet-5-5" in seen
     seen.clear()
     assert run(app, "--llm", "claude_cli:claude-opus-5-5").exit_code == 0
-    assert set(seen) == {"claude-opus-5-5"}
+    assert sorted(seen) == ["claude-haiku-5-5", "claude-opus-5-5", "claude-opus-5-5"]
