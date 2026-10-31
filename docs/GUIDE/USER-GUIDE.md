@@ -467,6 +467,31 @@ Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (
 | `cookbook/solver_check/` | both SOLVE backends, no LLM: a Python kernel and a subprocess compute the same sum, an `ASSERT` compares them with the expected value, and a failing solver routes to an error report |
 | `cookbook/ts_verify/` | a polyglot loop: an LLM writes a TypeScript function, the TypeScript compiler and Node (run as subprocess tools) judge it, their errors drive the retry, and a Python tool builds the report. Needs Node 22.18+ (`npm install` there adds type checking) |
 
+## Reserved words
+
+Names with a meaning in a workflow file. Choosing one of these as a node id, step id, input name or port name will not do what you want. File and folder names are not on the list: the parser never reads them, so a folder called `subgraph/` or `sub_graph/` is fine. (The cookbook's part folders are `sub_graph/` only because `parts/` is in this repo's `.gitignore`.)
+
+| Where | Reserved |
+|---|---|
+| Node types (`type:`) | `INPUT` `OUTPUT` `GENERATE` `SOLVE` `EVALUATE` `ASSERT` `FORK` `JOIN` `LOOP` `BATCH` `SUBGRAPH` `RUN` `GUARD` `MUTATE` `RECOVER` `CONTEXT` `QUERY` `OBSERVE` `EMIT` (upper case) |
+| Edge types | `triggers` (control) and `binds` (data) |
+| Control ports | `entry` `trigger` `complete` `pass` `fail` `allow` `deny` `applied` `rejected` `exit` `halt` `retry` `error`; a FORK's `branch_<n>` |
+| Data ports | the prefixes `in_` and `out_` (`in_topic`, `out_essay`); a condition reads an input as `@in_topic` |
+| Top-level keys | `version` `workflow` `resources` `nodes` `edges` `steps` `elaborate` |
+| `workflow:` keys | `name` `inputs` `outputs` `policy` |
+| `resources:` kinds | `prompts` `procedures` `policies` `parts` |
+| Node `config` keys | `prompt_ref` `prompt_inline` `procedure_ref` `llm` `temperature` `condition` `expression` `backend` `code` `command` `parse` `subgraph` `max_iterations` `persist_mutations` `part` `policy_ref` `principal` `phases` `container` `timeout` (the full list is in the sections on each node) |
+| Compact step kinds | `generate` `solve` `assert` `evaluate` `guard` `fork` `join` `output` `node` `use` `loop` |
+| Compact step keys | `in` `out` `on` `ports` `config`, and for a `loop` step `steps` `while` `index`; every other key goes into the node's `config` |
+| Compact references | `$in.<input>` (a workflow input), `$loop.<name>` (inside a loop body), `<step>` and `<step>.<out name>` |
+| Ids | letters, digits and `_` only; `wf_entry` is the INPUT node the compact form adds, so no step may use it |
+| Part expansion | `__` joins a use's id to the part's node id (`first__rewrite`), so avoid `__` in your own ids; `_`-prefixed keys such as `_source_dir`, `_part_of` and `_route` belong to the loader and runtime |
+| Condition functions | `json_get` `contains` `startswith` `endswith` `len` `lower` `upper` `strip` `abs` `min` `max` `int` `float` `str` `bool` `has_pii` `latest` `is_empty`; a condition may call nothing else |
+| Condition words | `and` `or` `not` `in` `True` `False` `None`, also in upper case (`AND` `OR` `NOT` `IN` `TRUE` `FALSE` `NULL`) |
+| `llm:` spec | `ADAPTER[:MODEL]`; `mock` is the adapter that answers every node without a model |
+
+`SUBGRAPH` is the node a part's `use` becomes; `subgraph` (lower case) is the body of a `LOOP`. They are different things, and neither conflicts with a file or folder name.
+
 ## Known limits
 
 - A `SOLVE` with no `expression`, `procedure_ref` or `backend` computes nothing: `graf validate` and the runtime both report it.
