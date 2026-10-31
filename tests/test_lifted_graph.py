@@ -22,8 +22,9 @@ class Echo:
 def test_each_step_sees_the_previous_answer_and_the_input_default_applies():
     llm = Echo()
     assert GraphLangRuntime(load_graph(GRAPH), llm=llm, verbose=False).execute({}) == {"summary": "R3"}
-    assert llm.prompts[0] == "Research and provide key facts about distributed AI inference."
+    assert "Topic: distributed AI inference" in llm.prompts[0]
     assert "Research: R1" in llm.prompts[1] and "Analysis: R2" in llm.prompts[2]
+    assert all("Topic: distributed AI inference" in p for p in llm.prompts)               # every step sees the original topic
 
 
 def test_a_literal_argument_is_a_port_default():
@@ -32,7 +33,7 @@ def test_a_literal_argument_is_a_port_default():
     graph["edges"] = [e for e in graph["edges"] if e["target"] != "gen_1.in_topic"]
     llm = Echo()
     GraphLangRuntime(graph, llm=llm, verbose=False).execute({})
-    assert llm.prompts[0] == "Research and provide key facts about tides."
+    assert "Topic: tides" in llm.prompts[0]
 
 
 @pytest.mark.llm

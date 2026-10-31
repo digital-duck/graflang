@@ -17,8 +17,8 @@ SELF_REFINE = COOKBOOK / "self_refine" / "self_refine.graph.yaml"
 def test_a_lifted_graph_comes_back_with_its_functions():
     text, warnings = graph_to_spl(load_graph(LIFTED))
     assert warnings == []
-    assert "CREATE FUNCTION analyze(research TEXT)" in text and "Research: {research}" in text
-    assert "GENERATE research(@topic) INTO @research" in text and text.rstrip().endswith("RETURN @summary\nEND")
+    assert "CREATE FUNCTION analyze(research TEXT, topic TEXT)" in text and "Research: {research}" in text and "Topic: {topic}" in text
+    assert "GENERATE research(@topic) INTO @research" in text and "GENERATE analyze(@research, @topic) INTO @analysis" in text and text.rstrip().endswith("RETURN @summary\nEND")
 
 
 def test_a_lifted_tool_comes_back_as_create_tool_api():

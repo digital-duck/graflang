@@ -1,4 +1,5 @@
 # Lifted from SPL.py cookbook/009_chain_of_thought/chain.spl by `spl3 util spl2graph`; the three CREATE FUNCTION bodies are the prompts.
+# Edited since: every step also receives the original topic, and the prompts ask for the text only (no preamble or closing offers).
 version: 1.0-graph
 workflow:
   name: chain_of_thought
@@ -22,7 +23,13 @@ nodes:
     params:
     - topic
     prompt_inline: |-
-      Research and provide key facts about {{in_topic}}.
+      Research the topic below and give the key facts about it: its background and causes, its current state,
+      and what may follow from it.
+
+      Topic: {{in_topic}}
+
+      Say where your knowledge may be out of date.
+      Reply with the research only: no preamble, no closing questions or offers.
     arguments:
     - '@topic'
   ports:
@@ -36,15 +43,25 @@ nodes:
     function: analyze
     params:
     - research
+    - topic
     prompt_inline: |-
-      Analyze the following research findings for key trends and implications.
+      Analyze the research findings below for key trends and implications.
+      Stay on the topic and cover each part of it (for example causes, current state and consequences),
+      so that nothing the topic asks for is dropped.
+
+      Topic: {{in_topic}}
+
       Research: {{in_research}}
+
+      Reply with the analysis only: no preamble, no closing questions or offers.
     arguments:
     - '@research'
+    - '@topic'
   ports:
   - trigger
   - complete
   - in_research
+  - in_topic
   - out_analysis
 - id: gen_3
   type: GENERATE
@@ -52,15 +69,24 @@ nodes:
     function: summarize_analysis
     params:
     - analysis
+    - topic
     prompt_inline: |-
-      Summarize the following analysis into a concise executive brief.
+      Summarize the analysis below into a concise executive brief on the topic.
+      Cover every part of the topic, and state any data caveat once.
+
+      Topic: {{in_topic}}
+
       Analysis: {{in_analysis}}
+
+      Reply with the brief only: no preamble, no closing questions or offers, no next-steps section.
     arguments:
     - '@analysis'
+    - '@topic'
   ports:
   - trigger
   - complete
   - in_analysis
+  - in_topic
   - out_summary
 - id: wf_exit
   type: OUTPUT
@@ -81,11 +107,17 @@ edges:
 - source: gen_1.out_research
   target: gen_2.in_research
   type: binds
+- source: wf_entry.out_topic
+  target: gen_2.in_topic
+  type: binds
 - source: gen_2.complete
   target: gen_3.trigger
   type: triggers
 - source: gen_2.out_analysis
   target: gen_3.in_analysis
+  type: binds
+- source: wf_entry.out_topic
+  target: gen_3.in_topic
   type: binds
 - source: gen_3.out_summary
   target: wf_exit.in_summary

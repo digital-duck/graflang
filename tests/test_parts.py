@@ -174,6 +174,8 @@ def test_llm_on_a_use_reaches_the_parts_generate_nodes_that_name_none(demo):
     import yaml
     path = demo / "parts_demo.graph.yaml"
     doc = yaml.safe_load(path.read_text())
+    for step in doc["steps"]:
+        next(iter(step.values())).pop("llm", None)                                   # the shipped graph names an llm on every step
     doc["steps"][1]["first"]["llm"] = "claude_cli:claude-haiku-5-5"              # the first use only
     path.write_text(yaml.safe_dump(doc))
     nodes = {n["id"]: n for n in load_graph(path)["nodes"]}
