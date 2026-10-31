@@ -11,25 +11,47 @@ workflow:
   inputs:
     - {name: "spec", type: "TEXT"}
     - {name: "lang", type: "TEXT", default: "python"}
+    - {name: "reference", type: "TEXT", default: ""}           # API facts the model cannot know (a library's call signatures); given to write and improve
+    - {name: "smoke", type: "TEXT", default: ""}               # Python run against the real dependencies after the tests (optional)
+    - {name: "max_cycles", type: "INTEGER", default: 2}        # improve + verify rounds at most
   outputs:
     - {name: "code", type: "FILES"}          # a project folder: written as <run folder>/code/...
     - {name: "review", type: "TEXT"}
+    - {name: "report", type: "TEXT"}                           # what the last verification found
 
 resources:
   parts:
     analyze_spec: "./sub_graph/analyze_spec.graph.yaml"
     write_code: "./sub_graph/write_code.graph.yaml"
     review_code: "./sub_graph/review_code.graph.yaml"
-    improve_code: "./sub_graph/improve_code.graph.yaml"
+  prompts:
+    improve_code: "./sub_graph/prompts/improve_code.md"      # used by the repair loop below (a part cannot read a loop's inputs, so it is a plain GENERATE)
 
 steps:
   - analyze: {use: parts.analyze_spec, in: {spec: $in.spec}, out: [analysis]}
   - gate:    {evaluate: "contains(@in_analysis, '[READY]')", in: {analysis: analyze.analysis}}
   - abort:   {node: RECOVER, on: gate.fail, in: {message: analyze.analysis}, ports: [trigger, halt, in_message, out_error], action: halt}
-  - write:   {use: parts.write_code, on: gate.pass, in: {spec: $in.spec, lang: $in.lang}, out: [code]}
+  - write:   {use: parts.write_code, on: gate.pass, in: {spec: $in.spec, lang: $in.lang, reference: $in.reference}, out: [code]}
   - review:  {use: parts.review_code, in: {code: write.code, lang: $in.lang}, out: [feedback]}
-  - improve: {use: parts.improve_code, in: {spec: $in.spec, code: write.code, feedback: review.feedback, lang: $in.lang}, out: [code]}
-  - collect: {node: SOLVE, in: {text: improve.code, lang: $in.lang, spec: $in.spec}, ports: [trigger, complete, in_text, in_lang, in_spec, out_files],
-              out: files, backend: subprocess, command: ["python3", "-I", "tools/collect_files.py"], out_type: JSON, timeout: 30,
-              label: "Split the reply into the project's files"}
-  - done:    {output: {code: collect.files, review: review.feedback}}
+
+  # improve -> split into files -> run them; a failed check goes back into the next improve as the test result
+  - repair:
+      loop: "@in_max_cycles"
+      while: "NOT @passed"
+      in: {spec: $in.spec, lang: $in.lang, reference: $in.reference, smoke: $in.smoke, max_cycles: $in.max_cycles, feedback: review.feedback, code: write.code}
+      out:
+        code: {from: improve.code}                  # the reply of the latest round, read by the next round
+        test_result: {from: report.result}          # what verification said about it
+        files: {from: collect.files}
+        passed: {fired: ok.pass}
+      steps:
+        - improve: {generate: prompts.improve_code, in: {spec: $loop.spec, code: $loop.code, feedback: $loop.feedback, test_result: $loop.test_result, lang: $loop.lang, reference: $loop.reference}, out: [code]}
+        - collect: {node: SOLVE, in: {text: improve.code, lang: $loop.lang, spec: $loop.spec}, ports: [trigger, complete, in_text, in_lang, in_spec, out_files],
+                    out: files, backend: subprocess, command: ["python3", "-I", "tools/collect_files.py"], out_type: JSON, timeout: 30,
+                    label: "Split the reply into the project's files"}
+        - verify:  {node: SOLVE, in: {files: collect.files, lang: $loop.lang, smoke: $loop.smoke}, ports: [trigger, complete, in_files, in_lang, in_smoke, out_check],
+                    out: check, backend: subprocess, command: ["python3", "-I", "tools/verify_project.py"], parse: first_line, out_type: TEXT, timeout: 600,
+                    label: "Run the project: syntax, imports, tests, smoke"}
+        - ok:      {evaluate: "json_get(@in_check, 'passed') == TRUE", in: {check: verify.check}}
+        - report:  {solve: "json_get(@in_check, 'report')", in: {check: verify.check}, on: verify}
+  - done:    {output: {code: repair.files, review: review.feedback, report: repair.test_result}}

@@ -20,3 +20,7 @@ relative to the project folder), then the file's content. Give a README.md first
 source files. Split the code into modules when the specification has more than one concern, and let the modules import each other
 (for example `slugger/core.py` imported as `from slugger.core import slugify`); a small specification may be a single module.
 Do not use code fences and write nothing outside the files.
+
+Reference material (APIs and facts about libraries that the specification relies on; follow it exactly, and never guess a library's
+API when it is given here; empty if there is none):
+{{in_reference}}

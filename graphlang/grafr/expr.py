@@ -52,11 +52,16 @@ def _json_get(value: Any, key: Any, default: Any = "") -> Any:
     Unlike SPL's `json_get`, which always returns text."""
     if isinstance(value, str):
         text = value.strip()
-        fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
         try:
-            value = json.loads(fenced.group(1).strip() if fenced else text)
+            value = json.loads(text)                                  # plain JSON first: a string field may itself hold a code fence
         except ValueError:
-            return default
+            fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+            try:
+                value = json.loads(fenced.group(1).strip()) if fenced else None
+            except ValueError:
+                value = None
+            if value is None:
+                return default
     for part in str(key).split("."):
         if isinstance(value, dict) and part in value:
             value = value[part]

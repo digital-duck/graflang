@@ -9,6 +9,7 @@ workflow:
     - {name: "lang", type: "TEXT", default: "python"}
     - {name: "prior_code", type: "TEXT", default: ""}
     - {name: "prior_test", type: "TEXT", default: ""}
+    - {name: "reference", type: "TEXT", default: ""}
   outputs:
     - {name: "code", type: "TEXT"}
 
@@ -17,11 +18,11 @@ resources:
     write_code: "./prompts/write_code.md"
 
 nodes:
-  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_spec", "out_lang", "out_prior_code", "out_prior_test"]}
+  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_spec", "out_lang", "out_prior_code", "out_prior_test", "out_reference"]}
   - id: "gen"
     type: "GENERATE"
     config: {prompt_ref: "prompts.write_code"}
-    ports: ["trigger", "complete", "in_spec", "in_lang", "in_prior_code", "in_prior_test", "out_code"]
+    ports: ["trigger", "complete", "in_spec", "in_lang", "in_prior_code", "in_prior_test", "in_reference", "out_code"]
   - {id: "wf_exit", type: "OUTPUT", ports: ["trigger", "exit", "in_code"]}
 
 edges:
@@ -31,4 +32,5 @@ edges:
   - {source: "wf_entry.out_lang", target: "gen.in_lang", type: "binds"}
   - {source: "wf_entry.out_prior_code", target: "gen.in_prior_code", type: "binds"}
   - {source: "wf_entry.out_prior_test", target: "gen.in_prior_test", type: "binds"}
+  - {source: "wf_entry.out_reference", target: "gen.in_reference", type: "binds"}
   - {source: "gen.out_code", target: "wf_exit.in_code", type: "binds"}
