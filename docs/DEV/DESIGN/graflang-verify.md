@@ -1,6 +1,6 @@
 # GraphLang: Verification Guide
 
-How to check, by hand and by test, every feature built so far (state of 2026-10-30). Each section says what to run, what you should see, and which test file pins it. Commands run from the repo root `graflang/`. Nothing here needs a model unless a step says **[real LLM]**, and those are small and budgeted.
+How to check, by hand and by test, every feature built so far (state of 2026-10-30). Each section says what to run, what you should see, and which test file pins it. Commands run from the repo root `graflang/`. Runs use the default model (`claude_cli` with `claude-sonnet-5-5`), so the `claude` CLI must work; each step says how many model calls it makes, or that it makes none. Replaying a cassette (`--replay`) and the test suite are the model-free ways to check the same things.
 
 ## Contents
 
@@ -84,7 +84,7 @@ In the SPL.py repo: `python -m pytest tests/test_spl2graph.py -q` should give **
 
 ## 2. The cookbook at a glance
 
-Every graph validates, and all but the two LLM-only ones run offline with `--adapter mock`.
+Every graph validates. Four recipes call no model: `solver_check`, `lifted_tool`, `container_demo` and `pocketflow/text_transformer`; the others do.
 
 ```bash
 for f in cookbook/*/*.graph.yaml cookbook/pocketflow/*.graph.yaml; do
@@ -118,20 +118,20 @@ Each recipe's run commands are in its `readme.md`.
 G=cookbook/self_refine/self_refine.graph.yaml
 graf info $G                             # name, node and edge counts, inputs, outputs, resources
 graf validate $G                         # ✓ Valid GraphLang workflow: self_refine
-graf run $G --adapter mock --param topic=ducks --save-nodes --output-dir /tmp/verify/out
+graf run $G --param topic=ducks --save-nodes --output-dir /tmp/verify/out     # 3 model calls
 ```
 
-Check `/tmp/verify/out/self_refine-mock-<time>/`: `essay.md`, `result.json`, `run.json`, `summary.json` (steps 4, 3 calls), and `nodes/` with one file per node output.
+Check `/tmp/verify/out/self_refine-claude_cli-claude-sonnet-5-5-<time>/`: `essay.md`, `result.json`, `run.json`, `summary.json` (steps 4, 3 calls), and `nodes/` with one file per node output.
 
 ```bash
-graf run $G --adapter mock --param topic=x --log-level debug --log-format jsonl --log-dir /tmp/verify/logs
+graf run $G --param topic=x --log-level debug --log-format jsonl --log-dir /tmp/verify/logs     # 3 calls
 ls /tmp/verify/logs                      # a .jsonl with run.start, node events, run.end
-graf run $G --adapter mock --param topic=x --no-output --no-log   # prints only to the console
-graf run $G --adapter mock                                         # error: required input 'topic' missing (before any node fires)
-graf run $G --adapter mock --param nope=1                          # error: unknown workflow input
+graf run $G --param topic=x --no-output --no-log                   # 3 calls; prints only to the console
+graf run $G                                                         # error: required input 'topic' missing (before any node fires, no call)
+graf run $G --param nope=1                                          # error: unknown workflow input (no call)
 ```
 
-Typed inputs: `graf run cookbook/concept_book/build_concept_book.graph.yaml --adapter mock --param subject=x --param num_chapters=abc` fails at once with `input 'num_chapters' must be INTEGER`.
+Typed inputs: `graf run cookbook/concept_book/build_concept_book.graph.yaml --param subject=x --param num_chapters=abc` fails at once with `input 'num_chapters' must be INTEGER`.
 
 Other commands:
 
@@ -215,7 +215,7 @@ Everything else in the lifecycle is easier to see in tests: `pytest tests/test_l
 
 **Compact `steps:`** — `graf expand cookbook/parts_demo/parts_demo.graph.yaml | head -40` shows the long form. Kinds: generate, solve, assert, evaluate, guard, fork, join, output, use, loop, node.
 
-**Compact loop** — save as `loop.graph.yaml` and run with mock:
+**Compact loop** — save as `loop.graph.yaml` (the run below makes 6 model calls):
 
 ```yaml
 version: "1.0-graph"
@@ -237,12 +237,12 @@ steps:
   - done: {output: book}
 ```
 
-`graf run loop.graph.yaml --adapter mock --param subject=x --no-output --no-log` completes with **6 LLM calls** (outline, two chapters times write and review, compile). With `--param n=3`: 8 calls.
+`graf run loop.graph.yaml --param subject=x --no-output --no-log` completes with **6 LLM calls** (outline, two chapters times write and review, compile). With `--param n=3`: 8 calls.
 
 **Parts:**
 
 ```bash
-graf run cookbook/parts_demo/parts_demo.graph.yaml --adapter mock --param topic=tides --save-nodes --output-dir /tmp/verify/p
+graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides --save-nodes --output-dir /tmp/verify/p     # 3 calls
 graf expand cookbook/parts_demo/parts_demo.graph.yaml | grep -E "id: (first|second)__"   # first__rewrite, second__rewrite
 ```
 
@@ -251,10 +251,10 @@ The first use is told `formal tone`, the second the part's default `plain tone` 
 **Elaboration:**
 
 ```bash
-graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --adapter mock --workers 2 --no-output --no-log
+graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --workers 2 --no-output --no-log     # 4 calls
 ```
 
-Expected: four explanations keyed `counting`, `probability`, `entropy`, `coding`; the `entropy` prompt contains both prerequisites' texts; `coding` contains `entropy`'s. Run it with `--workers 1` and `--workers 4`: the output is identical. Add an edge `coding -> probability` to `concepts.yaml` (a copy) and validation reports a cycle.
+Expected: four explanations keyed `counting`, `probability`, `entropy`, `coding`; `entropy`'s should build on the two before it and `coding`'s on `entropy`'s (`pytest tests/test_elaborate.py` pins the exact prompt each concept receives). The same output with `--workers 1` and `--workers 4` is checked in section 8, by replay. Add an edge `coding -> probability` to `concepts.yaml` (a copy) and validation reports a cycle.
 
 Pinned by: `test_compact`, `test_parts`, `test_elaborate`. **[real LLM]** one test each (`--mode llm`).
 
@@ -293,10 +293,14 @@ A checkpoint belongs to one graph; resuming against an edited graph is refused. 
 
 ## 8. Concurrency, BATCH, RUN, SOLVE backends, containers
 
-**Concurrency:** `--workers N` runs nodes released together at the same time; results are applied in token order, so the output must not change:
+**Concurrency:** `--workers N` runs nodes released together at the same time; results are applied in token order, so the output must not change. A live model words things differently every time, so record once and compare two replays:
 
 ```bash
-for w in 1 4; do graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --adapter mock --workers $w --no-output --no-log | grep Output | md5sum; done   # two identical hashes
+E=cookbook/elaborate_demo/elaborate_demo.graph.yaml
+graf run $E --workers 1 --record /tmp/verify/e.jsonl --no-output --no-log          # 4 model calls, recorded
+graf run $E --workers 1 --replay /tmp/verify/e.jsonl --output-dir /tmp/verify/w1 --no-log   # no model
+graf run $E --workers 4 --replay /tmp/verify/e.jsonl --output-dir /tmp/verify/w4 --no-log   # no model
+cmp /tmp/verify/w1/*/result.json /tmp/verify/w4/*/result.json && echo identical
 ```
 
 `pytest tests/test_concurrency.py -q` (10) checks every shipped graph gives the same result with 4 workers as with 1. **[real LLM]** `test_real_llm_two_branches_overlap` proves two branches really overlap in time.
@@ -306,9 +310,9 @@ for w in 1 4; do graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --ad
 **SOLVE backends** (deterministic work, no model):
 
 ```bash
-graf run cookbook/solver_check/solver_check.graph.yaml --adapter mock --param numbers=1,2,3 --param expected=6 --no-output --no-log
+graf run cookbook/solver_check/solver_check.graph.yaml --param numbers=1,2,3 --param expected=6 --no-output --no-log
 #   Output: {'verdict': 'confirmed: 6 (kernel and subprocess agree)'}
-graf run cookbook/solver_check/solver_check.graph.yaml --adapter mock --param numbers=1,2,3 --param expected=7 --no-output --no-log
+graf run cookbook/solver_check/solver_check.graph.yaml --param numbers=1,2,3 --param expected=7 --no-output --no-log
 #   Output: {'verdict': 'MISMATCH: kernel 6, subprocess 6, expected 7'}
 graf run cookbook/lifted_tool/lifted_tool.graph.yaml --param word=hello --no-output --no-log   # Output: {'loud': 'HELLO!'}
 ```
@@ -322,7 +326,7 @@ graf run cookbook/lifted_tool/lifted_tool.graph.yaml --param word=hello --no-out
 ```bash
 docker pull python:3.12-slim
 pytest tests/test_container.py -q        # 19 pass: stub-docker tests plus 4 real ones (no skips when the daemon and image are there)
-graf run cookbook/container_demo/container_demo.graph.yaml --adapter mock --param numbers=4,5,6
+graf run cookbook/container_demo/container_demo.graph.yaml --param numbers=4,5,6
 #   Output: {'report': {'sum': 15, 'hostname': '<container id>', 'network': False, 'write_graph_folder': False, 'write_root': False}}
 docker ps -a --filter name=graf-         # nothing left behind
 ```
@@ -332,7 +336,7 @@ The report is the proof: the container had no network and could not write to the
 **Docker Desktop shares only your home directory.** Mounting any other folder hangs forever. graflang checks first: copy the demo to `/tmp` and run it, and it stops in a fraction of a second with `Docker Desktop shares only your home directory ... mounting it would hang`:
 
 ```bash
-cp -r cookbook/container_demo /tmp/cd && graf run /tmp/cd/container_demo.graph.yaml --adapter mock --no-output --no-log; rm -rf /tmp/cd
+cp -r cookbook/container_demo /tmp/cd && graf run /tmp/cd/container_demo.graph.yaml --no-output --no-log; rm -rf /tmp/cd
 ```
 
 To allow another folder, add it in Docker Desktop (Settings, Resources, File sharing) and export `GRAF_DOCKER_SHARED=/that/folder` (colon-separated list); `container: {mount: none}` skips the mount altogether. `graf validate` on a node with a bad `container:` names the problem (unknown key, `network: host`, non-positive limits).
@@ -367,7 +371,7 @@ Check by hand:
 2. **Node tab:** pick `draft`, change `temperature` to `0.2` and press Set. The sidebar says "unsaved changes"; **Problems** still says valid; **Undo** restores it.
 3. Add a config key with an invalid value, or remove a port an edge uses: **Problems** lists the error and **Save** is disabled.
 4. Fix it and press **Save**: comments such as `# Control flow` are kept in the file and only the edited line changes (`git diff cookbook/self_refine`). Revert with `git checkout cookbook/self_refine`.
-5. **Run tab:** fill `topic`, keep `mock`, press Run: you see the step count, the output JSON and a table of nodes fired. Choosing `claude_cli` makes real calls.
+5. **Run tab:** fill `topic`, pick the adapter in the box (`claude_cli` makes real, billed calls; the other entry answers with placeholder text and is free), press Run: you see the step count, the output JSON and a table of nodes fired.
 6. Open a compact file (`parts_demo`) or an `elaborate:` file: the editor refuses with a message pointing to `graf expand`.
 
 Not in the editor, by decision: dragging edges on the canvas, and editing compact or `elaborate:` files. `pytest tests/test_editor.py -q` (38) always runs; `test_editor_app.py` (7) needs Streamlit.
@@ -390,7 +394,7 @@ In SPL.py: `python -m pytest tests/test_spl2graph.py -q` gives 19 passed, includ
 
 ## 12. Real-LLM checks
 
-Always with a budget, always with a timeout, after an offline run. A small bindings file:
+Always with a budget and a timeout; a small bindings file:
 
 ```yaml
 # budget.bind.yaml
@@ -428,7 +432,7 @@ Do **not** run `017_judge` from the PocketFlow set unattended: the lifter skips 
 
 - `ModuleNotFoundError: zinet` → you are using the system Python; use the `graf` env.
 - `kernel` SOLVE hangs or errors → `pip install -e ".[kernel]"`; the first kernel call takes a few seconds.
-- A real run seems stuck → it may be a loop; Ctrl-C, then rerun with `--adapter mock` and read the step count, and use a `max_llm_calls` budget.
+- A real run seems stuck → it may be a loop; Ctrl-C, then rerun with `--max-steps 50` and a `max_llm_calls` budget (`--bind`, section 7) and read the step count.
 - `graf run` writes into the repo → results go to `<graph folder>/output/`; pass `--output-dir /tmp/...` or `--no-output`. `cookbook/*/output/` is ignored by git.
 - A cassette replay fails with `no recording` → the prompt or model changed; re-record with `--record` (small budget).
 - Logs: `~/.graflang/logs/<name>-<adapter>-<time>.log` and `.jsonl`; use `--log-level debug` for every node firing.

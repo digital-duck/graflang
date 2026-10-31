@@ -46,8 +46,6 @@ graf run cookbook/code_pipeline/code_pipeline.graph.yaml --llm claude_cli:claude
 graf run cookbook/code_pipeline/code_pipeline.graph.yaml --llm ollama:gemma3 --param spec="..."
 ```
 
-`--adapter mock` is not useful here: its placeholder text never contains `[READY]`, so `spec_gate` fails and the run ends at `abort_vague` with no output (this is the expected "spec too vague" path, and a quick way to see it).
-
 ## What you get
 
 - **Console:** the firing order, with the loop body indented. The loop nodes repeat once per cycle.
@@ -77,4 +75,4 @@ graf run cookbook/code_pipeline/code_pipeline.graph.yaml --llm ollama:gemma3 --p
 ## Known limits
 
 - `loop_test` is an LLM acting as a test suite (`04_test_code.spl`): it reviews the code, it does not execute it.
-- Not run end to end with a real model when this README was written; `mock` (stops at the gate) is the only path checked.
+- Not run end to end with a real model when this README was written.

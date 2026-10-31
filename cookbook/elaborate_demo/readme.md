@@ -27,7 +27,7 @@ counting ------/
 ## Run
 
 ```bash
-graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --adapter mock --workers 2
+graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --workers 2
 graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --param audience="high-school students" --workers 2 --save-nodes
 ```
 

@@ -15,7 +15,7 @@ pip install -e ".[dev]"                      # extras: dev, anthropic/gemini (pr
 pytest                                       # all tests (use the `graf` conda env's python: it has zinet, dd-llm, SPL.py)
 pytest tests/test_grafr_loop.py::test_name   # single test
 pytest --mode llm                           # only the few real-LLM tests (claude_cli, claude-sonnet-5-5); plain `pytest` is offline only; `-m` is refused (see tests/README.md); `--mode all` runs both
-graf run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `claude_cli` (real LLM!); add `--adapter mock` to run offline; --param is repeatable
+graf run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `claude_cli` with claude-sonnet-5-5 (a real LLM, billed; give a `--bind` file with `limits.max_llm_calls` when trying a loop); --param is repeatable
 graf validate|info <graph.yaml>
 graf run ... --log-level debug --log-format jsonl|text|both --log-dir DIR --no-log --output-dir DIR --save-nodes --no-output   # logs default to ~/.graflang/logs
 graf compile <graph.yaml> [--lang rust|spl] [-o OUT] [--dry-run]   # spl: SPL script (graf export-spl is folded in); rust: experimental stub; both run `validate`'s checks first
@@ -24,7 +24,7 @@ graf vis <graph.yaml> [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o F
 
 `graf` is one `click` group (`main` in `graphlang/cli.py`); each command lives in its package (`grafr/cli.py`: run/validate/info, `grafc/cli.py`: compile/check, `grafv/cli.py`: vis) as a plain `@click.command("name")` and is registered in `graphlang/cli.py`. There are no `grafr`/`grafc` console scripts. Imports in tests must be `graphlang.grafr...` / `graphlang.grafc...`. Tests under `tests/test_cedar_compiler.py` and `test_policy_slicer.py` exercise the hand-written Cedar compiler and have known failures (gap #18).
 
-Real LLM calls: `--llm claude_cli:<model-id>` (same as `--adapter claude_cli --model <id>`; `--llm` wins) goes through dd-llm (`/home/gongai/projects/digital-duck/dd-llm`, a core dependency; `pip install -e` it if missing). `procedure_ref` nodes additionally need SPL.py importable (`pip install -e /path/to/SPL.py` or set `SPL_PY_PATH`). Default `mock` adapter needs no LLM; tests use it.
+Real LLM calls: `--llm claude_cli:<model-id>` (same as `--adapter claude_cli --model <id>`; `--llm` wins) goes through dd-llm (`/home/gongai/projects/digital-duck/dd-llm`, a core dependency; `pip install -e` it if missing). `procedure_ref` nodes additionally need SPL.py importable (`pip install -e /path/to/SPL.py` or set `SPL_PY_PATH`). The `mock` adapter (kept for the test suite, not documented for users) needs no LLM; tests use it or stub models.
 
 ## Architecture
 

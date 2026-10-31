@@ -2,7 +2,7 @@ version: "1.0-graph"
 
 # A program run inside a Docker container. The SOLVE node sums the numbers and then reports what the container allowed:
 # no network, a read-only root filesystem, a read-only mount of this folder. No LLM.
-#   graf run cookbook/container_demo/container_demo.graph.yaml --adapter mock --param numbers=1,2,3
+#   graf run cookbook/container_demo/container_demo.graph.yaml --param numbers=1,2,3
 # Needs a running Docker daemon and the image:  docker pull python:3.12-slim
 # Under Docker Desktop this folder must be under your home directory (the only folder it shares by default).
 

@@ -2,7 +2,7 @@ version: "1.0-graph"
 
 # One template applied to a graph of concepts: each concept is explained by the `explain` part after its prerequisites,
 # and independent concepts run side by side with `--workers 2`.
-#   graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --adapter mock --workers 2
+#   graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --workers 2
 #   graf expand cookbook/elaborate_demo/elaborate_demo.graph.yaml     # the nodes and edges it stands for
 #   graf vis cookbook/elaborate_demo/elaborate_demo.graph.yaml
 

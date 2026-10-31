@@ -65,7 +65,7 @@ The LLM can propose mutations, but only those that pass the Cedar policy check a
 # Install (development)
 pip install -e ".[dev]"        # `claude_cli`, `ollama`, `openai`, `openrouter` work as is; `.[anthropic]`, `.[gemini]` add SDKs
 
-# Run a workflow (default adapter is `claude_cli`; `--adapter mock` calls no LLM)
+# Run a workflow (the default is `--adapter claude_cli --model claude-sonnet-5-5`)
 graf run cookbook/code_pipeline/code_pipeline.graph.yaml \
     --adapter ollama \
     --param spec="Write a binary search function"

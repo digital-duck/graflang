@@ -22,7 +22,7 @@ The interface is checked when the file loads (`graf validate`): `in:`/`out:` nam
 ## Run
 
 ```bash
-graf run cookbook/parts_demo/parts_demo.graph.yaml --adapter mock --param topic=tides
+graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides
 graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides --save-nodes
 ```
 

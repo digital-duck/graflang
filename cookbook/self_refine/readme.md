@@ -19,10 +19,10 @@ wf_entry -> draft -> critique -> refine -> wf_exit
 From the repo root:
 
 ```bash
-# no LLM: placeholder text, checks the wiring and the output files
-graf run cookbook/self_refine/self_refine.graph.yaml --adapter mock --param topic="ducks"
+# the default: claude_cli with claude-sonnet-5-5
+graf run cookbook/self_refine/self_refine.graph.yaml --param topic="why ducks float"
 
-# a real model
+# another model
 graf run cookbook/self_refine/self_refine.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="why ducks float"
 graf run cookbook/self_refine/self_refine.graph.yaml --llm ollama:gemma3 --param topic="why ducks float"
 ```

@@ -5,7 +5,7 @@ version: "1.0-graph"
 #   sum_script  runs solvers/sum_numbers.py as a black box (backend: subprocess); inputs go in as JSON on stdin, and the
 #               custom parser solvers/parsers.py:total turns its text output into an integer
 # If sum_script fails (non-zero exit, timeout, unreadable output) the node routes to its `error` port and the run reports it.
-# Run it offline:  graf run cookbook/solver_check/solver_check.graph.yaml --adapter mock --param numbers=1,2,3 --param expected=6
+# Run it (no model is called):  graf run cookbook/solver_check/solver_check.graph.yaml --param numbers=1,2,3 --param expected=6
 
 workflow:
   name: "solver_check"

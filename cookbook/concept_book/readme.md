@@ -21,11 +21,11 @@ wf_entry -> generate_outline -> chapter_loop -> compile_book -> wf_exit
 From the repo root:
 
 ```bash
-# no LLM, 2 chapters: checks the loop and the output files
-graf run cookbook/concept_book/build_concept_book.graph.yaml --adapter mock \
+# start small: 2 chapters is 6 calls with the default model (claude_cli, claude-sonnet-5-5); 5 chapters is 12
+graf run cookbook/concept_book/build_concept_book.graph.yaml \
     --param subject="entropy" --param num_chapters=2
 
-# a real model; start small, 5 chapters is 12 calls
+# another model, keeping every node's output
 graf run cookbook/concept_book/build_concept_book.graph.yaml --llm claude_cli:claude-haiku-5-5 \
     --param subject="entropy" --param num_chapters=3 --save-nodes
 ```

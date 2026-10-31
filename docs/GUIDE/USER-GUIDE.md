@@ -56,8 +56,8 @@ Check with `dot -V` (it prints the version), then `graf vis --list-engines`: the
 | Option | Meaning |
 |---|---|
 | `--param key=value` | a workflow input; repeatable. Coerced to the declared type (`INTEGER`, `FLOAT`, `BOOL`). A value without `=` is a usage error |
-| `--llm ADAPTER[:MODEL]` | `--adapter` and `--model` in one value, e.g. `claude_cli:claude-haiku-5-5`, `ollama:gemma3:12b`, `mock`. Only the first `:` splits, so model ids with `:` or `/` work. Wins over `--adapter`/`--model` |
-| `--adapter NAME` | `claude_cli` (default), `mock` (no LLM, placeholder text), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
+| `--llm ADAPTER[:MODEL]` | `--adapter` and `--model` in one value, e.g. `claude_cli:claude-haiku-5-5`, `ollama:gemma3:12b`. Only the first `:` splits, so model ids with `:` or `/` work. Wins over `--adapter`/`--model` |
+| `--adapter NAME` | `claude_cli` (default), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
 | `--model ID` | model for every `GENERATE` node; overrides `model:` hints in the graph. Default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), where the graph's hints apply |
 | `--max-steps N` | stop after N node firings (default 1000) |
 | `--output-dir DIR` | where results go (default `<graph folder>/output`); see [Results](#results-the-output-folder) |
@@ -417,7 +417,7 @@ Literals, `AND`/`OR`/`NOT`, comparisons, arithmetic, and these functions: `conta
 2. **Reference**: `prompt_ref: "prompts.draft"` (a `.md` file), `procedure_ref: "procedures.generate_code"` (an SPL.py `.spl` file), `policy_ref: "policies.mutation_safety"` (a `.cedar` file), each declared under `resources`.
 3. **Sub-graph**: a composite node; currently `LOOP`.
 
-A `procedure_ref` on `GENERATE` or `SOLVE` runs the SPL.py workflow in that file with SPL's own executor; sibling `.spl` files load into a registry so `IMPORT`/`CALL` work. Parameters come from the node's `in_*` ports (`in_spec` becomes `spec`) or from `config.params` `{spl_parameter: in_port}`; `*model*` parameters receive `--model`. Not executed under `--adapter mock`.
+A `procedure_ref` on `GENERATE` or `SOLVE` runs the SPL.py workflow in that file with SPL's own executor; sibling `.spl` files load into a registry so `IMPORT`/`CALL` work. Parameters come from the node's `in_*` ports (`in_spec` becomes `spec`) or from `config.params` `{spl_parameter: in_port}`; `*model*` parameters receive `--model`.
 
 ## Safety: GUARD and MUTATE
 

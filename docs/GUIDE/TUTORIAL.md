@@ -1,15 +1,15 @@
 # Tutorial: your first GraphLang workflow
 
-You will run a bundled workflow, read its anatomy, then write a small one of your own with a retry loop. About 15 minutes. Every command here passes `--adapter mock`, so no LLM or network is needed (without it `graf run` calls `claude_cli`). Install first: [SETUP.md](SETUP.md).
+You will run a bundled workflow, read its anatomy, then write a small one of your own with a retry loop. About 15 minutes. Every `graf run` here uses the default model (`claude_cli` with `claude-sonnet-5-5`), so the `claude` command-line tool must work; each run makes a handful of short calls, and the one deliberately endless retry in section 4 is capped at 10. Install first: [SETUP.md](SETUP.md).
 
 ## 1. Run a workflow
 
 ```bash
 graf info cookbook/self_refine/self_refine.graph.yaml
-graf run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain" --adapter mock
+graf run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain"
 ```
 
-`info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft (#1)` and so on), then the output and a `log:` line with the path of this run's log file (section 5). With `mock` the text is a placeholder that echoes the prompt: it proves the wiring works, not that the essay is good.
+`info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft (#1)` and so on), then the output and a `log:` line with the path of this run's log file (section 5).
 
 ## 2. Read the graph
 
@@ -92,7 +92,7 @@ Check and run it:
 
 ```bash
 graf validate haiku.graph.yaml
-graf run haiku.graph.yaml --adapter mock --param topic="rain"
+graf run haiku.graph.yaml --param topic="rain"
 ```
 
 What you built: `write` generates; `gate` (`EVALUATE`) tests a condition on the poem and sends the token to `pass` or `fail`; `fail` is wired back to `write.trigger`, so a bad result tries again. A node may fire more than once, so a retry is simply a wire back to an earlier node.
@@ -108,7 +108,7 @@ config: {condition: "len(@in_poem) > 100000"}
 ```
 
 ```bash
-graf run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20
+graf run haiku.graph.yaml --param topic="rain" --max-steps 20
 ```
 
 The run fails with `✗ Run failed: stopped after 20 node firings` (naming the nodes that fired most). `--max-steps` bounds the number of node firings, which is your safety net for endless retry wires. A better design is to let `LOOP` own the repetition (next section).
@@ -120,8 +120,8 @@ Now introduce a typo: change `@in_poem` to `@poem`. `graf validate` reports that
 Every `graf run` also writes a log file that records what happened, whether or not the run succeeded. The terminal shows the last line, `log: <path>`. By default the files go to `~/.graflang/logs/` (created on first use), one pair per run, named `<graph>-<adapter>[-<model>]-<timestamp>` (the model appears when you pass `--model` or `--llm ADAPTER:MODEL`, with `:` and `/` turned into `-`). Use `--log-dir .` to put them in the current folder instead:
 
 ```
-~/.graflang/logs/haiku-mock-20261024-081302.log      # for people
-~/.graflang/logs/haiku-mock-20261024-081302.jsonl    # for tools (one JSON object per line)
+~/.graflang/logs/haiku-claude_cli-claude-sonnet-5-5-20261024-081302.log      # for people
+~/.graflang/logs/haiku-claude_cli-claude-sonnet-5-5-20261024-081302.jsonl    # for tools (one JSON object per line)
 ```
 
 Run the failing graph from section 4 and open the `.log`:
@@ -145,7 +145,7 @@ Run the failing graph from section 4 and open the `.log`:
 The default level is `info`. Add `--log-level debug` to see the debug events, for example to check exactly what prompt a node sent:
 
 ```bash
-graf run haiku.graph.yaml --adapter mock --param topic="rain" --max-steps 20 --log-level debug
+graf run haiku.graph.yaml --param topic="rain" --max-steps 20 --log-level debug
 ```
 
 The `.jsonl` has the same events with their fields as keys, so you can query it:
@@ -190,9 +190,9 @@ A `LOOP` node runs a sub-graph repeatedly while a condition holds, and has a bui
 
 `@cycle` is the 0-based counter. `@ok` is the previous iteration's output named `ok`. Because the condition is checked before each iteration, `NOT @ok` is true on the first pass (nothing has fired yet). In the body, `write.in_topic` has no `binds` edge, so it reads the loop's own `in_topic`, which you bind from `start.out_topic`. Replace `write`/`gate` in your graph with this node, wire `start.entry -> retry.trigger`, `retry.exit -> done.trigger` and `retry.out_poem -> done.in_result`, then `validate` and `run`. For a complete example see `cookbook/concept_book/` (collects one chapter per iteration) and `cookbook/code_pipeline/`.
 
-## 7. Go real
+## 7. Another model
 
-Pick an adapter and model when you run, not in the graph. The default adapter is `claude_cli` (the `claude` command-line tool, so no API key). The adapter and model are part of the log file name (`haiku-claude_cli-claude-haiku-5-5-<timestamp>.log`), so runs with different LLMs are easy to tell apart:
+Pick an adapter and model when you run, not in the graph. The default is `--adapter claude_cli --model claude-sonnet-5-5` (the `claude` command-line tool, so no API key). The adapter and model are part of the log file name (`haiku-claude_cli-claude-haiku-5-5-<timestamp>.log`), so runs with different LLMs are easy to tell apart:
 
 ```bash
 graf run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="rain"
@@ -204,10 +204,10 @@ graf run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="rain"
 
 `cookbook/compliance_audit/` mixes everything above: an LLM for the fuzzy part, fixed rules for the decision, a retry path and a Cedar guard. An LLM reads a document and lists the **types** of personal data in it (never the values). Boolean rules then decide, with no LLM, whether the document may go to a destination. A failing document is redacted, read again and re-checked once. A Cedar `GUARD` has the last word, and anything that cannot be shown compliant ends at the `escalated` output.
 
-The rule check is a small Python program that a `SOLVE` node runs as a subprocess (`backend: subprocess`), so it needs no extra install. Run it with a real model:
+The rule check is a small Python program that a `SOLVE` node runs as a subprocess (`backend: subprocess`), so it needs no extra install. Run it:
 
 ```bash
-graf run cookbook/compliance_audit/compliance_audit.graph.yaml --llm claude_cli:claude-sonnet-5-5 \
+graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
     --param document="Customer John Doe, SSN 123-45-6789, asks to update his address." \
     --param destination=external_api --param engine=stdlib --param rules_file=
 ```

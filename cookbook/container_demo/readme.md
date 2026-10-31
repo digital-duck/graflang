@@ -17,7 +17,7 @@ wf_entry -> probe (SOLVE, backend: subprocess, container: python:3.12-slim) -> d
 
 ```bash
 docker pull python:3.12-slim
-graf run cookbook/container_demo/container_demo.graph.yaml --adapter mock --param numbers=4,5,6
+graf run cookbook/container_demo/container_demo.graph.yaml --param numbers=4,5,6
 # Output: {'report': {'sum': 15, 'hostname': '<container id>', 'network': False, 'write_graph_folder': False, 'write_root': False}}
 ```
 

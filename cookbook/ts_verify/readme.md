@@ -111,7 +111,7 @@ graf run cookbook/ts_verify/ts_verify.graph.yaml --llm claude_cli:claude-haiku-4
 - **Your own function.** Write cases as a JSON list, `[{"args": [...], "expected": ...}, ...]`, and pass the name and a spec. `cases` can be that JSON text itself or a path; a relative path starts in `cookbook/ts_verify/` (where the tools run), not in your current folder. Arguments and results must be JSON values, and the function must be pure: no imports, no `console`, no files.
 - **More or fewer attempts.** `--param max_cycles=5`.
 - **No type check.** `--param check_types=false`.
-- **Another model.** `--llm ollama:<model>`, or `--adapter mock` to see the plumbing without a model (the placeholder text is not code, so the run reports `cannot load the code`).
+- **Another model.** `--llm ollama:<model>`.
 - **Another language for a tool.** Edit `command:` in the graph. `["node", "tools/run_cases.mjs"]` could be `["deno", "run", "tools/run_cases.ts"]`, a Rust binary or a Python script, as long as it reads the same JSON and prints one JSON line. If the new runtime aborts at start-up, give the node more address space with `memory_mb` (Bun needs `memory_mb: 16384`). If the tool needs a variable from your environment, such as `HOME` or `NODE_PATH`, name it with `env_passthrough: [HOME]`; by default a tool sees only `PATH`.
 
 ## What it shows

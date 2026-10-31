@@ -16,7 +16,7 @@ It is an illustration of the pattern, not legal advice. The default rules are no
 ```bash
 # no extra install: the rule check is a plain Python program (no SPL.py, no kernel); sympy or z3 only if you pick those engines
 graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
-    --adapter claude_cli --model <id> \
+    --model <id> \
     --param document="Customer John Doe, SSN 123-45-6789, asks to update his address." \
     --param destination=external_api --param engine=stdlib --param rules_file=
 ```
