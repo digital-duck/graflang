@@ -1,0 +1,14 @@
+# Bindings for self_refine: the environment for a run, kept apart from the graph.
+#   graf run cookbook/self_refine/self_refine.graph.yaml --bind cookbook/self_refine/self_refine.bind.yaml
+# draft, critique and refine each name their own LLM in the graph (ollama:gemma3 -> haiku -> sonnet), and a node's llm: beats the
+# run's llm below. The run's llm applies only to a node that names none.
+
+llm: claude_cli:claude-sonnet-5-5       # the run's LLM, like --llm (a flag on the command line wins over this)
+
+params:
+  topic: why chinese lang is hard to learn      # default workflow parameter; --param topic=... wins
+
+limits:
+  max_llm_calls: 5                      # the recipe makes 3 calls; stops the run before a 6th
+  max_steps: 50
+  wall_time_s: 300

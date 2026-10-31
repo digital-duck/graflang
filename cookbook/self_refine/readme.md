@@ -19,15 +19,14 @@ wf_entry -> draft -> critique -> refine -> wf_exit
 From the repo root:
 
 ```bash
-# the default: claude_cli with claude-sonnet-5-5
+# three LLMs, as the graph names them: draft on ollama:gemma3, critique on haiku, refine on sonnet (needs a running Ollama with gemma3)
 graf run cookbook/self_refine/self_refine.graph.yaml --param topic="why ducks float"
 
-# another model
-graf run cookbook/self_refine/self_refine.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic="why ducks float"
-graf run cookbook/self_refine/self_refine.graph.yaml --llm ollama:gemma3 --param topic="why ducks float"
+# the same, with a default topic and a budget of 5 LLM calls (self_refine.bind.yaml)
+graf run cookbook/self_refine/self_refine.graph.yaml --bind cookbook/self_refine/self_refine.bind.yaml
 ```
 
-Under `claude_cli` the model is `claude-sonnet-5-5` unless you give another with `--llm claude_cli:<model>`. Under `ollama` there is no default: pass `--llm ollama:<model>`, or leave it to the nodes' own `llm:` (the graph's `draft` and `refine` name `ollama:gemma3`, `critique` names `claude_cli:claude-haiku-5-5`, and a node's `llm:` beats `--llm`).
+Each node's `llm:` (`adapter[:model]`, the same spec as `--llm`) beats `--llm`, so `--llm` only matters for a node that names none. To run all three on one model, delete the `llm:` lines from the graph, then `graf run ... --llm claude_cli:claude-haiku-5-5` (or `--llm ollama:gemma3`).
 
 ## What you get
 
