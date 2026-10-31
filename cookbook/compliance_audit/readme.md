@@ -17,10 +17,11 @@ It is an illustration of the pattern, not legal advice. The default rules are no
 # no extra install: the rule check is a plain Python program (no SPL.py, no kernel); sympy or z3 only if you pick those engines
 graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
     --param document="Customer John Doe, SSN 123-45-6789, asks to update his address." \
-    --param destination=external_api
+    --param destination=external_api \
+    --param rules_file="./procedures/rules.json"
 ```
 
-`engine` and `rules_file` are optional (`stdlib` and the demo rules); the example above is the same as adding `--param engine=stdlib --param rules_file=`.
+`rules_file` here names the demo rules explicitly (`procedures/rules.json`); a relative path starts in the recipe's folder, not where you ran `graf run`, so this works from the repo root. `engine` is left out, so it is `stdlib`. Both are optional: leave `rules_file` out (or empty) and the demo rules are used, and add `--param engine=sympy` to pick another engine.
 
 `engine` is `stdlib` (no dependency, the default), `sympy` or `z3`. All three give the same verdicts; see recipe 127 in SPL.py for the measurements (made with the SPL version of the check). A real run with `claude_cli` on the example above redacted the SSN, re-read the result, passed the rules and was released by the Cedar guard. `tests/test_compliance_audit.py` covers every path with a stub model, so it needs no LLM.
 
