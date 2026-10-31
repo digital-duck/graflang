@@ -1,0 +1,17 @@
+REVISION_NEEDED
+
+1. **Audience mismatch on the code and the maths in the "first working example" section.** The brief for intro readers allows "no more than a few lines of code" and asks for code to be explained. The example is about six lines, but it is presented without explaining what `client`, `messages.create`, `max_tokens`, or `content[0].text` mean. Either add one plain sentence per line of meaning, or cut it to the call itself and explain the rest in prose. The `ANTHROPIC_API_KEY` setup also needs a clearer note that the reader must sign up and may be billed.
+
+2. **Terms used before they are defined.** "Function" is glossed as "a fancy word for a machine," which is loose; define it with the post-office analogy first and then name it. "Probability" appears in "probability estimate" with no definition. "Accuracy" and "training data" are fine, but "label" is used before it is explained that a label is the correct answer attached to an example. "Inference" and "LLM" are defined, but "token" is not used, so no change is needed there. Check every term at first use.
+
+3. **Style drift from "clear and conversational, with concrete examples."** Most sections are conversational, but "Learning from examples" opens with a numbered procedure and "Common misconceptions" and "Key takeaways" are list-heavy. Keep the numbered training steps, but rewrite the misconceptions as short paragraphs with a concrete example each, and turn the takeaways into a short closing paragraph or keep them as a list of plain sentences. The "Check your understanding" questions are fine.
+
+4. **Accuracy: the muffin/chihuahua example is presented as a fact about a specific system.** It is a widely cited illustration, not a documented result for a specific classifier. Phrase it as "a well-known illustration" or "a photo classifier can be fooled in this way," and do not imply a specific published test.
+
+5. **Accuracy: "Chapter 2" cross-reference.** The chapter says "You will see how to supply your own facts in Chapter 2." This is a promise about content that cannot be verified from this chapter alone. Either confirm it matches the book's outline, or soften it to "later in this book."
+
+6. **Accuracy: LLM training description is oversimplified.** "Its core training task is simple to state: predict the next word" is accurate for pretraining, but the chapter then says the model "has learned that a good answer to a question is usually a sequence of words that reads like one." This is a loose claim. Say instead that post-training methods shape a model toward helpful answers, and that the next-word objective alone does not guarantee that.
+
+7. **Completeness: missing point on inference cost and latency.** The chapter says inference is "often a fraction of a second," which is true only for short inputs and outputs on a fast model. Add that response time and cost depend on input and output length and on the model chosen, so readers do not expect the timing as a rule.
+
+8. **Completeness: the "Predictions are guesses" section should say what confidence means.** The reader is told the 97% is "a probability estimate," but not that it is the model's own score and is not guaranteed to match real-world frequency. Add one sentence and a simple example.

@@ -1,0 +1,9 @@
+{
+  "graph": "parts_demo",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "topic": "AI assisted education"
+  },
+  "started": "2026-10-31T12:22:33"
+}

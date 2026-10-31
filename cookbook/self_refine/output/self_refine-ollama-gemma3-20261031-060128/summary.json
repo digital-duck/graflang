@@ -1,0 +1,34 @@
+{
+  "steps": 4,
+  "mutations": 0,
+  "llm": {
+    "adapter": "ollama",
+    "calls": 3,
+    "input_tokens": 2762,
+    "output_tokens": 2777,
+    "cost_usd": 0.0,
+    "ms": 48640
+  },
+  "nodes": {
+    "refine": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 17080
+    },
+    "critique": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 16107
+    },
+    "draft": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 15454
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "steps": 7,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 4,
+    "input_tokens": 5896,
+    "output_tokens": 7833,
+    "cost_usd": 0.0,
+    "ms": 87393
+  },
+  "nodes": {
+    "improve__gen": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 36902
+    },
+    "review__gen": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 24291
+    },
+    "write__gen": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 18634
+    },
+    "analyze__gen": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 7568
+    },
+    "collect": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 24
+    },
+    "gate": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "done": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

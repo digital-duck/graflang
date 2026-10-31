@@ -1,0 +1,9 @@
+{
+  "graph": "parts_demo",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "topic": "future of high education in age of AI"
+  },
+  "started": "2026-10-31T13:04:06"
+}

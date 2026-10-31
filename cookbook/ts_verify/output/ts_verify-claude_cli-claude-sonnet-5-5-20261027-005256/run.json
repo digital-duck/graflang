@@ -1,0 +1,11 @@
+{
+  "graph": "ts_verify",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "function": "slugify",
+    "cases": "examples/slugify.cases.json",
+    "spec": "slugify(title): lowercase; treat anything that is not an ASCII letter or digit as a separator; join the words with single hyphens; no leading or trailing hyphen"
+  },
+  "started": "2026-10-27T00:52:56"
+}

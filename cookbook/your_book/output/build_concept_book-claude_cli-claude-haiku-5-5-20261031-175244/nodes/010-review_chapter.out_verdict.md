@@ -1,0 +1,18 @@
+REVISION_NEEDED
+1. **Accuracy of the chapter-level claims about the attribution procedure.** Step B is described as "the generator is given only the gold passage." That is an oracle-context run, but the chapter then says a failure with gold present "looks identical whether the model could not read the passage or was distracted." Clarify that Step B distinguishes a generation failure from a utilisation failure only if the oracle run uses the same prompt and output format as the real run, and state that as a condition.
+
+2. **Overstated quantitative claim in the chapter-1 bridge.** The "worked example" says improving the generator from 0.90 to 0.99 "moves the ceiling only on the 80% where retrieval succeeded." That is correct as written, but the chapter should explicitly say the bound is $\text{recall} \times \text{faithfulness}$, with the independence assumption stated, since the product is what the reader is asked to compute in Question 1.
+
+3. **Verifier formula is stated without its conditions.** The chapter gives $P(\text{wrong accepted}) \approx p_g \cdot p_v$ and then says this holds "only if these events are independent," but it does not say what $p_v$ conditions on. Define $p_v$ as $P(\text{accept} \mid \text{generator wrong})$. Without that, the worked example's "critic misses 70%" is ambiguous, and Question 3 cannot be answered from the text.
+
+4. **Research-level claims without citations or qualifiers.** Several claims are asserted as general findings with no conditions or source: "documented" prompt sensitivity, "some reported leaderboard gains have not been reproduced," and "process reward models ... reliability of step labels is itself contested." The research reader is told to point to primary work only when sure it exists, so the chapter should either describe these lines of work without citation (which it mostly does) and say explicitly that the specific magnitudes ("comparable to the difference between model generations") are not established.
+
+5. **The agent-loop section gives the correlation direction without a worked case.** It says correlation can push success above or below $r^H$ and describes both regimes in one sentence. For a research reader, add one concrete pair of scenarios with the resulting approximate success rates, so the claim is checkable rather than informal.
+
+6. **Missing trade-off discussion for constrained decoding in the open-problems section.** The pitfall about distorted distributions is stated as fact ("some constrained decoders ... distort the probability distribution in ways that shift answers"). Qualify it as a reported risk and say what evidence would confirm it.
+
+7. **Style fit.** The requested style is "clear and conversational, with concrete examples." Several sections are dense and formal, such as the statement of the independence analysis, the "Questions for the reader" block, and the "Open problems" section, which read as lecture notes. Add a plain-language sentence before each formula, and make the open-problems paragraphs more conversational.
+
+8. **Chapter identity and overlap.** The chapter opens with a reference to "Chapter 1" and "the cost-reliability trade-off from Chapter 1." Those references are fine, but the "Safety and reliability boundaries" section partly restates the "Structured output" section's guarantee claim. Cut the repetition so the chapter does not repeat itself.
+
+9. **Learning-objective reference.** The text says the diagnostic procedure is "what the learning objective asks for." The reader has no visible learning objective in this chapter, so either remove that phrase or state the objective.

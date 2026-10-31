@@ -1,0 +1,6 @@
+{
+  "passed": true,
+  "attempts": 1,
+  "code": "export function slugify(title: string): string {\n  return title\n    .toLowerCase()\n    .replace(/[^a-z0-9]+/g, \"-\")\n    .replace(/^-+|-+$/g, \"\");\n}\n",
+  "report": "## ts_verify\n\n**Result:** PASSED after 1 attempt(s)  \n**Types:** clean  \n**Cases:** 5/5 passed  "
+}

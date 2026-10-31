@@ -1,0 +1,14 @@
+[READY]
+A Streamlit chat-style translation app that translates user text from a chosen source language to a chosen target language via an LLM adapter (default `claude_cli` / `claude-sonnet-5-5`), with sidebar settings to switch adapter, model, and API key.
+
+**Analysis:** The purpose is single and concrete (translation chatbot). Inputs and outputs are implicit but obvious (text and languages in, translated text out). Scope is reasonably bounded, and the configurable adapter/model/API key is the only extension. Success criteria are not stated, but they follow naturally: a translation is returned and the settings take effect. The remaining unknowns (language list, adapter library, key handling) can be settled with reasonable assumptions. The repo's dd-llm library already provides adapters, including `claude_cli`, so it is the natural integration choice.
+
+**STRUCTURED SPEC:**
+1. **UI:** Streamlit app using `st.chat_input` and `st.chat_message`. Chat history is kept in `st.session_state`. The user's message is the text to translate, and the assistant's reply is the translation only, with no commentary.
+2. **Languages:** Sidebar selectboxes for source language (including "Auto-detect") and target language, chosen from a predefined list of common languages (e.g. English, Chinese, Spanish, French, German, Japanese, Korean, Portuguese, Russian, Arabic). The default is Auto-detect to English.
+3. **LLM backend:** Calls go through the dd-llm adapter layer. The default is adapter `claude_cli` with model `claude-sonnet-5-5`, which needs no API key.
+4. **Configuration:** The sidebar offers an adapter selector (e.g. `claude_cli`, `anthropic`, `openai`, `gemini`) and a free-text model field that defaults to the adapter's recommended model. Changing the adapter or model takes effect on the next message, with no restart.
+5. **API key:** A password-type input in the sidebar, shown for adapters that need a key. The key is held only in session state and passed to the adapter, falling back to the provider's environment variable (e.g. `ANTHROPIC_API_KEY`) when blank. It is never logged, written to disk, or displayed.
+6. **Prompting:** A system prompt instructs the model to translate from the source to the target language and output only the translation, preserving formatting. Each message is translated independently, without conversational memory.
+7. **Errors:** Failures such as a missing key, an unavailable CLI, or a network error appear as a readable `st.error` message. The app does not crash, and the chat history is preserved.
+8. **Deliverables and acceptance:** A single entry file (e.g. `app.py`) run with `streamlit run app.py`, plus a short README with setup notes. It is correct when the default config translates a sentence end to end, and when switching adapter, model, or key changes the backend used for the next request.

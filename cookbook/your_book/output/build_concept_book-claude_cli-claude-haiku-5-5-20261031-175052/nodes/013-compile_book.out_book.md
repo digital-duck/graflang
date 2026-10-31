@@ -1,0 +1,312 @@
+# Applied AI: A Concept Book for Beginners
+
+## Table of Contents
+
+- How to Read This Book
+- Chapter 1: What Applied AI Is, and How a Model Turns Input into Output
+  - What applied AI is
+  - What a model is, in plain terms
+  - Training versus inference
+  - Learning from examples
+  - Predictions are guesses, not facts
+  - Large language models
+  - Prompts: asking well
+  - A first working example
+  - Common misconceptions
+  - Check your understanding
+  - Key takeaways
+- Chapter 2: Building a Useful System Around a Model
+  - From one call to a system
+  - Grounding: give the model the facts
+  - Retrieval: finding the right facts
+  - Structured output: answers the program can use
+  - Checking the output
+  - Hallucination: confident inventions
+  - Evaluating the system
+  - Cost, speed, and privacy
+  - A complete small project
+  - Common mistakes
+  - Check your understanding
+  - Key takeaways
+
+## How to Read This Book
+
+This book is for readers who are new to applied AI: people who use AI products, want to understand what is happening behind them, or want to start building a small tool themselves. It assumes no prior knowledge of machine learning or programming beyond being comfortable reading a few lines of Python. Chapter 1 introduces the core ideas, including what a model is, how training differs from inference, and how to write a clear prompt. Chapter 2 shows how to build a useful system around a model, with grounding, retrieval, structured output, checks, and testing. Each chapter opens with a short motivating introduction, explains its concepts with everyday analogies and concrete examples, and closes with a "Check your understanding" section and "Key takeaways" summary. Read the chapters in order, and try the small examples as you go.
+
+---
+
+# Chapter 1: What Applied AI Is, and How a Model Turns Input into Output
+
+You use applied AI more often than you might think. When your email quietly moves junk messages out of your inbox, when a voice assistant understands "set a timer for ten minutes," or when a shopping site suggests a kettle after you bought a teapot, something is making a judgement about your data. This chapter explains what is happening in those moments. Once you can see the pattern, you can read a product claim about "AI" and ask sensible questions about it, and you can start building a small tool yourself.
+
+## What applied AI is
+
+*Applied AI* means using AI models to solve a real problem. It is different from *researching* new models, which is what scientists at AI labs spend their time on. An applied AI project starts with a problem, such as "stop spam reaching people's inboxes," and asks whether a model can help solve it.
+
+Three everyday examples:
+
+- **Spam filters** decide whether an incoming email is junk.
+- **Voice assistants** turn your speech into text, work out what you wanted, and carry out the request.
+- **Recommendation lists** guess which products or videos you are likely to want next.
+
+None of these needs a machine that thinks like a person. Each needs a model that does one job well.
+
+## What a model is, in plain terms
+
+A *model* is a program that takes an input and produces an output. Mathematicians call a rule like this a *function*: you put something in, and a definite result comes out. A model is a function whose rule was learned from examples rather than written by hand. Some examples:
+
+- Input: an email. Output: "spam" or "not spam."
+- Input: a photo. Output: "cat," "dog," or "muffin."
+- Input: a sentence. Output: a score from 1 to 5 for how positive it sounds.
+
+Think of a sorting clerk at a post office who has handled millions of letters. Show the clerk an envelope and they glance at the address style, the stamp, and the handwriting, then send it to the right bin in a moment. They are not reasoning from first principles about each letter. They have learned patterns from experience. A model works the same way: it has learned patterns from examples, and it applies them quickly to new inputs.
+
+## Training versus inference
+
+A model's life has two phases.
+
+- **Training** is the learning phase. The model is shown many examples and adjusts itself so its answers improve. This happens once, or occasionally when someone wants to update the model. It can take hours, days, or longer, and it is usually done by the people who build the model.
+- **Inference** is the using phase. You give the trained model a new input and it produces an output. This happens every time someone asks a question. How long it takes depends on the size of the input, the length of the answer, and the model you choose. A short question to a small, fast model may return in a fraction of a second, while a long document and a long answer to a larger model can take many seconds.
+
+An exam analogy helps. Studying for an exam is training: you practise, make mistakes, and correct them. Sitting the exam is inference: you apply what you learned to questions you have not seen before. You do not study during the exam, and the learned knowledge is what you carry into it.
+
+## Learning from examples
+
+How does a model improve? Imagine you want a spam filter. You collect 10,000 emails and attach a *label* to each one by hand. A label is the correct answer for that example: "spam" or "not spam." This labelled collection is your *training data*.
+
+The training process goes roughly like this:
+
+1. Show the model an email whose label you know.
+2. Let it guess.
+3. If the guess is wrong, nudge the model so it is a little more likely to get that email right next time.
+4. Repeat for all 10,000 emails, many times over.
+
+To judge progress, you hold back some labelled emails the model has never seen. Its *accuracy* on those is simply the fraction it gets right. If it classifies 930 of 1,000 unseen emails correctly, its accuracy is 93%. Counting correct answers is the only arithmetic you need to understand the idea.
+
+## Predictions are guesses, not facts
+
+A model does not output the truth. It outputs a *prediction*, often with a confidence score: "spam, 97% sure." That number is the model's own internal score for how strongly it leans toward an answer. It is not a guarantee. A score of 97% does not mean the model is right 97% of the time in the real world. The only way to know how well the scores match reality is to measure them on emails the model has never seen. Even then, the score can be wrong, sometimes very confidently.
+
+A well-known illustration of this is a photo classifier that is shown a picture of a blueberry muffin with chocolate chips and labels it "chihuahua." The muffin and the dog's face share a pattern of small dark spots on a light background, and a model trained on similar-looking photos can be fooled in exactly this way. The output looks just as authoritative as a correct one, which is why you should treat every model output as a prediction to be checked, especially when the stakes are high.
+
+## Large language models
+
+A *large language model* (LLM) is a model specialised in text. Its core training task is simple to state: given some text, predict the next word. Read the sentence "The capital of France is" and the model is trained to expect "Paris."
+
+That sounds modest, but the training data is enormous: a large share of the written text available online, books, and more. To predict the next word well across all those subjects, the model has to pick up grammar, facts, writing styles, and common patterns of reasoning. This is why an LLM can answer questions, write a summary, or draft an email. After this basic training, further methods, often called post-training, shape the model toward answers that are helpful and well-formed. The next-word objective alone does not guarantee that. A model trained only to continue text can just as easily continue a question with more questions, which is why the extra shaping matters.
+
+## Prompts: asking well
+
+A *prompt* is the text you send to a language model: the instruction, the context, and any examples you provide. The quality of the prompt strongly affects the quality of the answer.
+
+Compare two requests.
+
+**Vague:**
+> Summarise this.
+
+**Clear:**
+> Summarise the paragraph below in two sentences for a non-expert reader. Keep the names of people and places. Do not add opinions.
+>
+> [paragraph]
+
+The vague version leaves the model to guess the length, the audience, and what matters. It may return a single sentence, a long paragraph, or a list of bullet points. The clear version tells the model the length, the reader, what to keep, and what to avoid. The model has less to guess, so its output is more likely to match what you actually wanted. A good habit is to state the task, the audience, the format, and any constraints.
+
+## A first working example
+
+You can ask a language model to summarise text with a few lines of Python. To run this, you need to sign up for an account with the model provider, create an API key, and set it as the environment variable `ANTHROPIC_API_KEY`. Be aware that using the service is usually billed by use, so you may be charged for each request, even small ones. You also need to install the SDK with `pip install anthropic`.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()  # connects to the service, using your API key
+paragraph = "Applied AI means using models to solve real problems. ..."  # paste any text here
+
+reply = client.messages.create(  # sends your request and waits for the answer
+    model="claude-haiku-5-5",  # which model to use
+    max_tokens=200,  # the longest answer you will accept, to limit cost
+    messages=[{"role": "user", "content":  # your message, as the user's turn
+        "Summarise the paragraph below in two sentences for a non-expert reader.\n\n" + paragraph}],
+)
+print(reply.content[0].text)  # the answer comes back as a list; take the first text piece
+```
+
+Here is what each part does. `anthropic.Anthropic()` creates a connection to the service. `client.messages.create(...)` sends your request and waits for the reply. `model` names the model you want, `max_tokens` caps how long the answer can be, and `messages` holds your instruction together with the text to summarise. The reply arrives as a structured object, and `reply.content[0].text` picks out the first piece of text in it, which is the summary.
+
+Run it. The script sends your text to the model (the request is the *inference* step), then reads back the answer from the response. Every model call costs a small amount of money, so keep your test inputs short while you learn.
+
+## Common misconceptions
+
+**"The AI understands things the way people do."** A model learns statistical patterns from text or images. Take a model that answers questions about a famous city, and it may give a fluent, correct answer. Ask it a question with a false premise, such as "Why did the Eiffel Tower move to London in 1950?", and it may still produce a confident, detailed reply. It does not check the premise the way a person would. The mechanism is different from human comprehension, even when the answers look like understanding.
+
+**"The model knows facts it was never shown."** A model can only reflect what was in its training data, up to the date that data was collected. Suppose you ask it about a company's refund policy, which it was never trained on. It may guess, and the guess can sound plausible and be wrong. It does not look things up unless you connect it to a search tool or give it a document. You will see how to supply your own facts later in this book.
+
+**"More data always helps."** More data helps when it is relevant, correctly labelled, and varied. Imagine a spam filter trained on a million emails where many "spam" labels are actually newsletters. It will learn the wrong lesson, and ten thousand carefully labelled emails would serve it better. Duplicated or biased data can make a model worse at the cases you care about. Quality and fit to the task matter as much as quantity.
+
+## Check your understanding
+
+1. Give two everyday examples of applied AI that were not in this chapter, and for each say what the model's input and output are.
+2. A friend says, "We trained the model last night, so now it's ready to answer customers." Which phase are they describing, and what is the difference between that phase and what happens when a customer asks a question?
+3. A model labels a photo of a dog as "cat" with 88% confidence. Why is the confidence figure not proof that the answer is correct?
+4. Rewrite this vague prompt so a language model is more likely to give you a useful answer: "Tell me about dogs." Explain which parts of your rewrite help.
+
+## Key takeaways
+
+Applied AI uses models to solve a specific real problem, and it is different from inventing new models. A model is a function that takes an input and produces an output, based on patterns it learned from examples. Training happens once and learns from labelled examples, while inference happens every time someone uses the model. Model outputs are predictions with scores attached, and those scores can be confidently wrong. A large language model predicts the next word, which lets it answer questions and write text, but it only knows what it was trained on. A clear prompt states the task, audience, format, and constraints, and it usually gets a better answer than a vague one. Calling a model from code takes only a few lines, and the answer it gives you is a prediction you should check.
+
+---
+
+# Chapter 2: Building a Useful System Around a Model
+
+A model on its own is a clever guesser. Ask it a question and it answers from whatever it picked up during training. That knowledge may be out of date, incomplete, or simply not about your business. Most useful AI products are therefore not "a model" alone. They are a model wrapped in a few extra parts that supply the right information, shape the answer, and check the result. This chapter shows you those parts. By the end, you will be able to build a small question-answering tool over your own documents, and you will know how to tell whether it is working.
+
+## From one call to a system
+
+Think of a kitchen. The cook matters, but a restaurant meal also depends on the ingredients, the recipe, and a taste test before the plate leaves the kitchen. If the ingredients are poor, even a skilled cook makes a poor dish.
+
+An AI system has the same shape:
+
+- **Input**: the question, plus any data the system gathers to answer it. Think of this as the ingredients.
+- **Model**: the component that reads the prompt (the instructions and context you give it) and writes an answer. This is the cook.
+- **Checks**: code or a second review that inspects the answer before anyone sees it. This is the taste test.
+- **Output**: the answer, delivered in a form the rest of the software can use.
+
+When people say a system "works," they usually mean all four parts work together. A better model rarely fixes a poor supply of ingredients or a missing taste test.
+
+## Grounding: give the model the facts
+
+Suppose a customer asks, "Can I return a sale item after 30 days?" If you send only the question, the model falls back on general knowledge about returns. It may sound confident and still be wrong about your shop.
+
+**Grounding** means putting the relevant facts into the prompt at the moment of the question. It is like handing a new shop assistant the returns policy card before they answer the phone. For example:
+
+> Use only the policy below to answer the customer.
+>
+> Policy: Sale items may be returned within 14 days with a receipt. Final-sale items cannot be returned.
+>
+> Question: Can I return a sale item after 30 days?
+
+Now the model has something specific to work from. It can answer "No, sale items are accepted for return only within 14 days," because the answer is in the text in front of it. It is no longer relying on memory alone.
+
+## Retrieval: finding the right facts
+
+Grounding is easy when the facts are short, like one policy card. Real documents are longer. Suppose you have a 10-page product manual and a user asks, "How do I reset the device?"
+
+You could paste all 10 pages into every prompt, but that is slow and costly, and the model may miss the important lines buried in the middle. **Retrieval** solves this by finding only the useful parts. It works in three steps:
+
+1. **Split** the manual into **passages**, which are chunks of text small enough to hand over in one go. A natural split is one passage per section. For example, a manual's "Setup" heading and its text become one passage, and its "Troubleshooting" heading and text become another.
+2. **Search** the passages for the ones most related to the question. The simplest method counts shared words. A question about resetting shares the word "reset" with the "Troubleshooting" passage and not with the "Setup" passage, so troubleshooting scores higher. More advanced systems compare meanings, but the goal is the same: find the few passages that matter.
+3. **Include** only those passages in the prompt, along with the question.
+
+Here is the word-counting idea in plain terms. For each passage, count how many words it shares with the question. Keep the two passages with the highest counts. Those are the ones you send to the model. A few lines of code can do this, but the idea is the important part.
+
+For a question about resetting, this might pick the "Resetting the device" and "Troubleshooting" sections. The model then answers from those two passages. Retrieval plus grounding is the core pattern behind most document question-answering tools.
+
+## Structured output: answers the program can use
+
+A person reads a paragraph and understands it. A program needs fields it can check and store. Imagine a paper form with labelled boxes: "Name," "Date," "Category." Each box holds one kind of answer, and a clerk can file the form without guessing. A free-text note, by contrast, might say anything in any order.
+
+**Structured output** means asking the model to fill in a form like that. The usual format is **JSON**, a plain-text way of writing labelled fields, with names in quotes and values after a colon. If your system records a ticket's priority, a free-text reply might say "This looks urgent," but you need the word `high` so your code can act on it.
+
+> Answer the question using the passages. Reply only with JSON in this form:
+> `{"answer": text, "source_section": text, "confident": true or false}`
+
+Your code can then read the labelled boxes like any other data:
+
+```python
+import json
+
+reply = '{"answer": "Hold the power button for 10 seconds.", "source_section": "Resetting the device", "confident": true}'
+data = json.loads(reply)  # turns the text into a labelled form
+print(data["answer"])     # prints: Hold the power button for 10 seconds.
+```
+
+Models do not always follow the format, so the next section matters.
+
+## Checking the output
+
+Checks are the taste test. There are two kinds.
+
+- **Rule checks** are code that tests the output against simple rules, a bit like a spell-checker. Does the reply parse as JSON? Is the `answer` box filled in? Is `source_section` one of the section names you supplied? If a check fails, the system can retry or flag the question for a person.
+- **Review checks** are a second reader. A second model call, or a person, reads the first answer next to the passages and asks, "Is this answer supported by the text?" It is like a human proofreader who understands the meaning, not just the spelling. It is slower and costs more, so it is often kept for high-stakes answers.
+
+Checks do not make the model right. They make wrong answers easier to notice and stop malformed ones from reaching your program.
+
+## Hallucination: confident inventions
+
+A **hallucination** is an answer that sounds fluent and certain but is not supported by the facts. Imagine a student who has not read the chapter but writes a confident essay anyway, using phrases that sound like the subject. That is roughly what happens when a model is asked something the supplied text does not cover. It produces a plausible reply from patterns it learned, not from your documents.
+
+Why does this happen? A simplified picture helps here. The model is trained to produce likely continuations of text, so a likely-sounding answer comes easily. This is a simplification, not the whole story, but the key point holds: a likely-sounding answer is not the same as a true one. The model has no built-in step that says "I checked this against a source."
+
+Grounding and retrieval reduce hallucination because they give the model a source to copy from. A required `source_section` field and a rule check that the section exists reduce it further. Yet none of these eliminate it. The model can still misread a passage, combine two passages wrongly, or invent a detail the passage does not contain. Treat hallucination as a rate to measure and manage, not a bug you can finally close.
+
+Hallucination is most dangerous when the answer looks authoritative. A system that cites a section and quotes it confidently can still be wrong, which is why the next section matters.
+
+## Evaluating the system
+
+How do you know the system is good? Think of a quiz you write before a driving test. You know the right answers because you wrote them from the official handbook, and you use the quiz to see how well you, or the system, have learned the material. In this case, the test set is a list of questions, each paired with a known good answer taken from your documents. Twenty questions is a reasonable start.
+
+Here is a small example:
+
+| Question | Expected answer |
+|---|---|
+| How do I reset the device? | Hold the power button for 10 seconds. |
+| What is the warranty period? | Two years from the purchase date. |
+| Can I use the charger abroad? | Yes, with a plug adapter. |
+
+Run the system on every question and count how many answers match. Then change something, such as a better search, a new prompt, or a different model, and run the same questions again. If the score rises, the change helped on this set. If it falls, undo it.
+
+A test set has limits. Twenty questions cannot cover everything users will ask, and matching is hard to judge when answers are worded differently. Start with a small, honest set and grow it as you find failures.
+
+## Cost, speed, and privacy
+
+Every model call costs money and takes time. Providers, the companies that run model services, usually charge by the **token**. A token is a small chunk of text, often a short word or part of a long one. As a rough rule of thumb, one token is about three-quarters of a word, so 100 tokens is roughly 75 words. This is an approximate guide, and exact counts vary by model.
+
+Retrieval helps here. Sending two relevant passages costs far less than sending a whole manual.
+
+Let's work through a budget step by step, using made-up prices. Suppose:
+
+1. Each question sends about 1,500 tokens to the model and gets back about 200.
+2. Together, that is 1,700 tokens per question.
+3. Your tool handles 1,000 questions a month, so that is 1,700 × 1,000 = 1,700,000 tokens a month.
+4. Suppose the provider charges $0.01 per 1,000 tokens. Then 1,700,000 tokens is 1,700 thousands, so the bill is 1,700 × $0.01 = $17 a month.
+
+If you double the passages, the input rises to 3,000 tokens per question and the bill climbs too. Keep retrieval focused.
+
+Privacy needs the same attention. When you send text to a third-party model service, a company outside your own organisation, that text leaves your machine and is governed by that company's terms. Customer names, medical notes, or internal financial figures should not go into a prompt without a decision about whether that service is allowed to see them. Remove or mask personal details where you can, and read what your provider says it does with the data.
+
+## A complete small project
+
+Here is how the pieces combine into a question-answering tool over a few documents:
+
+1. **Load and split** the documents into passages, one per section.
+2. **Retrieve** the two or three passages most related to the question.
+3. **Ask** the model, with grounding instructions and a required JSON format.
+4. **Check** the reply. It must parse, contain a non-empty answer, and name a real source section. If it fails, retry once, then flag it.
+5. **Test** with your question set, record the score, and repeat after every change.
+
+Each step is small. The value comes from putting them together and measuring the result.
+
+## Common mistakes
+
+Each of these mistakes is easy to make, so it helps to name them early.
+
+- **Assuming the model knows your documents.** It does not, unless you supply the text. Like a visitor who has never seen your office, it can only describe offices in general.
+- **Sending everything.** Long prompts cost more, run slower, and can bury the relevant lines, like a useful note hidden in a thick stack of paper.
+- **Trusting format as proof of accuracy.** Valid JSON can still contain a wrong answer. A neatly filled form can hold a wrong entry.
+- **Skipping the test set.** Without it, you cannot tell whether a change helped or hurt. You are driving without a speedometer.
+- **Believing hallucination can be eliminated.** It can be reduced and detected, not guaranteed away, much like no one proofreader catches every typo.
+
+## Check your understanding
+
+1. In the kitchen analogy, what plays the role of the ingredients in an AI system, and why does a good cook still need good ingredients?
+2. Why does retrieving two relevant passages usually beat pasting an entire 10-page manual into the prompt? Give one reason about accuracy and one reason about cost.
+3. A model returns valid JSON with a non-empty `answer`, but the answer is wrong. Which check would have caught it, and which kind of check would still miss it?
+4. You change your search method and your test score drops from 16 out of 20 to 13. What should you do next, and what does this tell you about the value of a test set?
+
+## Key takeaways
+
+- A useful AI system is a model plus inputs, checks, and output. The model is one part.
+- **Grounding** puts the facts in the prompt. **Retrieval** finds the right facts when the documents are large.
+- **Structured output** lets your program use the answer reliably, and rule checks catch malformed replies.
+- **Hallucination** is confident invention. Grounding and checks reduce it, but it cannot be fully prevented.
+- A small **test set** lets you measure whether a change really improves the system.
+- Cost and privacy depend on how much text you send and where it goes, so plan both before you build.

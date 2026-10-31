@@ -1,0 +1,54 @@
+{
+  "steps": 8,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 241,
+    "output_tokens": 39,
+    "cost_usd": 0.0,
+    "ms": 2977
+  },
+  "nodes": {
+    "repair": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 3430
+    },
+    "write": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2978
+    },
+    "typecheck": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 332
+    },
+    "run_cases": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 115
+    },
+    "finalize": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 26
+    },
+    "types_ok": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "tests_ok": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "done": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

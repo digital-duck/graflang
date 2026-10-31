@@ -1,0 +1,11 @@
+{
+  "graph": "build_concept_book",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "subject": "applied AI",
+    "num_chapters": "2",
+    "audience": "intro"
+  },
+  "started": "2026-10-31T17:50:52"
+}

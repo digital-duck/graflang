@@ -1,0 +1,39 @@
+{
+  "steps": 5,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0,
+    "ms": 0
+  },
+  "nodes": {
+    "sum_kernel": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 473
+    },
+    "sum_script": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 35
+    },
+    "agree": {
+      "type": "ASSERT",
+      "n": 1,
+      "ms": 2
+    },
+    "report_mismatch": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "done": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

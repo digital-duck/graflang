@@ -1,0 +1,10 @@
+{
+  "graph": "solver_check",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "numbers": "1,2,3",
+    "expected": "6"
+  },
+  "started": "2026-10-27T23:33:29"
+}

@@ -1,0 +1,44 @@
+{
+  "steps": 10,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 8,
+    "input_tokens": 11127,
+    "output_tokens": 5620,
+    "cost_usd": 0.0,
+    "ms": 105338
+  },
+  "nodes": {
+    "chapter_loop": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 79576
+    },
+    "write_chapter": {
+      "type": "GENERATE",
+      "n": 3,
+      "ms": 51338
+    },
+    "review_chapter": {
+      "type": "GENERATE",
+      "n": 3,
+      "ms": 28233
+    },
+    "generate_outline": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 21884
+    },
+    "compile_book": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3886
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

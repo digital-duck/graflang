@@ -1,0 +1,10 @@
+{
+  "graph": "build_concept_book",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "subject": "entropy",
+    "num_chapters": "3"
+  },
+  "started": "2026-10-31T17:09:06"
+}

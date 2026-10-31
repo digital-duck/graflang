@@ -1,0 +1,8 @@
+{
+  "result": {
+    "passed": true,
+    "attempts": 1,
+    "code": "export function slugify(title: string): string {\n  const words: string[] = [];\n  let current: string = \"\";\n  const lower: string = title.toLowerCase();\n  for (let i: number = 0; i < lower.length; i++) {\n    const code: number = lower.charCodeAt(i);\n    const isLetter: boolean = code >= 97 && code <= 122;\n    const isDigit: boolean = code >= 48 && code <= 57;\n    if (isLetter || isDigit) {\n      current += lower[i];\n    } else if (current.length > 0) {\n      words.push(current);\n      current = \"\";\n    }\n  }\n  if (current.length > 0) {\n    words.push(current);\n  }\n  return words.join(\"-\");\n}\n",
+    "report": "## ts_verify\n\n**Result:** PASSED after 1 attempt(s)  \n**Types:** clean  \n**Cases:** 5/5 passed  "
+  }
+}

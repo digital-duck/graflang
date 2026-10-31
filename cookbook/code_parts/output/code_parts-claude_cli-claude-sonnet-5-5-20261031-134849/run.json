@@ -1,0 +1,9 @@
+{
+  "graph": "code_parts",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "spec": "write a chatbot using streamlit web framework which will translate text from source lang to target lang, using LLM adapter=claude_cli, model=claude-sonnet-5-5 as default, but user can configure with other adapter/model options including API_KEY setting"
+  },
+  "started": "2026-10-31T13:48:49"
+}

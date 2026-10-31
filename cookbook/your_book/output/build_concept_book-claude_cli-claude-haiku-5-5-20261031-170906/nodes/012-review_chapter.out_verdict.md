@@ -1,0 +1,22 @@
+REVISION_NEEDED
+1. **Factual error in the entropy-of-mixing / isothermal example is fine, but the "first irreversible process" section has a sign error in framing.** The text says the total entropy change is $Q(1/T_C - 1/T_H) > 0$, which is correct, but it then says "The hot body loses entropy $Q/T_H$; the cold body gains $Q/T_C$." This is correct as written, but the sentence "Since $T_C < T_H$, the cold body gains more entropy than the hot body loses" should be stated more carefully: the reason is that $1/T_C > 1/T_H$, not simply that $T_C < T_H$ in the abstract. Make the inequality step explicit.
+
+2. **Carnot efficiency statement is loose.** "The efficiency of an ideal heat engine depends only on the temperatures of its hot and cold reservoirs, not on the working substance" is accurate, but the chapter should say this holds for a reversible Carnot cycle specifically, since the bound $\eta \le 1 - T_C/T_H$ applies to all engines while equality holds only for reversible ones. As written, "A perfect engine" is ambiguous (it could mean "reversible" or "100% efficient," which is impossible).
+
+3. **Clausius quotation is untranslated in the body and the German is attributed without a source.** Either supply a translation inline (it is given only in the next sentence, which is fine) and cite the 1865 paper, or drop the quotation. Also, "Die Energie der Welt ist konstant..." is commonly rendered with "strebt einem Maximum zu" — the translation given is acceptable, but the date and context should be sourced.
+
+4. **Misleading claim about the state function.** "$dS$ is defined through heat, but $S$ itself is a property you can assign to a system at rest" needs qualification: entropy is defined only up to an additive constant (the absolute value comes from the third law / statistical mechanics, which the chapter has not introduced). Add this, or the reader will assume S has a natural zero.
+
+5. **Heat death section overstates and then partly retracts.** The opening paragraph presents heat death as the conclusion of the argument, and only later notes that it is uncertain. Reorder so the caveats come first, or soften "the argument goes" to signal the speculative status from the start. Also "Stars will burn out" is a claim about the far future that the Second Law alone does not establish; say so.
+
+6. **Gravitation caveat is compressed.** "Gravitating systems can have negative heat capacity and can clump rather than homogenize" is correct but unexplained for a non-specialist audience. Either add one sentence on why (e.g., virial theorem) or cut it.
+
+7. **Missing link to the mixing/free-expansion example.** The text names "unrestrained expansion into vacuum" as an irreversible source, but never computes or mentions that free expansion of an ideal gas has $\Delta S = nR\ln(V_2/V_1)$ while $q=0$ and $w=0$. This is the cleanest illustration that entropy rises without heat flow, and the chapter's worked example could be extended to show it. Without it, the reader may conclude entropy change always comes from heat exchange, which contradicts the definition used.
+
+8. **Minor accuracy: "one mole doubling its volume, $\Delta S = R\ln 2 \approx 5.76$ J/K."** Check: $R = 8.314$, $\ln 2 = 0.693$, product is $5.76$ J/K. This is correct; no change needed, but state the value of $R$ or cite it so the number is checkable.
+
+9. **Irreversibility paragraph conflates two ideas.** "A reversible process is a perfect equilibrium at every instant" is an idealization; say "a quasi-static process proceeds through equilibrium states" to avoid implying that reversible processes are physically realized.
+
+10. **Completeness: Chapter 3 forward reference.** The closing says the puzzle "is the reason Chapter 3 is necessary" and that the answer lies in counting. That is fine, but the chapter should briefly say what the microscopic reversibility puzzle is (time-symmetric laws vs. one-way entropy) before pointing forward; currently the reader gets the question only in the last two paragraphs, which is abrupt.
+
+11. **Typo/style:** "a degradation of the energy's ability to do work" is fine; "Heat is 'lower quality'" uses scare quotes inconsistently with the earlier "high quality" phrasing. Use the same quoting style for both.

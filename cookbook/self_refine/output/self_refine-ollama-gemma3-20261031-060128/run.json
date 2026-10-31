@@ -1,0 +1,9 @@
+{
+  "graph": "self_refine",
+  "adapter": "ollama",
+  "model": "gemma3",
+  "params": {
+    "topic": "why ducks float"
+  },
+  "started": "2026-10-31T06:01:28"
+}

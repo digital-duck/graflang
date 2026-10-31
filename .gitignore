@@ -224,7 +224,7 @@ __marimo__/
 # grafr run artifacts (procedure logs)
 .grafr/
 # grafr run results (<graph folder>/output/)
-output/
+outputs/
 
 # private design chat (kept in the maintainer's private notes, see docs/DEV/readme.md)
 docs/DEV/IDEATION/

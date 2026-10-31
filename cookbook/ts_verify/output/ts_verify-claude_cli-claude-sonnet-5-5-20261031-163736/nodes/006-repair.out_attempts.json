@@ -1,0 +1,3 @@
+[
+  "```ts\nexport function slugify(title: string): string {\n  return title\n    .toLowerCase()\n    .replace(/[^a-z0-9]+/g, \"-\")\n    .replace(/^-+|-+$/g, \"\");\n}\n```"
+]
