@@ -365,7 +365,7 @@ Persistent MUTATE across loop iterations (G14), optional Rust/WASM packaging, zi
 | 1 | `exec` phase vs `EXEC` node | Node type is **`RUN`** | E4 and the roadmap use `RUN`; `exec` stays the lifecycle phase |
 | 2 | Several `binds` into one port | **Explicit nodes** split and join for real fan-in; ordered or exclusive writers stay legal | `JOIN` bundles named inputs into one JSON object (the `kwargs` counterpart), with an unpack step to split. Unordered writers are a race reported by `graf validate` (happens-before rule, E5 and §13). Replaces the earlier "one source per port" wording, which would have broken the cookbook |
 | 3 | `grafc/cedar` | **Leave it alone** | No deletion or move; its 7 failing tests stay known failures (gap #18). Not on the build path |
-| 4 | Real-LLM test gating | A small default set; the rest behind `--mode llm` (offline `--mode no-llm` is the default); recorded replays (E9) for CI | Register the `llm` marker in `pyproject.toml`; tests call `claude_cli:claude-sonnet-5-5` |
+| 4 | Real-LLM test gating | A small default set; the rest behind `--mode llm` (plain `pytest` is offline); recorded replays (E9) for CI | Register the `llm` marker in `pyproject.toml`; tests call `claude_cli:claude-sonnet-5-5` |
 | 5 | IDE target | Left to me: **Streamlit**, behind `graf vis` (read-only by default, `--edit` for the IDE; `graf ui` is a hidden alias) | See below |
 | 6 | zinet prerequisite | zinet is not released while graflang is developed, so both codebases may change together | M1–M4 no longer gate R1; change zinet in step with graflang, and take the `zinet` dependency as an editable install |
 

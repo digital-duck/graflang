@@ -41,12 +41,12 @@ graf --help                            # run, validate, info, expand, compile, v
 ## 1. The automated suite
 
 ```bash
-python -m pytest -q                       # offline: no model (the default, same as --mode no-llm)
+python -m pytest -q                       # offline: no model (the default)
 ```
 
 Expected (2026-10-31): **749 passed, 3 skipped, 7 failed**, about 50 s. The 7 failures are the known, left-alone ones in the hand-written Cedar compiler: `tests/test_cedar_compiler.py` (6) and `tests/test_policy_slicer.py::test_slice_by_context_keys` (1). Anything else failing is a regression.
 
-`--mode` is a graflang option (`tests/conftest.py`): `no-llm` (the default) deselects the tests marked `llm`, `llm` runs only those, `all` runs everything. An explicit `-m` expression still overrides it.
+`--mode` is a graflang option (`tests/conftest.py`, see `tests/README.md`): by default the tests marked `llm` are deselected, `--mode llm` runs only those, `--mode all` runs everything. pytest's own `-m` is refused.
 
 Skips: the Streamlit editor tests (no Streamlit in the `graf` env), and environment skips. The real-Docker tests skip without a daemon and the `python:3.12-slim` image.
 
@@ -95,20 +95,22 @@ done
 
 Expected: every line `✓ Valid GraphLang workflow: <name>`.
 
-| Recipe | Shows | Offline run | Readme |
-|---|---|---|---|
-| `self_refine` | 3 GENERATE nodes in a line | `graf run cookbook/self_refine/self_refine.graph.yaml --adapter mock --param topic=ducks` | yes |
-| `concept_book` | LOOP with `collect` | `graf run cookbook/concept_book/build_concept_book.graph.yaml --adapter mock --param subject=entropy --param num_chapters=2` | yes |
-| `code_pipeline` | procedures, guards, MUTATE, RECOVER (needs SPL.py to run `.spl`) | see its readme | yes |
-| `compliance_audit` | subprocess SOLVE rules, Cedar release guard | needs a model for extract/redact; tests cover all paths with a stub | yes |
-| `solver_check` | kernel and subprocess SOLVE, ASSERT routing | `graf run cookbook/solver_check/solver_check.graph.yaml --adapter mock --param numbers=1,2,3 --param expected=6` | yes |
-| `ts_verify` | LLM writes TypeScript, Node and tsc judge it | needs Node 22.18+ and a model | yes |
-| `chain_of_thought` | lifted from SPL, cassette | replay (section 7) | yes |
-| `lifted_tool` | a Python tool as a kernel SOLVE | `graf run cookbook/lifted_tool/lifted_tool.graph.yaml --param word=hello` | yes |
-| `parts_demo` | one part used twice | `graf run cookbook/parts_demo/parts_demo.graph.yaml --adapter mock --param topic=tides` | yes |
-| `elaborate_demo` | a template applied to a graph | `graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --adapter mock --workers 2` | yes |
-| `container_demo` | a program run inside Docker | `graf run cookbook/container_demo/container_demo.graph.yaml --adapter mock` (needs Docker) | yes |
-| `pocketflow` | R1 acceptance samples | section 11 | yes |
+| Recipe | Shows |
+|---|---|
+| `self_refine` | 3 GENERATE nodes in a line |
+| `concept_book` | LOOP with `collect` |
+| `code_pipeline` | procedures, guards, MUTATE, RECOVER (needs SPL.py to run `.spl`) |
+| `compliance_audit` | subprocess SOLVE rules, Cedar release guard |
+| `solver_check` | kernel and subprocess SOLVE, ASSERT routing |
+| `ts_verify` | LLM writes TypeScript, Node and tsc judge it |
+| `chain_of_thought` | lifted from SPL, cassette |
+| `lifted_tool` | a Python tool as a kernel SOLVE |
+| `parts_demo` | one part used twice |
+| `elaborate_demo` | a template applied to a graph |
+| `container_demo` | a program run inside Docker |
+| `pocketflow` | R1 acceptance samples |
+
+Each recipe's run commands are in its `readme.md`.
 
 ## 3. Core commands
 
