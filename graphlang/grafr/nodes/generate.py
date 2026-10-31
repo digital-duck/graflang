@@ -37,7 +37,7 @@ class GenerateExecutor(NodeExecutor):
         if in_data.get('_validation_error'):
             prompt += f"\n\nYour previous reply was rejected: {in_data['_validation_error']}\nReply again, corrected."
 
-        model = resolve_model(llm.name, config.get('model'), getattr(llm, 'model_override', None))
+        model = resolve_model(llm.name, config.get('model'), getattr(llm, 'model_override', None), getattr(llm, 'default_model', None))
         started = time.perf_counter()
         response = llm.generate(prompt, model=model, temperature=config.get('temperature'))
         log_event(_log, "llm.call", node=node_data['id'], adapter=llm.name, model=model,

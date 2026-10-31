@@ -29,7 +29,7 @@ nodes:
     type: "GENERATE"
     config:
       prompt_ref: "prompts.critique"
-      model: "ollama/gemma3"
+      model: "claude_cli/claude-sonnet-5-5"
     ports: ["trigger", "complete", "in_essay", "out_feedback"]
 
   - id: "refine"

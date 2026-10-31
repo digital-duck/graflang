@@ -86,7 +86,8 @@ class RecordingLLM:
         self.name = inner.name
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps({"cassette": 1, "adapter": inner.name, "model": getattr(inner, "model_override", None)}) + "\n", encoding="utf-8")
+        self.path.write_text(json.dumps({"cassette": 1, "adapter": inner.name, "model": getattr(inner, "model_override", None),
+                                                  "default_model": getattr(inner, "default_model", None)}) + "\n", encoding="utf-8")
 
     def __getattr__(self, attr):
         if attr == "inner":
@@ -96,6 +97,10 @@ class RecordingLLM:
     @property
     def model_override(self):
         return getattr(self.inner, "model_override", None)
+
+    @property
+    def default_model(self):
+        return getattr(self.inner, "default_model", None)
 
     def last_usage(self):
         return getattr(self.inner, "last_usage", lambda: None)()
@@ -120,7 +125,8 @@ class ReplayLLM:
         if not lines or lines[0].get("cassette") != 1:
             raise CassetteError(f"{self.path} is not a graflang cassette")
         self.name = lines[0]["adapter"]                  # the recorded adapter, so models resolve the way they did then
-        self.model_override = lines[0].get("model")     # the run's model then, so each call is keyed the same way
+        self.model_override = lines[0].get("model")     # the run's explicit model then, so each call is keyed the same way
+        self.default_model = lines[0].get("default_model")
         self._answers: Dict[str, List[str]] = {}
         for entry in lines[1:]:
             self._answers.setdefault(entry["key"], []).append(entry["response"])

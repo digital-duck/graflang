@@ -58,7 +58,7 @@ Check with `dot -V` (it prints the version), then `graf vis --list-engines`: the
 | `--param key=value` | a workflow input; repeatable. Coerced to the declared type (`INTEGER`, `FLOAT`, `BOOL`). A value without `=` is a usage error |
 | `--llm ADAPTER[:MODEL]` | `--adapter` and `--model` in one value, e.g. `claude_cli:claude-haiku-5-5`, `ollama:gemma3:12b`. Only the first `:` splits, so model ids with `:` or `/` work. Wins over `--adapter`/`--model` |
 | `--adapter NAME` | `claude_cli` (default), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
-| `--model ID` | model for every `GENERATE` node; overrides `model:` hints in the graph. Default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), where the graph's hints apply |
+| `--model ID` | model for every `GENERATE` node; beats a node's own `model:`. Without it a node's `model:` is used if the adapter can run it, else the default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), which use their own |
 | `--max-steps N` | stop after N node firings (default 1000) |
 | `--output-dir DIR` | where results go (default `<graph folder>/output`); see [Results](#results-the-output-folder) |
 | `--save-nodes` / `--no-save-nodes` | save every node's output, LLM responses included (the default); `--no-save-nodes` keeps only the workflow outputs |
@@ -82,7 +82,7 @@ nodes/001-draft.out_essay.md      every node's output (not with --no-save-nodes)
 ```
 
 - Every node's output ports are saved (unless you pass `--no-save-nodes`) under `nodes/`, numbered in firing order (`001-`, `002-`, ...). Nodes that fire again in a `LOOP` get a new number each time. This is where intermediate LLM responses go. Prompts are not saved.
-- The model part is the one you asked for with `--llm` or `--model` (characters other than letters, digits, `.`, `_`, `-` become `-`, so `gemma3:12b` shows as `gemma3-12b`); log files use the same naming. Without one the name still carries the default (`claude-sonnet-5-5` under `claude_cli`). Only adapters with no default (`ollama`, ...) give a folder without a model part and `"model": null` in `run.json`; the nodes then use the model hints in the graph.
+- The model part is the one you asked for with `--llm` or `--model` (characters other than letters, digits, `.`, `_`, `-` become `-`, so `gemma3:12b` shows as `gemma3-12b`); log files use the same naming. Without one the name still carries the default (`claude-sonnet-5-5` under `claude_cli`), even if some nodes name a model of their own. Only adapters with no default (`ollama`, ...) give a folder without a model part and `"model": null` in `run.json`.
 - `--output-dir DIR` replaces `<graph folder>/output`. Each run still gets its own subfolder, so runs never overwrite each other.
 - `--no-output` writes nothing. A run that fails, or ends without reaching an `OUTPUT` node, writes no result files.
 - `output/` is in `.gitignore`.

@@ -192,6 +192,6 @@ def run_node_procedure(node_data: Dict, in_data: Dict[str, Any], resolver, llm) 
         if port not in in_data:
             raise ValueError(f"node {node_id!r}: params maps {spl_name!r} to {port!r}, which has no value")
         args[spl_name] = in_data[port]
-    out = run_procedure(path, args, llm.adapter_name, getattr(llm, 'model_override', None),
+    out = run_procedure(path, args, llm.adapter_name, getattr(llm, 'model_override', None) or getattr(llm, 'default_model', None),
                         log_dir=resolver.base_dir / '.grafr' / 'logs')
     return {output_ports[0]: out} if output_ports else {}

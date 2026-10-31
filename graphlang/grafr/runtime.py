@@ -228,7 +228,7 @@ class GraphLangRuntime:
         """Run the workflow and return its outputs: a dict keyed by the workflow's declared output name."""
         wf = self.graph_data["workflow"]["name"]
         log_event(_log, "run.start", workflow=wf, nodes=self.G.number_of_nodes(), inputs=sorted(inputs or {}),
-                  adapter=self.llm.name, model=getattr(self.llm, "model_override", None))
+                  adapter=self.llm.name, model=getattr(self.llm, "model_override", None) or getattr(self.llm, "default_model", None))
         started = time.perf_counter()
         try:
             outputs = self._execute(inputs)

@@ -11,8 +11,9 @@
 (SPL.py is needed only for `procedure_ref` nodes; see procedures.py.)
 
 DODA: the graph says *what* to generate; the provider and model are chosen when you run it
-(`graf run --llm claude_cli:claude-haiku-5-5`). A `model` written in a node is only a hint:
-it is used when it is compatible with the chosen adapter and no `--model` was given, else ignored.
+(`graf run --llm claude_cli:claude-haiku-5-5`). The model for a call is chosen in this order:
+an explicit choice on the command line (`--model`, or the model in `--llm adapter:model`, or `llm:` in a bindings file) wins for every node;
+else the node's own `model:` if it fits the adapter; else the adapter's default (claude_cli: claude-sonnet-5-5).
 """
 from __future__ import annotations
 
@@ -20,8 +21,8 @@ import threading
 from typing import Any, Optional
 
 
-# Per-adapter default when no --model/--llm model is given. An adapter not listed (ollama, openrouter, ...) has
-# none: the model hints in the graph apply, else the adapter's own default.
+# Per-adapter default, used by a node that names no model of its own (or one for another adapter) when none is given on the
+# command line. An adapter not listed (ollama, openrouter, ...) has none: the adapter's own default applies.
 DEFAULT_MODELS = {"claude_cli": "claude-sonnet-5-5"}
 
 
@@ -33,10 +34,13 @@ class LLMUnavailable(RuntimeError):
     """The requested adapter cannot be created (dd-llm missing, unknown name, missing API key, ...)."""
 
 
-def resolve_model(adapter: str, node_model: Optional[str], override: Optional[str]) -> Optional[str]:
-    """Pick the model for one call: the run-time override, else the node's hint if it fits the adapter."""
-    if override:
-        return override
+def resolve_model(adapter: str, node_model: Optional[str], override: Optional[str], default: Optional[str] = None) -> Optional[str]:
+    """Pick the model for one call: the explicit run-time choice, else the node's own model if it fits the adapter, else the default."""
+    return override or _node_hint(adapter, node_model) or default
+
+
+def _node_hint(adapter: str, node_model: Optional[str]) -> Optional[str]:
+    """The node's `model:` as this adapter can use it, or None (a hint for another provider, or a model the adapter does not offer)."""
     if not node_model or adapter == "mock":
         return node_model or None
     if "/" in node_model and adapter != "openrouter":
@@ -65,7 +69,7 @@ class MockLLM:
 class DDLLM:
     """A dd-llm adapter behind the `generate` GraphLang nodes use."""
 
-    def __init__(self, name: str, model: Optional[str] = None):
+    def __init__(self, name: str, model: Optional[str] = None, default: Optional[str] = None):
         try:
             import dd_llm
         except ImportError as e:
@@ -77,7 +81,8 @@ class DDLLM:
             raise LLMUnavailable(str(e)) from e
         self.name = name
         self.adapter_name = name
-        self.model_override = model
+        self.model_override = model                  # chosen on the command line: beats every node's own model
+        self.default_model = default                 # used when a node names no usable model
         self._local = threading.local()
 
     def last_usage(self) -> Optional[dict]:
@@ -102,4 +107,4 @@ def make_llm(adapter: str = "mock", model: Optional[str] = None):
     """The LLM object for `--adapter` / `--model`."""
     if adapter == "mock":
         return MockLLM(model)
-    return DDLLM(adapter, model or default_model(adapter))
+    return DDLLM(adapter, model, default_model(adapter))

@@ -98,7 +98,8 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, re
     limits = bindings.get("limits", {})
     max_steps = max_steps or limits.get("max_steps") or 1000
 
-    model = model or default_model(adapter)          # claude_cli: claude-sonnet-5-5; ollama etc.: none
+    explicit_model = model                           # what the user chose: it beats every node's own `model:`
+    model = model or default_model(adapter)          # the name used in log and result folders (claude_cli: claude-sonnet-5-5)
 
     if no_log:
         disable_logging()
@@ -148,7 +149,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, re
     try:
         if record_file and replay_file:
             raise click.UsageError("use --record or --replay, not both")
-        llm = ReplayLLM(Path(replay_file)) if replay_file else make_llm(adapter, model)
+        llm = ReplayLLM(Path(replay_file)) if replay_file else make_llm(adapter, explicit_model)
         if record_file:
             llm = RecordingLLM(llm, Path(record_file))
         llm = MeteredLLM(llm, limits.get("max_llm_calls"), limits.get("max_cost_usd"))

@@ -58,6 +58,14 @@ def test_resolve_model_rules(fake_dd_llm):
     assert resolve_model("claude_cli", None, None) is None
 
 
+def test_resolve_model_order_is_cli_then_node_then_default(fake_dd_llm):
+    d = "claude-sonnet-5-5"
+    assert resolve_model("claude_cli", "claude-haiku-5-5", "claude-opus-5-5", d) == "claude-opus-5-5"   # explicit CLI choice wins
+    assert resolve_model("claude_cli", "claude_cli/claude-haiku-5-5", None, d) == "claude-haiku-5-5"   # else the node's own
+    assert resolve_model("claude_cli", None, None, d) == d                                            # else the default
+    assert resolve_model("claude_cli", "ollama/gemma3", None, d) == d                                 # a hint for another adapter falls to the default
+
+
 def test_dd_llm_wrapper_calls_the_adapter(fake_dd_llm):
     llm = make_llm("claude_cli", "claude-haiku-5-5")
     assert isinstance(llm, DDLLM) and llm.name == "claude_cli" and llm.adapter_name == "claude_cli"

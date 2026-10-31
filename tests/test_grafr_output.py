@@ -119,25 +119,26 @@ def test_default_model_reaches_the_run_name_and_the_llm(app, monkeypatch):
     class Fake:
         name, adapter_name = "claude_cli", "claude_cli"
 
-        def __init__(self, model):
-            seen["model"] = model
-            self.model_override = model
+        def __init__(self, model, default):
+            seen["model"], seen["default"] = model, default
+            self.model_override, self.default_model = model, default
 
         def generate(self, prompt, model=None, **kw):
             seen.setdefault("calls", []).append(model)
             return "text"
 
-    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", lambda name, model=None: Fake(model))
+    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", lambda name, model=None, default=None: Fake(model, default))
     assert run(app, "--adapter", "claude_cli").exit_code == 0
     (run_dir,) = run_dirs(app / "output")
     assert run_dir.name.startswith("self_refine-claude_cli-claude-sonnet-5-5-")
     assert json.loads((run_dir / "run.json").read_text())["model"] == "claude-sonnet-5-5"
-    assert seen["model"] == "claude-sonnet-5-5" and set(seen["calls"]) == {"claude-sonnet-5-5"}
+    assert seen["model"] is None and seen["default"] == "claude-sonnet-5-5"     # a default, not an override
+    assert set(seen["calls"]) == {"claude-sonnet-5-5"}
 
 
 def test_explicit_model_beats_the_default(app, monkeypatch):
-    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", lambda name, model=None: type(
-        "F", (), {"name": "claude_cli", "adapter_name": "claude_cli", "model_override": model,
+    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", lambda name, model=None, default=None: type(
+        "F", (), {"name": "claude_cli", "adapter_name": "claude_cli", "model_override": model, "default_model": default,
                   "generate": lambda self, p, model=None, **k: "t"})())
     assert run(app, "--llm", "claude_cli:claude-haiku-5-5").exit_code == 0
     (run_dir,) = run_dirs(app / "output")
@@ -161,3 +162,23 @@ edges:
     result = CliRunner().invoke(main, ["run", str(graph), "--adapter", "mock", "--no-log", "--no-output"])
     disable_logging()
     assert "a[i] [bold]b[/bold]" in result.output.replace("\n", " ")
+
+
+def test_a_node_model_beats_the_default_but_not_an_explicit_model(app, monkeypatch):
+    import yaml
+    seen = []
+
+    def fake(name, model=None, default=None):
+        return type("F", (), {"name": "claude_cli", "adapter_name": "claude_cli", "model_override": model, "default_model": default,
+                              "generate": lambda self, p, model=None, **k: seen.append(model) or "t"})()
+
+    graph = next(app.glob("*.graph.yaml"))
+    doc = yaml.safe_load(graph.read_text())
+    next(n for n in doc["nodes"] if n["id"] == "critique")["config"]["model"] = "claude_cli/claude-haiku-5-5"
+    graph.write_text(yaml.safe_dump(doc))
+    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", fake)
+    assert run(app, "--adapter", "claude_cli").exit_code == 0
+    assert "claude-haiku-5-5" in seen and "claude-sonnet-5-5" in seen
+    seen.clear()
+    assert run(app, "--llm", "claude_cli:claude-opus-5-5").exit_code == 0
+    assert set(seen) == {"claude-opus-5-5"}
