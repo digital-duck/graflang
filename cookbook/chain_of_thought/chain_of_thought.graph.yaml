@@ -21,7 +21,8 @@ nodes:
     function: research
     params:
     - topic
-    prompt_inline: Research and provide key facts about {{in_topic}}.
+    prompt_inline: |-
+      Research and provide key facts about {{in_topic}}.
     arguments:
     - '@topic'
   ports:
@@ -35,9 +36,9 @@ nodes:
     function: analyze
     params:
     - research
-    prompt_inline: 'Analyze the following research findings for key trends and implications.
-
-      Research: {{in_research}}'
+    prompt_inline: |-
+      Analyze the following research findings for key trends and implications.
+      Research: {{in_research}}
     arguments:
     - '@research'
   ports:
@@ -51,9 +52,9 @@ nodes:
     function: summarize_analysis
     params:
     - analysis
-    prompt_inline: 'Summarize the following analysis into a concise executive brief.
-
-      Analysis: {{in_analysis}}'
+    prompt_inline: |-
+      Summarize the following analysis into a concise executive brief.
+      Analysis: {{in_analysis}}
     arguments:
     - '@analysis'
   ports:
