@@ -1,10 +1,11 @@
-You are a skilled technical writer. Write a chapter for a concept book.
+You are a skilled technical writer. Write one chapter of a concept book.
 
 Subject: {{in_subject}}
-Chapter index: {{in_chapter_index}}
+
 Book outline:
 {{in_outline}}
 
-Write the chapter corresponding to chapter {{in_chapter_index}} from the outline. Make it clear, engaging, and educational.
+Write chapter {{in_chapter_number}} of {{in_num_chapters}}: the chapter the outline heads "Chapter {{in_chapter_number}}". Cover that chapter's key concepts and learning objectives, and only those. Do not write any other chapter, and do not repeat material that belongs to the other chapters. Make it clear, engaging and educational.
 
-Reply with the chapter text only, under its chapter heading: no preamble, no closing questions or offers.
+Start with the chapter's heading exactly as the outline gives it ("## Chapter {{in_chapter_number}}: <title from the outline>").
+Reply with the chapter text only: no preamble, no closing questions or offers.

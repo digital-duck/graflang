@@ -34,3 +34,13 @@ def test_the_verdict_is_read_whatever_its_formatting():
 def test_all_approved_makes_no_revision_calls():
     _, llm = run("OUTLINE", "CH0", "APPROVED", "CH1", "APPROVED", "BOOK")
     assert len(llm.prompts) == 6
+
+
+def test_each_chapter_is_asked_for_by_the_number_the_outline_uses():
+    """The loop counter is 0-based and the outline says "Chapter 1", "Chapter 2": a prompt that passed the raw counter made the second
+    chapter a second 'Chapter 1' (see the output of 2026-10-31 17:25)."""
+    _, llm = run("OUTLINE", "CH1", "APPROVED", "CH2", "APPROVED", "BOOK", chapters=2)
+    first, second = llm.prompts[1], llm.prompts[3]
+    assert "Write chapter 1 of 2" in first and 'heads "Chapter 1"' in first
+    assert "Write chapter 2 of 2" in second and 'heads "Chapter 2"' in second and "OUTLINE" in second
+    assert "chapter index" not in second.lower()

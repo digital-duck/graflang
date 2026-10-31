@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `concept_book`: the second chapter could repeat the first. The chapter prompt was given the loop's 0-based counter ("write chapter 1") while the outline numbers chapters from 1; a `chapter_number` step now passes the 1-based number and the total.
+
 - `concept_book` revises: the reviewer's verdict now routes an `EVALUATE`; `REVISION_NEEDED` sends the chapter and the feedback to a new `revise_chapter` step, and the book is compiled from the revised chapters (before, the verdict was collected and never used). To collect "the chapter, revised or not", a LOOP's `collect` (and the compact `out:`) now accepts a list of results, taking the one written last in each iteration, as `from` already did.
 
 - A list in a prompt: `{{in_chapters}}` used to show Python's repr (`['chapter 1\\n...', ...]`); a list of texts now reads one after another with a blank line between, and any other list or mapping as JSON. `concept_book`'s compile step had been handed 13 KB of escaped text and answered "Okay" (the book came out empty); its nodes also no longer pin `ollama:gemma3`, so the run's `--llm` applies, and its prompts ask for the text only.

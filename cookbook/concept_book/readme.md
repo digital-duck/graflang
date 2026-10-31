@@ -16,6 +16,10 @@ wf_entry -> generate_outline -> chapter_loop -> compile_book -> wf_exit
 | LLM calls | 2 + 2 x `num_chapters` (outline, compile, and a write plus a review per chapter), plus one revision for each chapter the reviewer sends back (at most `num_chapters`) |
 | Prompts | `prompts/outline.md`, `chapter.md`, `review.md`, `revise.md`, `compile.md` |
 
+## Chapter numbers
+
+The loop's counter is 0-based, but an outline numbers its chapters from 1. An earlier version of the chapter prompt passed the raw counter ("write chapter 1" for the second chapter), and the second chapter came out as another "Chapter 1: Foundations" (seen in a run on 2026-10-31). A `chapter_number` step (`@in_chapter_index + 1`) now gives the writer the number the outline uses, and the prompt asks for "chapter N of M" under the outline's own heading. In a check run (2 chapters, haiku) chapters 1 and 2 carried the outline's two titles.
+
 ## Run
 
 From the repo root:

@@ -39,11 +39,17 @@ nodes:
         chapters: {collect: ["write_chapter.out_chapter", "revise_chapter.out_chapter"]}
       subgraph:
         nodes:
+          # the counter is 0-based but the outline says "Chapter 1", "Chapter 2": hand the writer the number the outline uses
+          - id: "chapter_number"
+            type: "SOLVE"
+            config:
+              expression: "@in_chapter_index + 1"
+            ports: ["trigger", "complete", "in_chapter_index", "out_number"]
           - id: "write_chapter"
             type: "GENERATE"
             config:
               prompt_ref: "prompts.chapter"
-            ports: ["trigger", "complete", "in_outline", "in_chapter_index", "in_subject", "out_chapter"]
+            ports: ["trigger", "complete", "in_outline", "in_chapter_number", "in_num_chapters", "in_subject", "out_chapter"]
           - id: "review_chapter"
             type: "GENERATE"
             config:
@@ -60,6 +66,8 @@ nodes:
               prompt_ref: "prompts.revise"
             ports: ["trigger", "complete", "in_chapter", "in_verdict", "in_subject", "in_outline", "out_chapter"]
         edges:
+          - {source: "chapter_number.complete", target: "write_chapter.trigger", type: "triggers"}
+          - {source: "chapter_number.out_number", target: "write_chapter.in_chapter_number", type: "binds"}
           - {source: "write_chapter.complete", target: "review_chapter.trigger", type: "triggers"}
           - {source: "review_chapter.complete", target: "needs_revision.trigger", type: "triggers"}
           - {source: "needs_revision.pass", target: "revise_chapter.trigger", type: "triggers"}     # pass: the condition holds, a revision is needed
