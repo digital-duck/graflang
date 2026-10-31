@@ -14,7 +14,7 @@ GraphLang: a graph-first language for agentic workflows. The graph (YAML, `*.gra
 pip install -e ".[dev]"                      # extras: dev, anthropic/gemini (provider SDKs via dd-llm; the openai SDK is core), spl (procedure_ref only), kernel (`backend: kernel` on SOLVE: jupyter_client, ipykernel), grafc (jinja2)
 pytest                                       # all tests (use the `graf` conda env's python: it has zinet, dd-llm, SPL.py)
 pytest tests/test_grafr_loop.py::test_name   # single test
-pytest -m llm                                # the few real-LLM tests (claude_cli, claude-sonnet-5-5); `-m "not llm"` for offline only
+pytest --mode llm                           # only the few real-LLM tests (claude_cli, claude-sonnet-5-5); plain `pytest` (= `--mode no-llm`) is offline only; `--mode all` runs both
 graf run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `claude_cli` (real LLM!); add `--adapter mock` to run offline; --param is repeatable
 graf validate|info <graph.yaml>
 graf run ... --log-level debug --log-format jsonl|text|both --log-dir DIR --no-log --output-dir DIR --save-nodes --no-output   # logs default to ~/.graflang/logs

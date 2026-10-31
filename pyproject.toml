@@ -61,4 +61,4 @@ graphlang = ["schema/*.json", "policies/*.cedar", "grafc/rust_gen/templates/*.j2
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["llm: calls a real LLM (claude_cli, default claude-sonnet-5-5); deselect with -m \"not llm\""]
+markers = ["llm: calls a real LLM (claude_cli, default claude-sonnet-5-5); skipped by default, run with --mode llm"]

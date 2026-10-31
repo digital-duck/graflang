@@ -41,15 +41,18 @@ graf --help                            # run, validate, info, expand, compile, v
 ## 1. The automated suite
 
 ```bash
-python -m pytest -q -m "not llm"        # offline: no model
+python -m pytest -q                       # offline: no model (the default, same as --mode no-llm)
 ```
 
-Expected (2026-10-30): **729 passed, 4 skipped, 7 failed**, about 45 s. The 7 failures are the known, left-alone ones in the hand-written Cedar compiler: `tests/test_cedar_compiler.py` (6) and `tests/test_policy_slicer.py::test_slice_by_context_keys` (1). Anything else failing is a regression.
+Expected (2026-10-31): **749 passed, 3 skipped, 7 failed**, about 50 s. The 7 failures are the known, left-alone ones in the hand-written Cedar compiler: `tests/test_cedar_compiler.py` (6) and `tests/test_policy_slicer.py::test_slice_by_context_keys` (1). Anything else failing is a regression.
+
+`--mode` is a graflang option (`tests/conftest.py`): `no-llm` (the default) deselects the tests marked `llm`, `llm` runs only those, `all` runs everything. An explicit `-m` expression still overrides it.
 
 Skips: the Streamlit editor tests (no Streamlit in the `graf` env), and environment skips. The real-Docker tests skip without a daemon and the `python:3.12-slim` image.
 
 ```bash
-python -m pytest -q -m llm              # 8 real-model tests, claude_cli, claude-sonnet-5-5, about 5 min, billed
+python -m pytest -q --mode llm           # only the 8 real-model tests, claude_cli, claude-sonnet-5-5, about 5 min, billed
+python -m pytest -q --mode all           # both
 python -m pytest tests/test_x.py -q     # one file
 python -m pytest tests/test_x.py::test_name -q
 ```
@@ -204,7 +207,7 @@ steps:
 
 Everything else in the lifecycle is easier to see in tests: `pytest tests/test_lifecycle.py -q` (30) covers `pre.require` and `defaults`, `exec.retry` with `max` and `wait_s` and `on`, `timeout_s`, fallback to a route, `post.out_schema` (GENERATE asks for JSON and re-prompts with the validation error), `post.route`, and `RECOVER` (`halt`, `abort`, `skip`, `retry`). Typed ports and trust labels (`TEXT!sql_safe`): `pytest tests/test_ports.py -q` (8).
 
-**[real LLM]** `pytest tests/test_lifecycle.py -m llm -q` makes one real call asking for JSON that matches a schema.
+**[real LLM]** `pytest tests/test_lifecycle.py --mode llm -q` makes one real call asking for JSON that matches a schema.
 
 ## 6. Compact form, parts, elaboration
 
@@ -251,7 +254,7 @@ graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --adapter mock --work
 
 Expected: four explanations keyed `counting`, `probability`, `entropy`, `coding`; the `entropy` prompt contains both prerequisites' texts; `coding` contains `entropy`'s. Run it with `--workers 1` and `--workers 4`: the output is identical. Add an edge `coding -> probability` to `concepts.yaml` (a copy) and validation reports a cycle.
 
-Pinned by: `test_compact`, `test_parts`, `test_elaborate`. **[real LLM]** one test each (`-m llm`).
+Pinned by: `test_compact`, `test_parts`, `test_elaborate`. **[real LLM]** one test each (`--mode llm`).
 
 ## 7. Bindings, budgets, record and replay, checkpoint
 
@@ -396,7 +399,7 @@ limits: {max_llm_calls: 12, max_steps: 300}
 timeout 300 graf run cookbook/self_refine/self_refine.graph.yaml --llm claude_cli:claude-sonnet-5-5 --bind budget.bind.yaml --param topic="why ducks float" --no-output --no-log
 timeout 300 graf run cookbook/parts_demo/parts_demo.graph.yaml --llm claude_cli:claude-sonnet-5-5 --bind budget.bind.yaml --param topic=tides --no-output --no-log     # 3 calls
 timeout 300 graf run cookbook/pocketflow/majority_vote.graph.yaml --llm claude_cli:claude-sonnet-5-5 --bind budget.bind.yaml --no-output --no-log                     # 3 calls, answer 36
-pytest -m llm -q                                                                                                                                                      # the 8 real tests
+pytest --mode llm -q                                                                                                                                                      # the 8 real tests
 ```
 
 Summary line to expect after a real run: `N steps · M LLM calls, X tokens in / Y out · slowest: <node> <s>s`. `claude_cli` reports tokens but not cost.
