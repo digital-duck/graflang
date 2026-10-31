@@ -45,7 +45,7 @@ def test_the_chain_runs_through_both_uses_with_the_right_tone_each_time():
 
 
 def test_the_long_form_subgraph_node_works_without_the_compact_syntax(demo):
-    graph = {"version": "1.0-graph", "resources": {"parts": {"polish": "./parts/polish.graph.yaml"}},
+    graph = {"version": "1.0-graph", "resources": {"parts": {"polish": "./sub_graph/polish.graph.yaml"}},
              "workflow": {"name": "w", "inputs": [{"name": "text", "type": "TEXT"}], "outputs": [{"name": "out", "type": "TEXT"}]},
              "nodes": [{"id": "s", "type": "INPUT", "ports": ["entry", "out_text"]},
                        {"id": "p", "type": "SUBGRAPH", "config": {"part": "parts.polish"}, "ports": ["trigger", "complete", "in_essay", "out_essay"]},
@@ -60,7 +60,7 @@ def test_the_long_form_subgraph_node_works_without_the_compact_syntax(demo):
 
 
 def test_a_part_may_use_a_part(demo):
-    outer = YAML().load((demo / "parts" / "polish.graph.yaml").read_text())
+    outer = YAML().load((demo / "sub_graph" / "polish.graph.yaml").read_text())
     outer["workflow"]["name"] = "twice"
     outer["resources"]["parts"] = {"polish": "./polish.graph.yaml"}
     outer["resources"].pop("prompts")
@@ -71,9 +71,9 @@ def test_a_part_may_use_a_part(demo):
                       {"source": "b.complete", "target": "wf_exit.trigger", "type": "triggers"},
                       {"source": "wf_entry.out_essay", "target": "a.in_essay", "type": "binds"}, {"source": "wf_entry.out_tone", "target": "a.in_tone", "type": "binds"},
                       {"source": "a.out_essay", "target": "b.in_essay", "type": "binds"}, {"source": "b.out_essay", "target": "wf_exit.in_essay", "type": "binds"}]
-    dump(demo / "parts" / "twice.graph.yaml", outer)
+    dump(demo / "sub_graph" / "twice.graph.yaml", outer)
     top = YAML().load(GRAPH.read_text())
-    top["resources"]["parts"] = {"twice": "./parts/twice.graph.yaml"}
+    top["resources"]["parts"] = {"twice": "./sub_graph/twice.graph.yaml"}
     top["steps"] = [{"t": {"use": "parts.twice", "in": {"essay": "hello", "tone": "calm"}, "out": ["essay"]}}, {"done": {"output": "t.essay"}}]
     top["workflow"]["inputs"] = []
     path = dump(demo / "nested.graph.yaml", top)
@@ -86,7 +86,7 @@ def test_a_part_may_use_a_part(demo):
 
 def test_a_part_inside_a_loop_body_is_expanded_there(demo):
     graph = load_graph(GRAPH)
-    base = {"version": "1.0-graph", "resources": {"parts": {"polish": "./parts/polish.graph.yaml"}},
+    base = {"version": "1.0-graph", "resources": {"parts": {"polish": "./sub_graph/polish.graph.yaml"}},
             "workflow": {"name": "l", "inputs": [], "outputs": [{"name": "all", "type": "JSON"}]},
             "nodes": [{"id": "s", "type": "INPUT", "ports": ["entry"]},
                       {"id": "lp", "type": "LOOP", "ports": ["trigger", "exit", "out_all"],
@@ -111,7 +111,7 @@ def test_a_part_inside_a_loop_body_is_expanded_there(demo):
     (lambda g: g["nodes"][1].__setitem__("ports", ["complete", "in_essay", "out_essay"]), "needs the ports trigger and complete"),
 ])
 def test_a_use_that_does_not_match_the_interface_is_named(demo, edit, message):
-    g = {"version": "1.0-graph", "resources": {"parts": {"polish": "./parts/polish.graph.yaml"}},
+    g = {"version": "1.0-graph", "resources": {"parts": {"polish": "./sub_graph/polish.graph.yaml"}},
          "workflow": {"name": "w", "inputs": [{"name": "text", "type": "TEXT"}], "outputs": []},
          "nodes": [{"id": "s", "type": "INPUT", "ports": ["entry", "out_text"]},
                    {"id": "p", "type": "SUBGRAPH", "config": {"part": "parts.polish"}, "ports": ["trigger", "complete", "in_essay", "out_essay"]}],
@@ -122,19 +122,19 @@ def test_a_use_that_does_not_match_the_interface_is_named(demo, edit, message):
 
 
 def test_a_part_that_uses_itself_is_refused(demo):
-    part = YAML().load((demo / "parts" / "polish.graph.yaml").read_text())
+    part = YAML().load((demo / "sub_graph" / "polish.graph.yaml").read_text())
     part["resources"]["parts"] = {"me": "./polish.graph.yaml"}
     part["nodes"].insert(1, {"id": "again", "type": "SUBGRAPH", "config": {"part": "parts.me"}, "ports": ["trigger", "complete", "in_essay", "out_essay"]})
-    dump(demo / "parts" / "polish.graph.yaml", part)
+    dump(demo / "sub_graph" / "polish.graph.yaml", part)
     with pytest.raises(PartError, match="cannot use itself"):
         load_graph(GRAPH.parent.parent.joinpath(demo.name, "parts_demo.graph.yaml") if False else demo / "parts_demo.graph.yaml")
 
 
 def test_a_part_without_an_input_node_is_refused(demo):
-    part = YAML().load((demo / "parts" / "polish.graph.yaml").read_text())
+    part = YAML().load((demo / "sub_graph" / "polish.graph.yaml").read_text())
     part["nodes"] = [n for n in part["nodes"] if n["type"] != "INPUT"]
     part["edges"] = [e for e in part["edges"] if not e["source"].startswith("wf_entry")]
-    dump(demo / "parts" / "polish.graph.yaml", part)
+    dump(demo / "sub_graph" / "polish.graph.yaml", part)
     with pytest.raises(PartError, match="exactly one INPUT and one OUTPUT"):
         load_graph(demo / "parts_demo.graph.yaml")
 

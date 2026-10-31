@@ -13,10 +13,10 @@ workflow:
 
 resources:
   parts:
-    polish: "./parts/polish.graph.yaml"
+    polish: "./sub_graph/polish.graph.yaml"
 
 steps:
-  - draft:  {generate: "Write two sentences about {{in_topic}}.", in: {topic: $in.topic}, out: essay}
+  - draft:  {generate: "Write 5 sentences about {{in_topic}}.", in: {topic: $in.topic}, out: essay}
   - first:  {use: parts.polish, in: {essay: draft, tone: formal}, out: [essay]}
   - second: {use: parts.polish, in: {essay: first.essay}, out: [essay]}
   - done:   {output: second.essay}

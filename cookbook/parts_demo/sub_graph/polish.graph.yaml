@@ -1,0 +1,31 @@
+version: "1.0-graph"
+
+# A part: a workflow file another workflow uses as one node (see ../parts_demo.graph.yaml).
+# Its interface is the workflow header: inputs essay and tone (tone has a default), output essay.
+
+workflow:
+  name: "polish"
+  inputs:
+    - {name: "essay", type: "TEXT"}
+    - {name: "tone", type: "TEXT", default: "plain"}
+  outputs:
+    - {name: "essay", type: "TEXT"}
+
+resources:
+  prompts:
+    rewrite: "./prompts/rewrite.md"           # relative to this file; the using workflow gets it under a prefixed name
+
+nodes:
+  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_essay", "out_tone"]}
+  - id: "rewrite"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.rewrite"}
+    ports: ["trigger", "complete", "in_essay", "in_tone", "out_essay"]
+  - {id: "wf_exit", type: "OUTPUT", ports: ["trigger", "exit", "in_essay"]}
+
+edges:
+  - {source: "wf_entry.entry", target: "rewrite.trigger", type: "triggers"}
+  - {source: "rewrite.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "wf_entry.out_essay", target: "rewrite.in_essay", type: "binds"}
+  - {source: "wf_entry.out_tone", target: "rewrite.in_tone", type: "binds"}
+  - {source: "rewrite.out_essay", target: "wf_exit.in_essay", type: "binds"}
