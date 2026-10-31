@@ -97,7 +97,7 @@ ls cookbook/ts_verify/output/                     # one folder per run
 python -m json.tool cookbook/ts_verify/output/<run>/result.json
 ```
 
-`result.json` has the same four fields as the printed output: `passed`, `attempts`, `code` (clean, without the markdown fence) and `report`. To see every attempt and every report, add `--save-nodes` to the run: the run folder then has a `nodes/` folder with one file per node output in firing order (`002-write.out_code.md`, `003-typecheck.out_check.md`, ...). The log (path printed at the end of the run) records each tool call with its duration and a hash of its input and output.
+`result.json` has the same four fields as the printed output: `passed`, `attempts`, `code` (clean, without the markdown fence) and `report`. To see every attempt and every report, look in the run folder's `nodes/` folder with one file per node output in firing order (`002-write.out_code.md`, `003-typecheck.out_check.md`, ...). The log (path printed at the end of the run) records each tool call with its duration and a hash of its input and output.
 
 ### 6. Change something
 

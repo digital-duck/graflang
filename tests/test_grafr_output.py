@@ -39,7 +39,7 @@ def test_default_output_dir_is_next_to_the_graph(app):
     assert run_dir.name.startswith("self_refine-mock-")
     assert json.loads((run_dir / "result.json").read_text())["essay"].startswith("[Mock LLM response")
     assert (run_dir / "essay.md").read_text().startswith("[Mock LLM response")
-    assert not (run_dir / "nodes").exists()
+    assert (run_dir / "nodes").is_dir()                          # node outputs are saved by default
     assert f"output: {run_dir}" in result.output.replace("\n", "")
 
 
@@ -54,8 +54,20 @@ def test_no_output_writes_nothing(app):
     assert not (app / "output").exists()
 
 
-def test_save_nodes_writes_each_nodes_output_in_firing_order(app):
+def test_no_save_nodes_keeps_only_the_workflow_outputs(app):
+    assert run(app, "--no-save-nodes").exit_code == 0
+    (run_dir,) = run_dirs(app / "output")
+    assert (run_dir / "result.json").exists() and not (run_dir / "nodes").exists()
+
+
+def test_save_nodes_flag_is_still_accepted(app):
     assert run(app, "--save-nodes").exit_code == 0
+    (run_dir,) = run_dirs(app / "output")
+    assert (run_dir / "nodes").is_dir()
+
+
+def test_node_outputs_are_saved_by_default_in_firing_order(app):
+    assert run(app).exit_code == 0                               # no flag needed
     (run_dir,) = run_dirs(app / "output")
     names = sorted(p.name for p in (run_dir / "nodes").iterdir())
     assert names[0].startswith("001-") and any("draft.out_essay.md" in n for n in names)

@@ -62,7 +62,7 @@ graf run cookbook/code_pipeline/code_pipeline.graph.yaml --llm ollama:gemma3 --p
   | `spec/extracted.md` | `06_extract_spec` |
 
 - **Logs:** `~/.graflang/logs/code_pipeline-<adapter>[-<model>]-<time>.log` / `.jsonl` for the graph, and `spl-<procedure>-<time>.log` / `.jsonl` beside them for each procedure run.
-- With `--save-nodes`, `nodes/` also holds each node's output (analysis, code, feedback, test verdict, docs).
+- `nodes/` also holds each node's output (analysis, code, feedback, test verdict, docs).
 
 ## Things to check
 

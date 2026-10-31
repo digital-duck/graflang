@@ -23,10 +23,10 @@ The interface is checked when the file loads (`graf validate`): `in:`/`out:` nam
 
 ```bash
 graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides
-graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides --save-nodes
+graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides
 ```
 
-With `--save-nodes` you get the draft, the formal version and the plain version, to compare.
+In the run folder's `nodes/` you get the draft, the formal version and the plain version, to compare.
 
 ## Things to check
 

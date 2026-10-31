@@ -27,14 +27,14 @@ graf run cookbook/concept_book/build_concept_book.graph.yaml \
 
 # another model, keeping every node's output
 graf run cookbook/concept_book/build_concept_book.graph.yaml --llm claude_cli:claude-haiku-5-5 \
-    --param subject="entropy" --param num_chapters=3 --save-nodes
+    --param subject="entropy" --param num_chapters=3
 ```
 
 ## What you get
 
 - **Console:** `generate_outline`, then `chapter_loop`, then the body nodes `write_chapter` and `review_chapter` indented once per iteration, then `compile_book`.
 - **Result:** `cookbook/concept_book/output/build_concept_book-<adapter>[-<model>]-<time>/book.md` (also `result.json`).
-- **Intermediate text:** with `--save-nodes`, `nodes/` holds the outline, every chapter and every review, numbered in firing order.
+- **Intermediate text:** `nodes/` holds the outline, every chapter and every review, numbered in firing order.
 - **Log:** `~/.graflang/logs/build_concept_book-<adapter>[-<model>]-<time>.log` and `.jsonl`; `loop.end` records `iterations`.
 
 ## Things to check
@@ -45,4 +45,4 @@ graf run cookbook/concept_book/build_concept_book.graph.yaml --llm claude_cli:cl
 
 ## Known limit
 
-`review_chapter` writes an `APPROVED` / `REVISION_NEEDED` verdict, but nothing reads it: no chapter is revised, and the verdict only shows up with `--save-nodes`. It is a place to hang a retry (an `EVALUATE` plus a second pass), not a working gate yet.
+`review_chapter` writes an `APPROVED` / `REVISION_NEEDED` verdict, but nothing reads it: no chapter is revised, and the verdict only shows up in `nodes/`. It is a place to hang a retry (an `EVALUATE` plus a second pass), not a working gate yet.

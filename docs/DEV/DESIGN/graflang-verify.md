@@ -118,10 +118,17 @@ Each recipe's run commands are in its `readme.md`.
 G=cookbook/self_refine/self_refine.graph.yaml
 graf info $G                             # name, node and edge counts, inputs, outputs, resources
 graf validate $G                         # ✓ Valid GraphLang workflow: self_refine
-graf run $G --param topic=ducks --save-nodes --output-dir /tmp/verify/out     # 3 model calls
+graf run $G --param topic=ducks --output-dir /tmp/verify/out     # 3 model calls
 ```
 
-Check `/tmp/verify/out/self_refine-claude_cli-claude-sonnet-5-5-<time>/`: `essay.md`, `result.json`, `run.json`, `summary.json` (steps 4, 3 calls), and `nodes/` with one file per node output.
+Check `/tmp/verify/out/self_refine-claude_cli-claude-sonnet-5-5-<time>/`: `essay.md`, `result.json`, `run.json`, `summary.json` (steps 4, 3 calls), and `nodes/` with one file per node output (saved by default; `--no-save-nodes` keeps only the workflow outputs).
+
+Without `--output-dir`, results go to the `output/` folder next to the `.graph.yaml` (for this graph `cookbook/self_refine/output/<run>/`, ignored by git); each run gets its own subfolder. Try it, and `--no-save-nodes`, `--no-output`:
+
+```bash
+graf run $G --param topic=ducks --no-save-nodes   # 3 calls; the new run folder under cookbook/self_refine/output/ has no nodes/
+ls cookbook/self_refine/output/
+```
 
 ```bash
 graf run $G --param topic=x --log-level debug --log-format jsonl --log-dir /tmp/verify/logs     # 3 calls
@@ -242,7 +249,7 @@ steps:
 **Parts:**
 
 ```bash
-graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides --save-nodes --output-dir /tmp/verify/p     # 3 calls
+graf run cookbook/parts_demo/parts_demo.graph.yaml --param topic=tides --output-dir /tmp/verify/p     # 3 calls
 graf expand cookbook/parts_demo/parts_demo.graph.yaml | grep -E "id: (first|second)__"   # first__rewrite, second__rewrite
 ```
 

@@ -17,7 +17,7 @@ pytest tests/test_grafr_loop.py::test_name   # single test
 pytest --mode llm                           # only the few real-LLM tests (claude_cli, claude-sonnet-5-5); plain `pytest` is offline only; `-m` is refused (see tests/README.md); `--mode all` runs both
 graf run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `claude_cli` with claude-sonnet-5-5 (a real LLM, billed; give a `--bind` file with `limits.max_llm_calls` when trying a loop); --param is repeatable
 graf validate|info <graph.yaml>
-graf run ... --log-level debug --log-format jsonl|text|both --log-dir DIR --no-log --output-dir DIR --save-nodes --no-output   # logs default to ~/.graflang/logs
+graf run ... --log-level debug --log-format jsonl|text|both --log-dir DIR --no-log --output-dir DIR --no-save-nodes --no-output   # logs default to ~/.graflang/logs
 graf compile <graph.yaml> [--lang rust|spl] [-o OUT] [--dry-run]   # spl: SPL script (graf export-spl is folded in); rust: experimental stub; both run `validate`'s checks first
 graf vis <graph.yaml> [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o FILE] [--no-open]   # draw the workflow (default ~/.graflang/vis/); `python -m graphlang ...` also works
 ```

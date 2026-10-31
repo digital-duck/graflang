@@ -64,9 +64,9 @@ def _load_or_exit(graph_path: Path) -> dict:
               help="where log files go (default ~/.graflang/logs, or $DD_LOG_DIR); e.g. --log-dir . for the current folder")
 @click.option("--no-log", is_flag=True, help="do not write a log file")
 @click.option("--output-dir", type=click.Path(file_okay=False), default=None,
-              help="where results go (default <graph folder>/output): a folder per run with result.json and one file per output")
-@click.option("--save-nodes", is_flag=True,
-              help="also save every node's output (LLM responses included) under <run folder>/nodes/")
+              help="where results go (default: the output/ folder next to the .graph.yaml): a folder per run with result.json and one file per output")
+@click.option("--save-nodes/--no-save-nodes", default=True, show_default=True,
+              help="save every node's output (LLM responses included) under <run folder>/nodes/ (--no-save-nodes keeps only the workflow outputs)")
 @click.option("--no-output", is_flag=True, help="do not write result files")
 @click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
               help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")

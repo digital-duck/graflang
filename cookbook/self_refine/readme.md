@@ -33,7 +33,7 @@ Under `claude_cli` the model is `claude-sonnet-5-5` unless you give another with
 
 - **Console:** the three firings (`draft`, `critique`, `refine`), then `✓ Workflow completed` and the output.
 - **Result:** `cookbook/self_refine/output/self_refine-<adapter>[-<model>]-<time>/essay.md` (also `result.json`).
-- **Intermediate text:** add `--save-nodes` to also get `nodes/001-draft.out_essay.md`, `002-critique.out_feedback.md` and `003-refine.out_essay.md`, so you can compare the draft with the refined essay.
+- **Intermediate text:** `nodes/001-draft.out_essay.md`, `002-critique.out_feedback.md` and `003-refine.out_essay.md`, so you can compare the draft with the refined essay.
 - **Log:** `~/.graflang/logs/self_refine-<adapter>[-<model>]-<time>.log` and `.jsonl` (no essay text, only sizes and timings).
 
 ## Things to check
