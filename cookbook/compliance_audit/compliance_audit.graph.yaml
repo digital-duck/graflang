@@ -7,7 +7,7 @@ version: "1.0-graph"
 workflow:
   name: "compliance_audit"
   inputs:
-    - {name: "document", type: "TEXT"}
+    - {name: "document", type: "TEXT"}         # the text itself, or the path of a text file (read by load_document)
     - {name: "destination", type: "TEXT"}     # external_api and third_party_vendor are external
     - {name: "engine", type: "TEXT", default: "stdlib"}          # stdlib, sympy or z3
     - {name: "rules_file", type: "TEXT", default: ""}      # optional path to your own rules JSON; empty = procedures/rules.json
@@ -26,6 +26,18 @@ nodes:
   - id: "wf_entry"
     type: "INPUT"
     ports: ["entry", "out_document", "out_destination", "out_engine", "out_rules_file"]
+
+  # 0. The document: a literal text is kept, a file path is replaced by the file's text (procedures/load_document.py)
+  - id: "load_document"
+    type: "SOLVE"
+    config:
+      backend: "subprocess"
+      command: ["python3", "-I", "procedures/load_document.py"]
+      parse: {tool: "procedures/load_document.py:parse"}      # the whole text, not one line
+      out_type: "TEXT"
+      timeout: 30
+      label: "Load the document"
+    ports: ["trigger", "complete", "in_document", "out_text"]
 
   # 1. Probabilistic: what personal data is in the document? (types only)
   - id: "extract_pii"
@@ -110,8 +122,10 @@ nodes:
 
 edges:
   # first pass
-  - {source: "wf_entry.entry",          target: "extract_pii.trigger",  type: "triggers"}
-  - {source: "wf_entry.out_document",   target: "extract_pii.in_document", type: "binds"}
+  - {source: "wf_entry.entry",          target: "load_document.trigger", type: "triggers"}
+  - {source: "wf_entry.out_document",   target: "load_document.in_document", type: "binds"}
+  - {source: "load_document.complete", target: "extract_pii.trigger",  type: "triggers"}
+  - {source: "load_document.out_text",  target: "extract_pii.in_document", type: "binds"}
   - {source: "extract_pii.complete",    target: "check.trigger",        type: "triggers"}
   - {source: "extract_pii.out_pii_map", target: "check.in_pii_map",      type: "binds"}
   - {source: "wf_entry.out_destination", target: "check.in_destination", type: "binds"}
@@ -126,7 +140,7 @@ edges:
 
   # not compliant: redact, extract again from the redacted text, check again
   - {source: "compliant_first.fail",    target: "redact.trigger",        type: "triggers"}
-  - {source: "wf_entry.out_document",   target: "redact.in_document",    type: "binds"}
+  - {source: "load_document.out_text",  target: "redact.in_document",    type: "binds"}
   - {source: "check.out_verdict",       target: "redact.in_verdict",      type: "binds"}
   - {source: "redact.complete",         target: "extract_again.trigger", type: "triggers"}
   - {source: "redact.out_redacted",     target: "extract_again.in_document", type: "binds"}
@@ -149,7 +163,7 @@ edges:
   - {source: "check.out_verdict",       target: "audit_released.in_verdict", type: "binds"}
   - {source: "recheck.out_verdict",     target: "audit_released.in_verdict", type: "binds"}
   - {source: "audit_released.complete", target: "released.trigger",      type: "triggers"}
-  - {source: "wf_entry.out_document",   target: "released.in_safe_document", type: "binds"}
+  - {source: "load_document.out_text",  target: "released.in_safe_document", type: "binds"}
   - {source: "redact.out_redacted",     target: "released.in_safe_document", type: "binds"}   # the redacted text wins if there is one
   - {source: "audit_released.out_audit", target: "released.in_audit",    type: "binds"}
   - {source: "release_guard.deny",      target: "audit_escalated.trigger", type: "triggers"}

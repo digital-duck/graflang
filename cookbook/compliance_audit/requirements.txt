@@ -1,0 +1,3 @@
+# Only for engine=sympy and engine=z3; the default engine (stdlib) needs nothing extra.
+sympy
+z3-solver

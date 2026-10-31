@@ -209,3 +209,103 @@ def test_engine_and_rules_file_are_optional():
     out = GraphLangRuntime(load_graph(GRAPH), llm=llm, verbose=False).execute({"document": WITH_SSN, "destination": "external_api"})
     full, _ = run(WITH_SSN, "external_api")
     assert out == full
+
+
+def test_document_is_either_a_text_or_the_path_of_a_file(tmp_path):
+    path = tmp_path / "note.txt"
+    path.write_text(WITH_SSN, encoding="utf-8")
+    llm = StubLLM(redacts=False)
+    out = GraphLangRuntime(load_graph(GRAPH), llm=llm, verbose=False).execute(
+        {"document": str(path), "destination": "external_api", "engine": "stdlib"})
+    assert "ESCALATED" in out["audit"] and "R2" in out["audit"]               # the file's SSN was found, so it was read as the document
+
+
+def test_a_missing_document_file_stops_the_run_instead_of_being_audited_as_text(tmp_path):
+    llm = StubLLM()
+    with pytest.raises(Exception, match="no such file"):
+        GraphLangRuntime(load_graph(GRAPH), llm=llm, verbose=False).execute(
+            {"document": str(tmp_path / "missing.txt"), "destination": "external_api", "engine": "stdlib"})
+    assert llm.calls == []
+
+
+def test_the_shipped_input_file_has_the_pii_the_readme_example_needs():
+    text = (EXAMPLE / "input" / "customer_case_file.txt").read_text(encoding="utf-8")
+    assert len(text.split()) > 200 and "123-45-6789" in text and "maria.alvarez@example.com" in text
+
+
+def _facts(entities, destination="external_api"):
+    sys.path.insert(0, str(EXAMPLE / "procedures"))
+    import tools
+    return tools.derive_facts_from({"entities": entities}, destination)
+
+
+def test_masking_is_tracked_per_data_type():
+    facts = _facts([{"type": "NAME", "masked": True}, {"type": "OTHER", "masked": False}, {"type": "CCN", "masked": True}])
+    assert facts["masked_name"] and facts["masked_ccn"] and not facts["masked_other"]
+    assert facts["masked_email"]                       # no email reported: nothing is exposed
+    assert not facts["is_masked"]                      # the all-types fact is unchanged
+
+
+def test_extended_rules_release_a_document_whose_only_unmasked_kind_is_not_restricted():
+    sys.path.insert(0, str(EXAMPLE / "procedures"))
+    import tools
+    rules = tools.load_rules_file(str(EXAMPLE / "procedures" / "rules_extended.json"))
+    masked_everything = [{"type": t, "masked": True} for t in ("NAME", "DOB", "ADDRESS", "EMAIL", "PHONE", "CCN")]
+    assert tools.check(_facts(masked_everything), rules, "stdlib")["compliant"]
+    with_stray = masked_everything + [{"type": "OTHER", "masked": False}]
+    assert tools.check(_facts(with_stray), rules, "stdlib")["violated"] == ["R1", "R8"]     # only what the stray item touches
+    assert tools.check(_facts(masked_everything + [{"type": "SSN", "masked": True}]), rules, "stdlib")["violated"] == ["R2"]
+
+
+# ── the LLM-only baseline (compliance_audit_llm_only.graph.yaml) ─────────────────────────────────────────────────
+
+BASELINE = EXAMPLE / "compliance_audit_llm_only.graph.yaml"
+
+
+class StubJudge(StubLLM):
+    """The model as judge: sees the document and the destination, and answers the verdict itself."""
+
+    def generate(self, prompt: str, model=None, **opts) -> str:
+        if "compliance reviewer" not in prompt:
+            return super().generate(prompt, model, **opts)                       # redact
+        self.calls.append("judge")
+        document = prompt.split("DOCUMENT:\n", 1)[1]
+        external = "DESTINATION: external_api" in prompt
+        violated = ["R2"] * (external and bool(SSN.search(document))) + ["R3"] * bool(CARD.search(document))
+        return json.dumps({"compliant": not violated, "violated": violated, "facts": {"is_external": external}})
+
+
+def run_baseline(document, destination, llm=None):
+    llm = llm or StubJudge()
+    runtime = GraphLangRuntime(load_graph(BASELINE), llm=llm, verbose=False)
+    return runtime.execute({"document": document, "destination": destination}), llm
+
+
+def test_baseline_releases_a_clean_document_after_one_call():
+    out, llm = run_baseline(CLEAN, "external_api")
+    assert out["safe_document"] == CLEAN and out["audit"] == "released to external_api (LLM judge)" and llm.calls == ["judge"]
+
+
+def test_baseline_redacts_judges_again_and_releases():
+    out, llm = run_baseline(WITH_SSN, "external_api")
+    assert "123-45-6789" not in out["safe_document"] and llm.calls == ["judge", "redact", "judge"]
+
+
+def test_baseline_escalates_when_the_redaction_fails_and_the_judge_says_so():
+    out, _ = run_baseline(WITH_SSN, "external_api", llm=StubJudge(redacts=False))
+    assert "safe_document" not in out and out["audit"].startswith("ESCALATED") and "R2" in out["audit"]
+
+
+def test_baseline_fails_closed_on_a_reply_that_is_not_a_verdict():
+    class Garbled(StubJudge):
+        def generate(self, prompt, model=None, **opts):
+            return "Looks fine to me!"
+    out, _ = run_baseline(CLEAN, "external_api", llm=Garbled())                  # an unreadable verdict is never read as compliant
+    assert "safe_document" not in out and out["audit"].startswith("ESCALATED")
+
+
+def test_baseline_and_the_main_recipe_use_the_same_redact_prompt_and_guard():
+    def node(path, node_id):
+        return next(n for n in load_graph(path)["nodes"] if n["id"] == node_id)["config"]
+    assert node(GRAPH, "redact") == node(BASELINE, "redact")
+    assert node(GRAPH, "release_guard") == node(BASELINE, "release_guard")

@@ -30,7 +30,8 @@ ENGINES = ("stdlib", "sympy", "z3")
 MAX_ENUMERATED_VARIABLES = 16
 DATA_TYPES = ("ssn", "ccn", "email", "phone", "address", "name", "dob", "other")
 TYPE_ALIASES = {"credit_card": "ccn", "card": "ccn", "social_security": "ssn", "date_of_birth": "dob"}
-KNOWN_FACTS = tuple(f"has_{t}" for t in DATA_TYPES) + ("has_pii", "is_masked", "is_external")
+KNOWN_FACTS = (tuple(f"has_{t}" for t in DATA_TYPES) + tuple(f"masked_{t}" for t in DATA_TYPES)
+               + ("has_pii", "is_masked", "is_external"))
 RULES_FILE = Path(__file__).with_name("rules.json")
 
 
@@ -279,6 +280,9 @@ def derive_facts_from(pii_map: dict, destination: str, external_destinations=EXT
     entities = pii_map.get("entities", [])
     kinds = {TYPE_ALIASES.get(str(e["type"]).lower(), str(e["type"]).lower()) for e in entities}
     facts = {f"has_{t}": t in kinds for t in DATA_TYPES}
+    for t in DATA_TYPES:           # masked_<type>: every reported item of that type is masked (true when there is none)
+        facts[f"masked_{t}"] = all(e.get("masked", False) for e in entities
+                                   if TYPE_ALIASES.get(str(e["type"]).lower(), str(e["type"]).lower()) == t)
     facts["has_pii"] = bool(entities)
     facts["is_masked"] = all(e.get("masked", False) for e in entities)         # no entities: nothing to mask
     facts["is_external"] = str(destination).strip().lower() in {d.lower() for d in external_destinations}
