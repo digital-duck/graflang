@@ -110,6 +110,11 @@ What this shows, and what it does not:
 - The screenshot is the happy path. Error handling (a bad key, an empty input, a timeout) was not exercised by hand.
 - One run is an anecdote, not a measurement. Nothing here compares this against writing the app by hand or against a plain one-shot prompt.
 
+Two comments on where this sits:
+
+1. **This recipe showcases vibe-coding.** A natural-language spec goes in and an application comes out, with the structure of the code left to the model. The graph does not make that approach more disciplined; it makes it safer to use, by adding a gate, a review and a loop that runs the result. What the model builds is still its own design.
+2. **Planned, not built: a more disciplined route.** Later we intend to refactor this graph-code with GraphLang itself, so that an application is generated from a blueprint `graph.yaml` (the application's own structure written as a graph, which the model then fills in), instead of from a free-text spec. The aim is to build an AI application by design, with the graph as the source of truth, rather than by vibe-coding. Nothing of this exists yet; the blueprint format and how it would be checked are open.
+
 ## What is not here
 
 The Cedar-guarded retry, the documentation step and the closure judge stay in `code_pipeline`. That recipe keeps its `.spl` procedures because the `code_pipeline` experiment runs the same procedures in all its arms.
