@@ -168,3 +168,19 @@ def test_the_picture_draws_each_use_of_a_part_as_a_box():
     G, _ = build(load_graph(GRAPH))
     assert G.nodes["first"]["kind"] == "SUBGRAPH" and G.nodes["first__rewrite"]["parent"] == "first"
     assert G.nodes["second__rewrite"]["parent"] == "second" and "parent" not in G.nodes["draft"]
+
+
+def test_llm_on_a_use_reaches_the_parts_generate_nodes_that_name_none(demo):
+    import yaml
+    path = demo / "parts_demo.graph.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["steps"][1]["first"]["llm"] = "claude_cli:claude-haiku-5-5"              # the first use only
+    path.write_text(yaml.safe_dump(doc))
+    nodes = {n["id"]: n for n in load_graph(path)["nodes"]}
+    assert nodes["first__rewrite"]["config"]["llm"] == "claude_cli:claude-haiku-5-5"
+    assert "llm" not in nodes["second__rewrite"]["config"]
+    part = demo / "sub_graph" / "polish.graph.yaml"
+    p = YAML().load(part.read_text())
+    next(n for n in p["nodes"] if n["id"] == "rewrite")["config"]["llm"] = "ollama:gemma3"      # the part names its own: it wins
+    dump(part, p)
+    assert {n["id"]: n for n in load_graph(path)["nodes"]}["first__rewrite"]["config"]["llm"] == "ollama:gemma3"

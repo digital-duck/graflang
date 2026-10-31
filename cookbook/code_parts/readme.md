@@ -37,7 +37,7 @@ graf vis cookbook/code_parts/code_parts.graph.yaml      # each part use drawn as
 graf expand cookbook/code_parts/code_parts.graph.yaml   # the flat graph: analyze__gen, write__gen, ...
 ```
 
-Each step may name its own LLM: add `llm: "ollama:gemma3"` to the `gen` node of a part, or to a `use` step's config, to give that step another model.
+Each step may name its own LLM: add `llm: "ollama:gemma3"` to a `use` step (`- review: {use: parts.review_code, llm: "ollama:gemma3", ...}`) and the part's `GENERATE` node uses it, unless the part file's node names its own.
 
 ## What is not here
 

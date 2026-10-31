@@ -231,7 +231,7 @@ steps:
   - second: {use: parts.polish, in: {essay: first.essay}, out: [essay]}
 ```
 
-The part's `workflow.inputs` and `outputs` are its interface: `in:` names must be inputs of the part, `out:` names its outputs, an input with no default must be bound, and types must be assignable. A literal in `in:` overrides the part's default. Each use is its own copy (`first__rewrite`, `second__rewrite`), so state is not shared; parts may use parts, but not themselves. In long form the use is a `SUBGRAPH` node with `config: {part: parts.polish}` and ports `trigger`, `complete`, `in_<name>`, `out_<name>`. `graf expand` shows the expanded graph. See `cookbook/parts_demo`.
+The part's `workflow.inputs` and `outputs` are its interface: `in:` names must be inputs of the part, `out:` names its outputs, an input with no default must be bound, and types must be assignable. A literal in `in:` overrides the part's default. Each use is its own copy (`first__rewrite`, `second__rewrite`), so state is not shared; parts may use parts, but not themselves. To choose the LLM, write `llm: "adapter:model"` as one more key of the step: on a `generate` step it is that node's LLM (`- draft: {generate: "...", llm: "ollama:gemma3", in: {...}}`); on a `use` step it is the LLM of the part's `GENERATE` nodes that name none of their own (a node's own `llm:` in the part file wins). Any key of a step other than `in`, `out`, `on`, `ports`, `config` and the kind goes into the node's `config`. In long form the use is a `SUBGRAPH` node with `config: {part: parts.polish}` and ports `trigger`, `complete`, `in_<name>`, `out_<name>`. `graf expand` shows the expanded graph. See `cookbook/parts_demo`.
 
 ## Elaboration: a part for every node of a graph
 

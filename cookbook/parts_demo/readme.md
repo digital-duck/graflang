@@ -37,6 +37,8 @@ wf_entry --> draft --> first__rewrite --> second__rewrite --> done      (trigger
    topic ----> draft ... essay ----> first__rewrite ... essay ----> second__rewrite ... essay ----> done   (binds, the data)
 ```
 
+To choose the LLM of a step, add `llm: "adapter:model"` to it, like any other config key: `- draft: {generate: "...", llm: "ollama:gemma3", in: {topic: $in.topic}, out: essay}`. On a `use` step (`first`) the `llm:` applies to the part's `GENERATE` nodes that name none (here `first__rewrite`); a `llm:` in the part file itself wins. Each step can use a different model, and the run's `--llm` fills in for steps that name none.
+
 Run `graf expand cookbook/parts_demo/parts_demo.graph.yaml` to see all of it, and `graf vis cookbook/parts_demo/parts_demo.graph.yaml` to draw it (each `use` as a box). The two forms are interchangeable; use `steps:` for a line of steps and `nodes:`/`edges:` for anything it cannot say (the two may sit in one file, and steps can refer to the hand-written nodes). The full step grammar is in the module docstring of `graphlang/grafr/compact.py` and in the USER-GUIDE.
 
 ## How a part works

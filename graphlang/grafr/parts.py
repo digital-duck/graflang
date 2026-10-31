@@ -156,6 +156,8 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
         node["id"] = prefix + node["id"]
         cfg_ = node.get("config")
         if isinstance(cfg_, dict):
+            if cfg.get("llm") and node.get("type") == "GENERATE" and not cfg_.get("llm"):
+                cfg_["llm"] = cfg["llm"]                     # `llm:` on the use: the LLM of the part's GENERATE nodes that name none
             for key, kind_ in REF_KEYS:
                 if key in cfg_:
                     cfg_[key] = f"{kind_}.{prefix}{str(cfg_[key]).partition('.')[2]}"
