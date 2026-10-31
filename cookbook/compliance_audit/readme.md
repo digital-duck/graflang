@@ -21,6 +21,26 @@ graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
     --param rules_file="./procedures/rules.json"
 ```
 
+The same audit with the other two rule engines. They need their package (`pip install sympy`, `pip install z3-solver`) in the Python that runs the rule check, which is the `python3` on your `PATH`:
+
+```bash
+# (1) sympy: the rules as symbolic Boolean expressions
+graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
+    --param document="Customer John Doe, SSN 123-45-6789, asks to update his address." \
+    --param destination=external_api \
+    --param engine=sympy \
+    --param rules_file="./procedures/rules.json"
+
+# (2) z3: an SMT solver; besides the violated rules it reports an unsat core, a set of rules that cannot hold together
+graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
+    --param document="Customer John Doe, SSN 123-45-6789, asks to update his address." \
+    --param destination=external_api \
+    --param engine=z3 \
+    --param rules_file="./procedures/rules.json"
+```
+
+Without the package the run stops at the rule check with an error that names it (for z3: `z3 engine needs z3-solver: pip install z3-solver`); it does not fall back to another engine. On the same facts (an unmasked SSN going to `external_api`) all three engines return `compliant: false, violated: [R1, R2]`; z3 also returns `core: [R1]`. That is the program's verdict on a fixed pii map, checked directly; I have not compared full LLM runs across engines.
+
 `rules_file` here names the demo rules explicitly (`procedures/rules.json`); a relative path starts in the recipe's folder, not where you ran `graf run`, so this works from the repo root. `engine` is left out, so it is `stdlib`. Both are optional: leave `rules_file` out (or empty) and the demo rules are used, and add `--param engine=sympy` to pick another engine.
 
 `engine` is `stdlib` (no dependency, the default), `sympy` or `z3`. All three give the same verdicts; see recipe 127 in SPL.py for the measurements (made with the SPL version of the check). A real run with `claude_cli` on the example above redacted the SSN, re-read the result, passed the rules and was released by the Cedar guard. `tests/test_compliance_audit.py` covers every path with a stub model, so it needs no LLM.
