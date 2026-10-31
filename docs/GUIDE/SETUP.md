@@ -38,7 +38,7 @@ Optional extras:
 
 Core dependencies (`click`, `ruamel.yaml`, `networkx`, `jsonschema`, `cedarpy`, `dd-llm`, `rich`, `dd-llm[openai]`, `dd-logging`, `zinet`) come with the base install. `zinet` is the shared graph library: `graf vis` draws through it. `dd-llm` is the shared LLM layer that provides the adapters, and its `openai` SDK serves openai, openrouter, ollama, deepseek and qwen. `cedarpy` is the official Cedar engine and is required: `grafr` imports it at startup.
 
-One console script is installed, `graf`, with the subcommands `run`, `validate`, `info`, `compile`, `check` and `vis`. `python -m graphlang ...` does the same thing.
+One console script is installed, `graf`, with the subcommands `run`, `validate`, `info`, `expand`, `compile` and `vis`. `python -m graphlang ...` does the same thing.
 
 ## Check the install
 

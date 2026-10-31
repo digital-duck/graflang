@@ -20,6 +20,17 @@ class GraphAnalyzer:
             src_node = edge['source'].split('.')[0]
             tgt_node = edge['target'].split('.')[0]
             self.G.add_edge(src_node, tgt_node, **edge)
+        self.dag = self._without_back_edges()
+
+    def _without_back_edges(self) -> nx.DiGraph:
+        """The graph with one edge of every cycle removed (a retry wire points back), so levels and paths are defined."""
+        dag = self.G.copy()
+        while True:
+            try:
+                cycle = nx.find_cycle(dag)
+            except nx.NetworkXNoCycle:
+                return dag
+            dag.remove_edge(*cycle[-1][:2])
     
     def analyze(self) -> Dict:
         """Perform topological analysis."""
@@ -42,26 +53,21 @@ class GraphAnalyzer:
         return counts
     
     def _find_critical_path(self) -> List[str]:
-        """Find the longest path through the graph."""
-        # Simplified: find path from INPUT to OUTPUT
+        """Find the longest path through the graph (back edges ignored)."""
         input_nodes = [n for n in self.G.nodes() if self.G.nodes[n]['type'] == 'INPUT']
         output_nodes = [n for n in self.G.nodes() if self.G.nodes[n]['type'] == 'OUTPUT']
         
         if not input_nodes or not output_nodes:
             return []
         
-        try:
-            path = nx.longest_path(self.G, source=input_nodes[0], target=output_nodes[0])
-            return path
-        except nx.NetworkXNoPath:
-            return []
-    
+        return nx.dag_longest_path(self.dag)
+
     def _find_parallel_sections(self) -> List[List[str]]:
         """Find sections that can be executed in parallel."""
         # Nodes at the same topological level can be parallelized
         levels = {}
-        for node in nx.topological_sort(self.G):
-            level = max([levels.get(pred, 0) for pred in self.G.predecessors(node)] + [0]) + 1
+        for node in nx.topological_sort(self.dag):
+            level = max([levels.get(pred, 0) for pred in self.dag.predecessors(node)] + [0]) + 1
             levels[node] = level
         
         # Group nodes by level

@@ -36,7 +36,7 @@ def test_detect(data, kind):
 
 
 @pytest.mark.parametrize("name", ["graph.yaml", "knowledge.yaml", "x.graph.yaml"])
-@pytest.mark.parametrize("cmd", [["validate"], ["info"], ["vis", "--no-open"], ["check"]])
+@pytest.mark.parametrize("cmd", [["validate"], ["info"], ["vis", "--no-open"], ["compile", "--dry-run"], ["compile", "--lang", "spl"]])
 def test_every_command_explains_a_zinet_file_whatever_it_is_called(tmp_path, name, cmd):
     f = tmp_path / name
     f.write_text(ZINET_GRAPH)
@@ -72,7 +72,7 @@ concepts:
 """
 
 
-@pytest.mark.parametrize("cmd", [["validate"], ["info"], ["check"]])
+@pytest.mark.parametrize("cmd", [["validate"], ["info"], ["compile", "--dry-run"], ["compile", "--lang", "spl"]])
 def test_a_conceptbook_graph_is_not_called_a_zinet_graph(tmp_path, cmd):
     f = tmp_path / "graph.yaml"
     f.write_text(CONCEPTBOOK_GRAPH)

@@ -1,12 +1,9 @@
 """Main GraphLang compiler orchestrator."""
 
-import json
 from pathlib import Path
 from typing import Dict, Any, List
-from ruamel.yaml import YAML
-from jsonschema import validate, ValidationError
 
-from ..formats import require_graphlang
+from ..grafr.runtime import load_graph
 from .analyzer import GraphAnalyzer
 from .optimizer import GraphOptimizer
 from .cedar_compiler import CedarCompiler
@@ -34,25 +31,10 @@ class GraphLangCompiler:
         self.rust_code: Dict = {}
     
     def load_graph(self):
-        """Load and validate the GraphLang YAML."""
-        yaml = YAML()
-        with open(self.graph_path, 'r') as f:
-            self.graph_data = yaml.load(f)
-        require_graphlang(self.graph_data, self.graph_path)
-        
-        # Validate against schema
-        schema_path = Path(__file__).parent.parent / "schema" / "graflang-ir.json"
-        if schema_path.exists():
-            with open(schema_path, 'r') as f:
-                schema = json.load(f)
-            try:
-                validate(instance=self.graph_data, schema=schema)
-            except ValidationError as e:
-                raise ValueError(f"Schema validation failed: {e.message}")
-        
-        # Store source directory for resource resolution
-        self.graph_data['_source_dir'] = str(self.graph_path.parent)
-    
+        """Load the workflow the way `graf run` and `graf validate` do: compact, parts and elaborate files are expanded and the
+        schema is checked."""
+        self.graph_data = load_graph(self.graph_path)
+
     def resolve_resources(self):
         """Resolve all Tier 2 resources (procedures, prompts, policies)."""
         if 'resources' not in self.graph_data:

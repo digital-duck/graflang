@@ -150,7 +150,7 @@ edges:
 - **Do more at once.** `--workers` runs parallel branches concurrently, `BATCH` maps a subgraph over a list, `RUN` calls a subprocess, a Python kernel or an http service.
 - **Keep it affordable and repeatable.** A run summary with calls, tokens and time; budgets; `--record` / `--replay` of model calls so tests need no model; `--checkpoint` / `--resume` after a failure.
 - **Stay in control.** Cedar guards at run time, a workflow policy for which nodes are allowed at all, and a `MUTATE` that can never touch the safety layer or what runs.
-- **Come from and go to SPL.** SPL.py's `spl2graph` lifts SPL workflows into graphs (265 of its 274 cookbook workflows validate); `graf export-spl` writes a graph back as SPL.
+- **Come from and go to SPL.** SPL.py's `spl2graph` lifts SPL workflows into graphs (265 of its 274 cookbook workflows validate); `graf compile --lang spl` writes a graph back as SPL.
 
 ---
 
@@ -176,7 +176,7 @@ GraphLang takes SPL's proven semantics and gives them a **topological execution 
 - [x] `graf vis`: read a workflow as a graph (control flow first, data edges on demand, loops that collapse to one box)
 - [x] Editor: `graf vis --edit` adds, connects, changes and removes nodes, validates while you edit and saves the `*.graph.yaml` with its comments kept (`pip install 'graflang[edit]'`). Not yet: run from the view, drag-to-connect.
 - [ ] Interactive Streamlit UI (drill-down visualization of Tier 3 composites)
-- [x] SPL recipes as graphs: `spl2graph` (in SPL.py) lifts 265 of 274 cookbook workflows; `graf export-spl` goes back
+- [x] SPL recipes as graphs: `spl2graph` (in SPL.py) lifts 265 of 274 cookbook workflows; `graf compile --lang spl` goes back
 - [ ] Paper submission (NeurIPS / ICLR)
 
 ---

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `graf compile` takes `--lang rust|spl` (default rust) and `--dry-run`; `graf export-spl` is now `graf compile --lang spl`. Both languages run `graf validate`'s checks first and read compact, parts and elaborate files like `graf run` does. `graf check` is removed: it duplicated `validate` (schema, resources) and its extra analysis crashed on every graph; `graf compile --dry-run` is its replacement. `--target` is replaced by `--lang`.
+
 ## 0.1.1
 
 - `graf vis`: nodes are labelled by what they do (`draft`, `write file`, `set iteration`, `repeat while ...`) with underscores shown as spaces, and show no type line (the colour and legend say it); the id and type are in the side panel. A node's `config.label` is used as written when present.

@@ -2,7 +2,25 @@
 
 How to check, by hand and by test, every feature built so far (state of 2026-10-30). Each section says what to run, what you should see, and which test file pins it. Commands run from the repo root `graflang/`. Nothing here needs a model unless a step says **[real LLM]**, and those are small and budgeted.
 
-Contents: 0 Setup · 1 The automated suite · 2 The cookbook at a glance · 3 Core commands · 4 Validation rules · 5 Node lifecycle and typed ports · 6 Compact form, parts, elaboration · 7 Bindings, budgets, record and replay, checkpoint · 8 Concurrency, BATCH, RUN, SOLVE backends, containers · 9 Safety: GUARD, MUTATE, policies, PII · 10 The editor · 11 SPL interop and the PocketFlow corpus · 12 Real-LLM checks · 13 Known failures and limits · 14 If something does not behave
+## Contents
+
+| # | Section |
+|---|---|
+| 0 | [Setup](#0-setup) |
+| 1 | [The automated suite](#1-the-automated-suite) |
+| 2 | [The cookbook at a glance](#2-the-cookbook-at-a-glance) |
+| 3 | [Core commands](#3-core-commands) |
+| 4 | [Validation rules](#4-validation-rules) |
+| 5 | [Node lifecycle and typed ports](#5-node-lifecycle-and-typed-ports) |
+| 6 | [Compact form, parts, elaboration](#6-compact-form-parts-elaboration) |
+| 7 | [Bindings, budgets, record and replay, checkpoint](#7-bindings-budgets-record-and-replay-checkpoint) |
+| 8 | [Concurrency, BATCH, RUN, SOLVE backends, containers](#8-concurrency-batch-run-solve-backends-containers) |
+| 9 | [Safety: GUARD, MUTATE, policies, PII](#9-safety-guard-mutate-policies-pii) |
+| 10 | [The editor](#10-the-editor) |
+| 11 | [SPL interop and the PocketFlow corpus](#11-spl-interop-and-the-pocketflow-corpus) |
+| 12 | [Real-LLM checks](#12-real-llm-checks) |
+| 13 | [Known failures and limits](#13-known-failures-and-limits) |
+| 14 | [If something does not behave](#14-if-something-does-not-behave) |
 
 ---
 
@@ -12,7 +30,7 @@ Contents: 0 Setup · 1 The automated suite · 2 The cookbook at a glance · 3 Co
 conda activate graf                    # or use /home/gongai/anaconda3/envs/graf/bin/python and .../bin/graf
 pip install -e ".[dev]"                # once; extras: kernel (kernel SOLVE), edit (the editor), grafc (jinja2)
 pip install -e ".[kernel]"             # needed by lifted_tool, solver_check, 2 tests
-graf --help                            # run, validate, info, expand, export-spl, vis, compile, check
+graf --help                            # run, validate, info, expand, compile, vis
 ```
 
 - The system `python` lacks `zinet`; use the `graf` env.
@@ -55,7 +73,7 @@ Which file pins which feature:
 | GUARD, MUTATE (including loop persistence), Cedar | `test_grafr_mutate` 37 |
 | Capabilities policy, PII | `test_capabilities` 9, `test_pii` 16 |
 | Editor | `test_editor` 38, `test_editor_app` (needs Streamlit) |
-| Drawing | `test_grafv` 32, `test_formats` 27 |
+| Drawing, command line | `test_grafv` 32, `test_formats` 27, `test_compile` 9 |
 | SPL interop | `test_export_spl` 9, `test_lifted_graph` 2, `test_lifted_tool` 1, `test_lifted_loops` 2, `test_pocketflow_corpus` 94 |
 | Cookbook recipes | `test_compliance_audit` 20, `test_ts_verify` 11 (needs Node 22.18+), `test_experiment_*` 51 |
 
@@ -114,9 +132,18 @@ Other commands:
 
 ```bash
 graf expand cookbook/parts_demo/parts_demo.graph.yaml        # the long nodes/edges form (compact, parts, elaborate all expand)
-graf export-spl cookbook/lifted_tool/lifted_tool.graph.yaml  # SPL text with CREATE TOOL_API shout(...)
+graf compile cookbook/lifted_tool/lifted_tool.graph.yaml --lang spl     # SPL text with CREATE TOOL_API shout(...), printed
+graf compile cookbook/lifted_tool/lifted_tool.graph.yaml --lang spl --dry-run   # checks it compiles, writes nothing
 graf vis cookbook/elaborate_demo/elaborate_demo.graph.yaml --engine mermaid -o /tmp/verify/e.md --no-open
 graf vis cookbook/parts_demo/parts_demo.graph.yaml --no-open # a cytoscape HTML in ~/.graflang/vis/, parts drawn as boxes
+```
+
+`graf compile` is the one command for other languages: `--lang spl` (an SPL script, printed or `-o FILE`) and `--lang rust` (a Cargo project into `-o DIR`, an experimental stub; needs `pip install 'graflang[grafc]'`). Both run `graf validate`'s checks first and refuse a graph with errors; `--dry-run` does everything and writes nothing:
+
+```bash
+graf compile cookbook/parts_demo/parts_demo.graph.yaml --lang spl --dry-run    # ✓ Workflow compiles to SPL ... (dry run, nothing written)
+graf compile cookbook/lifted_tool/lifted_tool.graph.yaml --dry-run             # ✓ Workflow compiles to Rust ... (needs jinja2)
+graf check cookbook/self_refine/self_refine.graph.yaml                          # No such command: check and export-spl were folded in
 ```
 
 Engines: `cytoscape` (default), `graphviz`, `pyvis`, `graphify`, `mermaid`. Open the HTML for a LOOP: its body appears as a box. In the parts and elaboration pictures each use of a part is a box labelled `first (polish)`.
@@ -345,7 +372,7 @@ Not in the editor, by decision: dragging edges on the canvas, and editing compac
 Needs SPL.py importable.
 
 ```bash
-graf export-spl cookbook/lifted_tool/lifted_tool.graph.yaml > /tmp/verify/t.spl     # CREATE TOOL_API + WORKFLOW
+graf compile cookbook/lifted_tool/lifted_tool.graph.yaml --lang spl -o /tmp/verify/t.spl     # CREATE TOOL_API + WORKFLOW
 pytest tests/test_export_spl.py tests/test_lifted_graph.py tests/test_lifted_tool.py tests/test_lifted_loops.py -q
 pytest tests/test_pocketflow_corpus.py -q      # 94: all 83 PocketFlow workflows lift and validate, plus the 3 samples run
 ```

@@ -32,5 +32,5 @@ A cassette is keyed by model, prompt and temperature, so `--replay` only answers
 
 ## Things to check
 
-- `graf export-spl` writes the graph back as a `.spl` file with the same three functions.
+- `graf compile --lang spl` writes the graph back as a `.spl` file with the same three functions.
 - The summary's quality depends on the model; the cassette fixes it so the test (`tests/`) can run offline.

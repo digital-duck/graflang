@@ -10,8 +10,8 @@ A GraphLang program is a YAML file, `*.graph.yaml`. The topology is the program:
 graf validate FILE      # static checks, nothing executes
 graf info     FILE      # name, node/edge counts, inputs, outputs, resources
 graf run      FILE [options]
-graf check    FILE      # can it be compiled? (compiler is a stub)
-graf compile  FILE [-o DIR] [--target rust] [--optimize]
+graf expand   FILE      # a compact, parts or elaborate file in its long nodes/edges form
+graf compile  FILE --lang spl|rust [-o OUT] [--dry-run]   # SPL script, or a Rust project (stub)
 graf vis      FILE [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o OUT] [--no-open]
 ```
 
@@ -240,9 +240,9 @@ elaborate:
 
 An edge `a -> b` means b runs after a. Nodes with no incoming edge start together; a node with several waits for all of them, and with `pass` receives their values as one object keyed by node id. The workflow's first output is one object, node id to `result`. The graph must have no cycle. The result is ordinary nodes and edges (`graf expand` prints them), so `--workers N` runs independent nodes together. See `cookbook/elaborate_demo`.
 
-## Export to SPL: `graf export-spl`
+## Compile: `graf compile --lang spl|rust`
 
-`graf export-spl flow.graph.yaml -o flow.spl` writes the workflow as an SPL script (structure only, no LLM) that SPL.py's `spl3 run` can run. A prompt becomes a `CREATE FUNCTION`, a lifted Python tool a `CREATE TOOL_API`. What SPL has no word for (lifecycle phases, typed ports) is dropped and listed as a warning.
+`graf compile flow.graph.yaml --lang spl -o flow.spl` writes the workflow as an SPL script (structure only, no LLM) that SPL.py's `spl3 run` can run. A prompt becomes a `CREATE FUNCTION`, a lifted Python tool a `CREATE TOOL_API`. What SPL has no word for (lifecycle phases, typed ports) is dropped and listed as a warning. Without `-o` the script is printed. `--lang rust` writes a Cargo project into `-o` (default `<name>_compiled`) and is an experimental stub (`pip install 'graflang[grafc]'`). `--dry-run` does every step, writes nothing and says whether the workflow compiles. Before compiling, the workflow gets the same checks as `graf validate` and is refused on an error; there is no separate `graf check`.
 
 ## What a workflow may contain: `workflow.policy`
 
