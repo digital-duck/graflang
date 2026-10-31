@@ -484,8 +484,8 @@ Names with a meaning in a workflow file. Choosing one of these as a node id, ste
 | Compact step kinds | `generate` `solve` `assert` `evaluate` `guard` `fork` `join` `output` `node` `use` `loop` |
 | Compact step keys | `in` `out` `on` `ports` `config`, and for a `loop` step `steps` `while` `index`; every other key goes into the node's `config` |
 | Compact references | `$in.<input>` (a workflow input), `$loop.<name>` (inside a loop body), `<step>` and `<step>.<out name>` |
-| Ids | letters, digits and `_` only; `wf_entry` is the INPUT node the compact form adds, so no step may use it |
-| Part expansion | `__` joins a use's id to the part's node id (`first__rewrite`), so avoid `__` in your own ids; `_`-prefixed keys such as `_source_dir`, `_part_of` and `_route` belong to the loader and runtime |
+| Ids | letters, digits and `_` only; `graf validate` refuses an id with `.`, `/` or a space, and `__` (anything but a part's own expansion). `wf_entry` is the INPUT node the compact form adds, so no step may use it |
+| Part expansion | `__` joins a use's id to the part's node id (`first__rewrite`), so `__` in your own ids is an error; `_`-prefixed keys such as `_source_dir`, `_part_of` and `_route` belong to the loader and runtime |
 | Condition functions | `json_get` `contains` `startswith` `endswith` `len` `lower` `upper` `strip` `abs` `min` `max` `int` `float` `str` `bool` `has_pii` `latest` `is_empty`; a condition may call nothing else |
 | Condition words | `and` `or` `not` `in` `True` `False` `None`, also in upper case (`AND` `OR` `NOT` `IN` `TRUE` `FALSE` `NULL`) |
 | `llm:` spec | `ADAPTER[:MODEL]`; `mock` is the adapter that answers every node without a model |

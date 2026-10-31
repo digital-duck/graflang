@@ -371,6 +371,23 @@ def invariants(nodes: List[Dict], edges: List[Dict]) -> List[str]:
     return errors
 
 
+def _check_ids(nodes: List[Dict], uses: Set[str], prefix: str, errors: List[str]) -> None:
+    """Node ids that would clash with the syntax around them: `.` splits a node from its port in an edge, `/` joins a LOOP body's
+    ids, and `__` joins a part use's id to the part's node id (`first__rewrite`), so only the loader may write it."""
+    for n in nodes:
+        nid = str(n["id"])
+        where = f"{prefix}{n['type']} {nid!r}"
+        bad = sorted({c for c in nid if c in "./" or c.isspace()})
+        if bad:
+            errors.append(f"{where}: an id may not contain {' '.join(repr(c) for c in bad)} ('.' separates a node from its port in an edge, "
+                          "'/' joins a loop body's ids; use letters, digits and _)")
+        if "__" in nid and nid.split("__")[0] not in uses:
+            errors.append(f"{where}: '__' in an id is reserved for the nodes a part's `use` expands to (use_id__node_id)")
+        body = (n.get("config") or {}).get("subgraph")
+        if isinstance(body, dict):
+            _check_ids(body.get("nodes", []), uses, f"{prefix}{nid}/", errors)
+
+
 def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
@@ -391,6 +408,7 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                 errors.append(f"INPUT {n['id']!r}: port {p!r} is not a declared workflow input")
         for d in sorted(declared - {p[4:] for p in n["ports"] if p.startswith("out_")}):
             warnings.append(f"INPUT {n['id']!r}: declared input {d!r} has no out_{d} port")
+    _check_ids(nodes, {use for use, _ in (graph_data.get("_part_of") or {}).values()}, "", errors)
     _check_scope(nodes, edges, "", resolver, set(), set(), errors, warnings)
     _check_guarded(nodes, edges, errors)
     from .capabilities import capability_errors          # imported here: capabilities uses _risky from this module

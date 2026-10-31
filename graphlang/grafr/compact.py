@@ -122,6 +122,9 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
     ids = [s for s, _, _ in parsed]
     if len(set(ids)) != len(ids) or ENTRY in ids:
         raise CompactError(f"step ids must be unique and not {ENTRY!r}: {ids}")
+    for sid in ids:
+        if "__" in sid:
+            raise CompactError(f"step {sid!r}: '__' in an id is reserved for the nodes a part's `use` expands to (use_id__node_id)")
 
     outs: Dict[str, List[str]] = {}
     for sid, kind, body in parsed:
