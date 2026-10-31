@@ -65,7 +65,7 @@ def test_an_error_in_one_branch_surfaces_after_the_others_finish():
         GraphLangRuntime(fork_graph(), llm=Boom(), verbose=False, workers=2).execute({})
 
 
-CASES = {"self_refine": {"topic": "t"}, "build_concept_book": {"subject": "tides", "target_audience": "kids", "num_chapters": 2}, "compliance_audit": {"document": "Call me at 555-1234", "destination": "internal", "engine": "builtin", "rules_file": ""}, "code_pipeline": {"spec": "add two numbers"},
+CASES = {"self_refine": {"topic": "t"}, "your_book": {"subject": "tides", "audience": "intro", "num_chapters": 2}, "compliance_audit": {"document": "Call me at 555-1234", "destination": "internal", "engine": "builtin", "rules_file": ""}, "code_pipeline": {"spec": "add two numbers"},
          "solver_check": {"numbers": "1,2,3", "expected": 6}, "chain_of_thought": {}, "lifted_tool": {}}
 
 

@@ -13,7 +13,7 @@ from graphlang.grafv.model import build
 
 ROOT = Path(__file__).resolve().parent.parent
 COOKBOOK = ROOT / "cookbook"
-CONCEPT_BOOK = COOKBOOK / "concept_book" / "build_concept_book.graph.yaml"
+CONCEPT_BOOK = COOKBOOK / "your_book" / "your_book.graph.yaml"
 SELF_REFINE = COOKBOOK / "self_refine" / "self_refine.graph.yaml"
 
 

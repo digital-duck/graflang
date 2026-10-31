@@ -22,7 +22,7 @@ A real run calls a real model and is billed (or uses your `claude_cli` subscript
 | [`ts_verify`](ts_verify) | an LLM writes TypeScript, real tools (`tsc`, Node) judge it, and their errors drive the retry | `claude_cli`, Node 22.18+ | up to 3 | ✅ |
 | [`code_pipeline`](code_pipeline) | procedures, a Cedar-guarded retry loop, `MUTATE`, `RECOVER` | `claude_cli` or Ollama, SPL.py (it runs `.spl` procedures) | up to 16 | ✅ |
 | [`code_parts`](code_parts) | vibe-coding with a safety net: spec gate, review, a project folder as output (`FILES`), and a verification loop that runs the generated code | `claude_cli`; Python for the verification | 3 + one per repair round | ✅ |
-| [`concept_book`](concept_book) | a `LOOP` that collects one chapter per iteration | `claude_cli` or Ollama | 2 + 2 per chapter | not yet |
+| [`your_book`](your_book) | a book on any subject for a chosen audience (`intro` … `research`) and style: a `LOOP` that writes, reviews and revises one chapter per iteration | `claude_cli` or Ollama | 2 + 2 per chapter, plus a revision for each chapter sent back | not yet |
 | [`compliance_audit`](compliance_audit) | an LLM lists data types; deterministic rules and a Cedar guard decide the release | `claude_cli` | 1 if compliant at once, 3 if it must redact | not yet |
 | [`lifted_tool`](lifted_tool) | a Python tool lifted from SPL into a `SOLVE` node that carries its own source | none: no model is called | 0 | not yet |
 | [`elaborate_demo`](elaborate_demo) | one template (a part) applied to every node of a graph of things | `claude_cli` | 1 per concept (4) | not yet |

@@ -492,7 +492,7 @@ Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (
 | Graph | What it does |
 |---|---|
 | `cookbook/self_refine/` | draft, critique, refine an essay |
-| `cookbook/concept_book/` | builds a concept book chapter by chapter in a `LOOP` that collects chapters |
+| `cookbook/your_book/` | writes a book on any subject for a chosen audience and style, chapter by chapter in a `LOOP` that reviews and revises each chapter |
 | `cookbook/code_pipeline/` | the flagship: analyse a spec, generate/review/test code in a `LOOP`, Cedar-guarded retries, optional closure check; SPL procedures `00`-`07` sit next to the graph |
 | `cookbook/solver_check/` | both SOLVE backends, no LLM: a Python kernel and a subprocess compute the same sum, an `ASSERT` compares them with the expected value, and a failing solver routes to an error report |
 | `cookbook/ts_verify/` | a polyglot loop: an LLM writes a TypeScript function, the TypeScript compiler and Node (run as subprocess tools) judge it, their errors drive the retry, and a Python tool builds the report. Needs Node 22.18+ (`npm install` there adds type checking) |

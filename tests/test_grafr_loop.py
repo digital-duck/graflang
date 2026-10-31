@@ -201,7 +201,7 @@ def test_procedure_nodes_refuse_a_non_spl_llm_but_run_under_mock(tmp_path):
 
 
 def test_shipped_loops_run_with_a_scripted_llm():
-    data = load_graph(COOKBOOK / "concept_book" / "build_concept_book.graph.yaml")
+    data = load_graph(COOKBOOK / "your_book" / "your_book.graph.yaml")
     llm = FakeLLM(["OUTLINE", "CH-A", "REV-A", "CH-B", "REV-B", "BOOK"])
     rt = GraphLangRuntime(data, llm=llm, verbose=False)
     out = rt.execute({"subject": "physics", "num_chapters": "2"})

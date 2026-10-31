@@ -22,7 +22,7 @@ This document reviews the existing prototype at `~/projects/digital-duck/graflan
 | Safety | Cedar (`cedarpy`) for GUARD/MUTATE, fail-closed; safe expression evaluator; MUTATE cannot add code-bearing keys (`CODE_KEYS`) |
 | Compiler `grafc` | Mostly stub; ~1,500-line hand-written Cedar compiler; Rust codegen stub |
 | Viz | `graf vis` via `zinet.vis` engines: cytoscape (default), graphviz, mermaid, ascii |
-| Cookbook | `code_pipeline`, `self_refine`, `concept_book`, `compliance_audit`, `solver_check`, `ts_verify` |
+| Cookbook | `code_pipeline`, `self_refine`, `your_book`, `compliance_audit`, `solver_check`, `ts_verify` |
 | Process | Gap tracker with 35 numbered items; ~30 test files |
 
 ---

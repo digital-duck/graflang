@@ -1,7 +1,7 @@
 version: "1.0-graph"
 
 workflow:
-  name: "build_concept_book"
+  name: "your_book"
   inputs:
     - {name: "subject", type: "TEXT"}
     - {name: "audience", type: "TEXT", default: "intro"}          # intro | intermediate | advanced | research: who the book is written for

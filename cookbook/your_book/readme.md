@@ -1,6 +1,8 @@
-# concept_book
+# your_book
 
-Build a short concept book on a subject: write an outline, then write, review and (if the reviewer asks) revise one chapter per loop iteration, then compile the final chapters into a book.
+An LLM writes book-quality learning material on any subject, for the reader you name: an outline, then each chapter written, reviewed and (if the reviewer asks) revised in a loop, then the final chapters compiled into one book. Choose the `audience` (`intro`, `intermediate`, `advanced`, `research`) and the `style` of explanation.
+
+(Not to be confused with ConceptBook, which is driven by a concept-graph outline: here the outline is written by the model from a subject, an audience and a style.)
 
 ```
 wf_entry -> generate_outline -> chapter_loop -> compile_book -> wf_exit
@@ -30,7 +32,7 @@ The same subject reads very differently for different readers, so two inputs sha
 `style` is free text: "conversational, analogy first", "Socratic, one question at a time", "worked examples", "textbook". A value of `audience` that is not one of the four words is read as a description of the learner ("a product manager with no coding background") and mapped to the closest level. The level guide is written into the outline, chapter and review prompts, which is where the level changes what is produced; the reviewer also checks fit to the audience and the style, not only accuracy. Every chapter has the same shape (opening, ideas with a worked example, mistakes or, for `research`, open questions, check-yourself questions, takeaways), and the compile step adds a short "How to read this book".
 
 ```bash
-graf run cookbook/concept_book/build_concept_book.graph.yaml --llm claude_cli:claude-haiku-5-5 \
+graf run cookbook/your_book/your_book.graph.yaml --llm claude_cli:claude-haiku-5-5 \
     --param subject="applied AI" --param audience=intermediate --param style="worked examples, code first"
 ```
 
@@ -46,11 +48,11 @@ From the repo root:
 
 ```bash
 # start small: 2 chapters is 6 calls, plus up to 2 revisions, with the default model (claude_cli, claude-sonnet-5-5)
-graf run cookbook/concept_book/build_concept_book.graph.yaml \
+graf run cookbook/your_book/your_book.graph.yaml \
     --param subject="entropy" --param num_chapters=2
 
 # another model (every node uses it: the graph names none of its own), with a budget of 14 calls
-graf run cookbook/concept_book/build_concept_book.graph.yaml --llm claude_cli:claude-haiku-5-5 \
+graf run cookbook/your_book/your_book.graph.yaml --llm claude_cli:claude-haiku-5-5 \
     --bind budget.bind.yaml --param subject="entropy" --param num_chapters=3     # budget.bind.yaml: limits: {max_llm_calls: 14}
 ```
 
@@ -59,9 +61,9 @@ No node names an `llm:`, so `--llm` decides the model for all of them. To spend 
 ## What you get
 
 - **Console:** `generate_outline`, then `chapter_loop`, then the body nodes `write_chapter`, `review_chapter`, `needs_revision` and, when the reviewer sends a chapter back, `revise_chapter`, indented once per iteration, then `compile_book`.
-- **Result:** `cookbook/concept_book/output/build_concept_book-<adapter>[-<model>]-<time>/book.md` (also `result.json`).
+- **Result:** `cookbook/your_book/output/your_book-<adapter>[-<model>]-<time>/book.md` (also `result.json`).
 - **Intermediate text:** `nodes/` holds the outline, every first draft (`write_chapter`), every verdict (`review_chapter.out_verdict`), every revision (`revise_chapter`), the chapters the compile step received (`chapter_loop.out_chapters.json`) and the book, numbered in firing order.
-- **Log:** `~/.graflang/logs/build_concept_book-<adapter>[-<model>]-<time>.log` and `.jsonl`; `loop.end` records `iterations`.
+- **Log:** `~/.graflang/logs/your_book-<adapter>[-<model>]-<time>.log` and `.jsonl`; `loop.end` records `iterations`.
 
 ## Things to check
 

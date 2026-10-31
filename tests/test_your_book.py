@@ -1,11 +1,11 @@
-"""cookbook/concept_book: a chapter the reviewer asks to revise is revised, and the compile step gets the final chapters."""
+"""cookbook/your_book: a chapter the reviewer asks to revise is revised, and the compile step gets the final chapters."""
 from pathlib import Path
 
 from graphlang.grafr.runtime import GraphLangRuntime, load_graph
 from graphlang.grafr.topology import check
 from test_lifecycle import Scripted
 
-GRAPH = Path(__file__).parent.parent / "cookbook" / "concept_book" / "build_concept_book.graph.yaml"
+GRAPH = Path(__file__).parent.parent / "cookbook" / "your_book" / "your_book.graph.yaml"
 
 
 def run(*replies, chapters=2):

@@ -98,7 +98,7 @@ Expected: every line `✓ Valid GraphLang workflow: <name>`.
 | Recipe | Shows |
 |---|---|
 | `self_refine` | 3 GENERATE nodes in a line |
-| `concept_book` | LOOP with `collect` |
+| `your_book` | LOOP with `collect`, a reviewed and revised chapter per iteration, audience and style inputs |
 | `code_pipeline` | procedures, guards, MUTATE, RECOVER (needs SPL.py to run `.spl`) |
 | `compliance_audit` | subprocess SOLVE rules, Cedar release guard |
 | `solver_check` | kernel and subprocess SOLVE, ASSERT routing |
@@ -139,7 +139,7 @@ graf run $G                                                         # error: req
 graf run $G --param nope=1                                          # error: unknown workflow input (no call)
 ```
 
-Typed inputs: `graf run cookbook/concept_book/build_concept_book.graph.yaml --param subject=x --param num_chapters=abc` fails at once with `input 'num_chapters' must be INTEGER`.
+Typed inputs: `graf run cookbook/your_book/your_book.graph.yaml --param subject=x --param num_chapters=abc` fails at once with `input 'num_chapters' must be INTEGER`.
 
 Other commands:
 
