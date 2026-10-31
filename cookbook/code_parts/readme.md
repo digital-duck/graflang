@@ -85,6 +85,31 @@ The `smoke` code may make real calls (the example calls the model once per round
 
 **This runs the generated code on your machine**: with a timeout and a temporary folder, but no sandbox. A `SOLVE` with `backend: subprocess` accepts `container: {image, ...}` to run it in Docker (no network, read-only), if the image has the packages the project needs.
 
+## Milestone: a working app from one prompt (2026-10-31)
+
+The first end-to-end use of this recipe on a real application: a Streamlit translation chatbot, written from this single spec and run on `claude_cli` with `claude-sonnet-5-5`.
+
+> write a chatbot using streamlit web framework which will translate text from source lang to target lang, using LLM adapter=claude_cli, model=claude-sonnet-5-5 as default, but user can configure with other adapter/model options including API_KEY setting
+
+![The generated Translator Chatbot: sidebar with adapter, model and languages; Chinese translated to German, German to English, English to Chinese](meta-app-2026-10-31_14-12-38.png)
+
+*The app the recipe generated, translating a Chinese sentence to German, that German back to English, and that English to Chinese. The adapter and model are the sidebar's defaults; both can be changed there, and the sidebar says that `claude_cli` needs no API key.*
+
+What the run produced: a package folder (`code/`) with a README, modules that import each other, tests and a `pyproject.toml`, plus `review.md` and `report.md`, with no `.spl` file or SPL.py involved.
+
+How it got there, in order:
+
+1. **First run:** the app started, but a translation failed with `The LLM adapter has no 'generate' method`. The model had guessed the adapter's API. Its own tests passed, because it also wrote the fake the tests used.
+2. **Fix in the recipe, not by hand:** the repair loop now runs the generated code (syntax, imports, tests, optional `smoke` code against the real library) and feeds the failures into the next `improve`. A `reference` input carries facts the model cannot know, such as the real `dd_llm` call. In a controlled rerun (a translator package, haiku), the loop failed all 3 rounds without `reference`, and passed in one round with it. See "Verification" above.
+3. **Result:** the app in the screenshot, which translates in every direction tried.
+
+What this shows, and what it does not:
+
+- It shows that a graph can wrap a model's code writing with a spec gate, an independent review, a real project layout and a loop that executes the result. The model writes the code; the graph decides what happens to it and what counts as done.
+- It does not show that one prompt is always enough. The model could not know dd-llm's API; someone had to supply it (`reference`) and someone had to write the check that proves it (`smoke`).
+- The screenshot is the happy path. Error handling (a bad key, an empty input, a timeout) was not exercised by hand.
+- One run is an anecdote, not a measurement. Nothing here compares this against writing the app by hand or against a plain one-shot prompt.
+
 ## What is not here
 
 The Cedar-guarded retry, the documentation step and the closure judge stay in `code_pipeline`. That recipe keeps its `.spl` procedures because the `code_pipeline` experiment runs the same procedures in all its arms.
