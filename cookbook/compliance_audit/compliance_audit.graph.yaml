@@ -9,8 +9,8 @@ workflow:
   inputs:
     - {name: "document", type: "TEXT"}
     - {name: "destination", type: "TEXT"}     # external_api and third_party_vendor are external
-    - {name: "engine", type: "TEXT"}          # stdlib, sympy or z3
-    - {name: "rules_file", type: "TEXT"}      # optional path to your own rules JSON; empty = procedures/rules.json
+    - {name: "engine", type: "TEXT", default: "stdlib"}          # stdlib, sympy or z3
+    - {name: "rules_file", type: "TEXT", default: ""}      # optional path to your own rules JSON; empty = procedures/rules.json
   outputs:
     - {name: "safe_document", type: "TEXT"}
     - {name: "audit", type: "TEXT"}

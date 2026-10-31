@@ -201,3 +201,11 @@ def test_validate_proves_the_release_is_only_reachable_through_the_guard():
     data["edges"].append({"source": "compliant_first.pass", "target": "audit_released.trigger", "type": "triggers"})
     data["nodes"] = [{**n, "config": {**n["config"], "risky": True}} if n["id"] == "audit_released" else n for n in data["nodes"]]
     assert any("'audit_released' is risky but can run without passing a GUARD" in m for m in check(data)[0])
+
+
+def test_engine_and_rules_file_are_optional():
+    """The readme's example passes only the document and the destination: stdlib and the demo rules are the defaults."""
+    llm = StubLLM()
+    out = GraphLangRuntime(load_graph(GRAPH), llm=llm, verbose=False).execute({"document": WITH_SSN, "destination": "external_api"})
+    full, _ = run(WITH_SSN, "external_api")
+    assert out == full
