@@ -16,7 +16,7 @@ resources:
     polish: "./sub_graph/polish.graph.yaml"
 
 steps:
-  - draft:  {generate: "Write 5 sentences about {{in_topic}}.", in: {topic: $in.topic}, out: essay}
-  - first:  {use: parts.polish, in: {essay: draft, tone: formal}, out: [essay]}
-  - second: {use: parts.polish, in: {essay: first.essay}, out: [essay]}
+  - draft:  {generate: "Write 5 sentences about {{in_topic}}.", in: {topic: $in.topic}, out: essay, llm: "ollama:gemma3"}
+  - first:  {use: parts.polish, in: {essay: draft, tone: formal}, out: [essay], llm: "claude_cli:claude-haiku-5-5"}
+  - second: {use: parts.polish, in: {essay: first.essay}, out: [essay], llm: "claude_cli:claude-sonnet-5-5"}
   - done:   {output: second.essay}
