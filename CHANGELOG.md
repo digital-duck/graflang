@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `graf create --name N --spec TEXT|@FILE [--out-dir DIR] [--llm adapter:model] [--max-rounds N] [--allow-code] [--force]`: vibe-coding for GraphLang. An LLM writes an app (a compact `.graph.yaml`, its prompts, a readme) from a plain-language spec; the result is checked like `graf validate` and by a dry run on the mock LLM, and the problems go back to the LLM for up to `--max-rounds` calls. Nothing generated is executed without `--allow-code`. The authoring guide and three example apps are shipped in the package (`graphlang/grafc/create_guide.md`, `create_examples/`).
+
 - A node's `config.model` is replaced by `config.llm: adapter[:model]` (the `--llm` spec). It beats the run's `--llm`, which beats the adapter default (`claude-sonnet-5-5` for `claude_cli`), so each task can choose its own model, or even its own adapter (created on first use; `llm.call` logs what ran). `:model` names a model on the run's adapter. `model:` on a GENERATE node is an error in `graf validate`; bindings `models:` / `model: $x` become `llms:` / `llm: $x`; the `mock` adapter answers every node. Before, the default acted as an override and node `model:` hints were ignored under `claude_cli`. A cassette records the default too (old ones still replay). SPL.py's lifter writes `llm: ":<model>"` for `USING MODEL`.
 
 - `graf compile` takes `--lang rust|spl` (default rust) and `--dry-run`; `graf export-spl` is now `graf compile --lang spl`. Both languages run `graf validate`'s checks first and read compact, parts and elaborate files like `graf run` does. `graf check` is removed: it duplicated `validate` (schema, resources) and its extra analysis crashed on every graph; `graf compile --dry-run` is its replacement. `--target` is replaced by `--lang`.

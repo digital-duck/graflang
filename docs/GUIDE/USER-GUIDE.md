@@ -13,6 +13,7 @@ graf run      FILE [options]
 graf expand   FILE      # a compact, parts or elaborate file in its long nodes/edges form
 graf compile  FILE --lang spl|rust [-o OUT] [--dry-run]   # SPL script, or a Rust project (stub)
 graf vis      FILE [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o OUT] [--no-open]
+graf create   --name NAME --spec TEXT|@FILE [--out-dir DIR] [--llm ADAPTER:MODEL]   # an app from a plain-language spec
 ```
 
 `python -m graphlang ...` is equivalent to `graf ...`.
@@ -162,6 +163,32 @@ Used as a Python library (`GraphLangRuntime(...).execute(...)`), the runtime log
 Checks edges point to real nodes and ports, `triggers`/`binds` join the right kinds of port, resources exist, conditions parse and use only available variables, and `GUARD`/`MUTATE`/`LOOP` configs are complete. Errors fail the command; warnings (an input nothing feeds, a node nothing triggers) do not.
 
 It also checks that **every risky node is behind a `GUARD`**. A node is risky if its type is `EMIT` or `QUERY` (they reach outside the workflow) or you mark it with `config: {risky: true}`; mark an `OUTPUT` that releases data, or a `procedure_ref` node that acts on the world. A `LOOP` whose body holds a risky node counts as risky itself. The check follows `triggers` edges from the `INPUT` node with every edge that leaves a `GUARD` removed. A risky node still reached has a path around the guard, which is an error; a risky node reachable from a guard's `deny` port is an error too. Limits: `binds` (data) edges are ignored, guards inside a `LOOP` body are not credited, and a node you forget to mark is not checked, so the check is only as complete as your marking.
+
+## `graf create`: an app from a plain-language spec
+
+Vibe-coding for GraphLang: you describe the app, an LLM writes it as a graph.
+
+```bash
+graf create --name meeting_notes --out-dir apps/meeting_notes --llm claude_cli:claude-sonnet-5-5 \
+    --spec "turn raw meeting notes into a summary, decisions and action items with owners; check that every item has an owner and fix those that do not; return one markdown document"
+```
+
+It writes `apps/meeting_notes/`: `meeting_notes.graph.yaml` (the compact `steps:` form), `prompts/*.md`, `readme.md` (inputs, outputs, how to run, calls per run) and `create.json` (the spec, the LLM, how many rounds it took). Then `graf vis`, `graf run` or edit it like any other workflow.
+
+| Option | |
+|---|---|
+| `--name` | lower-case letters, digits and `_`; names the graph file and `workflow.name` |
+| `--spec` | the specification; `@spec.md` reads it from a file |
+| `--out-dir` | where to write (default `./NAME`); it must be new or empty, unless `--force` |
+| `--llm` | `ADAPTER[:MODEL]` for the LLM that writes the app (default `claude_cli:claude-sonnet-5-5`). This is not the LLM the app uses when it runs: that is `graf run --llm`, or each step's own `llm:` |
+| `--max-rounds` | LLM calls at most (default 3): the first writes the app, each next one fixes the problems found in the last |
+| `--allow-code` | let the app contain programs (`tools/*.py` run by `SOLVE`/`RUN` nodes) |
+
+What happens: the LLM is given an authoring guide and three small example apps and asked for the files. The reply is checked like `graf validate`, then **run once on the mock LLM** (a dry run: it finds wiring that validates but fails when it runs). Every problem found is sent back with the model's own attempt for another round. If problems remain after `--max-rounds`, the files are still written and the command exits with status 1, so you can fix them by hand.
+
+What it does not do: **nothing the LLM generates is executed** unless you pass `--allow-code`, and even then the dry run is skipped when the app has programs, so they only run when you run the app. Without `--allow-code` an app that needs a program (a `subprocess` or `kernel` `SOLVE`, `RUN`, `procedure_ref`) is refused and the LLM is told to express the step another way. `GUARD`, `MUTATE`, `BATCH` and parts are not generated. A passing check means the graph is well formed and wired, not that the app does what you meant: read the prompts, then try it with a real input (`graf run` with a bindings file that caps `max_llm_calls`).
+
+Each round is a real, billed call of the `--llm` model; a first-round success costs one.
 
 ## File layout
 

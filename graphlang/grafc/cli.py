@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """The compile command of `graf`: one command, one `--lang` per output language (registered in graphlang/cli.py)."""
 
+import os
 import sys
 from pathlib import Path
 
 import click
+from dd_llm import parse_llm_spec
 from rich.console import Console
 from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -150,3 +152,80 @@ def _compile_rust(graph_path: Path, output, optimize: bool, dry_run: bool) -> No
     console.print(f"  cd {output_dir}")
     console.print(f"  cargo build --release")
     console.print(f"  ./target/release/{graph_path.stem}")
+
+
+@click.command("create", short_help="Generate a GraphLang app from a plain-language spec (vibe-coding).")
+@click.option("--name", required=True, help="the app's name: lower-case letters, digits, _ (it names NAME.graph.yaml and workflow.name)")
+@click.option("--spec", required=True, help="what the app should do, in plain language; @FILE reads it from a file")
+@click.option("--out-dir", type=click.Path(file_okay=False), default=None, help="the folder to write the app into (default ./NAME); it must be empty or new, unless --force")
+@click.option("--llm", "llm_spec", default=None, help="the LLM that writes the app, ADAPTER[:MODEL] (default claude_cli:claude-sonnet-5-5)")
+@click.option("--max-rounds", type=click.IntRange(1, 10), default=3, show_default=True,
+              help="LLM calls at most: the first writes the app, each next one fixes the problems found in the last")
+@click.option("--allow-code", is_flag=True, help="let the app contain programs (tools/*.py run by SOLVE or RUN nodes); off by default: nothing generated then runs code")
+@click.option("--force", is_flag=True, help="write into a folder that already has files (same-named files are overwritten)")
+@click.option("--log-level", default=None, help="file log level (default info)")
+@click.option("--log-dir", type=click.Path(file_okay=False), default=None, help="where log files go (default ~/.graflang/logs)")
+@click.option("--no-log", is_flag=True, help="do not write a log file")
+def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, log_level, log_dir, no_log):
+    """Generate a GraphLang app from a specification.
+
+    The LLM writes the app's files (NAME.graph.yaml, prompts/*.md, readme.md); the result is checked like `graf validate` and with a
+    dry run on the mock LLM, and every problem is sent back to the LLM for another try, up to --max-rounds calls (each one is a real,
+    billed call). The app is written even if problems remain (exit status 1), so you can fix it by hand.
+
+    \b
+    graf create --name triage --spec "classify a support message as urgent or normal, then draft a reply" --out-dir apps/triage
+    graf create --name notes --spec @notes_spec.md --llm claude_cli:claude-haiku-5-5
+    """
+    from ..grafr.adapters import default_model, make_llm
+    from ..grafr.metering import MeteredLLM
+    from ..logging_config import disable_logging, setup_logging
+    from .create import CreateError, check_name, create_app, write_app
+    try:
+        check_name(name)
+        if spec.startswith("@"):
+            try:
+                spec = Path(spec[1:]).read_text(encoding="utf-8")
+            except OSError as e:
+                raise click.BadParameter(f"cannot read {spec[1:]}: {e}", param_hint="--spec")
+        try:
+            adapter, model = parse_llm_spec(llm_spec or "claude_cli")
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="--llm")
+        explicit = model
+        model = model or default_model(adapter)
+        dest = Path(out_dir) if out_dir else Path(name)
+        if dest.exists() and any(dest.iterdir()) and not force:
+            raise CreateError(f"{dest} already has files; pick another --out-dir or pass --force to write into it")
+        if no_log:
+            disable_logging()
+            log_path = None
+        else:
+            log_path = setup_logging(f"create-{name}", adapter=adapter, model=model or "", log_dir=log_dir or Path.home() / ".graflang" / "logs",
+                                     log_level=log_level, log_format=os.environ.get("DD_LOG_FORMAT") or "both")
+        try:
+            llm = MeteredLLM(make_llm(adapter, explicit), max_calls=max_rounds)
+        except Exception as e:                              # dd-llm missing, unknown adapter, no key
+            raise CreateError(str(e))
+        console.print(f"[bold blue]⚡ Creating[/bold blue] {name} with {adapter}{':' + model if model else ''} (up to {max_rounds} call(s))")
+        created = create_app(name, spec, llm, model, max_rounds=max_rounds, allow_code=allow_code)
+        written = write_app(name, spec, created, dest, f"{adapter}:{model}" if model else adapter, force)
+    except CreateError as e:
+        console.print(f"[red]Error:[/red] {escape(str(e))}")
+        sys.exit(1)
+    for w in created.warnings:
+        console.print(f"[yellow]warning:[/yellow] {escape(w)}")
+    usage = llm.snapshot()
+    for path in written:
+        console.print(f"  {path}")
+    console.print(f"[dim]{created.rounds} LLM call(s), {usage['input_tokens']} tokens in / {usage['output_tokens']} out[/dim]")
+    if log_path:
+        console.print(f"[dim]log: {log_path}[/dim]")
+    if created.problems:
+        for problem in created.problems:
+            console.print(f"[red]problem:[/red] {escape(problem)}")
+        console.print(f"[red]✗ Written with {len(created.problems)} problem(s) left after {created.rounds} round(s)[/red]: fix them by hand (`graf validate {dest / (name + '.graph.yaml')}`)")
+        sys.exit(1)
+    graph = dest / f"{name}.graph.yaml"
+    console.print(f"[bold green]✓ Created[/bold green] {graph} (it passes `graf validate` and a dry run)")
+    console.print(f"[dim]next: graf vis {graph} · graf run {graph} --param ...  (read {dest / 'readme.md'} for the inputs)[/dim]")

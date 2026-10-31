@@ -163,6 +163,22 @@ Engines: `cytoscape` (default), `graphviz`, `pyvis`, `graphify`, `mermaid`. Open
 
 Pinned by: `test_grafr_output`, `test_grafr_logging`, `test_grafv`, `test_export_spl`.
 
+### `graf create`
+
+Offline (no model): `pytest tests/test_create.py -q` (16): the three shipped example apps validate and run on the mock LLM, the reply parser, the problem-and-retry loop with a scripted LLM, the code policy, and the command end to end.
+
+Real (billed, at most 3 calls; the first usually succeeds):
+
+```bash
+timeout 600 graf create --name meeting_notes --out-dir /tmp/verify/meeting_notes \
+    --spec "turn raw meeting notes into a summary, decisions and action items with owners; check that every item has an owner and fix those that do not; return one markdown document"
+graf validate /tmp/verify/meeting_notes/meeting_notes.graph.yaml    # ✓ Valid
+cat /tmp/verify/meeting_notes/create.json                           # spec, llm, rounds: 1, problems_left: []
+graf vis /tmp/verify/meeting_notes/meeting_notes.graph.yaml --no-open
+```
+
+Check the prompts read sensibly, then run the app with a budget (`--bind` with `limits.max_llm_calls`). The graph can be right and a weak model still follow a prompt badly at run time (a small model may leave an owner as `UNASSIGNED` that the fix step was asked to resolve): that is the app's prompt and model, not `graf create`.
+
 ## 4. Validation rules
 
 `graf validate` proves properties before anything runs. Make these three small files in a scratch folder and expect each error.

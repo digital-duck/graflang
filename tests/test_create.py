@@ -1,0 +1,182 @@
+"""`graf create`: a plain-language spec in, a checked GraphLang app out. The LLM is a stub; nothing here calls a model."""
+import json
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from graphlang.cli import main
+from graphlang.grafc import create as C
+from graphlang.grafr.runtime import GraphLangRuntime, load_graph
+from graphlang.grafr.topology import check
+from graphlang.grafr.adapters import MockLLM
+
+EXAMPLES = Path(C.__file__).parent / "create_examples"
+APPS = {"linear": "summarizer", "branch": "support_triage", "loop": "polish"}
+
+
+def reply_for(example, name):
+    """What a model would answer: the example's files, renamed to `name`."""
+    src, old = EXAMPLES / example, APPS[example]
+    blocks = []
+    for path in sorted(src.rglob("*")):
+        if path.is_file():
+            rel = path.relative_to(src).as_posix()
+            text = path.read_text()
+            if rel == f"{old}.graph.yaml":
+                rel, text = f"{name}.graph.yaml", text.replace(f'name: "{old}"', f'name: "{name}"')
+            blocks.append(f"=== FILE: {rel} ===\n{text}")
+    blocks.append("=== FILE: readme.md ===\n# app\nruns\n")
+    return "\n".join(blocks)
+
+
+class Scripted:
+    name, model_override, default_model = "scripted", None, None
+
+    def __init__(self, *replies):
+        self.replies, self.prompts = list(replies), []
+
+    def generate(self, prompt, model=None, **opts):
+        self.prompts.append(prompt)
+        return self.replies.pop(0)
+
+    def last_usage(self):
+        return None
+
+
+@pytest.mark.parametrize("example", sorted(APPS))
+def test_every_shipped_example_is_a_valid_app_that_runs(example):
+    graph = load_graph(EXAMPLES / example / f"{APPS[example]}.graph.yaml")
+    assert check(graph) == ([], [])
+    problems, _ = C.check_app("x", {}, False)
+    assert problems                                            # an empty app is refused
+    files = C.parse_files(reply_for(example, "my_app"))
+    assert C.check_app("my_app", files) == ([], [])             # and a renamed copy passes the full check, dry run included
+
+
+def test_the_prompt_carries_the_guide_the_examples_and_the_spec():
+    prompt = C.build_prompt("triage", "classify messages", allow_code=False)
+    assert "You write GraphLang apps" in prompt and "support_triage" in prompt and "classify messages" in prompt
+    assert "triage.graph.yaml" in prompt and "tools/NAME.py" not in prompt
+    assert "tools/NAME.py" in C.build_prompt("triage", "x", allow_code=True)
+
+
+def test_files_are_read_from_marked_blocks_and_a_fence_around_a_file_is_removed():
+    files = C.parse_files("=== FILE: a.yaml ===\n```yaml\nk: 1\n```\n=== FILE: prompts/p.md ===\nhello {{in_x}}\n")
+    assert files == {"a.yaml": "k: 1\n", "prompts/p.md": "hello {{in_x}}\n"}
+    with pytest.raises(C.CreateError, match="no `=== FILE"):
+        C.parse_files("just text")
+    with pytest.raises(C.CreateError, match="unsafe path"):
+        C.parse_files("=== FILE: ../evil.md ===\nx\n")
+
+
+def test_a_good_first_answer_costs_one_call():
+    llm = Scripted(reply_for("branch", "triage"))
+    made = C.create_app("triage", "classify then reply", llm, None)
+    assert made.ok and made.rounds == 1 and len(llm.prompts) == 1 and f"triage.graph.yaml" in made.files
+
+
+def test_problems_go_back_to_the_llm_with_its_own_attempt():
+    broken = reply_for("linear", "notes").replace('{generate: prompts.fix,', '{generate: prompts.fix, model: "x",')
+    llm = Scripted(broken, reply_for("linear", "notes"))
+    made = C.create_app("notes", "summarize", llm, None)
+    assert made.ok and made.rounds == 2
+    second = llm.prompts[1]
+    assert "Your previous attempt" in second and "model" in second and "notes.graph.yaml" in second       # the file it wrote and what was wrong
+
+
+def test_a_graph_that_does_not_load_is_a_problem_the_llm_can_fix():
+    llm = Scripted("=== FILE: notes.graph.yaml ===\nversion: '1.0-graph'\nworkflow: {name: notes}\n", reply_for("linear", "notes"))
+    made = C.create_app("notes", "x", llm, None)
+    assert made.ok and made.rounds == 2 and "does not load" in llm.prompts[1]
+
+
+def test_a_wrong_workflow_name_is_found():
+    wrong = reply_for("linear", "other").replace("other.graph.yaml", "notes.graph.yaml")
+    problems, _ = C.check_app("notes", C.parse_files(wrong))
+    assert any("workflow.name" in p for p in problems)
+
+
+def test_a_graph_that_fails_at_run_time_is_found_by_the_dry_run(monkeypatch):
+    files = C.parse_files(reply_for("linear", "notes"))
+
+    class Boom:
+        def __init__(self, *a, **k):
+            pass
+
+        def execute(self, inputs):
+            raise ValueError("port in_x has no value")
+
+    monkeypatch.setattr("graphlang.grafr.runtime.GraphLangRuntime", Boom)
+    problems, _ = C.check_app("notes", files)
+    assert any("dry run" in p and "port in_x" in p for p in problems)
+
+
+def test_it_gives_up_after_max_rounds_and_reports_what_is_left():
+    bad = reply_for("linear", "notes").replace('{generate: prompts.fix,', '{generate: prompts.fix, model: "x",')
+    llm = Scripted(bad, bad)
+    made = C.create_app("notes", "x", llm, None, max_rounds=2)
+    assert not made.ok and made.rounds == 2 and len(llm.prompts) == 2 and any("model" in p for p in made.problems)
+
+
+def test_nothing_that_runs_code_is_accepted_without_allow_code():
+    files = C.parse_files(reply_for("linear", "notes"))
+    with_tool = {**files, "tools/x.py": "print(1)\n"}
+    assert any("not allowed" in p for p in C.check_app("notes", with_tool)[0])
+    graph_with_run = files["notes.graph.yaml"].replace(
+        "  - done:", '  - tool: {node: SOLVE, in: {t: fix.summary}, ports: [trigger, complete, in_t, out_r], out: r, backend: subprocess, command: ["python3", "tools/x.py"]}\n  - done:')
+    problems, _ = C.check_app("notes", {**files, "notes.graph.yaml": graph_with_run})
+    assert any("needs --allow-code" in p for p in problems)
+    ok, _ = C.check_app("notes", {**with_tool, "notes.graph.yaml": graph_with_run}, allow_code=True)
+    assert not any("allow-code" in p or "not allowed" in p for p in ok)         # allowed (and not executed: no dry run)
+
+
+def test_names_and_folders_are_checked(tmp_path):
+    for bad in ("Notes", "1app", "my-app", ""):
+        with pytest.raises(C.CreateError, match="--name"):
+            C.check_name(bad)
+    made = C.Created(C.parse_files(reply_for("linear", "notes")), 1, [])
+    out = tmp_path / "app"
+    written = C.write_app("notes", "summarize", made, out, "mock")
+    assert (out / "notes.graph.yaml").exists() and (out / "prompts" / "fix.md").exists()
+    meta = json.loads((out / "create.json").read_text())
+    assert meta["spec"] == "summarize" and meta["name"] == "notes" and out / "create.json" in written
+    with pytest.raises(C.CreateError, match="already has files"):
+        C.write_app("notes", "x", made, out, "mock")
+    C.write_app("notes", "x", made, out, "mock", force=True)
+
+
+def run_cli(monkeypatch, tmp_path, llm, *extra):
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: llm)
+    return CliRunner().invoke(main, ["create", "--name", "triage", "--spec", "classify then reply", "--llm", "claude_cli:claude-haiku-5-5",
+                                     "--out-dir", str(tmp_path / "triage"), "--no-log", *extra])
+
+
+def test_the_command_writes_an_app_that_validates_and_runs(monkeypatch, tmp_path):
+    llm = Scripted(reply_for("branch", "triage"))
+    llm.name = "claude_cli"
+    result = run_cli(monkeypatch, tmp_path, llm)
+    assert result.exit_code == 0 and "Created" in result.output, result.output
+    graph = tmp_path / "triage" / "triage.graph.yaml"
+    assert CliRunner().invoke(main, ["validate", str(graph)]).exit_code == 0
+    assert GraphLangRuntime(load_graph(graph), llm=MockLLM(), verbose=False).execute({"message": "down"})
+
+
+def test_the_command_writes_the_app_even_when_problems_are_left(monkeypatch, tmp_path):
+    bad = reply_for("branch", "triage").replace('{generate: prompts.classify,', '{generate: prompts.classify, model: "x",')
+    llm = Scripted(bad)
+    llm.name = "claude_cli"
+    result = run_cli(monkeypatch, tmp_path, llm, "--max-rounds", "1")
+    assert result.exit_code == 1 and "problem" in result.output and (tmp_path / "triage" / "triage.graph.yaml").exists()
+
+
+def test_the_spec_can_come_from_a_file_and_a_bad_name_is_refused(monkeypatch, tmp_path):
+    spec = tmp_path / "spec.md"
+    spec.write_text("from a file: triage messages")
+    llm = Scripted(reply_for("branch", "triage"))
+    llm.name = "claude_cli"
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: llm)
+    out = CliRunner().invoke(main, ["create", "--name", "triage", "--spec", f"@{spec}", "--out-dir", str(tmp_path / "t"), "--no-log"])
+    assert out.exit_code == 0 and "from a file: triage messages" in llm.prompts[0]
+    bad = CliRunner().invoke(main, ["create", "--name", "Bad-Name", "--spec", "x", "--no-log"])
+    assert bad.exit_code == 1 and "--name" in bad.output

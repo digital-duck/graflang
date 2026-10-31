@@ -18,6 +18,7 @@ pytest --mode llm                           # only the few real-LLM tests (claud
 graf run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `claude_cli` with claude-sonnet-5-5 (a real LLM, billed; give a `--bind` file with `limits.max_llm_calls` when trying a loop); --param is repeatable
 graf validate|info <graph.yaml>
 graf run ... --log-level debug --log-format jsonl|text|both --log-dir DIR --no-log --output-dir DIR --no-save-nodes --no-output   # logs default to ~/.graflang/logs
+graf create --name N --spec TEXT|@FILE [--out-dir DIR] [--llm adapter:model] [--max-rounds 3] [--allow-code]   # vibe-coding: an LLM writes a graph app (grafc/create.py + create_guide.md + create_examples/), checked like validate plus a mock dry run; the shipped examples are validated by tests/test_create.py
 graf compile <graph.yaml> [--lang rust|spl] [-o OUT] [--dry-run]   # spl: SPL script (graf export-spl is folded in); rust: experimental stub; both run `validate`'s checks first
 graf vis <graph.yaml> [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o FILE] [--no-open]   # draw the workflow (default ~/.graflang/vis/); `python -m graphlang ...` also works
 ```

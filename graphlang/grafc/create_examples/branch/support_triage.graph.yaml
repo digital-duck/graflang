@@ -1,0 +1,25 @@
+version: "1.0-graph"
+
+# Classify a support message, then answer it by one of two prompts. A branch starts with `on: <evaluate step>.pass` or `.fail`,
+# and each branch ends in its own `output` step (a workflow output may be written by either).
+
+workflow:
+  name: "support_triage"
+  inputs:
+    - {name: "message", type: "TEXT"}
+  outputs:
+    - {name: "reply", type: "TEXT"}
+
+resources:
+  prompts:
+    classify: "./prompts/classify.md"
+    urgent_reply: "./prompts/urgent_reply.md"
+    normal_reply: "./prompts/normal_reply.md"
+
+steps:
+  - classify:  {generate: prompts.classify, in: {message: $in.message}, out: label}
+  - urgent:    {evaluate: "contains(@in_label, 'URGENT')", in: {label: classify.label}}
+  - rush:      {generate: prompts.urgent_reply, on: urgent.pass, in: {message: $in.message}, out: reply}
+  - rush_out:  {output: rush.reply}
+  - routine:   {generate: prompts.normal_reply, on: urgent.fail, in: {message: $in.message}, out: reply}
+  - routine_out: {output: routine.reply, on: routine}

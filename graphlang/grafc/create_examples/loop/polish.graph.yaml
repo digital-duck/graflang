@@ -1,0 +1,35 @@
+version: "1.0-graph"
+
+# Draft a text, then improve it in a loop until the critic approves or max_rounds is reached.
+# A `loop` step runs its own `steps` once per iteration; `while` is checked before each round; the loop's `out` says what carries
+# over (`from`: the latest value, `fired`: whether a step's port fired this round). Inside the body, `$loop.<name>` reads a loop input
+# or carried value of that name (the key in `in:` must be the same name).
+
+workflow:
+  name: "polish"
+  inputs:
+    - {name: "topic", type: "TEXT"}
+    - {name: "max_rounds", type: "INTEGER", default: 3}
+  outputs:
+    - {name: "text", type: "TEXT"}
+
+resources:
+  prompts:
+    draft: "./prompts/draft.md"
+    critique: "./prompts/critique.md"
+    improve: "./prompts/improve.md"
+
+steps:
+  - draft: {generate: prompts.draft, in: {topic: $in.topic}, out: text}
+  - rounds:
+      loop: "@in_max_rounds"
+      while: "NOT @approved"
+      in: {max_rounds: $in.max_rounds, text: draft.text}
+      out:
+        text: {from: improve.text}
+        approved: {fired: ok.pass}
+      steps:
+        - critique: {generate: prompts.critique, in: {text: $loop.text}, out: notes}
+        - ok:       {evaluate: "contains(@in_notes, 'APPROVED')", in: {notes: critique.notes}}
+        - improve:  {generate: prompts.improve, on: ok.fail, in: {text: $loop.text, notes: critique.notes}, out: text}
+  - done: {output: rounds.text}

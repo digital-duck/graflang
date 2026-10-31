@@ -1,0 +1,22 @@
+version: "1.0-graph"
+
+# Summarize a text, then check the summary for claims the text does not make. Three steps in a line; each step may name its own LLM.
+
+workflow:
+  name: "summarizer"
+  inputs:
+    - {name: "text", type: "TEXT"}
+  outputs:
+    - {name: "summary", type: "TEXT"}
+
+resources:
+  prompts:
+    summarize: "./prompts/summarize.md"
+    verify: "./prompts/verify.md"
+    fix: "./prompts/fix.md"
+
+steps:
+  - summarize: {generate: prompts.summarize, in: {text: $in.text}, out: summary}
+  - verify:    {generate: prompts.verify, llm: "claude_cli:claude-haiku-5-5", in: {text: $in.text, summary: summarize.summary}, out: issues}
+  - fix:       {generate: prompts.fix, in: {text: $in.text, summary: summarize.summary, issues: verify.issues}, out: summary}
+  - done:      {output: fix.summary}
