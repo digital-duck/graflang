@@ -106,6 +106,7 @@ Expected: every line `✓ Valid GraphLang workflow: <name>`.
 | `chain_of_thought` | lifted from SPL, cassette |
 | `lifted_tool` | a Python tool as a kernel SOLVE |
 | `parts_demo` | one part used twice |
+| `code_parts` | `code_pipeline`'s first steps as parts: no `.spl`, no SPL.py |
 | `elaborate_demo` | a template applied to a graph |
 | `container_demo` | a program run inside Docker |
 | `pocketflow` | R1 acceptance samples |

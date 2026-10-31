@@ -1,0 +1,32 @@
+version: "1.0-graph"
+
+# code_pipeline's first steps (analyze the spec, write, review, improve) with no .spl files and no SPL.py: each step is a part,
+# a named subgraph (parts/*.graph.yaml), used as one node. The prompts are the ones the SPL sub-workflows carry.
+#   graf run cookbook/code_parts/code_parts.graph.yaml --param spec="a function is_palindrome(s) that ignores case and punctuation"
+#   graf vis cookbook/code_parts/code_parts.graph.yaml      # each use is drawn as a box
+#   graf expand cookbook/code_parts/code_parts.graph.yaml   # the flat graph: write__gen, review__gen, ...
+
+workflow:
+  name: "code_parts"
+  inputs:
+    - {name: "spec", type: "TEXT"}
+    - {name: "lang", type: "TEXT", default: "python"}
+  outputs:
+    - {name: "code", type: "TEXT"}
+    - {name: "review", type: "TEXT"}
+
+resources:
+  parts:
+    analyze_spec: "./parts/analyze_spec.graph.yaml"
+    write_code: "./parts/write_code.graph.yaml"
+    review_code: "./parts/review_code.graph.yaml"
+    improve_code: "./parts/improve_code.graph.yaml"
+
+steps:
+  - analyze: {use: parts.analyze_spec, in: {spec: $in.spec}, out: [analysis]}
+  - gate:    {evaluate: "contains(@in_analysis, '[READY]')", in: {analysis: analyze.analysis}}
+  - abort:   {node: RECOVER, on: gate.fail, in: {message: analyze.analysis}, ports: [trigger, halt, in_message, out_error], action: halt}
+  - write:   {use: parts.write_code, on: gate.pass, in: {spec: $in.spec, lang: $in.lang}, out: [code]}
+  - review:  {use: parts.review_code, in: {code: write.code, lang: $in.lang}, out: [feedback]}
+  - improve: {use: parts.improve_code, in: {spec: $in.spec, code: write.code, feedback: review.feedback, lang: $in.lang}, out: [code]}
+  - done:    {output: {code: improve.code, review: review.feedback}}
