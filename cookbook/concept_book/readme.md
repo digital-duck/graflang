@@ -1,20 +1,20 @@
 # concept_book
 
-Build a short concept book on a subject: write an outline, then write and review one chapter per loop iteration, then compile the chapters into a book.
+Build a short concept book on a subject: write an outline, then write, review and (if the reviewer asks) revise one chapter per loop iteration, then compile the final chapters into a book.
 
 ```
 wf_entry -> generate_outline -> chapter_loop -> compile_book -> wf_exit
                                  |  per iteration:
-                                 |  write_chapter -> review_chapter
-                                 |  (chapters are collected into out_chapters)
+                                 |  write_chapter -> review_chapter -> needs_revision --[REVISION_NEEDED]--> revise_chapter
+                                 |  (the chapter collected is the revision if there was one, else the first draft)
 ```
 
 | | |
 |---|---|
 | Inputs | `subject` (TEXT, required), `target_audience` (TEXT, default `beginners`), `num_chapters` (INTEGER, default 5) |
 | Output | `book` (TEXT): the compiled book |
-| LLM calls | 2 + 2 x `num_chapters` (outline, compile, and a write plus a review per chapter) |
-| Prompts | `prompts/outline.md`, `chapter.md`, `review.md`, `compile.md` |
+| LLM calls | 2 + 2 x `num_chapters` (outline, compile, and a write plus a review per chapter), plus one revision for each chapter the reviewer sends back (at most `num_chapters`) |
+| Prompts | `prompts/outline.md`, `chapter.md`, `review.md`, `revise.md`, `compile.md` |
 
 ## Run
 

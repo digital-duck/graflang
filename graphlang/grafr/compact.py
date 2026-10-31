@@ -288,15 +288,18 @@ def _loop_outputs(sid: str, spec: Any, body_nodes: List[Dict]) -> Dict[str, Any]
         if not isinstance(how, dict) or len(how) != 1 or next(iter(how)) not in ("from", "collect", "fired"):
             raise CompactError(f"step {sid!r}: loop output {name!r} needs exactly one of from / collect / fired")
         (kind, ref), = how.items()
-        node, _, port = str(ref).partition(".")
-        found = next((n for n in body_nodes if n["id"] == node), None)
-        if found is None:
-            raise CompactError(f"step {sid!r}: loop output {name!r} names {node!r}, which is not a step of its body")
-        if kind != "fired":                                  # a result name; `fired` already names a control port
-            port = f"out_{port}" if port else next((p for p in found["ports"] if p.startswith("out_")), "")
-            if port not in found["ports"]:
-                raise CompactError(f"step {sid!r}: loop output {name!r}: {node!r} has no result {port[4:]!r}")
-        outs[name] = {kind: f"{node}.{port}"}
+        refs = []
+        for one in (ref if isinstance(ref, list) and kind in ("from", "collect") else [ref]):
+            node, _, port = str(one).partition(".")
+            found = next((n for n in body_nodes if n["id"] == node), None)
+            if found is None:
+                raise CompactError(f"step {sid!r}: loop output {name!r} names {node!r}, which is not a step of its body")
+            if kind != "fired":                              # a result name; `fired` already names a control port
+                port = f"out_{port}" if port else next((p for p in found["ports"] if p.startswith("out_")), "")
+                if port not in found["ports"]:
+                    raise CompactError(f"step {sid!r}: loop output {name!r}: {node!r} has no result {port[4:]!r}")
+            refs.append(f"{node}.{port}")
+        outs[name] = {kind: refs if isinstance(ref, list) and kind in ("from", "collect") else refs[0]}
     return outs
 
 

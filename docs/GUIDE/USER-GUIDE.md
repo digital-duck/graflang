@@ -240,7 +240,7 @@ steps:
       loop: "@in_num_chapters"            # max iterations: a number or an expression; add `while: "@i < @in_n"` for a condition
       index: i                            # the 0-based counter's name (default `cycle`)
       in: {outline: outline, subject: $in.subject}
-      out: {chapters: {collect: write.chapter}}      # name: collect | from | fired, naming a body step's result
+      out: {chapters: {collect: write.chapter}}      # name: collect | from | fired, naming a body step's result (collect and from also take a list of results: the one written last)
       steps:
         - write:  {generate: prompts.chapter, in: {outline: $loop.outline, i: $loop.i}, out: chapter}
         - review: {generate: prompts.review,  in: {chapter: write.chapter}}

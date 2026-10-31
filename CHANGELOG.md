@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `concept_book` revises: the reviewer's verdict now routes an `EVALUATE`; `REVISION_NEEDED` sends the chapter and the feedback to a new `revise_chapter` step, and the book is compiled from the revised chapters (before, the verdict was collected and never used). To collect "the chapter, revised or not", a LOOP's `collect` (and the compact `out:`) now accepts a list of results, taking the one written last in each iteration, as `from` already did.
+
 - A list in a prompt: `{{in_chapters}}` used to show Python's repr (`['chapter 1\\n...', ...]`); a list of texts now reads one after another with a blank line between, and any other list or mapping as JSON. `concept_book`'s compile step had been handed 13 KB of escaped text and answered "Okay" (the book came out empty); its nodes also no longer pin `ollama:gemma3`, so the run's `--llm` applies, and its prompts ask for the text only.
 
 - `graf create --name N --spec TEXT|@FILE [--out-dir DIR] [--llm adapter:model] [--max-rounds N] [--allow-code] [--force]`: vibe-coding for GraphLang. An LLM writes an app (a compact `.graph.yaml`, its prompts, a readme) from a plain-language spec; the result is checked like `graf validate` and by a dry run on the mock LLM, and the problems go back to the LLM for up to `--max-rounds` calls. Nothing generated is executed without `--allow-code`. The authoring guide and three example apps are shipped in the package (`graphlang/grafc/create_guide.md`, `create_examples/`).

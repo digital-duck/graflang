@@ -527,7 +527,8 @@ class GraphLangRuntime:
                             {from: "node.out_port"}     the value the latest iteration wrote; if that iteration wrote none, the
                                                         previous one (it starts as the LOOP's input of the same name). A list
                                                         of ports: whichever wrote last, for a variable set on exclusive branches
-                            {collect: "node.out_port"}  a list, one value per iteration
+                            {collect: "node.out_port"}  a list, one value per iteration; a list of ports: whichever wrote last in that
+                                                        iteration (a result made on one of two branches)
                             {fired: "node.port"}        true if a token left that port in the latest iteration
           persist_mutations  true: what a MUTATE in the body changed stays for the next iterations (default: each
                           iteration starts from the body as written; the mutation budget is still shared)
@@ -582,7 +583,10 @@ class GraphLangRuntime:
                     if written:                                      # an iteration that sets it on no branch leaves it as it was
                         state[name] = sub.values[max(written, key=lambda k: sub._stamp[k])]
                 elif "collect" in spec:
-                    state[name].append(sub.values.get(split_ref(spec["collect"])))
+                    refs = [split_ref(r) for r in ([spec["collect"]] if isinstance(spec["collect"], str) else spec["collect"])]
+                    written = [k for k in refs if k in sub.values]
+                    # one value per iteration; with a list of ports, the one written last (a result made on one of two branches)
+                    state[name].append(sub.values[max(written, key=lambda k: sub._stamp[k])] if written else None)
                 else:
                     state[name] = split_ref(spec["fired"]) in sub.emitted
             cycle += 1

@@ -1,0 +1,36 @@
+"""cookbook/concept_book: a chapter the reviewer asks to revise is revised, and the compile step gets the final chapters."""
+from pathlib import Path
+
+from graphlang.grafr.runtime import GraphLangRuntime, load_graph
+from graphlang.grafr.topology import check
+from test_lifecycle import Scripted
+
+GRAPH = Path(__file__).parent.parent / "cookbook" / "concept_book" / "build_concept_book.graph.yaml"
+
+
+def run(*replies, chapters=2):
+    llm = Scripted(*replies)
+    graph = load_graph(GRAPH)
+    assert check(graph) == ([], [])
+    out = GraphLangRuntime(graph, llm=llm, verbose=False).execute({"subject": "entropy", "num_chapters": chapters})
+    return out, llm
+
+
+def test_approved_chapters_are_kept_and_a_revision_is_asked_only_when_needed():
+    out, llm = run("OUTLINE", "CH0", "APPROVED", "CH1", "REVISION_NEEDED\nadd an example", "CH1-REVISED", "BOOK")
+    assert out == {"book": "BOOK"} and len(llm.prompts) == 7           # outline, write, review, write, review, revise, compile (no revise for chapter 0)
+    revise = llm.prompts[5]
+    assert "CH1" in revise and "add an example" in revise and "entropy" in revise and "OUTLINE" in revise      # the chapter, the feedback, the context
+    compile_prompt = llm.prompts[6]
+    assert "CH0" in compile_prompt and "CH1-REVISED" in compile_prompt and "add an example" not in compile_prompt
+    assert "CH1\n" not in compile_prompt.replace("CH1-REVISED", "")    # the unrevised draft is not what gets compiled
+
+
+def test_the_verdict_is_read_whatever_its_formatting():
+    out, llm = run("OUTLINE", "CH0", "**revision_needed**: too thin", "CH0-V2", "BOOK", chapters=1)
+    assert len(llm.prompts) == 5 and "CH0-V2" in llm.prompts[4]
+
+
+def test_all_approved_makes_no_revision_calls():
+    _, llm = run("OUTLINE", "CH0", "APPROVED", "CH1", "APPROVED", "BOOK")
+    assert len(llm.prompts) == 6

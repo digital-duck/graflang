@@ -14,6 +14,7 @@ resources:
     outline: "./prompts/outline.md"
     chapter: "./prompts/chapter.md"
     review: "./prompts/review.md"
+    revise: "./prompts/revise.md"
     compile: "./prompts/compile.md"
 
 nodes:
@@ -34,7 +35,8 @@ nodes:
       max_iterations: "@in_num_chapters"
       index_var: chapter_index                 # 0-based; also readable by the body as port in_chapter_index
       outputs:
-        chapters: {collect: "write_chapter.out_chapter"}   # out_chapters: one chapter per iteration
+        # one chapter per iteration: the revision if the reviewer asked for one, else the chapter as first written
+        chapters: {collect: ["write_chapter.out_chapter", "revise_chapter.out_chapter"]}
       subgraph:
         nodes:
           - id: "write_chapter"
@@ -46,10 +48,26 @@ nodes:
             type: "GENERATE"
             config:
               prompt_ref: "prompts.review"
-            ports: ["trigger", "complete", "in_chapter", "out_approved"]
+            ports: ["trigger", "complete", "in_chapter", "out_verdict"]
+          - id: "needs_revision"
+            type: "EVALUATE"
+            config:
+              condition: "contains(upper(@in_verdict), 'REVISION_NEEDED')"
+            ports: ["trigger", "pass", "fail", "in_verdict"]
+          - id: "revise_chapter"
+            type: "GENERATE"
+            config:
+              prompt_ref: "prompts.revise"
+            ports: ["trigger", "complete", "in_chapter", "in_verdict", "in_subject", "in_outline", "out_chapter"]
         edges:
           - {source: "write_chapter.complete", target: "review_chapter.trigger", type: "triggers"}
+          - {source: "review_chapter.complete", target: "needs_revision.trigger", type: "triggers"}
+          - {source: "needs_revision.pass", target: "revise_chapter.trigger", type: "triggers"}     # pass: the condition holds, a revision is needed
           - {source: "write_chapter.out_chapter", target: "review_chapter.in_chapter", type: "binds"}
+          - {source: "review_chapter.out_verdict", target: "needs_revision.in_verdict", type: "binds"}
+          - {source: "write_chapter.out_chapter", target: "revise_chapter.in_chapter", type: "binds"}
+          - {source: "review_chapter.out_verdict", target: "revise_chapter.in_verdict", type: "binds"}
+          # in_subject and in_outline of revise_chapter read the loop's inputs
     ports: ["trigger", "loop", "exit", "in_outline", "in_subject", "in_num_chapters", "out_chapters"]
 
   - id: "compile_book"

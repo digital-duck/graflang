@@ -250,7 +250,7 @@ def _check_loop(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[s
         if len(kinds) != 1:
             errors.append(f"{where}: output {name!r} needs exactly one of from/collect/fired")
             continue
-        for ref in (spec[kinds[0]] if isinstance(spec[kinds[0]], list) and kinds[0] == "from" else [spec[kinds[0]]]):
+        for ref in (spec[kinds[0]] if isinstance(spec[kinds[0]], list) and kinds[0] in ("from", "collect") else [spec[kinds[0]]]):
             node, _, port = ref.partition(".")
             if node not in body_ids:
                 errors.append(f"{where}: output {name!r} refers to {ref!r}, but the subgraph has no node {node!r}")
