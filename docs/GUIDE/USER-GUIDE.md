@@ -58,7 +58,7 @@ Check with `dot -V` (it prints the version), then `graf vis --list-engines`: the
 | `--param key=value` | a workflow input; repeatable. Coerced to the declared type (`INTEGER`, `FLOAT`, `BOOL`). A value without `=` is a usage error |
 | `--llm ADAPTER[:MODEL]` | `--adapter` and `--model` in one value, e.g. `claude_cli:claude-haiku-5-5`, `ollama:gemma3:12b`. Only the first `:` splits, so model ids with `:` or `/` work. Wins over `--adapter`/`--model` |
 | `--adapter NAME` | `claude_cli` (default), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
-| `--model ID` | run-wide model for every `GENERATE` node that names none of its own. A node's `model:` (if the adapter can run it) beats it, so one node can use a stronger or weaker model; a hint for another adapter (`ollama/gemma3` under `claude_cli`) is ignored with a warning (`llm.hint_ignored`). With neither, the default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), which use their own |
+| `--model ID` | run-wide model for every `GENERATE` node that has no `llm:` of its own. A node's `llm:` beats it (see below). With neither, the default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), which use their own |
 | `--max-steps N` | stop after N node firings (default 1000) |
 | `--output-dir DIR` | where results go (default `<graph folder>/output`); see [Results](#results-the-output-folder) |
 | `--save-nodes` / `--no-save-nodes` | save every node's output, LLM responses included (the default); `--no-save-nodes` keeps only the workflow outputs |
@@ -71,6 +71,16 @@ Check with `dot -V` (it prints the version), then `graf vis --list-engines`: the
 A run ends with the workflow output. If no `OUTPUT` node was reached (a gate routed to a dead end) it says so. Failures print `✗ Run failed: ...` and exit with code 1: bad expression, unknown variable (message names the node), rejected edge to a missing port, or the step limit (`stopped after N node firings`).
 
 ### Results: the output folder
+
+**Choosing the LLM per node.** A `GENERATE` node may name its own LLM with `llm: ADAPTER[:MODEL]`, the same spec as `--llm`. It wins over the command line for that node, so you can run the whole graph on a cheap model and give one task a stronger one, or another provider:
+
+```yaml
+- id: critique
+  type: GENERATE
+  config: {prompt_ref: prompts.critique, llm: "claude_cli:claude-haiku-5-5"}   # or "ollama:gemma3"; ":claude-haiku-5-5" = a model on the run's adapter
+```
+
+Order, highest first: the node's `llm:`, then `--llm` (or `--adapter`/`--model`, or `llm:` in a bindings file), then the adapter's default (`claude-sonnet-5-5` for `claude_cli`). A node that names only an adapter other than the run's (`llm: ollama`) gets that adapter's default model; the run's `--llm` model belongs to the run's adapter. An adapter a node names is created on first use, so its requirements (a running Ollama, an API key) apply from then on. `llm.call` in the log shows the adapter and model each node used. `model:` on a node is no longer accepted: `graf validate` says to write `llm:`. Under the `mock` adapter every node is answered by the mock.
 
 Each run writes its results to a new folder, `<graph folder>/output/<graph>-<adapter>[-<model>]-<timestamp>/`. For `graf run cookbook/self_refine/self_refine.graph.yaml --llm ollama:gemma3 ...` that is `cookbook/self_refine/output/self_refine-ollama-gemma3-20261024-111347/`:
 
@@ -191,7 +201,7 @@ steps:
 - `in` maps an input to a value. `$in.topic` is a workflow input, `draft` or `draft.essay` is another step's result, and anything else is a literal that becomes the input's default. Wrap a literal that looks like a reference as `{value: draft}`.
 - `out` names the result port(s); the default is `result`, and a bare step name means the first one.
 - Control is inferred from the order you list the steps. A step with `on: gate.fail` (or a list) hangs there instead, which is how you write the branches of `assert`, `evaluate`, `guard` and `fork`.
-- Other keys (`model`, `phases`, `temperature`, ...) go into the node's `config`. `nodes:` and `edges:` may sit beside `steps:` for anything the compact form cannot say.
+- Other keys (`llm`, `phases`, `temperature`, ...) go into the node's `config`. `nodes:` and `edges:` may sit beside `steps:` for anything the compact form cannot say.
 
 ### Loops in the compact form
 
@@ -275,14 +285,14 @@ A graph says what to do; a bindings file says which model, which files and how m
 ```yaml
 # prod.bind.yaml
 llm: claude_cli:claude-sonnet-5-5       # adapter[:model], like --llm
-models: {fast: claude-haiku-5-5}        # what `model: $fast` in a node means
+llms: {fast: claude_cli:claude-haiku-5-5}   # what `llm: $fast` in a node means
 params: {topic: tides}                  # default parameters; --param wins
 resources:                              # replaces named prompts / procedures / policies; paths relative to this file
   prompts: {draft: ./prod/draft.md}
 limits: {max_steps: 200, wall_time_s: 300}
 ```
 
-`graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file for the run-wide model, but a node's own `model:` still beats both. A `model: $name` with no binding uses the run's default model (with a warning). `limits.max_cost` is not supported: adapters do not report cost.
+`graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file for the run's LLM, but a node's own `llm:` still beats both. An `llm: $name` with no binding uses the run's LLM (with a warning). `limits.max_cost` is not supported: adapters do not report cost.
 
 ## Several things at once: JOIN, BATCH and `--workers`
 

@@ -25,7 +25,7 @@ nodes:
     type: "GENERATE"
     config:
       prompt_ref: "prompts.outline"
-      model: "ollama/gemma3"
+      llm: "ollama:gemma3"
     ports: ["trigger", "complete", "in_subject", "in_num_chapters", "out_outline"]
 
   - id: "chapter_loop"
@@ -42,13 +42,13 @@ nodes:
             type: "GENERATE"
             config:
               prompt_ref: "prompts.chapter"
-              model: "ollama/gemma3"
+              llm: "ollama:gemma3"
             ports: ["trigger", "complete", "in_outline", "in_chapter_index", "in_subject", "out_chapter"]
           - id: "review_chapter"
             type: "GENERATE"
             config:
               prompt_ref: "prompts.review"
-              model: "ollama/gemma3"
+              llm: "ollama:gemma3"
             ports: ["trigger", "complete", "in_chapter", "out_approved"]
         edges:
           - {source: "write_chapter.complete", target: "review_chapter.trigger", type: "triggers"}
@@ -59,7 +59,7 @@ nodes:
     type: "GENERATE"
     config:
       prompt_ref: "prompts.compile"
-      model: "ollama/gemma3"
+      llm: "ollama:gemma3"
     ports: ["trigger", "complete", "in_outline", "in_chapters", "in_subject", "out_book"]
 
   - id: "wf_exit"

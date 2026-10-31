@@ -75,7 +75,7 @@ graf run cookbook/self_refine/self_refine.graph.yaml \
 
 - `claude_cli` runs the Claude Code CLI on your subscription (dd-llm strips `ANTHROPIC_API_KEY` from the child process so it cannot bill the paid API).
 - `ollama` needs a running Ollama server with the model pulled, and the `openai` extra (it speaks the OpenAI-compatible API).
-- A `model:` written inside a node is only a hint. It is used when you give no `--model` (or `--llm ADAPTER:MODEL`) and it fits the adapter; `ollama/gemma3` is ignored under `claude_cli`.
+- A node may name its own LLM with `llm: ADAPTER[:MODEL]` (e.g. `ollama:gemma3`); it beats `--llm` for that node. An adapter named by a node needs its own setup (a running Ollama, a key).
 
 Nodes that use `procedure_ref` (the `code_pipeline` procedures `00`-`07`) run SPL.py workflows, so they need SPL.py importable (`pip install -e ".[spl]"`, `pip install -e /path/to/SPL.py`, or `export SPL_PY_PATH=/path/to/SPL.py`) and only execute under a real adapter. Their logs go to `<graph folder>/.grafr/logs` (git-ignored).
 

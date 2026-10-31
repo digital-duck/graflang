@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 from .ports import apply_input_types, assignable, check_types, normalize_ports, port_type
 from .lifecycle import check_phases
+from .adapters import parse_node_llm
 from .parts import flatten_parts
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
@@ -92,6 +93,10 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
                 _check_condition(where, cfg["condition"], in_ports, errors)
         elif typ == "GENERATE" and not any(k in cfg for k in ("prompt_ref", "prompt_inline", "procedure_ref")):
             errors.append(f"{where}: needs prompt_ref, prompt_inline or procedure_ref")
+        if typ == "GENERATE" and "model" in cfg:
+            errors.append(f"{where}: config.model is now config.llm (adapter[:model], as --llm), e.g. llm: \"claude_cli:{cfg['model']}\"")
+        if typ == "GENERATE" and "llm" in cfg and not (isinstance(cfg["llm"], str) and (cfg["llm"].startswith("$") or parse_node_llm(cfg["llm"]) != (None, None))):
+            errors.append(f"{where}: llm must be a string like 'claude_cli:claude-haiku-5-5' (adapter[:model])")
         elif typ == "GUARD":
             if not cfg.get("policy_ref"):
                 errors.append(f"{where}: no policy_ref (a guard without a policy cannot decide)")

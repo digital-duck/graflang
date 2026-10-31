@@ -24,8 +24,9 @@ class CassetteError(RuntimeError):
     """A replay asked for a call that was not recorded, or the cassette is unreadable."""
 
 
-def call_key(model: Optional[str], prompt: str, temperature: Any) -> str:
-    return hashlib.sha256(json.dumps([model or "", prompt, temperature], ensure_ascii=False).encode()).hexdigest()[:20]
+def call_key(model: Optional[str], prompt: str, temperature: Any, adapter: Optional[str] = None) -> str:
+    parts = [model or "", prompt, temperature] + ([adapter] if adapter else [])     # `adapter`: a node that names another than the run's
+    return hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode()).hexdigest()[:20]
 
 
 class MeteredLLM:
@@ -107,7 +108,7 @@ class RecordingLLM:
 
     def generate(self, prompt: str, model: Optional[str] = None, **opts: Any) -> str:
         response = self.inner.generate(prompt, model=model, **opts)
-        entry = {"key": call_key(model, prompt, opts.get("temperature")), "model": model, "prompt_chars": len(prompt), "response": response}
+        entry = {"key": call_key(model, prompt, opts.get("temperature"), opts.get("adapter")), "model": model, "prompt_chars": len(prompt), "response": response}
         with self._lock, self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         return response
@@ -133,7 +134,7 @@ class ReplayLLM:
         self._lock = threading.Lock()
 
     def generate(self, prompt: str, model: Optional[str] = None, **opts: Any) -> str:
-        key = call_key(model, prompt, opts.get("temperature"))
+        key = call_key(model, prompt, opts.get("temperature"), opts.get("adapter"))
         with self._lock:
             queue = self._answers.get(key)
             if not queue:

@@ -2,14 +2,14 @@
 
     # prod.bind.yaml
     llm: claude_cli:claude-sonnet-5-5       # adapter[:model], like --llm
-    models: {fast: claude-haiku-5-5}        # what `model: $fast` in a node means
+    llms: {fast: claude_cli:claude-haiku-5-5}   # what `llm: $fast` in a node means (adapter[:model])
     params: {topic: tides}                  # default workflow parameters; --param wins
     resources:                              # replaces named resources; paths are relative to this file
       prompts: {draft: ./prod/draft.md}
     limits: {max_steps: 200, wall_time_s: 300, concurrency: 4, max_llm_calls: 50, max_cost_usd: 1.0}
 
-`graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file, which beats the
-graph's own `model:` hints. A `model: $name` with no binding falls back to the run's default model.
+`graf run flow.graph.yaml --bind prod.bind.yaml`. A flag on the command line beats the bindings file for the run's `llm`; a node's own `llm:` beats both.
+An `llm: $name` with no binding falls back to the run's llm.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Tuple
 
 from ruamel.yaml import YAML
 
-KEYS = {"llm", "models", "params", "resources", "limits"}
+KEYS = {"llm", "llms", "params", "resources", "limits"}
 LIMITS = {"max_steps", "wall_time_s", "concurrency", "max_llm_calls", "max_cost_usd"}
 KINDS = ("prompts", "procedures", "policies")
 
@@ -28,7 +28,7 @@ def load_bindings(path: Path) -> Dict[str, Any]:
     path = Path(path)
     data = YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
-        raise ValueError(f"{path.name}: a bindings file is a mapping (llm, models, params, resources, limits)")
+        raise ValueError(f"{path.name}: a bindings file is a mapping (llm, llms, params, resources, limits)")
     unknown = sorted(set(data) - KEYS)
     if unknown:
         raise ValueError(f"{path.name}: unknown key(s) {unknown} (use {sorted(KEYS)})")
@@ -45,7 +45,7 @@ def load_bindings(path: Path) -> Dict[str, Any]:
     for kind, names in (data.get("resources") or {}).items():
         if kind not in KINDS or not isinstance(names, dict):
             raise ValueError(f"{path.name}: resources.{kind} must be a mapping under one of {KINDS}")
-    for key in ("models", "params"):
+    for key in ("llms", "params"):
         if key in data and not isinstance(data[key], dict):
             raise ValueError(f"{path.name}: {key} must be a mapping")
     out = dict(data)
@@ -54,26 +54,26 @@ def load_bindings(path: Path) -> Dict[str, Any]:
     return out
 
 
-def _walk(nodes: List[Dict], models: Dict[str, str], warnings: List[str]) -> None:
+def _walk(nodes: List[Dict], llms: Dict[str, str], warnings: List[str]) -> None:
     for n in nodes:
         cfg = n.get("config", {})
-        model = cfg.get("model")
-        if isinstance(model, str) and model.startswith("$"):
-            if model[1:] in models:
-                cfg["model"] = models[model[1:]]
+        spec = cfg.get("llm")
+        if isinstance(spec, str) and spec.startswith("$"):
+            if spec[1:] in llms:
+                cfg["llm"] = llms[spec[1:]]
             else:
-                del cfg["model"]
-                warnings.append(f"node {n['id']!r}: model {model} has no binding; the run's default model is used")
+                del cfg["llm"]
+                warnings.append(f"node {n['id']!r}: llm {spec} has no binding; the run's llm is used")
         body = cfg.get("subgraph")
         if isinstance(body, dict):
-            _walk(body.get("nodes", []), models, warnings)
+            _walk(body.get("nodes", []), llms, warnings)
 
 
 def bind_graph(graph_data: Dict, bindings: Dict[str, Any]) -> Tuple[Dict, List[str]]:
     """A copy of the graph with the bindings applied, and warnings (unbound `$model`s, resources the graph does not name)."""
     graph = copy.deepcopy(graph_data)
     warnings: List[str] = []
-    _walk(graph["nodes"], bindings.get("models") or {}, warnings)
+    _walk(graph["nodes"], bindings.get("llms") or {}, warnings)
     resources = graph.setdefault("resources", {})
     for kind, names in (bindings.get("resources") or {}).items():
         for name, path in names.items():

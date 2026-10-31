@@ -20,7 +20,7 @@ TYPE_COLORS = {
     "SOLVE": "#2fa84f", "QUERY": "#2fa84f", "CONTEXT": "#2fa84f", "OBSERVE": "#2fa84f",
 }
 OTHER_COLOR = "#8a8f98"
-CONFIG_KEYS = ("prompt_ref", "procedure_ref", "condition", "model", "policy_ref", "policy_refs", "expression", "temperature")
+CONFIG_KEYS = ("prompt_ref", "procedure_ref", "condition", "llm", "policy_ref", "policy_refs", "expression", "temperature")
 
 
 def color(node_type: str) -> str:

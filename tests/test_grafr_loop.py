@@ -171,18 +171,19 @@ def test_input_coercion_by_declared_type():
 
 def test_generate_uses_the_run_llm_and_the_model_rules():
     g = graph([ENTRY, {"id": "gen", "type": "GENERATE", "ports": ["trigger", "complete", "in_n", "out_text"],
-                       "config": {"prompt_inline": "n is {{in_n}}", "model": "ollama/gemma3"}}, EXIT],
+                       "config": {"prompt_inline": "n is {{in_n}}", "llm": ":claude-haiku-5-5"}}, EXIT],
               [trig("start.entry", "gen.trigger"), trig("gen.complete", "end.trigger"),
                bind("start.out_n", "gen.in_n"), bind("gen.out_text", "end.in_result")],
               inputs=[{"name": "n", "type": "INTEGER"}], outputs=[{"name": "t", "type": "TEXT"}])
     llm = FakeLLM(["answer"])
     out = GraphLangRuntime(g, llm=llm, verbose=False).execute({"n": 7})
     assert out == {"t": "answer"} and llm.prompts == ["n is 7"]
-    assert llm.models == [None]                                          # an 'ollama/' hint is ignored under 'fake'
+    assert llm.models == ["claude-haiku-5-5"]                            # the node's own llm
+    del g["nodes"][1]["config"]["llm"]
     llm2 = FakeLLM(["a"])
-    llm2.model_override = "claude-haiku-5-5"
+    llm2.model_override = "claude-opus-5-5"
     GraphLangRuntime(g, llm=llm2, verbose=False).execute({"n": 1})
-    assert llm2.models == ["claude-haiku-5-5"]                           # the run-time --model wins
+    assert llm2.models == ["claude-opus-5-5"]                            # none on the node: the run's --llm
 
 
 def test_procedure_nodes_refuse_a_non_spl_llm_but_run_under_mock(tmp_path):

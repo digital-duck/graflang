@@ -22,6 +22,19 @@ def app(tmp_path):
     disable_logging()
 
 
+def set_node_llms(app, **specs):
+    """Rewrite the app's GENERATE nodes: `llm` is dropped, then set from specs (node id -> spec)."""
+    import yaml
+    graph = next(app.glob("*.graph.yaml"))
+    doc = yaml.safe_load(graph.read_text())
+    for n in doc["nodes"]:
+        if n["type"] == "GENERATE":
+            n["config"].pop("llm", None)
+            if n["id"] in specs:
+                n["config"]["llm"] = specs[n["id"]]
+    graph.write_text(yaml.safe_dump(doc))
+
+
 def run(app, *extra, log_dir=None):
     args = ["run", str(app / "self_refine.graph.yaml"), "--adapter", "mock", "--param", "topic=ducks",
             "--log-dir", str(log_dir or app.parent / "logs"), *extra]
@@ -115,6 +128,7 @@ def test_claude_cli_defaults_to_sonnet_and_other_adapters_have_no_default():
 
 def test_default_model_reaches_the_run_name_and_the_llm(app, monkeypatch):
     seen = {}
+    set_node_llms(app, critique=":claude-haiku-5-5")
 
     class Fake:
         name, adapter_name = "claude_cli", "claude_cli"
@@ -164,21 +178,42 @@ edges:
     assert "a[i] [bold]b[/bold]" in result.output.replace("\n", " ")
 
 
-def test_a_node_model_beats_the_cli_model_and_the_default(app, monkeypatch):
-    import yaml
+def test_a_nodes_llm_beats_the_cli_llm_and_the_default(app, monkeypatch):
     seen = []
 
     def fake(name, model=None, default=None):
         return type("F", (), {"name": "claude_cli", "adapter_name": "claude_cli", "model_override": model, "default_model": default,
                               "generate": lambda self, p, model=None, **k: seen.append(model) or "t"})()
 
-    graph = next(app.glob("*.graph.yaml"))
-    doc = yaml.safe_load(graph.read_text())
-    next(n for n in doc["nodes"] if n["id"] == "critique")["config"]["model"] = "claude_cli/claude-haiku-5-5"
-    graph.write_text(yaml.safe_dump(doc))
+    set_node_llms(app, critique="claude_cli:claude-haiku-5-5")
     monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", fake)
     assert run(app, "--adapter", "claude_cli").exit_code == 0
     assert "claude-haiku-5-5" in seen and "claude-sonnet-5-5" in seen
     seen.clear()
     assert run(app, "--llm", "claude_cli:claude-opus-5-5").exit_code == 0
-    assert sorted(seen) == ["claude-haiku-5-5", "claude-opus-5-5", "claude-opus-5-5"]
+    assert "claude-haiku-5-5" in seen and "claude-opus-5-5" in seen and "claude-sonnet-5-5" not in seen   # critique keeps its own
+
+
+def test_a_node_can_use_another_adapter_than_the_run(app, monkeypatch):
+    calls = []
+
+    def fake(name, model=None, default=None):
+        return type("F", (), {"name": "claude_cli", "adapter_name": "claude_cli", "model_override": model, "default_model": default,
+                              "generate": lambda self, p, model=None, adapter=None, **k: calls.append((adapter, model)) or "t"})()
+
+    set_node_llms(app, draft="ollama:gemma3", critique=":claude-haiku-5-5")
+    monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", fake)
+    assert run(app, "--llm", "claude_cli:claude-opus-5-5").exit_code == 0
+    assert calls[0] == ("ollama", "gemma3")                        # draft: its own adapter, not the run's model
+    assert calls[1] == (None, "claude-haiku-5-5")                  # critique: the run's adapter, its own model
+    assert all(c in {("ollama", "gemma3"), (None, "claude-haiku-5-5"), (None, "claude-opus-5-5")} for c in calls)
+
+
+def test_validate_rejects_the_old_model_key(app):
+    import yaml
+    graph = app / "self_refine.graph.yaml"
+    doc = yaml.safe_load(graph.read_text())
+    doc["nodes"][1]["config"]["model"] = "x"
+    graph.write_text(yaml.safe_dump(doc))
+    result = CliRunner().invoke(main, ["validate", str(graph)])
+    assert result.exit_code != 0 and "config.llm" in result.output

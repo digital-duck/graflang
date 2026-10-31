@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from graphlang.grafr.adapters import DDLLM, LLMUnavailable, MockLLM, make_llm, resolve_model
+from graphlang.grafr.adapters import DDLLM, LLMUnavailable, MockLLM, make_llm, parse_node_llm, resolve_call
 
 
 def test_mock_is_the_default_and_needs_nothing():
@@ -47,24 +47,38 @@ def fake_dd_llm(monkeypatch):
     return made
 
 
-def test_resolve_model_rules(fake_dd_llm):
-    assert resolve_model("claude_cli", "ollama/gemma3", None) is None            # hint for another provider: ignored
-    assert resolve_model("claude_cli", "ollama/gemma3", "claude-haiku-5-5") == "claude-haiku-5-5"   # --model wins
-    assert resolve_model("claude_cli", "claude-sonnet-5-5", None) == "claude-sonnet-5-5"
-    assert resolve_model("claude_cli", "gemma3", None) is None                   # not a Claude model
-    assert resolve_model("ollama", "ollama/gemma3", None) == "gemma3"            # own prefix stripped
-    assert resolve_model("openrouter", "qwen/qwen3", None) == "qwen/qwen3"       # openrouter models contain a slash
-    assert resolve_model("mock", "anything/x", None) == "anything/x"
-    assert resolve_model("claude_cli", None, None) is None
+def test_parse_node_llm():
+    assert parse_node_llm("ollama:gemma3:12b") == ("ollama", "gemma3:12b")
+    assert parse_node_llm("claude_cli") == ("claude_cli", None) and parse_node_llm("claude_cli:") == ("claude_cli", None)
+    assert parse_node_llm(":claude-haiku-5-5") == (None, "claude-haiku-5-5")        # a model on the run's adapter
+    assert parse_node_llm(None) == (None, None) and parse_node_llm("") == (None, None)
 
 
-def test_resolve_model_order_is_cli_then_node_then_default(fake_dd_llm):
+def test_the_nodes_llm_beats_the_cli_which_beats_the_default():
     d = "claude-sonnet-5-5"
-    assert resolve_model("claude_cli", "claude_cli/claude-haiku-5-5", "claude-opus-5-5", d) == "claude-haiku-5-5"   # the node's own wins
-    assert resolve_model("claude_cli", None, "claude-opus-5-5", d) == "claude-opus-5-5"               # else the CLI's run-wide choice
-    assert resolve_model("claude_cli", None, None, d) == d                                            # else the default
-    assert resolve_model("claude_cli", "ollama/gemma3", "claude-opus-5-5", d) == "claude-opus-5-5"    # a hint for another adapter: CLI choice
-    assert resolve_model("claude_cli", "ollama/gemma3", None, d) == d
+    assert resolve_call("claude_cli", "claude_cli:claude-haiku-5-5", "claude-opus-5-5", d) == ("claude_cli", "claude-haiku-5-5")   # node wins
+    assert resolve_call("claude_cli", ":claude-haiku-5-5", "claude-opus-5-5", d) == ("claude_cli", "claude-haiku-5-5")
+    assert resolve_call("claude_cli", None, "claude-opus-5-5", d) == ("claude_cli", "claude-opus-5-5")        # else --llm
+    assert resolve_call("claude_cli", "claude_cli", "claude-opus-5-5", d) == ("claude_cli", "claude-opus-5-5")   # adapter only: the run's model
+    assert resolve_call("claude_cli", None, None, d) == ("claude_cli", d)                                    # else the default
+
+
+def test_a_node_can_name_another_adapter():
+    # the run's --llm model belongs to the run's adapter, so it does not leak into the node's
+    assert resolve_call("claude_cli", "ollama:gemma3", "claude-opus-5-5", "claude-sonnet-5-5") == ("ollama", "gemma3")
+    assert resolve_call("claude_cli", "ollama", "claude-opus-5-5", "claude-sonnet-5-5") == ("ollama", None)      # that adapter's own default
+    assert resolve_call("ollama", "claude_cli", None, None) == ("claude_cli", "claude-sonnet-5-5")              # claude_cli's default
+
+
+def test_mock_answers_for_every_node():
+    assert resolve_call("mock", "ollama:gemma3", None) == ("mock", "gemma3")
+    assert resolve_call("mock", None, "x") == ("mock", "x")
+
+
+def test_a_node_adapter_is_made_on_first_use(fake_dd_llm):
+    llm = make_llm("claude_cli")
+    assert llm.generate("a", model="m", adapter="ollama") == "reply to a" and fake_dd_llm["name"] == "ollama"
+    assert llm.generate("b", model="m") == "reply to b"
 
 
 def test_dd_llm_wrapper_calls_the_adapter(fake_dd_llm):

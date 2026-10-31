@@ -54,7 +54,7 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--resume", "resume_file", type=click.Path(exists=True, dir_okay=False), default=None,
               help="continue a run from a --checkpoint file (the same graph; kernel variables are not restored)")
 @click.option("--bind", "bind_file", type=click.Path(dir_okay=False), default=None,
-              help="bindings file: the model, files and limits for this environment (llm, models, params, resources, limits)")
+              help="bindings file: the model, files and limits for this environment (llm, llms, params, resources, limits)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
 @click.option("--log-level", type=click.Choice(["debug", "info", "warning", "error"]), default=None,
               help="file log level (default info, or $DD_LOG_LEVEL); debug adds every node firing and LLM text previews")

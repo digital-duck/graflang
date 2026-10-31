@@ -22,21 +22,21 @@ nodes:
     type: "GENERATE"
     config:
       prompt_ref: "prompts.draft"
-      model: "ollama/gemma3"
+      llm: "ollama:gemma3"
     ports: ["trigger", "complete", "in_topic", "out_essay"]
 
   - id: "critique"
     type: "GENERATE"
     config:
       prompt_ref: "prompts.critique"
-      model: "claude_cli/claude-sonnet-5-5"
+      llm: "claude_cli:claude-haiku-5-5"
     ports: ["trigger", "complete", "in_essay", "out_feedback"]
 
   - id: "refine"
     type: "GENERATE"
     config:
       prompt_ref: "prompts.refine"
-      model: "ollama/gemma3"
+      llm: "ollama:gemma3"
     ports: ["trigger", "complete", "in_essay", "in_feedback", "out_essay"]
 
   - id: "wf_exit"

@@ -27,7 +27,7 @@ graf run cookbook/self_refine/self_refine.graph.yaml --llm claude_cli:claude-hai
 graf run cookbook/self_refine/self_refine.graph.yaml --llm ollama:gemma3 --param topic="why ducks float"
 ```
 
-Under `claude_cli` the model is `claude-sonnet-5-5` unless you give another with `--llm claude_cli:<model>`. Under `ollama` there is no default: pass `--llm ollama:<model>`, or the nodes' hint `model: ollama/gemma3` applies and the folder name has no model part.
+Under `claude_cli` the model is `claude-sonnet-5-5` unless you give another with `--llm claude_cli:<model>`. Under `ollama` there is no default: pass `--llm ollama:<model>`, or leave it to the nodes' own `llm:` (the graph's `draft` and `refine` name `ollama:gemma3`, `critique` names `claude_cli:claude-haiku-5-5`, and a node's `llm:` beats `--llm`).
 
 ## What you get
 

@@ -39,7 +39,7 @@ nodes:
 
   - id: "analyze"
     type: "GENERATE"
-    config: {procedure_ref: "procedures.analyze_spec", model: "ollama/gemma3"}
+    config: {procedure_ref: "procedures.analyze_spec", llm: "ollama:gemma3"}
     ports: ["trigger", "complete", "in_spec", "out_analysis"]
 
   - id: "spec_gate"

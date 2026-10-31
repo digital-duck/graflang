@@ -11,19 +11,17 @@
 (SPL.py is needed only for `procedure_ref` nodes; see procedures.py.)
 
 DODA: the graph says *what* to generate; the provider and model are chosen when you run it
-(`graf run --llm claude_cli:claude-haiku-5-5`). The model for a call is chosen in this order:
-the node's own `model:` if it fits the adapter (fine-grained control);
-else the choice on the command line (`--model`, the model in `--llm adapter:model`, or `llm:` in a bindings file), the run-wide setting;
-else the adapter's default (claude_cli: claude-sonnet-5-5).
+(`graf run --llm claude_cli:claude-haiku-5-5`). A node may name its own with `llm: adapter[:model]` (the same spec as `--llm`),
+which wins for that node (fine-grained control, even another adapter); else the run's `--llm` (`--adapter`/`--model`, or `llm:` in a bindings
+file) applies; else the adapter's default (claude_cli: claude-sonnet-5-5).
 """
 from __future__ import annotations
 
 import threading
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
-# Per-adapter default, used by a node that names no model of its own (or one for another adapter) when none is given on the
-# command line. An adapter not listed (ollama, openrouter, ...) has none: the adapter's own default applies.
+# Per-adapter default, used when neither the node nor the command line names a model. An adapter not listed (ollama, openrouter, ...) has none: the adapter's own default applies.
 DEFAULT_MODELS = {"claude_cli": "claude-sonnet-5-5"}
 
 
@@ -35,25 +33,27 @@ class LLMUnavailable(RuntimeError):
     """The requested adapter cannot be created (dd-llm missing, unknown name, missing API key, ...)."""
 
 
-def resolve_model(adapter: str, node_model: Optional[str], override: Optional[str], default: Optional[str] = None) -> Optional[str]:
-    """Pick the model for one call: the node's own model if it fits the adapter, else the run-wide choice, else the default."""
-    return node_hint(adapter, node_model) or override or default
+def parse_node_llm(spec: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Split a node's `llm:` (`ADAPTER[:MODEL]`, as `--llm`; `:MODEL` names only a model) into (adapter, model); either may be None."""
+    if spec is None or spec == "":
+        return None, None
+    if not isinstance(spec, str):
+        raise ValueError(f"llm must be a string like 'claude_cli:claude-haiku-5-5', got {spec!r}")
+    adapter, _, model = spec.partition(":")
+    return adapter.strip() or None, model.strip() or None
 
 
-def node_hint(adapter: str, node_model: Optional[str]) -> Optional[str]:
-    """The node's `model:` as this adapter can use it, or None (a hint for another provider, or a model the adapter does not offer)."""
-    if not node_model or adapter == "mock":
-        return node_model or None
-    if "/" in node_model and adapter != "openrouter":
-        prefix, rest = node_model.split("/", 1)
-        if prefix != adapter:
-            return None                      # a hint for another provider, e.g. 'ollama/gemma3' under claude_cli
-        node_model = rest
-    try:
-        from dd_llm import model_compatible
-    except ImportError:
-        return node_model
-    return node_model if model_compatible(adapter, node_model) else None
+def resolve_call(run_adapter: str, spec: Optional[str], override: Optional[str], default: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """The (adapter, model) for one call. The node's own `llm:` wins, then the run's (`--llm`), then the adapter's default.
+    A node that names only an adapter other than the run's gets that adapter's default model, not the run's `--llm` model.
+    Under `mock` every node is answered by the mock, whatever it names."""
+    adapter, model = parse_node_llm(spec)
+    if run_adapter == "mock":
+        return run_adapter, model or override
+    adapter = adapter or run_adapter
+    if adapter == run_adapter:
+        return adapter, model or override or default
+    return adapter, model or default_model(adapter)
 
 
 class MockLLM:
@@ -76,31 +76,42 @@ class DDLLM:
         except ImportError as e:
             raise LLMUnavailable("adapter %r needs dd-llm: `pip install dd-llm` (or `pip install -e /path/to/dd-llm`); "
                                  "use --adapter mock without it" % name) from e
-        try:
-            self._adapter = dd_llm.get_adapter(name)
-        except ValueError as e:                      # unknown adapter, or a required key / setting is missing
-            raise LLMUnavailable(str(e)) from e
+        self._dd_llm = dd_llm
+        self._adapters: Dict[str, Any] = {name: self._get_adapter(name)}     # others are made when a node names them
+        self._adapters_lock = threading.Lock()
         self.name = name
         self.adapter_name = name
-        self.model_override = model                  # chosen on the command line: applies to nodes that name no usable model of their own
-        self.default_model = default                 # used when a node names no usable model
+        self.model_override = model                  # chosen on the command line: applies to nodes that name no model of their own
+        self.default_model = default                 # used when neither the node nor the command line names one
         self._local = threading.local()
+
+    def _get_adapter(self, name: str):
+        try:
+            return self._dd_llm.get_adapter(name)
+        except ValueError as e:                      # unknown adapter, or a required key / setting is missing
+            raise LLMUnavailable(str(e)) from e
 
     def last_usage(self) -> Optional[dict]:
         """Tokens and cost the adapter reported for this thread's latest call, if it did."""
         return getattr(self._local, "usage", None)
 
-    def generate(self, prompt: str, model: Optional[str] = None, **opts: Any) -> str:
+    def generate(self, prompt: str, model: Optional[str] = None, adapter: Optional[str] = None, **opts: Any) -> str:
+        """`adapter` is a node's own choice of another adapter than the run's."""
         kwargs = {k: v for k, v in opts.items() if k in ("max_tokens", "temperature", "system") and v is not None}
+        adapter = adapter or self.name
+        with self._adapters_lock:
+            if adapter not in self._adapters:
+                self._adapters[adapter] = self._get_adapter(adapter)
+            chosen = self._adapters[adapter]
         try:
-            result = self._adapter.call(prompt, model=model or "", **kwargs)
+            result = chosen.call(prompt, model=model or "", **kwargs)
         except ImportError as e:                     # the provider's SDK is an optional extra of dd-llm
-            raise LLMUnavailable("adapter %r needs an extra package: %s (see `pip install dd-llm[%s]`)" % (self.name, e, self.name)) from e
+            raise LLMUnavailable("adapter %r needs an extra package: %s (see `pip install dd-llm[%s]`)" % (adapter, e, adapter)) from e
         self._local.usage = {"input_tokens": getattr(result, "input_tokens", 0), "output_tokens": getattr(result, "output_tokens", 0),
                              "cost_usd": getattr(result, "cost_usd", None)}
         if not result.success:
             errors = result.error_history or []
-            raise RuntimeError(errors[-1]["error"] if errors else f"{self.name} call failed")
+            raise RuntimeError(errors[-1]["error"] if errors else f"{adapter} call failed")
         return result.content
 
 

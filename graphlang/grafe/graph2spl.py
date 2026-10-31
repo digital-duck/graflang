@@ -251,9 +251,10 @@ class GraphToSPL:
         s = f"GENERATE {cfg['function']}({args})"
         if cfg.get("output_budget") is not None:
             s += f" WITH OUTPUT BUDGET {cfg['output_budget']} TOKENS"
-        if cfg.get("model"):
-            m = cfg["model"]
-            s += f" USING MODEL {m if m.startswith('@') else repr(m)}"
+        if cfg.get("llm"):
+            m = cfg["llm"].partition(":")[2]                    # SPL names a model only; the adapter is chosen when it runs
+            if m:
+                s += f" USING MODEL {m if m.startswith('@') else repr(m)}"
         return s + f" INTO @{var}"
 
     def _prompt_text(self, cfg: dict) -> str:
