@@ -175,7 +175,8 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, re
     summary = runtime.summary()
     console.print(f"[dim]{_summary_line(summary)}[/dim]")        # values may hold [brackets], not markup
     if run_output and result:
-        run_output.save_result(result)
+        trees = {o["name"] for o in graph_data["workflow"].get("outputs", []) if str(o.get("type", "")).upper() == "FILES"}
+        run_output.save_result(result, trees)
         run_output.save_summary(summary)
         console.print(f"[dim]output: {run_output.dir}[/dim]")
     if log_path:

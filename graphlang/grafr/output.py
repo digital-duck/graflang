@@ -4,6 +4,7 @@
     run.json                 what produced it: graph, adapter, model, parameters, start time
     result.json              the workflow outputs (what `graf run` prints as Output)
     <name>.md                one file per text output, e.g. essay.md
+    <name>/...               an output declared `type: FILES` (a mapping of relative path to text) as a real folder of files
     nodes/003-draft.out_essay.md    with --save-nodes: every node's output ports, numbered by firing order
 
 LLM text lives here, not in the log (see logging_config.py): the log records that a node produced N chars and,
@@ -31,6 +32,25 @@ def _render(value: Any) -> tuple[str, str]:
     if isinstance(value, str):
         return ".md", value
     return ".json", json.dumps(value, indent=2, ensure_ascii=False, default=str)
+
+
+class FilesError(ValueError):
+    """An output declared FILES is not a mapping of safe relative paths to text."""
+
+
+def _tree(name: str, value: Any) -> Dict[str, str]:
+    """The files of a FILES output, checked: relative paths that stay inside the folder, text contents."""
+    if not isinstance(value, dict) or not value:
+        raise FilesError(f"output {name!r} is declared FILES: expected a non-empty mapping of path to text, got {type(value).__name__}")
+    files = {}
+    for rel, text in value.items():
+        path = Path(str(rel))
+        if not str(rel).strip() or path.is_absolute() or ".." in path.parts or "\\" in str(rel):
+            raise FilesError(f"output {name!r}: {rel!r} is not a relative path inside the folder")
+        if not isinstance(text, str):
+            raise FilesError(f"output {name!r}: the content of {rel!r} must be text, got {type(text).__name__}")
+        files[path.as_posix()] = text
+    return files
 
 
 class RunOutput:
@@ -68,11 +88,18 @@ class RunOutput:
         path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
         return path
 
-    def save_result(self, result: Dict[str, Any]) -> List[Path]:
-        """Write result.json and one file per output."""
+    def save_result(self, result: Dict[str, Any], trees: frozenset | set = frozenset()) -> List[Path]:
+        """Write result.json and one file per output; an output named in `trees` (declared FILES) becomes a folder of files."""
         self.dir.mkdir(parents=True, exist_ok=True)
         paths = []
         for name, value in result.items():
+            if name in trees:
+                for rel, text in _tree(name, value).items():
+                    path = self.dir / _slug(name) / rel
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(text, encoding="utf-8")
+                    paths.append(path)
+                continue
             suffix, text = _render(value)
             path = self.dir / f"{_slug(name)}{suffix}"
             path.write_text(text, encoding="utf-8")

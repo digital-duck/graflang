@@ -3,14 +3,14 @@
 The first half of `code_pipeline` (check the spec, write the code, review it, improve it) with **no `.spl` files and no SPL.py**. Where `code_pipeline` runs each step as an SPL sub-workflow (`procedure_ref`), here each step is a *part*: a named subgraph, a small workflow file used as one node and expanded in place when the graph loads.
 
 ```
-analyze -> gate --[READY]--> write -> review -> improve -> done
+analyze -> gate --[READY]--> write -> review -> improve -> collect -> done
               \--(not ready)--> abort (run stops)
 ```
 
 | | |
 |---|---|
 | Inputs | `spec` (TEXT, required), `lang` (TEXT, default `python`) |
-| Outputs | `code` (TEXT, the improved code), `review` (TEXT, the review feedback) |
+| Outputs | `code` (FILES, a project folder: `<run folder>/code/`), `review` (TEXT, `review.md`) |
 | LLM calls | 4 (1 if the spec is rejected) |
 | Files | `code_parts.graph.yaml` (compact form), `sub_graph/*.graph.yaml` (one part per step), `sub_graph/prompts/*.md` |
 
@@ -23,7 +23,25 @@ analyze -> gate --[READY]--> write -> review -> improve -> done
 | `{spec}` placeholders | `{{in_spec}}` ports |
 | `EVALUATE ... WHEN contains('[READY]')` | an `evaluate` step, with a `RECOVER` halt on the other branch |
 
-The prompt text is the same as the `.spl` files' (`tests/test_code_parts.py` checks it). Left out on purpose: the artifact files the procedures write, the per-step `WITH OUTPUT BUDGET` and the exception handlers, none of which the graph needs; the graph's workflow outputs and the run folder's `nodes/` hold the results.
+The prompt text is the `.spl` files' (`tests/test_code_parts.py` checks it); `write_code` and `improve_code` add one paragraph asking for the code as project files. Left out on purpose: the artifact files the procedures write, the per-step `WITH OUTPUT BUDGET` and the exception handlers, none of which the graph needs; the graph's workflow outputs and the run folder's `nodes/` hold the results.
+
+## The generated code is a project folder
+
+The model does not return one block of code. `write_code` and `improve_code` ask for files, each introduced by a line `=== FILE: path/to/file ===`: a `README.md` first, then the sources, split into modules that import each other when the spec has more than one concern. The `collect` step (`tools/collect_files.py`, a `SOLVE` with `backend: subprocess`) splits the reply, strips code fences, refuses paths that leave the folder, adds an `__init__.py` to every Python package folder so the imports work, and adds a `README.md` from the spec if the model wrote none. A reply with no markers becomes one file, `main.<ext>`.
+
+The workflow output `code` is declared `type: FILES` (a mapping of relative path to text), so `graf run` writes it as a real folder instead of `code.md`:
+
+```
+output/code_parts-<adapter>-<model>-<time>/
+  code/                  <- the generated project
+    README.md
+    slugger/__init__.py  slugger/core.py  slugger/cli.py
+    tests/test_slugger.py
+  review.md              <- the review feedback
+  result.json  run.json  summary.json  nodes/
+```
+
+Run its tests from the project folder: `cd output/<run>/code && python -m unittest discover -s . -p "test_*.py"`.
 
 ## Run
 

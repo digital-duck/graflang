@@ -88,8 +88,11 @@ Each run writes its results to a new folder, `<graph folder>/output/<graph>-<ada
 run.json                          what produced it: graph, adapter, model, parameters, start time
 result.json                       the workflow outputs (what the run prints as Output)
 essay.md                          one file per text output; other values are written as .json
+code/...                          an output declared `type: FILES` (a mapping of relative path to text) is written as a folder of real files
 nodes/001-draft.out_essay.md      every node's output (not with --no-save-nodes)
 ```
+
+An output declared `type: FILES` in `workflow.outputs` holds a mapping `{relative path: text}` (for example from a `SOLVE` that splits a model's reply into files). It is written as a folder named after the output, `code/slugger/core.py` and so on, instead of one `.md` file; a path that is absolute, contains `..` or is not text is an error. `cookbook/code_parts` uses it for a generated project.
 
 - Every node's output ports are saved (unless you pass `--no-save-nodes`) under `nodes/`, numbered in firing order (`001-`, `002-`, ...). Nodes that fire again in a `LOOP` get a new number each time. This is where intermediate LLM responses go. Prompts are not saved.
 - The model part is the one you asked for with `--llm` or `--model` (characters other than letters, digits, `.`, `_`, `-` become `-`, so `gemma3:12b` shows as `gemma3-12b`); log files use the same naming. Without one the name still carries the default (`claude-sonnet-5-5` under `claude_cli`), even if some nodes name a model of their own. Only adapters with no default (`ollama`, ...) give a folder without a model part and `"model": null` in `run.json`.

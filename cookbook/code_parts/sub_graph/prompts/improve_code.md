@@ -14,3 +14,9 @@ Test failures (if any):
 
 Rewrite the code addressing all feedback and fixing all test failures.
 Return only the improved {{in_lang}} code — no explanation, no markdown fences.
+
+Lay the code out as a small project folder, not one block of text. Start every file with a line `=== FILE: path/to/file ===` (a path
+relative to the project folder), then the file's content. Give a README.md first (what the project is and how to run it), then the
+source files. Split the code into modules when the specification has more than one concern, and let the modules import each other
+(for example `slugger/core.py` imported as `from slugger.core import slugify`); a small specification may be a single module.
+Do not use code fences and write nothing outside the files.

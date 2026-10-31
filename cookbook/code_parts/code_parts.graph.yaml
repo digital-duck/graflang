@@ -12,7 +12,7 @@ workflow:
     - {name: "spec", type: "TEXT"}
     - {name: "lang", type: "TEXT", default: "python"}
   outputs:
-    - {name: "code", type: "TEXT"}
+    - {name: "code", type: "FILES"}          # a project folder: written as <run folder>/code/...
     - {name: "review", type: "TEXT"}
 
 resources:
@@ -29,4 +29,7 @@ steps:
   - write:   {use: parts.write_code, on: gate.pass, in: {spec: $in.spec, lang: $in.lang}, out: [code]}
   - review:  {use: parts.review_code, in: {code: write.code, lang: $in.lang}, out: [feedback]}
   - improve: {use: parts.improve_code, in: {spec: $in.spec, code: write.code, feedback: review.feedback, lang: $in.lang}, out: [code]}
-  - done:    {output: {code: improve.code, review: review.feedback}}
+  - collect: {node: SOLVE, in: {text: improve.code, lang: $in.lang, spec: $in.spec}, ports: [trigger, complete, in_text, in_lang, in_spec, out_files],
+              out: files, backend: subprocess, command: ["python3", "-I", "tools/collect_files.py"], out_type: JSON, timeout: 30,
+              label: "Split the reply into the project's files"}
+  - done:    {output: {code: collect.files, review: review.feedback}}

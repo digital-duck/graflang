@@ -217,3 +217,14 @@ def test_validate_rejects_the_old_model_key(app):
     graph.write_text(yaml.safe_dump(doc))
     result = CliRunner().invoke(main, ["validate", str(graph)])
     assert result.exit_code != 0 and "config.llm" in result.output
+
+
+def test_a_files_output_is_written_as_a_folder_of_files(tmp_path):
+    from graphlang.grafr.output import FilesError, RunOutput
+    out = RunOutput(tmp_path, "g", "mock")
+    out.save_result({"code": {"pkg/a.py": "x = 1\n", "README.md": "# hi\n"}, "review": "ok"}, {"code"})
+    assert (out.dir / "code" / "pkg" / "a.py").read_text() == "x = 1\n" and (out.dir / "code" / "README.md").exists()
+    assert (out.dir / "review.md").read_text() == "ok" and not (out.dir / "code.md").exists() and "pkg/a.py" in (out.dir / "result.json").read_text()
+    for bad in ({"../x.py": "x"}, {"/abs.py": "x"}, {"a.py": 3}, {}, "text"):
+        with pytest.raises(FilesError):
+            RunOutput(tmp_path, "h", "mock").save_result({"code": bad}, {"code"})
