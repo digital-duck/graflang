@@ -36,7 +36,7 @@ nodes:
     type: "GENERATE"
     config:
       prompt_ref: "prompts.refine"
-      llm: "ollama:gemma3"
+      llm: "claude_cli:claude-sonnet-5-5"
     ports: ["trigger", "complete", "in_essay", "in_feedback", "out_essay"]
 
   - id: "wf_exit"
