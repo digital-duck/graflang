@@ -6,3 +6,5 @@ Book outline:
 {{in_outline}}
 
 Write the chapter corresponding to chapter {{in_chapter_index}} from the outline. Make it clear, engaging, and educational.
+
+Reply with the chapter text only, under its chapter heading: no preamble, no closing questions or offers.

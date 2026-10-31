@@ -11,6 +11,18 @@ _log = get_logger("grafr.nodes.generate")
 PREVIEW_CHARS = 200
 
 
+def prompt_text(value) -> str:
+    """A value as it reads inside a prompt: text as is, a list of texts (a LOOP's `collect`) one after another with a blank line
+    between, any other list or mapping as JSON; not Python's repr, which shows a chapter's line breaks as `\\n`."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
+        return "\n\n".join(value)
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    return str(value)
+
+
 class GenerateExecutor(NodeExecutor):
     """Executes GENERATE nodes: builds the prompt and asks the run's LLM (`mock`, `claude_cli`, ...)."""
 
@@ -28,7 +40,7 @@ class GenerateExecutor(NodeExecutor):
             raise ValueError(f"GENERATE node {node_data['id']!r} needs prompt_ref, prompt_inline or procedure_ref")
 
         for key, value in in_data.items():                 # {{in_topic}} <- the value on port in_topic
-            text = "" if value is None else str(value)     # a LOOP's carried value is None before the first iteration
+            text = prompt_text(value)                       # a LOOP's carried value is None before the first iteration
             prompt = prompt.replace(f"{{{{{key}}}}}", text)
 
         schema = config.get('phases', {}).get('post', {}).get('out_schema')

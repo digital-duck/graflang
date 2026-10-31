@@ -416,7 +416,7 @@ port is a named JSON value, the node's one `out_*` port (besides `out_error`) ge
 - `triggers` passes a control token. A node fires when a token reaches `trigger` and may fire again if another arrives, so a retry is a wire back to an earlier node. Execution is token-passing dataflow, not interaction-net rewriting.
 - `binds` copies an `out_*` value to an `in_*` port. If several `binds` edges feed one port, the most recently written source wins.
 - Edges to nodes or ports that do not exist are rejected.
-- In a prompt file, `{{in_topic}}` is replaced by the value on the node's `in_topic` port.
+- In a prompt file, `{{in_topic}}` is replaced by the value on the node's `in_topic` port. Text goes in as it is; a list of texts (a loop's `collect`) goes in one after another with a blank line between; any other list or mapping goes in as JSON.
 
 ## Conditions
 

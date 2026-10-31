@@ -57,7 +57,7 @@ def test_each_thing_waits_for_its_prerequisites_and_sees_what_they_wrote(workers
     assert out["explanations"] == {k: f"ANSWER({v})" for k, v in
                                    {"counting": "counting outcomes", "probability": "probability", "entropy": "Shannon entropy", "coding": "optimal coding"}.items()}
     by_concept = {p.split('"')[1]: p for p in llm.prompts}
-    assert "'probability': 'ANSWER(probability)'" in by_concept["Shannon entropy"] and "'counting': 'ANSWER(counting outcomes)'" in by_concept["Shannon entropy"]
+    assert '"probability": "ANSWER(probability)"' in by_concept["Shannon entropy"] and '"counting": "ANSWER(counting outcomes)"' in by_concept["Shannon entropy"]
     assert "ANSWER(Shannon entropy)" in by_concept["optimal coding"]
     assert llm.prompts.index(by_concept["Shannon entropy"]) > llm.prompts.index(by_concept["probability"])
     assert llm.prompts.index(by_concept["optimal coding"]) == 3                           # last: it comes after entropy
