@@ -1,0 +1,59 @@
+{
+  "steps": 21,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 5,
+    "input_tokens": 831,
+    "output_tokens": 619,
+    "cost_usd": 0.0,
+    "ms": 24793
+  },
+  "nodes": {
+    "each_ticker": {
+      "type": "BATCH",
+      "n": 1,
+      "ms": 17538
+    },
+    "interpret": {
+      "type": "GENERATE",
+      "n": 4,
+      "ms": 16645
+    },
+    "synthesize": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 8150
+    },
+    "fetch": {
+      "type": "SOLVE",
+      "n": 4,
+      "ms": 870
+    },
+    "split": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 423
+    },
+    "metrics": {
+      "type": "SOLVE",
+      "n": 4,
+      "ms": 16
+    },
+    "join_lines": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "line": {
+      "type": "CONTEXT",
+      "n": 4,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

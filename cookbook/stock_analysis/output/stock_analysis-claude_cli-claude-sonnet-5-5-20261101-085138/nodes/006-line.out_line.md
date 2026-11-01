@@ -1,0 +1,1 @@
+AAPL: AAPL is bullish: it gained 3.28% over the 21-session window (333.69 to 344.63) and closed near the upper end of its range (low 332.89, high 348.91), with the end price slightly above the 341.68 average. The key risk is that the close sits about 1.2% below the 348.91 high, so a failure to retest that level could signal fading momentum and a pullback toward the average.

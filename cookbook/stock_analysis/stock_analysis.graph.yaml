@@ -1,0 +1,268 @@
+# Mixed-regime stock analysis, lifted from SPL.py's cookbook/066_stock_analysis by spl2graph and then reworked by hand: the SPL
+# `WHILE @ticker IN @tickers` did not lift to a LOOP that runs here (a LOOP tests a condition; it has no list to walk), so the
+# per-ticker steps are a BATCH over the list of tickers. Python (kernel SOLVE) does the data work, the model only reasons.
+#   graf run cookbook/stock_analysis/stock_analysis.graph.yaml --param tickers="AAPL,MSFT" --param days=30 --bind cookbook/stock_analysis/stock_analysis.bind.yaml
+version: 1.0-graph
+workflow:
+  name: stock_analysis
+  inputs:
+    - name: tickers
+      type: TEXT
+      default: AAPL,META,GOOG,CRM
+    - name: days
+      type: INT
+      default: 30
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_tickers
+      - out_days
+  - id: split
+    type: SOLVE
+    config:
+      tool: split_tickers
+      backend: kernel
+      out_type: TEXT
+      result: _result
+      code: |
+        import json
+        _result = json.dumps([t.strip() for t in tickers.split(',') if t.strip()])
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - out_items
+  - id: each_ticker
+    type: BATCH
+    config:
+      over: in_items
+      item_var: ticker
+      outputs:
+        lines:
+          collect: line.out_line
+      subgraph:
+        nodes:
+          - id: fetch
+            type: SOLVE
+            config:
+              tool: fetch_ohlcv
+              backend: kernel
+              code: |
+                import urllib.request, json, datetime
+
+                def fetch_ohlcv(ticker: str, days: str) -> str:
+                    """Fetch recent OHLCV data from Yahoo Finance (no API key needed)."""
+                    try:
+                        n = int(days)
+                        end_ts   = int(datetime.datetime.utcnow().timestamp())
+                        start_ts = end_ts - n * 86400
+                        url = (
+                            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+                            f"?period1={start_ts}&period2={end_ts}&interval=1d"
+                        )
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read())
+                        result = data["chart"]["result"][0]
+                        times  = result["timestamp"]
+                        closes = result["indicators"]["quote"][0]["close"]
+                        rows   = []
+                        for t, c in zip(times, closes):
+                            if c is None:
+                                continue
+                            date = datetime.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d")
+                            rows.append(f"{date},{round(c, 2)}")
+                        return "date,close\n" + "\n".join(rows) if rows else "error: no data"
+                    except Exception as e:
+                        return f"error: {e}"
+                _spl_result = fetch_ohlcv(ticker, days)
+              result: _spl_result
+              out_type: TEXT
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_ticker
+              - in_days
+              - out_raw_data
+          - id: metrics
+            type: SOLVE
+            config:
+              tool: compute_metrics
+              backend: kernel
+              code: |
+                def compute_metrics(csv_data: str) -> str:
+                    """Compute simple price metrics from date,close CSV."""
+                    try:
+                        lines = [l for l in csv_data.strip().splitlines() if l and not l.startswith("date")]
+                        if not lines:
+                            return "error: empty data"
+                        closes = []
+                        for line in lines:
+                            parts = line.split(",")
+                            if len(parts) >= 2:
+                                try:
+                                    closes.append(float(parts[1]))
+                                except ValueError:
+                                    pass
+                        if len(closes) < 2:
+                            return "error: insufficient data"
+                        start_p = closes[0]
+                        end_p   = closes[-1]
+                        high_p  = max(closes)
+                        low_p   = min(closes)
+                        change  = round((end_p - start_p) / start_p * 100, 2)
+                        avg_p   = round(sum(closes) / len(closes), 2)
+                        return (
+                            f"start={start_p},end={end_p},high={high_p},"
+                            f"low={low_p},change_pct={change},avg={avg_p},n={len(closes)}"
+                        )
+                    except Exception as e:
+                        return f"error: {e}"
+                _spl_result = compute_metrics(raw_data)
+              result: _spl_result
+              out_type: TEXT
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_raw_data
+              - out_metrics
+          - id: interpret
+            type: GENERATE
+            config:
+              function: interpret_metrics
+              prompt_inline: |-
+                You are a financial analyst. Given the following price metrics for {{in_ticker}},
+                write a concise two-sentence summary covering:
+                  1. Overall trend direction (bullish / bearish / sideways).
+                  2. One key risk or opportunity based on the data.
+
+                Metrics: {{in_metrics}}
+            ports:
+              - trigger
+              - complete
+              - in_ticker
+              - in_metrics
+              - out_insight
+          - id: line
+            type: CONTEXT
+            config:
+              action: set
+              expression: "@in_ticker + ': ' + @in_insight"
+            ports:
+              - trigger
+              - complete
+              - in_ticker
+              - in_insight
+              - out_line
+        edges:
+          - source: fetch.complete
+            target: metrics.trigger
+            type: triggers
+          - source: fetch.out_raw_data
+            target: metrics.in_raw_data
+            type: binds
+          - source: metrics.complete
+            target: interpret.trigger
+            type: triggers
+          - source: metrics.out_metrics
+            target: interpret.in_metrics
+            type: binds
+          - source: interpret.complete
+            target: line.trigger
+            type: triggers
+          - source: interpret.out_insight
+            target: line.in_insight
+            type: binds
+    ports:
+      - trigger
+      - exit
+      - in_items
+      - in_days
+      - out_lines
+  - id: join_lines
+    type: SOLVE
+    config:
+      tool: join_lines
+      backend: kernel
+      out_type: TEXT
+      result: _result
+      code: |
+        _result = '\n\n'.join(lines)
+    ports:
+      - trigger
+      - complete
+      - in_lines
+      - out_summaries
+  - id: synthesize
+    type: GENERATE
+    config:
+      prompt_inline: |-
+        You are a portfolio manager. Given the following per-stock summaries for {{in_tickers}}
+        over the last {{in_days}} days, produce a brief (3-5 sentence) consolidated portfolio outlook that:
+          - opens with the tickers and time frame,
+          - highlights the best and worst performers,
+          - notes any correlated risk across the portfolio,
+          - ends with a single actionable recommendation.
+
+        Summaries:
+        {{in_summaries}}
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - in_summaries
+      - in_days
+      - out_synthesis
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: split.trigger
+    type: triggers
+  - source: wf_entry.out_tickers
+    target: split.in_tickers
+    type: binds
+  - source: split.complete
+    target: each_ticker.trigger
+    type: triggers
+  - source: split.out_items
+    target: each_ticker.in_items
+    type: binds
+  - source: wf_entry.out_days
+    target: each_ticker.in_days
+    type: binds
+  - source: each_ticker.exit
+    target: join_lines.trigger
+    type: triggers
+  - source: each_ticker.out_lines
+    target: join_lines.in_lines
+    type: binds
+  - source: join_lines.complete
+    target: synthesize.trigger
+    type: triggers
+  - source: join_lines.out_summaries
+    target: synthesize.in_summaries
+    type: binds
+  - source: wf_entry.out_tickers
+    target: synthesize.in_tickers
+    type: binds
+  - source: wf_entry.out_days
+    target: synthesize.in_days
+    type: binds
+  - source: synthesize.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: synthesize.out_synthesis
+    target: wf_exit.in_report
+    type: binds

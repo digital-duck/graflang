@@ -96,7 +96,7 @@ resources:
     test_code: "./04_test_code.spl"
     # ... (8 procedures in the full file, 00-07)
   policies:
-    mutation_safety: "../../graphlang/policies/mutation_safety.cedar"
+    mutation_safety: "./policies/mutation_safety.cedar"
 
 nodes:
   - id: "analyze"

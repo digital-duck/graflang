@@ -1,0 +1,80 @@
+version: "1.0-graph"
+
+# Fetch recent prices for a few tickers, compute metrics in Python, have a model comment on each ticker, then write one portfolio outlook.
+# Python does what Python can test (split, fetch, metrics, bookkeeping); the model only reasons.
+# The per-ticker work is a `loop` that handles one ticker per round. The loop carries `state`, a JSON text with the tickers still
+# to do and the lines written so far.
+
+workflow:
+  name: "stock_copy"
+  inputs:
+    - {name: "tickers", type: "TEXT", default: "AAPL,META,GOOG,CRM"}
+    - {name: "days", type: "INTEGER", default: 30}
+  outputs:
+    - {name: "report", type: "TEXT"}
+
+resources:
+  prompts:
+    interpret_metrics: "./prompts/interpret_metrics.md"
+    synthesize: "./prompts/synthesize.md"
+
+steps:
+  - split:
+      node: SOLVE
+      in: {tickers: $in.tickers}
+      ports: [trigger, complete, in_tickers, out_result]
+      out: result
+      backend: subprocess
+      command: ["python3", "-I", "tools/split.py"]
+      out_type: JSON
+      timeout: 30
+  - count: {solve: "int(json_get(@in_result, 'count'))", in: {result: split.result}, out: n}
+  - each_ticker:
+      loop: "@in_n"
+      while: "TRUE"
+      in: {n: count.n, days: $in.days, state: split.result}
+      out:
+        state: {from: line.result}
+      steps:
+        - fetch:
+            node: SOLVE
+            in: {state: $loop.state, days: $loop.days}
+            ports: [trigger, complete, in_state, in_days, out_result]
+            out: result
+            backend: subprocess
+            command: ["python3", "-I", "tools/fetch.py"]
+            out_type: JSON
+            timeout: 60
+        - metrics:
+            node: SOLVE
+            in: {data: fetch.result}
+            ports: [trigger, complete, in_data, out_result]
+            out: result
+            backend: subprocess
+            command: ["python3", "-I", "tools/metrics.py"]
+            out_type: JSON
+            timeout: 30
+        - pick_ticker: {solve: "json_get(@in_result, 'ticker')", in: {result: metrics.result}, out: ticker}
+        - pick_metrics: {solve: "json_get(@in_result, 'text')", in: {result: metrics.result}, out: text}
+        - interpret: {generate: prompts.interpret_metrics, in: {ticker: pick_ticker.ticker, metrics: pick_metrics.text}, out: insight}
+        - line:
+            node: SOLVE
+            in: {state: $loop.state, ticker: pick_ticker.ticker, insight: interpret.insight}
+            ports: [trigger, complete, in_state, in_ticker, in_insight, out_result]
+            out: result
+            backend: subprocess
+            command: ["python3", "-I", "tools/line.py"]
+            out_type: JSON
+            timeout: 30
+  - join_lines:
+      node: SOLVE
+      in: {state: each_ticker.state}
+      ports: [trigger, complete, in_state, out_result]
+      out: result
+      backend: subprocess
+      command: ["python3", "-I", "tools/join_lines.py"]
+      out_type: JSON
+      timeout: 30
+  - summaries: {solve: "json_get(@in_result, 'text')", in: {result: join_lines.result}, out: text}
+  - synthesize: {generate: prompts.synthesize, in: {tickers: $in.tickers, days: $in.days, summaries: summaries.text}, out: report}
+  - done: {output: synthesize.report}

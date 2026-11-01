@@ -31,6 +31,69 @@ def _problems(graph_data) -> None:
         sys.exit(1)
 
 
+@click.command("describe", short_help="Describe what a workflow graph or a recipe folder does (a specification for `graf create`).")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("-o", "--output", default=None, type=click.Path(dir_okay=False),
+              help="where to write the text (default: RECIPE.spec.md in the recipe folder, or FILE.spec.md beside the graph file); `-o -` prints it instead")
+@click.option("--force", is_flag=True, help="replace the default .spec.md file when it already exists (a file named with -o is always replaced)")
+@click.option("--llm", "llm_spec", is_flag=False, flag_value="claude_cli", default=None, metavar="[ADAPTER[:MODEL]]",
+              help="have a model write the specification from the graph and the recipe's files (one real, billed call); without this option "
+                   "the description is built from the graph alone and no model is called. A bare --llm means claude_cli (put it after PATH)")
+def cmd_describe(path, output, force, llm_spec):
+    """What PATH does: a .graph.yaml file, or a recipe folder (its main graph plus its readme, prompts, procedures, tools and policies).
+
+    Without --llm the text is built from the graph alone: inputs, output, the steps in order (prompts, function names, tests), where each
+    step's data comes from, and the number of model and program steps. With --llm a model writes a specification from that structure and the
+    recipe's files, in words, to be given to `graf create --name NAME --spec @FILE` (the round trip: graph -> specification -> graph).
+
+    \b
+    graf describe cookbook/stock_analysis                       # the folder, no model: writes cookbook/stock_analysis/stock_analysis.spec.md
+    graf describe cookbook/stock_analysis --llm                 # written by claude_cli, to the same place
+    graf describe cookbook/stock_analysis --llm claude_cli:claude-sonnet-5-5 -o ~/spec.md
+    graf describe cookbook/stock_analysis -o -                  # print it
+    graf create --name stock_copy --spec @cookbook/stock_analysis/stock_analysis.spec.md --allow-code
+    """
+    from ..grafr.runtime import load_graph
+    from .describe import describe_graph, describe_recipe, write_spec
+    target = Path(path)
+    if output == "-":
+        dest = None
+    elif output:
+        dest = Path(output)
+    elif target.is_dir():
+        dest = target / f"{target.resolve().name}.spec.md"                    # a recipe folder: NAME.spec.md inside it
+    else:
+        dest = target.with_name(target.name.removesuffix(".graph.yaml").removesuffix(".yaml") + ".spec.md")    # a graph file: FILE.spec.md beside it
+    if dest is not None and dest.exists() and not output and not force:
+        err.print(f"[red]✗[/red] {escape(str(dest))} already exists; pass --force to replace it, or -o FILE (or -o - to print)")
+        sys.exit(1)
+    try:
+        if llm_spec is not None:
+            from ..grafr.adapters import default_model, make_llm
+            from ..grafr.metering import MeteredLLM
+            adapter, model = parse_llm_spec(llm_spec)
+            used = model or default_model(adapter)
+            llm = MeteredLLM(make_llm(adapter, model), max_calls=1)
+            err.print(f"[bold blue]⚡ Describing[/bold blue] {escape(str(target))} with {adapter}{':' + used if used else ''} (one call)", highlight=False)
+            text = write_spec(target, llm, used)
+        elif target.is_dir():
+            text = describe_recipe(target)
+        else:
+            text = describe_graph(load_graph(target), target)
+    except (ValueError, OSError, RuntimeError, ImportError) as e:
+        err.print(f"[red]✗ Cannot describe {escape(str(path))}:[/red] {escape(str(e))}")
+        sys.exit(1)
+    if dest is None:
+        click.echo(text, nl=False)
+        return
+    try:
+        dest.write_text(text, encoding="utf-8")
+    except OSError as e:
+        err.print(f"[red]✗ Cannot write {escape(str(dest))}:[/red] {escape(str(e))}")
+        sys.exit(1)
+    err.print(f"wrote {escape(str(dest))}", highlight=False)
+
+
 @click.command("compile", short_help="Compile a workflow to another language (spl, rust).")
 @click.argument("graph")
 @click.option("--lang", default="rust", type=click.Choice(["rust", "spl"]), show_default=True,

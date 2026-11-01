@@ -21,6 +21,7 @@ from graphlang import workspace as ws
 from graphlang.grafr.runtime import SCHEMA_PATH, load_graph
 from graphlang.grafv import attachments, chat_ops, ui
 from graphlang.grafv.editor import EditError, GraphEditor
+from graphlang.grafv.model import display_label
 
 NODE_TYPES = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))["properties"]["nodes"]["items"]["properties"]["type"]["enum"]
 _yaml = YAML(typ="safe")
@@ -70,14 +71,24 @@ def picture(editor: GraphEditor) -> None:
     ui.show_graph(editor.data())
 
 
+def node_labels(editor: GraphEditor) -> dict:
+    """id -> the name the picture shows for the node (its function, prompt or condition); `label (id)` when two nodes would read the same."""
+    labels = {str(n["id"]): display_label(n) for n in editor.data()["nodes"]}
+    counts = {}
+    for label in labels.values():
+        counts[label] = counts.get(label, 0) + 1
+    return {i: (f"{label} ({i})" if counts[label] > 1 else label) for i, label in labels.items()}
+
+
 def node_tab(editor: GraphEditor) -> None:
     ids = editor.node_ids()
     if not ids:
         st.info("no nodes yet")
         return
-    node_id = str(st.selectbox("Node", ids, key="node_pick"))
+    labels = node_labels(editor)
+    node_id = str(st.selectbox("Node", ids, key="node_pick", format_func=lambda i: labels.get(str(i), str(i))))
     node = editor.node(node_id)
-    st.caption(f"type **{node['type']}**")
+    st.caption(f"id **{node_id}** · type **{node['type']}**")
     ports = st.text_input("Ports (comma separated)", ", ".join(node["ports"]), key=f"ports_{node_id}")
     if ports != ", ".join(node["ports"]) and st.button("Set ports", key=f"setports_{node_id}"):
         if attempt(lambda: editor.set_ports(node_id, [p.strip() for p in ports.split(",") if p.strip()]), "ports changed"):

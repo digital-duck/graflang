@@ -1,0 +1,1 @@
+GOOG is clearly bearish, falling 20.71% over the 30 days from 350.87 to 278.22, with the close sitting at the period low and well below the 333.91 average. The key risk is continued downside momentum with no sign of a floor, though a sharp reversal from this oversold level could offer a rebound opportunity for investors with a higher risk tolerance.

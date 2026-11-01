@@ -1,0 +1,1 @@
+CRM shows a mildly bearish trend, slipping 3.07% over 30 days from 236.42 to 229.17 and finishing below its 236.03 average after failing to hold gains near the 250.29 high. The key risk is a break below the 224.56 low, which sits only about 2% under the current price, though a rebound toward the average would offer a modest recovery opportunity.

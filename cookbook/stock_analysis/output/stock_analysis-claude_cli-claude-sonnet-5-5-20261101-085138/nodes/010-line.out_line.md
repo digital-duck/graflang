@@ -1,0 +1,1 @@
+META: META's price trend is clearly bearish: it fell 15.53% over the 21 sessions, from 728.08 to 614.99, and closed near the period low of 612.49, well under the 692.87 average. The key risk is continued downside, since the stock sits right at its lows with no sign of a rebound, though a hold above ~612 would be an opportunity for a potential reversal or value entry point.

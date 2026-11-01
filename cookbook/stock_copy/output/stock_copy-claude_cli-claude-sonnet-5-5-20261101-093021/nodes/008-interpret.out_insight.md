@@ -1,0 +1,1 @@
+AAPL shows a modestly bullish trend, gaining 1.67% over 30 days to close at 344.63, above the 339.97 average, though it traded in a wide 329.40–348.91 range. The key risk is that the price sits just below the 348.91 high, so failure to break that resistance could trigger a pullback toward the average, while a clean breakout would signal further upside.

@@ -27,7 +27,7 @@ resources:
     spec_judge: "./07_spec_judge.spl"
   
   policies:
-    mutation_safety: "../../graphlang/policies/mutation_safety.cedar"
+    mutation_safety: "./policies/mutation_safety.cedar"
 
 # ============================================================
 # TIER 1 & 3: NODES (The Topology)

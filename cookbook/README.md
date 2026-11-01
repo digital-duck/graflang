@@ -28,8 +28,9 @@ A real run calls a real model and is billed (or uses your `claude_cli` subscript
 | [`pocketflow`](pocketflow) | acceptance samples lifted from SPL's PocketFlow set (`majority_vote`, `debate`, `text_transformer`) | `claude_cli` (or `--replay`) | 3 (`majority_vote`), 11 (`debate`), 0 (`text_transformer`) | ✅ |
 | [`elaborate_demo`](elaborate_demo) | one template (a part) applied to every node of a graph of things | `claude_cli` | 1 per concept (4) | ✅ |
 | [`container_demo`](container_demo) | a program run inside Docker (no network, read-only) | a running Docker daemon | 0 | ✅ |
+| [`stock_analysis`](stock_analysis) | `BATCH` over a list of tickers: Python (`SOLVE` kernel) fetches prices and computes metrics, the model comments on each and writes one outlook | `claude_cli`, `kernel` extra, network | 1 per ticker + 1 | not yet |
 
-The **Needs** and **LLM calls** columns summarise each recipe's own readme; check there before a run. All thirteen recipes are validated. A recipe marked "not yet" would mean not yet validated by the owner, not known to be broken: every recipe has automated tests, and `graf validate` passes for all of them.
+The **Needs** and **LLM calls** columns summarise each recipe's own readme; check there before a run. Thirteen of the fourteen recipes are validated; `stock_analysis` is not yet. A recipe marked "not yet" would mean not yet validated by the owner, not known to be broken: every recipe has automated tests, and `graf validate` passes for all of them.
 
 ## Reading order
 

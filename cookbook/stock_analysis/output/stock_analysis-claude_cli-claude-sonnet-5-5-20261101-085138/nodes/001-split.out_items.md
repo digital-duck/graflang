@@ -1,0 +1,1 @@
+["AAPL", "META", "GOOG", "CRM"]

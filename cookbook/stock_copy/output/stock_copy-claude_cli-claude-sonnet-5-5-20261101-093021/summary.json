@@ -1,0 +1,79 @@
+{
+  "steps": 31,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 5,
+    "input_tokens": 901,
+    "output_tokens": 573,
+    "cost_usd": 0.0,
+    "ms": 22872
+  },
+  "nodes": {
+    "each_ticker": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 19493
+    },
+    "interpret": {
+      "type": "GENERATE",
+      "n": 4,
+      "ms": 18250
+    },
+    "synthesize": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 4624
+    },
+    "fetch": {
+      "type": "SOLVE",
+      "n": 4,
+      "ms": 1035
+    },
+    "line": {
+      "type": "SOLVE",
+      "n": 4,
+      "ms": 100
+    },
+    "metrics": {
+      "type": "SOLVE",
+      "n": 4,
+      "ms": 89
+    },
+    "join_lines": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 22
+    },
+    "split": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 17
+    },
+    "count": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 1
+    },
+    "pick_ticker": {
+      "type": "SOLVE",
+      "n": 4,
+      "ms": 0
+    },
+    "pick_metrics": {
+      "type": "SOLVE",
+      "n": 4,
+      "ms": 0
+    },
+    "summaries": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "done": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

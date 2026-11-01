@@ -17,6 +17,7 @@ pytest tests/test_grafr_loop.py::test_name   # single test
 pytest --mode llm                           # only the few real-LLM tests (claude_cli, claude-sonnet-5-5); plain `pytest` is offline only; `-m` is refused (see tests/README.md); `--mode all` runs both
 graf run cookbook/self_refine/self_refine.graph.yaml --param key=value   # adapter defaults to `claude_cli` with claude-sonnet-5-5 (a real LLM, billed; give a `--bind` file with `limits.max_llm_calls` when trying a loop); --param is repeatable
 graf validate|info <graph.yaml>
+graf describe <graph.yaml|recipe-folder> [-o FILE|-] [--force] [--llm [ADAPTER:MODEL]]   # writes RECIPE.spec.md in the folder (FILE.spec.md beside a graph file; `-o -` prints; an existing default needs --force); the graph in words (inputs, output, steps in order with prompts and function names, data flow, cost; grafc/describe.py), from the file alone, no model; with --llm one billed call writes a specification from the structure plus the folder's readme/prompts/procedures/tools/policies; the text is what `graf create --spec @FILE` takes (round trip graph -> specification -> graph)
 graf run ... --log-level debug --log-format jsonl|text|both --log-dir DIR --no-log --output-dir DIR --no-save-nodes --no-output   # logs default to ~/.graflang/logs
 graf create --name N --spec TEXT|@FILE [--out-dir DIR] [--llm adapter:model] [--max-rounds 3] [--allow-code] [--from RECIPE|--no-examples] [--embedding SPEC]   # similar recipes from the work area go into the prompt (`find_examples`, shared with the app's Create page); vibe-coding: an LLM writes a graph app (grafc/create.py + create_guide.md + create_examples/), checked like validate plus a mock dry run; the shipped examples are validated by tests/test_create.py
 graf compile <graph.yaml> [--lang rust|spl] [-o OUT] [--dry-run]   # spl: SPL script (graf export-spl is folded in); rust: experimental stub; both run `validate`'s checks first
@@ -51,4 +52,5 @@ Real LLM calls: `--llm claude_cli:<model-id>` (same as `--adapter claude_cli --m
 
 - Vocabulary is deliberately settled by the owner: node types `FORK`/`JOIN` (short names, no implicit fan-out), port exclusion rather than Pauli-exclusion wording. Don't reintroduce Qwen's superposition/entanglement/conservation language.
 - Do not reuse unsupported claims from the Qwen draft paper (e.g. "40% fewer loops", "2x faster audits"); no experiments exist.
+- File names: a semantic infix plus an existing format extension (`NAME.graph.yaml`, `NAME.spec.md`), not a new extension. The infix says what the file means, the extension says how to open it. Use this for any new kind of file.
 - Treat Qwen-originated files as unreviewed drafts; verify behaviour with tests before building on them.

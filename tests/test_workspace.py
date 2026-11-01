@@ -234,3 +234,17 @@ def test_a_graph_in_a_sub_folder_belongs_to_its_recipe(home):
     (home / "elsewhere" / "top.graph.yaml").write_text("workflow: {}")
     nested.parent.mkdir(); nested.write_text("workflow: {}")
     assert w.recipe_folder(nested) == (home / "elsewhere").resolve()
+
+
+def test_every_shipped_recipe_validates_from_a_copy_elsewhere(tmp_path):
+    """An installed or cloned recipe lives outside the repository: nothing it names may be a path out of its own folder (the Edit page showed
+    `../../graphlang/policies/...` does not exist for code_pipeline)."""
+    from click.testing import CliRunner
+    from graphlang.cli import main
+    root = Path(__file__).parent.parent / "cookbook"
+    copied, _ = ws.install_cookbook(root, tmp_path / "elsewhere")
+    assert copied
+    for folder in sorted((tmp_path / "elsewhere").iterdir()):
+        for graph in ws.graphs_in(folder):
+            result = CliRunner().invoke(main, ["validate", str(graph)])
+            assert "does not exist" not in result.output, f"{graph}: {result.output}"

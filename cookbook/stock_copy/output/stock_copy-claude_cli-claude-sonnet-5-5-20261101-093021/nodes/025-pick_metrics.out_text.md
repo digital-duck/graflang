@@ -1,0 +1,1 @@
+start=236.42, end=229.17, high=250.29, low=224.56, change=-3.07%, average=236.03, days=30

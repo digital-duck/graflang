@@ -1,0 +1,1 @@
+start=234.69,end=229.17,high=250.29,low=224.56,change_pct=-2.35,avg=237.26,n=21

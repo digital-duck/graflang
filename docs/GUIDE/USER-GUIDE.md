@@ -13,6 +13,7 @@ graf run      FILE [options]
 graf expand   FILE      # a compact, parts or elaborate file in its long nodes/edges form
 graf compile  FILE --lang spl|rust [-o OUT] [--dry-run]   # SPL script, or a Rust project (stub)
 graf vis      FILE [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o OUT] [--no-open]
+graf describe GRAPH|RECIPE_FOLDER [-o FILE|-] [--llm [ADAPTER:MODEL]]              # what a graph or a recipe does, in words (a model only with --llm)
 graf create   --name NAME --spec TEXT|@FILE [--out-dir DIR] [--llm ADAPTER:MODEL] [--from RECIPE|--no-examples]   # an app from a plain-language spec
 ```
 
@@ -164,6 +165,29 @@ Checks edges point to real nodes and ports, `triggers`/`binds` join the right ki
 
 It also checks that **every risky node is behind a `GUARD`**. A node is risky if its type is `EMIT` or `QUERY` (they reach outside the workflow) or you mark it with `config: {risky: true}`; mark an `OUTPUT` that releases data, or a `procedure_ref` node that acts on the world. A `LOOP` whose body holds a risky node counts as risky itself. The check follows `triggers` edges from the `INPUT` node with every edge that leaves a `GUARD` removed. A risky node still reached has a path around the guard, which is an error; a risky node reachable from a guard's `deny` port is an error too. Limits: `binds` (data) edges are ignored, guards inside a `LOOP` body are not credited, and a node you forget to mark is not checked, so the check is only as complete as your marking.
 
+## `graf describe`: what a graph or a recipe does, in words
+
+```bash
+graf describe cookbook/stock_analysis/stock_analysis.graph.yaml     # a graph file: built from the file alone, no model
+graf describe cookbook/stock_analysis                               # a recipe folder: also lists the files that come with it
+graf describe cookbook/stock_analysis --llm                         # a model writes the specification (claude_cli)
+graf describe cookbook/stock_analysis --llm claude_cli:claude-sonnet-5-5 -o ~/spec.md
+graf describe cookbook/stock_analysis -o -                          # print it instead of writing it
+```
+
+**Where it goes.** By default the text is written to `RECIPE.spec.md` inside the recipe folder (`cookbook/stock_analysis/stock_analysis.spec.md`), or to `FILE.spec.md` beside the graph file when you give a file (`stock_analysis.graph.yaml` gives `stock_analysis.spec.md`; each graph of a folder gets its own). An existing default is not replaced (you may have edited it) unless you pass `--force`; a file you name with `-o` is always replaced, and `-o -` prints. A `*.spec.md` file is never sent to the model as material.
+
+**Without `--llm`** it reads the graph and writes a short markdown description: the purpose (the first paragraph of the recipe's `readme.md`, else the comment at the top of the file), the inputs with their defaults, the output, then the steps in the order they run. A model step shows the prompt it is given, a program step the Python function it runs and the first line of its docstring, a test its condition; a `LOOP` or `BATCH` shows its steps nested. Each step says where its data comes from, and the notes count the model and program steps. Nothing runs and no model is called, so the text is the same every time. Given a folder it describes the folder's main graph (the one named like the folder, else the top-most) and lists the other graphs and files.
+
+**With `--llm`** one model call (billed; `ADAPTER[:MODEL]`, a bare `--llm` is `claude_cli`; put it after the path) writes the specification from that structure and the recipe's files: the readme, prompts, `.spl` procedures, Python tools, policies and data files (each cut at 12,000 characters, 60,000 in all; run output and hidden files are left out). The model is told to produce what a builder needs to recreate the same behaviour: purpose, inputs and output with defaults, the steps in plain words with the prompts that matter quoted, what each program computes, the rules and limits, whether programs are needed, the cost, and the names to keep. The recipe's files are sent to the model you name, so use a local one (`ollama:...`) for material that must not leave the machine.
+
+The text is meant to be the specification for `graf create`, which closes a round trip you can check by eye or by running both graphs: a `.spl` file becomes a graph (`spl3 util spl2graph`), the graph or the folder becomes a specification (`graf describe --llm`), the specification becomes a graph again:
+
+```bash
+graf describe cookbook/stock_analysis --llm                         # writes cookbook/stock_analysis/stock_analysis.spec.md
+graf create --name stock_copy --spec @cookbook/stock_analysis/stock_analysis.spec.md --allow-code          # --allow-code when the specification says the app needs programs
+```
+
 ## `graf create`: an app from a plain-language spec
 
 Vibe-coding for GraphLang: you describe the app, an LLM writes it as a graph.
@@ -207,7 +231,7 @@ workflow:
 resources:                       # external files, paths relative to this YAML
   prompts:    {draft: "./prompts/draft.md"}
   procedures: {generate_code: "./01_generate_code.spl"}
-  policies:   {mutation_safety: "../../graphlang/policies/mutation_safety.cedar"}
+  policies:   {mutation_safety: "./policies/mutation_safety.cedar"}
 
 nodes: [ ... ]
 edges: [ ... ]

@@ -1,0 +1,7 @@
+# Bindings for stock_analysis: the budget of a run, kept apart from the graph.
+#   graf run cookbook/stock_analysis/stock_analysis.graph.yaml --bind cookbook/stock_analysis/stock_analysis.bind.yaml
+
+limits:
+  max_llm_calls: 6                      # one call per ticker plus the outlook: 5 with the four default tickers; stops the run before a 7th
+  max_steps: 100                        # about 21 steps for four tickers, a few more for each extra one
+  wall_time_s: 300

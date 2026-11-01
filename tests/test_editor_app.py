@@ -177,7 +177,7 @@ def test_a_prompt_written_as_a_block_shows_as_text_and_is_written_back_as_a_bloc
     app = AppTest.from_file(str(APP), default_timeout=30)
     app.run()
     assert not app.exception, app.exception                            # this used to be a RepresenterError
-    node = next(n for n in app.selectbox(key="node_pick").options if n.startswith("gen"))
+    node = next(n for n in app.session_state["editor"].node_ids() if n.startswith("gen"))
     pick(app, node)
     assert not app.exception, app.exception
     area = next(a for a in app.text_area if a.key and a.key.startswith(f"cfg_{node}_prompt"))
@@ -345,3 +345,23 @@ def test_a_graph_without_programs_runs_without_the_acknowledgement(at):
 
 def test_the_dry_run_is_not_called_mock_in_the_page(at):
     assert at.selectbox(key="run_adapter").options[0] == "dry run: placeholder answers, no model"
+
+
+def test_the_node_dropdown_shows_the_pictures_labels_and_keeps_the_ids_as_values(at):
+    from graphlang.grafv.model import display_label
+    nodes = at.session_state["editor"].data()["nodes"]
+    labels = [display_label(n) for n in nodes]
+    assert at.selectbox(key="node_pick").options == [l if labels.count(l) == 1 else f"{l} ({n['id']})" for l, n in zip(labels, nodes)]
+    pick(at, "draft")                                                   # selecting still works by id: the values are ids
+    assert any(c.value.startswith("id **draft**") for c in at.caption)
+
+
+def test_two_nodes_with_the_same_label_are_told_apart_by_their_id():
+    module = edit_page_module()
+
+    class Fake:
+        def data(self):
+            return {"nodes": [{"id": "a", "type": "GENERATE", "config": {"function": "analyze"}},
+                              {"id": "b", "type": "GENERATE", "config": {"function": "analyze"}},
+                              {"id": "c", "type": "INPUT", "config": {}}]}
+    assert module.node_labels(Fake()) == {"a": "analyze (a)", "b": "analyze (b)", "c": "c"}

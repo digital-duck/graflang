@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""`graf`: the one command line for GraphLang (run, validate, info, expand, compile, create, vis)."""
+"""`graf`: the one command line for GraphLang (run, validate, info, expand, compile, describe, create, vis)."""
 import copy
 
 import click
 
-from .grafc.cli import cmd_compile, cmd_create
+from .grafc.cli import cmd_compile, cmd_create, cmd_describe
 from .grafr.cli import cmd_expand, cmd_info, cmd_run, cmd_validate
 from .grafv.cli import cmd_vis
 
@@ -16,7 +16,7 @@ def main():
     pass
 
 
-for _cmd in (cmd_run, cmd_validate, cmd_info, cmd_compile, cmd_create, cmd_vis, cmd_expand):
+for _cmd in (cmd_run, cmd_validate, cmd_info, cmd_compile, cmd_create, cmd_describe, cmd_vis, cmd_expand):
     main.add_command(_cmd)
 
 _viz = copy.copy(cmd_vis)                       # `graf viz` is `graf vis` under the spelling people type; the vis summary names it
