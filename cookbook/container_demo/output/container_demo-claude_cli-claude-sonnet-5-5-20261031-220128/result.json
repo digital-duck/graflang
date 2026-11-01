@@ -1,0 +1,9 @@
+{
+  "report": {
+    "sum": 15,
+    "hostname": "20cef35f38e3",
+    "network": false,
+    "write_graph_folder": false,
+    "write_root": false
+  }
+}

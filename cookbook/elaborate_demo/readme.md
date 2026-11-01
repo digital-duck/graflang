@@ -1,6 +1,6 @@
 # elaborate_demo
 
-One template applied to a graph of things. `concepts.yaml` is a small knowledge graph (an edge `a -> b` means a is a prerequisite of b); the part `sub_graph/explain.graph.yaml` explains one concept. The `elaborate:` block in `elaborate_demo.graph.yaml` makes one use of the part per concept and turns the edges into order and data.
+One template applied to a graph of things. `concepts.data.yaml` is a small knowledge graph (an edge `a -> b` means a is a prerequisite of b); the part `sub_graph/explain.graph.yaml` explains one concept. The `elaborate:` block in `elaborate_demo.graph.yaml` makes one use of the part per concept and turns the edges into order and data.
 
 ```
 probability --\                 
@@ -13,7 +13,7 @@ counting ------/
 | Input | `audience` (TEXT, default `curious beginners`), passed to every concept |
 | Output | `explanations` (JSON): one explanation per concept id |
 | LLM calls | 1 per concept (4) |
-| Files | `elaborate_demo.graph.yaml`, `concepts.yaml`, `sub_graph/explain.graph.yaml`, `sub_graph/prompts/explain.md` |
+| Files | `elaborate_demo.graph.yaml`, `concepts.data.yaml`, `sub_graph/explain.graph.yaml`, `sub_graph/prompts/explain.md` |
 
 ## What elaboration does
 
@@ -35,6 +35,6 @@ With `--workers 2` the two roots run at the same time; the result is the same as
 
 ## Things to check
 
-- Adding a concept or an edge to `concepts.yaml` needs no change to the workflow. An edge that closes a cycle is refused, naming the cycle.
+- Adding a concept or an edge to `concepts.data.yaml` needs no change to the workflow. An edge that closes a cycle is refused, naming the cycle.
 - A concept without a `title` attribute is refused (the part's `concept` input has no default).
 - Reading order is only what the edges say. If chapters must be written in a fixed order for consistent style, that order has to be an edge.

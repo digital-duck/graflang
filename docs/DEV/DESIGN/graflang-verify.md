@@ -278,7 +278,7 @@ The first use is told `formal tone`, the second the part's default `plain tone` 
 graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --workers 2 --no-output --no-log     # 4 calls
 ```
 
-Expected: four explanations keyed `counting`, `probability`, `entropy`, `coding`; `entropy`'s should build on the two before it and `coding`'s on `entropy`'s (`pytest tests/test_elaborate.py` pins the exact prompt each concept receives). The same output with `--workers 1` and `--workers 4` is checked in section 8, by replay. Add an edge `coding -> probability` to `concepts.yaml` (a copy) and validation reports a cycle.
+Expected: four explanations keyed `counting`, `probability`, `entropy`, `coding`; `entropy`'s should build on the two before it and `coding`'s on `entropy`'s (`pytest tests/test_elaborate.py` pins the exact prompt each concept receives). The same output with `--workers 1` and `--workers 4` is checked in section 8, by replay. Add an edge `coding -> probability` to `concepts.data.yaml` (a copy) and validation reports a cycle.
 
 Pinned by: `test_compact`, `test_parts`, `test_elaborate`. **[real LLM]** one test each (`--mode llm`).
 

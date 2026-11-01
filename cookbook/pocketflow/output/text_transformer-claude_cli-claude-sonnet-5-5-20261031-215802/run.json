@@ -1,0 +1,7 @@
+{
+  "graph": "text_transformer",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {},
+  "started": "2026-10-31T21:58:02"
+}

@@ -31,17 +31,13 @@ nodes:
     function: argue_for
     params:
     - claim
-    prompt_inline: 'You are Advocate A, a skilled debater. Argue strongly IN FAVOR
-      of the following claim.
-
+    prompt_inline: |-
+      You are Advocate A, a skilled debater. Argue strongly IN FAVOR of the following claim.
 
       Claim: {{in_claim}}
 
-
-      Present 3-5 compelling arguments supporting this claim. Be persuasive, logical,
-      and cite evidence where possible.
-
-      Label your response: ARGUMENT FOR THE CLAIM'
+      Present 3-5 compelling arguments supporting this claim. Be persuasive, logical, and cite evidence where possible.
+      Label your response: ARGUMENT FOR THE CLAIM
     arguments:
     - '@claim'
   ports:
@@ -55,17 +51,13 @@ nodes:
     function: argue_against
     params:
     - claim
-    prompt_inline: 'You are Advocate B, a skilled debater. Argue strongly AGAINST
-      the following claim.
-
+    prompt_inline: |-
+      You are Advocate B, a skilled debater. Argue strongly AGAINST the following claim.
 
       Claim: {{in_claim}}
 
-
-      Present 3-5 compelling counter-arguments against this claim. Be persuasive,
-      logical, and cite evidence where possible.
-
-      Label your response: ARGUMENT AGAINST THE CLAIM'
+      Present 3-5 compelling counter-arguments against this claim. Be persuasive, logical, and cite evidence where possible.
+      Label your response: ARGUMENT AGAINST THE CLAIM
     arguments:
     - '@claim'
   ports:
@@ -144,28 +136,20 @@ nodes:
           - argument_for
           - argument_against
           - clarification_context
-          prompt_inline: 'You are an impartial Judge evaluating a debate. Carefully
-            review both arguments.
-
+          prompt_inline: |-
+            You are an impartial Judge evaluating a debate. Carefully review both arguments.
 
             Claim under debate: {{in_claim}}
 
-
             ARGUMENT FOR:
-
             {{in_argument_for}}
 
-
             ARGUMENT AGAINST:
-
             {{in_argument_against}}
-
 
             Context from prior rounds (empty on first pass): {{in_clarification_context}}
 
-
-            Analyze each side''''s logical strength, use of evidence, and persuasiveness.
-            Be thorough and impartial.'
+            Analyze each side''s logical strength, use of evidence, and persuasiveness. Be thorough and impartial.
           arguments:
           - '@claim'
           - '@argument_for'
@@ -188,33 +172,23 @@ nodes:
           - review
           - argument_for
           - argument_against
-          prompt_inline: 'You are a Judge scoring the arguments in a debate.
-
+          prompt_inline: |-
+            You are a Judge scoring the arguments in a debate.
 
             Claim: {{in_claim}}
 
-
             Your review: {{in_review}}
-
 
             FOR argument: {{in_argument_for}}
 
-
             AGAINST argument: {{in_argument_against}}
 
-
-            Score each argument on a scale of 1-10 for logical strength, evidence
-            quality, and persuasiveness (max 30 each).
-
+            Score each argument on a scale of 1-10 for logical strength, evidence quality, and persuasiveness (max 30 each).
             Output exactly in this format:
-
             SCORE_FOR: [score]/30
-
             SCORE_AGAINST: [score]/30
-
             WINNER_DETERMINABLE: [YES or NO]
-
-            REASON: [one-sentence explanation]'
+            REASON: [one-sentence explanation]
           arguments:
           - '@claim'
           - '@review'
@@ -234,19 +208,14 @@ nodes:
           function: check_winner
           params:
           - score
-          prompt_inline: 'Read this debate scoring result and decide if a winner has
-            been clearly determined.
-
+          prompt_inline: |-
+            Read this debate scoring result and decide if a winner has been clearly determined.
 
             {{in_score}}
 
-
-            If WINNER_DETERMINABLE is YES or one side''''s score clearly surpasses
-            the other, respond: yes
-
+            If WINNER_DETERMINABLE is YES or one side''s score clearly surpasses the other, respond: yes
             If the result is inconclusive or too close to call, respond: no
-
-            Reply with only "yes" or "no" — no other text.'
+            Reply with only "yes" or "no" — no other text.
           arguments:
           - '@score'
         ports:
@@ -273,27 +242,20 @@ nodes:
           - argument_for
           - argument_against
           - score
-          prompt_inline: 'You are the Judge. Declare the final verdict for this debate.
-
+          prompt_inline: |-
+            You are the Judge. Declare the final verdict for this debate.
 
             Claim debated: {{in_claim}}
 
-
             ARGUMENT FOR:
-
             {{in_argument_for}}
 
-
             ARGUMENT AGAINST:
-
             {{in_argument_against}}
-
 
             Final scores: {{in_score}}
 
-
-            Announce the winner (FOR or AGAINST), highlight the decisive arguments
-            that swung the verdict, and deliver a clear final verdict statement.'
+            Announce the winner (FOR or AGAINST), highlight the decisive arguments that swung the verdict, and deliver a clear final verdict statement.
           arguments:
           - '@claim'
           - '@argument_for'
@@ -327,32 +289,22 @@ nodes:
           - argument_against
           - review
           - score
-          prompt_inline: 'You are a Judge who cannot yet determine a clear winner
-            in this debate. Identify what is still unclear.
-
+          prompt_inline: |-
+            You are a Judge who cannot yet determine a clear winner in this debate. Identify what is still unclear.
 
             Claim: {{in_claim}}
 
-
             FOR argument: {{in_argument_for}}
-
 
             AGAINST argument: {{in_argument_against}}
 
-
             Your review: {{in_review}}
-
 
             Scoring attempt: {{in_score}}
 
-
-            Pinpoint the specific contested points, unsubstantiated claims, or missing
-            evidence that prevent a verdict.
-
-            Describe exactly what clarification or further argumentation would allow
-            you to reach a decision.
-
-            This will be passed as context into the next review round.'
+            Pinpoint the specific contested points, unsubstantiated claims, or missing evidence that prevent a verdict.
+            Describe exactly what clarification or further argumentation would allow you to reach a decision.
+            This will be passed as context into the next review round.
           arguments:
           - '@claim'
           - '@argument_for'
@@ -443,9 +395,11 @@ nodes:
     backend: kernel
     arguments:
     - '@result'
-    code: "def isblank(value: str) -> str:\n    \"\"\"ISBLANK(value) — returns 'true'\
-      \ if value is empty or only whitespace.\"\"\"\n    return 'true' if str(value).strip()\
-      \ == '' else 'false'\n_spl_result = isblank(result)\n"
+    code: |
+      def isblank(value: str) -> str:
+          """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+          return 'true' if str(value).strip() == '' else 'false'
+      _spl_result = isblank(result)
     result: _spl_result
     out_type: TEXT
     tool_params:
@@ -476,27 +430,20 @@ nodes:
     - argument_for
     - argument_against
     - score
-    prompt_inline: 'You are the Judge. Declare the final verdict for this debate.
-
+    prompt_inline: |-
+      You are the Judge. Declare the final verdict for this debate.
 
       Claim debated: {{in_claim}}
 
-
       ARGUMENT FOR:
-
       {{in_argument_for}}
 
-
       ARGUMENT AGAINST:
-
       {{in_argument_against}}
-
 
       Final scores: {{in_score}}
 
-
-      Announce the winner (FOR or AGAINST), highlight the decisive arguments that
-      swung the verdict, and deliver a clear final verdict statement.'
+      Announce the winner (FOR or AGAINST), highlight the decisive arguments that swung the verdict, and deliver a clear final verdict statement.
     arguments:
     - '@claim'
     - '@argument_for'

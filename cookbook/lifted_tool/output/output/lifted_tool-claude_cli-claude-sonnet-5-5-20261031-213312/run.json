@@ -1,0 +1,9 @@
+{
+  "graph": "lifted_tool",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "word": "graph-lang"
+  },
+  "started": "2026-10-31T21:33:12"
+}

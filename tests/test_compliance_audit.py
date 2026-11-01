@@ -309,3 +309,15 @@ def test_baseline_and_the_main_recipe_use_the_same_redact_prompt_and_guard():
         return next(n for n in load_graph(path)["nodes"] if n["id"] == node_id)["config"]
     assert node(GRAPH, "redact") == node(BASELINE, "redact")
     assert node(GRAPH, "release_guard") == node(BASELINE, "release_guard")
+
+
+def test_repeat_runs_prints_a_plan_and_calls_nothing_without_yes():
+    done = subprocess.run([sys.executable, str(EXAMPLE / "repeat_runs.py"), "--runs", "2", "--llm", "claude_cli"], capture_output=True, text=True)
+    assert done.returncode == 0 and "at most 12 LLM calls" in done.stdout and "nothing was run" in done.stdout
+
+
+def test_the_hard_document_has_what_its_answer_key_describes():
+    text = (EXAMPLE / "input" / "hard_case_file.txt").read_text(encoding="utf-8")
+    for item in ("987 65 4320", "***-**-4320", "3782 822463 10005", "[at]", "(020) 7946 0123", "Dr. Okafor", "compliant: true"):
+        assert item in text
+    assert (EXAMPLE / "input" / "hard_case_notes.md").is_file()

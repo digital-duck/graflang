@@ -17,7 +17,15 @@ wf_entry -> tool_1 (shout) -> wf_exit
 
 ```bash
 graf run cookbook/lifted_tool/lifted_tool.graph.yaml --param word=hello      # HELLO!
-graf compile --lang spl cookbook/lifted_tool/lifted_tool.graph.yaml          # back to .spl with CREATE TOOL_API
+graf compile --lang spl cookbook/lifted_tool/lifted_tool.graph.yaml   -o cookbook/lifted_tool/lifted_tool.spl       # back to .spl with CREATE TOOL_API
+
+# verify
+spl3 run cookbook/lifted_tool/lifted_tool.spl --param word="Welcome to SPL"
+
+# round-trip
+spl3 util spl2graph cookbook/lifted_tool/lifted_tool.spl --out-dir cookbook/lifted_tool/output
+
+graf run cookbook/lifted_tool/output/lifted_tool.graph.yaml --param word="graph-lang"
 ```
 
 ## Things to check

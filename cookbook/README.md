@@ -24,12 +24,12 @@ A real run calls a real model and is billed (or uses your `claude_cli` subscript
 | [`code_parts`](code_parts) | vibe-coding with a safety net: spec gate, review, a project folder as output (`FILES`), and a verification loop that runs the generated code | `claude_cli`; Python for the verification | 3 + one per repair round | ✅ |
 | [`your_book`](your_book) | a book on any subject for a chosen audience (`intro` … `research`) and style: a `LOOP` that writes, reviews and revises one chapter per iteration | `claude_cli` or Ollama | 2 + 2 per chapter, plus a revision for each chapter sent back | ✅ |
 | [`compliance_audit`](compliance_audit) | an LLM lists data types; deterministic rules and a Cedar guard decide the release | `claude_cli` | 1 if compliant at once, 3 if it must redact | ✅ |
-| [`lifted_tool`](lifted_tool) | a Python tool lifted from SPL into a `SOLVE` node that carries its own source | none: no model is called | 0 | not yet |
-| [`pocketflow`](pocketflow) | acceptance samples lifted from SPL's PocketFlow set (`majority_vote`, `debate`, `text_transformer`) | `claude_cli` (or `--replay`) | 3 (`majority_vote`), 11 (`debate`), 0 (`text_transformer`) | not yet |
-| [`elaborate_demo`](elaborate_demo) | one template (a part) applied to every node of a graph of things | `claude_cli` | 1 per concept (4) | not yet |
-| [`container_demo`](container_demo) | a program run inside Docker (no network, read-only) | a running Docker daemon | 0 | not yet |
+| [`lifted_tool`](lifted_tool) | a Python tool lifted from SPL into a `SOLVE` node that carries its own source | none: no model is called | 0 | ✅ |
+| [`pocketflow`](pocketflow) | acceptance samples lifted from SPL's PocketFlow set (`majority_vote`, `debate`, `text_transformer`) | `claude_cli` (or `--replay`) | 3 (`majority_vote`), 11 (`debate`), 0 (`text_transformer`) | ✅ |
+| [`elaborate_demo`](elaborate_demo) | one template (a part) applied to every node of a graph of things | `claude_cli` | 1 per concept (4) | ✅ |
+| [`container_demo`](container_demo) | a program run inside Docker (no network, read-only) | a running Docker daemon | 0 | ✅ |
 
-The **Needs** and **LLM calls** columns summarise each recipe's own readme; check there before a run. "Not yet" means not yet validated by the owner, not known to be broken: each of these has automated tests, and `graf validate` passes for all of them.
+The **Needs** and **LLM calls** columns summarise each recipe's own readme; check there before a run. All thirteen recipes are validated. A recipe marked "not yet" would mean not yet validated by the owner, not known to be broken: every recipe has automated tests, and `graf validate` passes for all of them.
 
 ## Reading order
 

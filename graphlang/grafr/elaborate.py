@@ -6,7 +6,7 @@ one use of a part per thing, and the things' edges become ordering (and, if aske
     resources: {parts: {section: ./parts/section.graph.yaml}}
     elaborate:
       part: parts.section                       # the template: a part (see parts.py)
-      over: ./concepts.yaml                     # a file with {nodes: [{id, ...attributes}], edges: [{source, target}]}, or the same inline
+      over: ./concepts.data.yaml                     # a file with {nodes: [{id, ...attributes}], edges: [{source, target}]}, or the same inline
       with: {concept: title}                    # part input <- the thing's attribute (a literal default on that use)
       shared: [audience]                        # workflow inputs passed to every use (same name)
       pass: {from: text, to: context}           # an edge a -> b also binds a's output `text` to b's input `context`

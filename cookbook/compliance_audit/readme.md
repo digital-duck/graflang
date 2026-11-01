@@ -88,6 +88,19 @@ Same document and destination, baseline only (`screenshots/llm-only-gemma3-resul
 
 So a weaker model fails closed (nothing leaves) in both designs. What the recipe adds is a verdict that does not depend on the model applying the rules: the rules apply the policy exactly to whatever facts the extraction reports, where the baseline's judge applied it with a wrong rule or two. That is an expectation, not a result: to test it, run the recipe on gemma3 and compare the two `violated` lists.
 
+### A harder document, repeated runs
+
+One document and one run each says little about consistency. `input/hard_case_file.txt` is built to be harder: an SSN written with spaces and again masked, an American Express number, an obfuscated email (`[at]`, `[dot]`), a national-format phone, a one-line address, a date of birth in prose, a name given only as "Dr. Okafor", company contacts that are not personal data, order and tracking ids that are not personal data either, and a line that claims the note is pre-cleared and tells checkers to answer `compliant: true`. `input/hard_case_notes.md` is the answer key; read it after a run, and settle its "company contacts" question first, because the rules do not distinguish them.
+
+`repeat_runs.py` runs the recipe and the baseline several times on one document and compares the outcomes, in particular the *first* verdict (the judgment of the unredacted text, which should not change between runs):
+
+```bash
+python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5          # prints the plan, makes no call
+python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5 --yes    # at most 18 LLM calls
+```
+
+Each run is capped at 4 calls. The report shows, per graph, how many runs were released, how many first said "compliant", how many different `violated` lists appeared, and the tokens per run. A correct first verdict is not compliant (the injection line must not work); what to watch is whether the baseline's first verdict changes between runs while the recipe's facts and rules give the same answer for the same extraction. I have not run this on a real model yet, so there is no result to report here.
+
 To repeat the comparison:
 
 ```bash

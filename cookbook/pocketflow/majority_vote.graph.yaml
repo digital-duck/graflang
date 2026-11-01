@@ -28,12 +28,11 @@ nodes:
     function: attempt_reasoning
     params:
     - question
-    prompt_inline: 'Answer the following reasoning question carefully and concisely.
-
+    prompt_inline: |-
+      Answer the following reasoning question carefully and concisely.
       State only your final answer — no explanation or preamble.
 
-
-      Question: {{in_question}}'
+      Question: {{in_question}}
     arguments:
     - '@question'
   ports:
@@ -47,12 +46,11 @@ nodes:
     function: attempt_reasoning
     params:
     - question
-    prompt_inline: 'Answer the following reasoning question carefully and concisely.
-
+    prompt_inline: |-
+      Answer the following reasoning question carefully and concisely.
       State only your final answer — no explanation or preamble.
 
-
-      Question: {{in_question}}'
+      Question: {{in_question}}
     arguments:
     - '@question'
   ports:
@@ -66,12 +64,11 @@ nodes:
     function: attempt_reasoning
     params:
     - question
-    prompt_inline: 'Answer the following reasoning question carefully and concisely.
-
+    prompt_inline: |-
+      Answer the following reasoning question carefully and concisely.
       State only your final answer — no explanation or preamble.
 
-
-      Question: {{in_question}}'
+      Question: {{in_question}}
     arguments:
     - '@question'
   ports:
@@ -103,17 +100,28 @@ nodes:
     backend: kernel
     arguments:
     - '@collected'
-    code: "import json\nfrom collections import Counter\n\ndef tally_votes(answers:\
-      \ str) -> str:\n    try:\n        items = [a.strip() for a in answers.split(\"\
-      \\n\") if a.strip()]\n        if not items:\n            return json.dumps({\"\
-      winner\": \"\", \"first_candidate\": \"\", \"consensus\": \"no\"})\n       \
-      \ counts = Counter(items)\n        most_common = counts.most_common()\n    \
-      \    top_count = most_common[0][1]\n        top_candidates = [v for v, c in\
-      \ most_common if c == top_count]\n        consensus = \"yes\" if len(top_candidates)\
-      \ == 1 else \"no\"\n        return json.dumps({\n            \"winner\": most_common[0][0],\n\
-      \            \"first_candidate\": top_candidates[0],\n            \"consensus\"\
-      : consensus\n        })\n    except Exception as e:\n        return f\"error:\
-      \ {e}\"\n_spl_result = tally_votes(collected)\n"
+    code: |
+      import json
+      from collections import Counter
+
+      def tally_votes(answers: str) -> str:
+          try:
+              items = [a.strip() for a in answers.split("\n") if a.strip()]
+              if not items:
+                  return json.dumps({"winner": "", "first_candidate": "", "consensus": "no"})
+              counts = Counter(items)
+              most_common = counts.most_common()
+              top_count = most_common[0][1]
+              top_candidates = [v for v, c in most_common if c == top_count]
+              consensus = "yes" if len(top_candidates) == 1 else "no"
+              return json.dumps({
+                  "winner": most_common[0][0],
+                  "first_candidate": top_candidates[0],
+                  "consensus": consensus
+              })
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = tally_votes(collected)
     result: _spl_result
     out_type: TEXT
     tool_params:
@@ -132,17 +140,27 @@ nodes:
     arguments:
     - '@tally'
     - '''consensus'''
-    code: "import json\n\ndef json_get(json_str: str, key: str) -> str:\n    \"\"\"\
-      JSON_GET(json, key) — extract a top-level key from a JSON object string.\n \
-      \   Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown\n\
-      \    ```json code fences before parsing, so raw LLM output works directly.\n\
-      \    Returns '' if key not found or input is not valid JSON.\n    \"\"\"\n \
-      \   try:\n        clean = str(json_str).replace('```json', '').replace('```',\
-      \ '').strip()\n        obj = json.loads(clean)\n        for part in str(key).split('.'):\n\
-      \            if isinstance(obj, dict):\n                obj = obj.get(part,\
-      \ '')\n            else:\n                return ''\n        return str(obj)\
-      \ if obj != '' else ''\n    except (json.JSONDecodeError, TypeError):\n    \
-      \    return ''\n_spl_result = json_get(tally, 'consensus')\n"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'consensus')
     result: _spl_result
     out_type: TEXT
     tool_params:
@@ -173,17 +191,27 @@ nodes:
     arguments:
     - '@tally'
     - '''winner'''
-    code: "import json\n\ndef json_get(json_str: str, key: str) -> str:\n    \"\"\"\
-      JSON_GET(json, key) — extract a top-level key from a JSON object string.\n \
-      \   Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown\n\
-      \    ```json code fences before parsing, so raw LLM output works directly.\n\
-      \    Returns '' if key not found or input is not valid JSON.\n    \"\"\"\n \
-      \   try:\n        clean = str(json_str).replace('```json', '').replace('```',\
-      \ '').strip()\n        obj = json.loads(clean)\n        for part in str(key).split('.'):\n\
-      \            if isinstance(obj, dict):\n                obj = obj.get(part,\
-      \ '')\n            else:\n                return ''\n        return str(obj)\
-      \ if obj != '' else ''\n    except (json.JSONDecodeError, TypeError):\n    \
-      \    return ''\n_spl_result = json_get(tally, 'winner')\n"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'winner')
     result: _spl_result
     out_type: TEXT
     tool_params:
@@ -204,17 +232,27 @@ nodes:
     arguments:
     - '@tally'
     - '''first_candidate'''
-    code: "import json\n\ndef json_get(json_str: str, key: str) -> str:\n    \"\"\"\
-      JSON_GET(json, key) — extract a top-level key from a JSON object string.\n \
-      \   Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown\n\
-      \    ```json code fences before parsing, so raw LLM output works directly.\n\
-      \    Returns '' if key not found or input is not valid JSON.\n    \"\"\"\n \
-      \   try:\n        clean = str(json_str).replace('```json', '').replace('```',\
-      \ '').strip()\n        obj = json.loads(clean)\n        for part in str(key).split('.'):\n\
-      \            if isinstance(obj, dict):\n                obj = obj.get(part,\
-      \ '')\n            else:\n                return ''\n        return str(obj)\
-      \ if obj != '' else ''\n    except (json.JSONDecodeError, TypeError):\n    \
-      \    return ''\n_spl_result = json_get(tally, 'first_candidate')\n"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'first_candidate')
     result: _spl_result
     out_type: TEXT
     tool_params:

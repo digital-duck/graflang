@@ -23,9 +23,11 @@ nodes:
     backend: kernel
     arguments:
     - '@word'
-    - '''!'''
-    code: "def shout(text: str, suffix: str) -> str:\n    return text.strip().upper()\
-      \ + suffix\n_spl_result = shout(word, '!')\n"
+    - "'!'"
+    code: |
+      def shout(text: str, suffix: str) -> str:
+          return text.strip().upper() + suffix
+      _spl_result = shout(word, '!')
     result: _spl_result
     out_type: TEXT
     tool_params:

@@ -1,0 +1,54 @@
+{
+  "steps": 8,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 4,
+    "input_tokens": 747,
+    "output_tokens": 601,
+    "cost_usd": 0.0,
+    "ms": 13616
+  },
+  "nodes": {
+    "entropy__write": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3685
+    },
+    "probability__write": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3485
+    },
+    "counting__write": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3290
+    },
+    "coding__write": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3157
+    },
+    "elab_start": {
+      "type": "FORK",
+      "n": 1,
+      "ms": 1
+    },
+    "elab_in_entropy": {
+      "type": "JOIN",
+      "n": 1,
+      "ms": 0
+    },
+    "elab_done": {
+      "type": "JOIN",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

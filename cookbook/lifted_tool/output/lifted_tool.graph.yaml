@@ -1,0 +1,58 @@
+version: 1.0-graph
+workflow:
+  name: w
+  inputs:
+  - name: word
+    type: TEXT
+    default: hi
+  outputs:
+  - name: loud
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_word
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: shout
+    backend: kernel
+    arguments:
+    - '@word'
+    - '''!'''
+    code: |
+      def shout(text: str, suffix: str) -> str:
+          return text.strip().upper() + suffix
+      _spl_result = shout(word, '!')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - text
+    - suffix
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_word
+  - out_loud
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_loud
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_word
+  target: tool_1.in_word
+  type: binds
+- source: tool_1.out_loud
+  target: wf_exit.in_loud
+  type: binds
+- source: tool_1.complete
+  target: wf_exit.trigger
+  type: triggers

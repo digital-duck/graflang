@@ -271,7 +271,7 @@ When the same step must run for every item of a small graph, say every concept o
 resources: {parts: {explain: ./parts/explain.graph.yaml}}
 elaborate:
   part: parts.explain
-  over: ./concepts.yaml          # {nodes: [{id, ...attributes}], edges: [{source, target}]}, or the same written inline
+  over: ./concepts.data.yaml          # {nodes: [{id, ...attributes}], edges: [{source, target}]}, or the same written inline
   with: {concept: title}         # the part's input <- the node's attribute
   shared: [audience]             # workflow inputs passed to every use
   pass: {from: text, to: context}  # optional: a prerequisite's output becomes an input of what follows

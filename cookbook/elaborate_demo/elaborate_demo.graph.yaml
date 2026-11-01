@@ -19,7 +19,7 @@ resources:
 
 elaborate:
   part: parts.explain
-  over: ./concepts.yaml
+  over: ./concepts.data.yaml
   with: {concept: title}
   shared: [audience]
   pass: {from: text, to: context}
