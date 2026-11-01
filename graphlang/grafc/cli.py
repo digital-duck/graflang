@@ -163,10 +163,18 @@ def _compile_rust(graph_path: Path, output, optimize: bool, dry_run: bool) -> No
               help="LLM calls at most: the first writes the app, each next one fixes the problems found in the last")
 @click.option("--allow-code", is_flag=True, help="let the app contain programs (tools/*.py run by SOLVE or RUN nodes); off by default: nothing generated then runs code")
 @click.option("--force", is_flag=True, help="write into a folder that already has files (same-named files are overwritten)")
+@click.option("--examples/--no-examples", default=True, show_default=True,
+              help="show the model the existing recipes most like the spec (found by meaning, with an embedding model, and by words)")
+@click.option("--from", "from_recipe", default=None, metavar="RECIPE",
+              help="start from this recipe, shown first to the model: as the Browse page names it, for example cookbook/self_refine")
+@click.option("--src-dir", type=click.Path(file_okay=False), default=None,
+              help="the recipes to choose examples from (one folder per recipe); default ~/.graflang/cookbook and ~/.graflang/apps")
+@click.option("--embedding", default=None, metavar="SPEC",
+              help="the embedding model for the search: auto, none, sentence_transformers:MODEL or ollama:MODEL (default: the Settings of the app, else auto)")
 @click.option("--log-level", default=None, help="file log level (default info)")
 @click.option("--log-dir", type=click.Path(file_okay=False), default=None, help="where log files go (default ~/.graflang/logs)")
 @click.option("--no-log", is_flag=True, help="do not write a log file")
-def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, log_level, log_dir, no_log):
+def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, examples, from_recipe, src_dir, embedding, log_level, log_dir, no_log):
     """Generate a GraphLang app from a specification.
 
     The LLM writes the app's files (NAME.graph.yaml, prompts/*.md, readme.md); the result is checked like `graf validate` and with a
@@ -180,7 +188,7 @@ def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, log
     from ..grafr.adapters import default_model, make_llm
     from ..grafr.metering import MeteredLLM
     from ..logging_config import disable_logging, setup_logging
-    from .create import CreateError, check_name, create_app, write_app
+    from .create import CreateError, check_name, create_app, find_examples, write_app
     try:
         check_name(name)
         if spec.startswith("@"):
@@ -208,7 +216,20 @@ def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, log
         except Exception as e:                              # dd-llm missing, unknown adapter, no key
             raise CreateError(str(e))
         console.print(f"[bold blue]⚡ Creating[/bold blue] {name} with {adapter}{':' + model if model else ''} (up to {max_rounds} call(s))")
-        created = create_app(name, spec, llm, model, max_rounds=max_rounds, allow_code=allow_code)
+        shown = None
+        if examples or from_recipe:
+            from .. import workspace as work
+            shown = find_examples(spec, work.Workspace(Path(src_dir) if src_dir else None), allow_code=allow_code, chosen=from_recipe,
+                                  embedding=embedding or work.load_settings().get("embedding", "auto"))
+            if from_recipe and from_recipe not in shown.keys:
+                raise CreateError(f"--from {from_recipe!r}: no such recipe (or it runs programs and --allow-code is off); see the Browse page for the names")
+            if shown.keys:
+                console.print(f"[dim]examples: {', '.join(shown.keys)}  ({shown.note})[/dim]")
+            else:
+                console.print(f"[dim]no similar recipe to show ({shown.note})[/dim]")
+            if shown.words_only and shown.keys:
+                console.print("[yellow]note:[/yellow] examples were chosen by words only; an embedding model finds closer ones (--embedding, or the app's Settings)")
+        created = create_app(name, spec, llm, model, max_rounds=max_rounds, allow_code=allow_code, references=(shown.text or None) if shown else None)
         written = write_app(name, spec, created, dest, f"{adapter}:{model}" if model else adapter, force)
     except CreateError as e:
         console.print(f"[red]Error:[/red] {escape(str(e))}")

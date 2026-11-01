@@ -17,6 +17,7 @@ file) applies; else the adapter's default (claude_cli: claude-sonnet-5-5).
 """
 from __future__ import annotations
 
+import base64
 import threading
 from typing import Any, Dict, Optional, Tuple
 
@@ -67,6 +68,9 @@ class MockLLM:
         return f"[Mock LLM response from {model or 'mock'} for prompt: {prompt[:300]}...]"
 
 
+IMAGE_ADAPTERS = {"anthropic"}       # dd-llm adapters that pass Anthropic-style message content (with image blocks) through; claude_cli does not
+
+
 class DDLLM:
     """A dd-llm adapter behind the `generate` GraphLang nodes use."""
 
@@ -96,9 +100,18 @@ class DDLLM:
         return getattr(self._local, "usage", None)
 
     def generate(self, prompt: str, model: Optional[str] = None, adapter: Optional[str] = None, **opts: Any) -> str:
-        """`adapter` is a node's own choice of another adapter than the run's."""
+        """`adapter` is a node's own choice of another adapter than the run's. `images` is a list of (mime type, bytes) to show the model
+        with the prompt; only adapters that take the Anthropic message format accept them (IMAGE_ADAPTERS)."""
         kwargs = {k: v for k, v in opts.items() if k in ("max_tokens", "temperature", "system") and v is not None}
         adapter = adapter or self.name
+        images = opts.get("images") or []
+        if images:
+            if adapter not in IMAGE_ADAPTERS:
+                raise LLMUnavailable("adapter %r cannot read images; choose one that can (%s) on the Settings page, or remove the image"
+                                     % (adapter, ", ".join(sorted(IMAGE_ADAPTERS))))
+            kwargs["messages"] = [{"role": "user", "content": [
+                *({"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode("ascii")}}
+                  for mime, data in images), {"type": "text", "text": prompt}]}]
         with self._adapters_lock:
             if adapter not in self._adapters:
                 self._adapters[adapter] = self._get_adapter(adapter)

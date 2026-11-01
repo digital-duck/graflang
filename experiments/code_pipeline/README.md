@@ -100,7 +100,7 @@ conda activate graf
 
 cd ~/projects/digital-duck/graflang
 
-pip install -e ".[dev]" && pip install -r requirements.txt     # requirements.txt: langgraph
+pip install -e ".[dev]" && pip install -r experiments/code_pipeline/requirements.txt     # langgraph, for the langgraph arm
 pip install -e ~/projects/digital-duck/SPL.py
 
 cd experiments/code_pipeline

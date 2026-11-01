@@ -180,3 +180,39 @@ def test_clone_never_overwrites_an_existing_file(tmp_path):
     with pytest.raises(EditError, match="already exists"):
         GraphEditor(src).clone("other")
     assert other.read_text() == "precious"
+
+
+def test_set_source_replaces_the_graph_keeps_what_was_typed_and_can_be_undone(work):
+    ed = GraphEditor(work)
+    original = ed.source()
+    assert original == work.read_text()
+    typed = original.replace("# Control flow", "# Control flow (edited by hand)")
+    ed.set_source(typed)
+    assert ed.changed and "edited by hand" in ed.source()
+    assert ed.undo() and ed.source() == original and not ed.changed
+
+
+def test_set_source_with_the_same_text_is_not_a_change(work):
+    ed = GraphEditor(work)
+    ed.set_source(ed.source())
+    assert not ed.changed and not ed._undo
+
+
+@pytest.mark.parametrize("text,reason", [("a: [", "not valid YAML"), ("just text", "needs `workflow:`"), ("steps: []\nworkflow: {name: x}", "compact"),
+                                         ("workflow: {name: x}\nnodes: nope", "list of mappings"), ("workflow: {name: x}\nnodes:\n- {type: GENERATE}", "`id`")])
+def test_set_source_refuses_text_that_is_not_a_workflow_and_changes_nothing(work, text, reason):
+    ed = GraphEditor(work)
+    before = ed.source()
+    with pytest.raises(EditError, match=reason):
+        ed.set_source(text)
+    assert ed.source() == before and not ed.changed
+
+
+def test_set_source_accepts_a_graph_with_errors_so_it_can_be_fixed_and_save_refuses_it(work):
+    ed = GraphEditor(work)
+    import re
+    ed.set_source(re.sub(r"GENERATE", "NOPE", ed.source(), count=1))
+    errors, _ = ed.problems()
+    assert errors
+    with pytest.raises(EditError, match="not saved"):
+        ed.save()

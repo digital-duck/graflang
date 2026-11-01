@@ -30,10 +30,16 @@ dependencies = [
     "rich>=13.7",
     "dd-logging>=0.2.0",      # timestamped text/JSONL run logs (shared with SPL.py)
     "zinet>=0.2.1",           # graph drawing (graf vis), and the graph algorithms shared with graph-code and work-graph
+    "dd-embed>=0.1.0",        # embeddings for recipe search (Browse, and the examples Create shows): a local Ollama model or sentence-transformers
+    "numpy>=1.24",
+    "requests>=2.28",         # finds a local Ollama embedding model
+    "streamlit-ace>=0.1.1",   # the code editor of the Source tab in `graf vis --edit` (the app itself needs the `edit` extra: streamlit)
 ]
 
 [project.optional-dependencies]
-edit = ["streamlit>=1.30"]   # `graf vis --edit`, the workflow editor
+edit = ["streamlit>=1.43"]   # `graf vis --edit`, the app with the Create, Edit, Settings, Import/Export and Browse pages
+semantic = ["dd-embed[sentence-transformers]>=0.1.0"]   # recipe search by meaning with sentence-transformers (or use a local Ollama embedding model)
+solver = ["sympy>=1.12", "z3-solver>=4.12"]   # the sympy and z3 rule engines of cookbook/compliance_audit (`engine=sympy|z3`); stdlib needs neither
 kernel = ["jupyter_client>=8", "ipykernel>=6"]   # `backend: kernel` on SOLVE nodes
 spl = ["spl-llm>=3.4"]        # only for SPL procedure_ref nodes (runs SPL.py workflows); plain GENERATE needs just dd-llm
 anthropic = ["dd-llm[anthropic]>=0.2.0"]

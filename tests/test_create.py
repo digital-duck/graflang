@@ -180,3 +180,122 @@ def test_the_spec_can_come_from_a_file_and_a_bad_name_is_refused(monkeypatch, tm
     assert out.exit_code == 0 and "from a file: triage messages" in llm.prompts[0]
     bad = CliRunner().invoke(main, ["create", "--name", "Bad-Name", "--spec", "x", "--no-log"])
     assert bad.exit_code == 1 and "--name" in bad.output
+
+
+# ── revising an app that exists ──────────────────────────────────────────────────────────────────
+
+def current_files(name="notes"):
+    return C.parse_files(reply_for("linear", name))
+
+
+def test_revise_sends_the_current_files_and_the_change_and_costs_one_call_when_it_checks_out():
+    llm = Scripted(reply_for("linear", "notes"))
+    created = C.revise_app("notes", "make the summary shorter", current_files(), llm, None)
+    assert created.ok and created.rounds == 1
+    prompt = llm.prompts[0]
+    assert "Change the existing app `notes`" in prompt and "make the summary shorter" in prompt and "=== FILE: notes.graph.yaml ===" in prompt
+
+
+def test_revise_sends_its_problems_back_with_its_own_attempt():
+    broken = reply_for("linear", "notes").replace("version:", "versoin:", 1)
+    llm = Scripted(broken, reply_for("linear", "notes"))
+    created = C.revise_app("notes", "tweak", current_files(), llm, None)
+    assert created.ok and created.rounds == 2
+    assert "Your previous attempt at the change" in llm.prompts[1] and "It has these problems" in llm.prompts[1]
+
+
+def test_revise_gives_up_after_max_rounds_and_keeps_what_is_left():
+    broken = reply_for("linear", "notes").replace("version:", "versoin:", 1)
+    created = C.revise_app("notes", "tweak", current_files(), Scripted(broken, broken), None, max_rounds=2)
+    assert not created.ok and created.rounds == 2 and created.problems
+
+
+def test_revise_refuses_an_empty_change_and_an_empty_app():
+    with pytest.raises(C.CreateError, match="empty"):
+        C.revise_app("notes", "  ", current_files(), Scripted(), None)
+    with pytest.raises(C.CreateError, match="no app"):
+        C.revise_app("notes", "x", {}, Scripted(), None)
+
+
+def test_images_are_shown_with_every_attempt_of_a_create_and_a_revision():
+    seen = []
+
+    class Seer(Scripted):
+        def generate(self, prompt, model=None, **opts):
+            seen.append(opts.get("images"))
+            return super().generate(prompt, model=model, **opts)
+    broken = reply_for("linear", "notes").replace("version:", "versoin:", 1)
+    pictures = [("image/png", b"x")]
+    C.create_app("notes", "from the picture", Seer(broken, reply_for("linear", "notes")), None, images=pictures)
+    C.revise_app("notes", "like the picture", current_files(), Seer(reply_for("linear", "notes")), None, images=pictures)
+    assert seen == [pictures, pictures, pictures]
+    seen.clear()
+    C.create_app("notes", "no picture", Seer(reply_for("linear", "notes")), None)
+    assert seen == [None]
+
+
+# ── examples from the existing recipes: `graf create` and the app's Create page share `find_examples` ──
+
+@pytest.fixture()
+def cookbook_home(tmp_path, monkeypatch):
+    from graphlang import workspace as ws
+    monkeypatch.setenv("GRAFLANG_HOME", str(tmp_path / "home"))
+    ws.install_cookbook(Path(C.__file__).resolve().parents[2] / "cookbook", ws.default_src_dir())
+    ws.save_settings({"embedding": "none"})                         # plain pytest is offline: words only
+    return tmp_path / "home"
+
+
+def test_find_examples_picks_the_closest_recipes_and_says_how(cookbook_home):
+    shown = C.find_examples("write code, review it, then improve it until the tests pass", embedding="none")
+    assert shown.keys and len(shown.keys) <= 2 and shown.words_only and "Existing recipe `" in shown.text
+    assert any(k.endswith(("code_pipeline", "code_parts")) for k in shown.keys) is False or all("/" in k for k in shown.keys)
+
+
+def test_find_examples_puts_the_chosen_recipe_first_and_drops_programs_unless_allowed(cookbook_home):
+    shown = C.find_examples("summarize a meeting", chosen="cookbook/self_refine", embedding="none")
+    assert shown.keys[0] == "cookbook/self_refine"
+    risky = C.find_examples("anything", chosen="cookbook/code_parts", embedding="none")
+    assert "cookbook/code_parts" not in risky.keys                                # it runs programs and they were not allowed
+    assert "cookbook/code_parts" in C.find_examples("anything", chosen="cookbook/code_parts", allow_code=True, embedding="none").keys
+
+
+def test_find_examples_with_no_recipes_returns_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAFLANG_HOME", str(tmp_path / "empty"))
+    shown = C.find_examples("summarize a meeting", embedding="none")
+    assert shown.keys == [] and shown.text == ""
+
+
+def test_the_command_shows_the_model_similar_recipes_and_names_them(cookbook_home, monkeypatch, tmp_path):
+    llm = Scripted(reply_for("linear", "notes"))
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: llm)
+    result = CliRunner().invoke(main, ["create", "--name", "notes", "--spec", "draft an essay then critique it and refine it", "--out-dir",
+                                       str(tmp_path / "out"), "--no-log", "--embedding", "none"])
+    assert result.exit_code == 0, result.output
+    assert "examples:" in result.output and "self_refine" in result.output
+    assert "Existing recipes that may be similar" in llm.prompts[0] and "Existing recipe `self_refine`" in llm.prompts[0]
+
+
+def test_the_command_can_turn_examples_off_or_start_from_a_named_recipe(cookbook_home, monkeypatch, tmp_path):
+    llm = Scripted(reply_for("linear", "notes"), reply_for("linear", "other"))
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: llm)
+    base = ["create", "--no-log", "--embedding", "none", "--spec", "draft an essay then critique it"]
+    off = CliRunner().invoke(main, base + ["--name", "notes", "--out-dir", str(tmp_path / "a"), "--no-examples"])
+    assert off.exit_code == 0 and "Existing recipes that may be similar" not in llm.prompts[0]
+    chosen = CliRunner().invoke(main, base + ["--name", "other", "--out-dir", str(tmp_path / "b"), "--from", "cookbook/chain_of_thought", "--no-examples"])
+    assert chosen.exit_code == 0 and "Existing recipe `chain_of_thought`" in llm.prompts[1]
+    bad = CliRunner().invoke(main, base + ["--name", "x", "--out-dir", str(tmp_path / "c"), "--from", "cookbook/nope"])
+    assert bad.exit_code == 1 and "no such recipe" in " ".join(bad.output.split())
+
+
+def test_the_command_uses_the_embedding_in_the_app_settings_unless_told_otherwise(cookbook_home, monkeypatch, tmp_path):
+    from graphlang import embedding as E
+    from graphlang import workspace as ws
+    seen = []
+    monkeypatch.setattr(E, "resolve", lambda spec="auto": (seen.append(spec), (None, "words only (test)"))[1])
+    ws.save_settings({"embedding": "ollama:some-model"})
+    llm = Scripted(reply_for("linear", "notes"), reply_for("linear", "notes"))
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: llm)
+    base = ["create", "--no-log", "--name", "notes", "--spec", "draft an essay"]
+    CliRunner().invoke(main, base + ["--out-dir", str(tmp_path / "a")])
+    CliRunner().invoke(main, base + ["--out-dir", str(tmp_path / "b"), "--embedding", "none"])
+    assert seen == ["ollama:some-model", "none"]

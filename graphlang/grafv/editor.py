@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from jsonschema import ValidationError, validate
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from ..grafr.compact import is_compact
 from ..grafr.ports import apply_input_types, normalize_ports
@@ -38,6 +39,8 @@ def _plain(value: Any) -> Any:
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain(v) for v in value]
+    if isinstance(value, str):
+        return str(value)                                   # a `|` block comes from ruamel as a str subclass the plain dumper cannot write
     return value
 
 
@@ -102,8 +105,10 @@ class GraphEditor:
         except (KeyError, ValueError) as e:
             return [f"cannot check the graph: {e}"], []
 
-    def run(self, params: Dict[str, Any] | None = None, adapter: str = "mock", model: str | None = None, max_steps: int = 200) -> Dict[str, Any]:
-        """Run the graph as it is now (saved or not) and report {ok, outputs, error, summary}. Never raises for a failed run."""
+    def run(self, params: Dict[str, Any] | None = None, adapter: str = "mock", model: str | None = None, max_steps: int = 200,
+            max_calls: int | None = None) -> Dict[str, Any]:
+        """Run the graph as it is now (saved or not) and report {ok, outputs, error, summary}. Never raises for a failed run.
+        `max_calls` caps the model calls (a run that would make more fails with the reason); None is no cap, as for the mock."""
         from graphlang.grafr.adapters import make_llm
         from graphlang.grafr.metering import MeteredLLM
         from graphlang.grafr.runtime import GraphLangRuntime
@@ -111,7 +116,7 @@ class GraphEditor:
         if errors:
             return {"ok": False, "outputs": None, "error": "fix these first: " + "; ".join(errors), "summary": None}
         try:
-            rt = GraphLangRuntime(self.data(), llm=MeteredLLM(make_llm(adapter, model)), max_steps=max_steps, verbose=False)
+            rt = GraphLangRuntime(self.data(), llm=MeteredLLM(make_llm(adapter, model), max_calls=max_calls), max_steps=max_steps, verbose=False)
             outputs = rt.execute(params or {})
         except Exception as e:                                 # a run can fail in many ways; the editor shows the reason
             return {"ok": False, "outputs": None, "error": f"{type(e).__name__}: {e}", "summary": None}
@@ -149,6 +154,42 @@ class GraphEditor:
             self.doc = self._yaml.load(before)                 # a failed edit leaves nothing half done
             raise
         self._undo.append(before)
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    @property
+    def undo_depth(self) -> int:
+        """How many edits can be undone (chat_ops uses it to roll back a failed set of operations)."""
+        return len(self._undo)
+
+    def source(self) -> str:
+        """The whole file as it is now (saved or not), the text the Source tab shows."""
+        return self._dump()
+
+    def set_source(self, text: str) -> None:
+        """Replace the whole file with `text`, typed by a person. It must be YAML in the long workflow form; whether the graph is valid is for
+        `problems()` and Save to say, so a half-finished edit can be applied and fixed. Undoable like any other edit."""
+        try:
+            doc = self._yaml.load(text)
+        except YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            where = f" (line {mark.line + 1}, column {mark.column + 1})" if mark is not None else ""
+            raise EditError(f"not valid YAML{where}: {getattr(e, 'problem', None) or e}")
+        if not isinstance(doc, dict) or "nodes" not in doc or "workflow" not in doc:
+            if is_compact(doc):
+                raise EditError("this is the compact `steps:` form, which this editor does not take; use the long `nodes:`/`edges:` form")
+            raise EditError("a workflow needs `workflow:`, `nodes:` and (optionally) `edges:` at the top level")
+        if not isinstance(doc["nodes"], list) or not all(isinstance(n, dict) and "id" in n for n in doc["nodes"]):
+            raise EditError("`nodes:` must be a list of mappings that each have an `id`")
+        if text == self._dump():
+            return
+
+        def change():
+            self.doc = doc
+            self.doc.setdefault("edges", [])
+        self._edit(change)
 
     def add_node(self, node_id: str, node_type: str, ports: List[str], config: Optional[Dict[str, Any]] = None) -> None:
         if not node_id or not all(c.isalnum() or c == "_" for c in node_id):

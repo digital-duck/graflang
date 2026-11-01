@@ -125,7 +125,7 @@ graf run cookbook/compliance_audit/compliance_audit.graph.yaml \
     --param rules_file="./procedures/rules.json"
 ```
 
-The same audit with the other two rule engines. They need their package in the Python that runs the rule check, which is the `python3` on your `PATH`: `pip install -r cookbook/compliance_audit/requirements.txt` (or just `pip install sympy`, `pip install z3-solver`):
+The same audit with the other two rule engines. They need their package in the Python that runs the rule check, which is the `python3` on your `PATH`: `pip install 'graflang[solver]'` (sympy and z3), or `pip install -r cookbook/compliance_audit/requirements.txt`, or just `pip install sympy` / `pip install z3-solver`:
 
 ```bash
 # (1) sympy: the rules as symbolic Boolean expressions
