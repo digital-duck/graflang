@@ -246,6 +246,23 @@ class GraphEditor:
         return True
 
     # ---- writing -----------------------------------------------------------------------------
+    def clone(self, name: str) -> Path:
+        """Copy the file as it is on disk to `name` in the same folder (so its relative prompts and procedures still resolve) and return the
+        new path. Nothing is overwritten: an existing file is an error. The original is not touched."""
+        name = name.strip()
+        if not name or Path(name).name != name or name.startswith("."):
+            raise EditError("the new name must be a plain file name in the same folder (no path, not starting with a dot)")
+        if not name.endswith(".graph.yaml"):
+            name = name[:-5] if name.endswith(".yaml") else name
+            name += ".graph.yaml"
+        target = self.path.parent / name
+        if target.exists():
+            raise EditError(f"{name} already exists: pick another name (nothing was overwritten)")
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)       # fails if the file appeared since the check
+        with os.fdopen(fd, "wb") as f:
+            f.write(self.path.read_bytes())
+        return target
+
     def save(self) -> None:
         """Write the file if `graf validate` reports no errors. The old file is replaced only after the new one is complete."""
         errors, _ = self.problems()

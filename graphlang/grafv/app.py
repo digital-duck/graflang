@@ -187,12 +187,39 @@ def run_tab(editor: GraphEditor) -> None:
     st.dataframe(rows, hide_index=True)
 
 
+def clone_box(editor: GraphEditor, original: str) -> None:
+    """Edit a copy instead of the file itself: the copy is made from the saved file, in the same folder, and never overwrites anything."""
+    cloned = editor.path.resolve() != Path(original).resolve()
+    if cloned:
+        st.caption(f"editing a copy of {Path(original).name}")
+        if st.button(f"Back to {Path(original).name}", key="back", disabled=editor.changed):
+            st.session_state.pop("target", None)
+            forget_widgets()
+            st.rerun()
+    with st.expander("Clone"):
+        stem = editor.path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
+        name = st.text_input("Name of the copy", f"{stem}-copy.graph.yaml", key="clone_name")
+        if editor.changed:
+            st.caption("Save or undo your edits first: the copy is made from the saved file.")
+        if st.button("Clone and edit the copy", key="clone", disabled=editor.changed):
+            try:
+                new = editor.clone(name)
+            except (EditError, OSError) as e:
+                st.session_state["flash"] = ("error", str(e))
+            else:
+                st.session_state["target"] = str(new)
+                st.session_state["flash"] = ("success", f"now editing {new.name}; {editor.path.name} is untouched")
+                forget_widgets()
+            st.rerun()
+
+
 def main() -> None:
     st.set_page_config(page_title="GraphLang editor", layout="wide")
-    target = os.environ.get("GRAF_EDIT_FILE")
-    if not target:
+    original = os.environ.get("GRAF_EDIT_FILE")
+    if not original:
         st.error("Start this with `graf vis --edit FILE`.")
         return
+    target = st.session_state.get("target") or original          # a clone, once one has been made
     if st.session_state.get("file") != target:
         try:
             st.session_state["editor"], st.session_state["file"] = GraphEditor(Path(target)), target
@@ -217,12 +244,16 @@ def main() -> None:
         if st.button("Reload from disk", key="reload"):
             st.session_state.pop("file")
             st.rerun()
+        clone_box(editor, original)
+        st.slider("Split: canvas | editor (% of the width)", 25, 80, 60, 5, key="split",
+                  help="Streamlit has no draggable divider: slide this to give the picture or the editor more room.")
 
     flash = st.session_state.pop("flash", None)
     if flash:
         (st.success if flash[0] == "success" else st.error)(flash[1])
 
-    left, right = st.columns([3, 2])
+    split = st.session_state.get("split", 60)
+    left, right = st.columns([split, 100 - split])
     with left:
         picture(editor)
     with right:

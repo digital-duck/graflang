@@ -39,12 +39,12 @@ def test_it_opens_and_shows_a_valid_graph(at):
 
 def test_a_config_edit_is_saved_with_the_comments_kept(at):
     pick(at, "draft")
-    at.text_area(key="cfg_draft_model").set_value("ollama/llama3").run()
-    button(at, "set_draft_model").click().run()
+    at.text_area(key="cfg_draft_llm").set_value("ollama:llama3").run()
+    button(at, "set_draft_llm").click().run()
     assert not at.exception and not button(at, "save").disabled
     button(at, "save").click().run()
     text = at.file.read_text()
-    assert "ollama/llama3" in text and "# Control flow" in text and "# Data flow" in text
+    assert "ollama:llama3" in text and "# Control flow" in text and "# Data flow" in text
 
 
 def test_an_invalid_edit_cannot_be_saved(at):
@@ -57,10 +57,10 @@ def test_an_invalid_edit_cannot_be_saved(at):
 
 def test_undo_restores_the_edit(at):
     pick(at, "draft")
-    at.text_area(key="cfg_draft_model").set_value("x/y").run()
-    button(at, "set_draft_model").click().run()
+    at.text_area(key="cfg_draft_llm").set_value("ollama:x").run()
+    button(at, "set_draft_llm").click().run()
     button(at, "undo").click().run()
-    assert button(at, "save").disabled and at.text_area(key="cfg_draft_model").value == "ollama/gemma3"
+    assert button(at, "save").disabled and at.text_area(key="cfg_draft_llm").value == "ollama:gemma3"
 
 
 def test_a_node_is_added_from_the_form_and_saved(at):
@@ -86,3 +86,32 @@ def test_the_run_tab_runs_the_graph_as_it_is_with_the_mock(at):
     button(at, "run_go").click().run()
     assert not at.exception and any("steps" in s.value for s in at.success)
     assert any("essay" in str(j.value) for j in at.json)
+
+
+def test_the_split_slider_sets_the_width_of_the_picture_and_the_editor(at):
+    assert at.sidebar.slider(key="split").value == 60
+    at.sidebar.slider(key="split").set_value(40).run()
+    assert not at.exception and at.session_state["split"] == 40
+
+
+def test_clone_makes_a_copy_and_edits_that_one_not_the_original(at):
+    original = at.file.read_text()
+    at.sidebar.text_input(key="clone_name").set_value("trial").run()
+    button(at, "clone").click().run()
+    assert not at.exception
+    assert (at.file.parent / "trial.graph.yaml").read_text() == original
+    assert at.sidebar.markdown[0].value == "### trial.graph.yaml"
+    pick(at, "draft")
+    at.text_area(key="cfg_draft_llm").set_value("ollama:llama3").run()
+    button(at, "set_draft_llm").click().run()
+    button(at, "save").click().run()
+    assert "llama3" in (at.file.parent / "trial.graph.yaml").read_text() and at.file.read_text() == original   # only the copy changed
+    button(at, "back").click().run()
+    assert at.sidebar.markdown[0].value == "### self_refine.graph.yaml"
+
+
+def test_clone_is_off_while_there_are_unsaved_edits(at):
+    pick(at, "draft")
+    at.text_area(key="cfg_draft_llm").set_value("ollama:llama3").run()
+    button(at, "set_draft_llm").click().run()
+    assert button(at, "clone").disabled

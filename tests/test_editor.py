@@ -152,3 +152,31 @@ def test_run_reports_a_failed_run_instead_of_raising(work):
 def test_a_file_with_an_elaborate_block_is_pointed_to_graf_expand():
     with pytest.raises(EditError, match="elaborate"):
         GraphEditor(Path(__file__).parent.parent / "cookbook" / "elaborate_demo" / "elaborate_demo.graph.yaml")
+
+
+def test_clone_copies_the_saved_file_beside_it_and_leaves_the_original_alone(tmp_path):
+    src = tmp_path / "g.graph.yaml"
+    shutil.copy(ALL[0], src)
+    before = src.read_bytes()
+    editor = GraphEditor(src)
+    copy = editor.clone("g-copy")
+    assert copy == tmp_path / "g-copy.graph.yaml" and copy.read_bytes() == before == src.read_bytes()     # comments and all
+    assert editor.clone("h.graph.yaml").name == "h.graph.yaml"
+
+
+@pytest.mark.parametrize("name", ["", "  ", "../x.graph.yaml", "sub/x.graph.yaml", ".hidden.graph.yaml"])
+def test_clone_refuses_a_name_that_is_not_a_plain_file_name(tmp_path, name):
+    src = tmp_path / "g.graph.yaml"
+    shutil.copy(ALL[0], src)
+    with pytest.raises(EditError):
+        GraphEditor(src).clone(name)
+    assert [p.name for p in tmp_path.iterdir()] == ["g.graph.yaml"]
+
+
+def test_clone_never_overwrites_an_existing_file(tmp_path):
+    src, other = tmp_path / "g.graph.yaml", tmp_path / "other.graph.yaml"
+    shutil.copy(ALL[0], src)
+    other.write_text("precious")
+    with pytest.raises(EditError, match="already exists"):
+        GraphEditor(src).clone("other")
+    assert other.read_text() == "precious"
