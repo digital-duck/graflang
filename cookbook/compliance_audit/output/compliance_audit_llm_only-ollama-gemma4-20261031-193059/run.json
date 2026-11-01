@@ -1,0 +1,10 @@
+{
+  "graph": "compliance_audit_llm_only",
+  "adapter": "ollama",
+  "model": "gemma4",
+  "params": {
+    "document": "./input/customer_case_file.txt",
+    "destination": "external_api"
+  },
+  "started": "2026-10-31T19:30:59"
+}

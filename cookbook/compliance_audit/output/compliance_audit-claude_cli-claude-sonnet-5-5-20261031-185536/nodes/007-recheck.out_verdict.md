@@ -1,0 +1,1 @@
+{"status": "OK", "engine": "z3", "compliant": false, "violated": ["R1", "R3", "R4", "R5", "R6", "R7", "R8"], "core": ["R1"], "facts": {"has_ssn": false, "has_ccn": true, "has_email": true, "has_phone": true, "has_address": true, "has_name": true, "has_dob": true, "has_other": true, "has_pii": true, "is_masked": false, "is_external": true}}

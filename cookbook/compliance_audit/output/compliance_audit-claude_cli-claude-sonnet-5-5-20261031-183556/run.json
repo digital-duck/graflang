@@ -1,0 +1,12 @@
+{
+  "graph": "compliance_audit",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "document": "Customer John Doe, SSN 123-45-6789, asks to update his address.",
+    "destination": "external_api",
+    "engine": "sympy",
+    "rules_file": "./procedures/rules.json"
+  },
+  "started": "2026-10-31T18:35:56"
+}

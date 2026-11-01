@@ -1,0 +1,1 @@
+{"status": "OK", "engine": "stdlib", "compliant": true, "violated": [], "facts": {"has_ssn": false, "has_ccn": false, "has_email": false, "has_phone": false, "has_address": false, "has_name": true, "has_dob": false, "has_other": false, "has_pii": true, "is_masked": true, "is_external": true}}
