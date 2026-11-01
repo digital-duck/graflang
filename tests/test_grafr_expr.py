@@ -58,7 +58,6 @@ def test_variables_lists_what_an_expression_uses():
     "eval('1')",
     "len(@x, key=1)",
     "bare_name",
-    "f'{1}'",
     "b'bytes'",
     "1j",
     "@x if @y else 1",
@@ -117,3 +116,55 @@ def test_latest_is_the_value_before_a_loop_until_an_iteration_sets_it():
     assert evaluate("latest(@in_n, @n)", {"in_n": 0, "n": None}) == 0           # zero and empty text are values, not "unset"
     assert evaluate("latest(@in_n, @n)", {"in_n": 0, "n": 2}) == 2
     assert evaluate("latest(@in_s, @s)", {"in_s": "", "s": None}) == ""
+
+
+# ── f-strings: the lift of SPL's string building (`@trace + f'{@step_no}. {@line}\n'`) ───────────────────────────
+
+SCOPE = {"trace": "T\n", "step_no": 3, "line": "x", "stmt": "a b", "v": 3.14159, "d": {"k": "v"}}
+
+
+def test_an_f_string_fills_its_fields_from_the_variables():
+    assert evaluate("@trace + f'{@step_no}. {@line}\\n'", SCOPE) == "T\n3. x\n"
+    assert evaluate("F'{@step_no}'", SCOPE) == "3" and evaluate("f''", SCOPE) == "" and evaluate("f'a' + 'b'") == "ab"
+    assert evaluate("f'{@step_no + 1}|{@d[\"k\"]}|{{braces}}'", SCOPE) == "4|v|{braces}"
+    assert evaluate("len(f'{@step_no}x')", SCOPE) == 2 and evaluate("contains(f'{@step_no}a', '3a')", SCOPE) is True
+
+
+def test_an_f_string_may_hold_quotes_of_the_other_kind_and_a_raw_prefix():
+    assert evaluate("f\"print(f(r'''{@stmt}'''))\"", SCOPE) == "print(f(r'''a b'''))"
+    assert evaluate("rf'\\d{@step_no}'", SCOPE) == "\\d3"
+    assert evaluate("'it' + \"'s\" + f'{@step_no}'", SCOPE) == "it's3"
+
+
+def test_conversions_and_plain_format_specs_work():
+    assert evaluate("f'{@v:.2f}|{@step_no:>4}|{@trace!r}|{@v!s:>8}'", SCOPE) == "3.14|   3|'T\\n'| 3.14159"
+
+
+def test_the_variables_of_an_f_string_are_found_and_the_whitelist_still_applies():
+    assert variables("f'{@step_no} {@line}'") == {"step_no", "line"}
+    for bad in ("f'{open(1)}'", "f'{__import__(1)}'", "f'{@d.__class__}'", "f'{@v:.2f}'.upper()", "f'{x}'"):
+        with pytest.raises(ExpressionError):
+            evaluate(bad, SCOPE)
+
+
+@pytest.mark.parametrize("bad", ["f'{@v:{@step_no}}'", "f'{@v!x}'", "f'{@v=}'", "f'{'", "f'}'", "f'{}'", "f'{@v:99999}'", "bf'x'", "f'{@v:.2f}' * 5000", "f'abc"])
+def test_an_f_string_that_is_not_allowed_is_an_error_not_a_crash(bad):
+    with pytest.raises(ExpressionError):
+        evaluate(bad, SCOPE)
+
+
+def test_the_helper_functions_of_an_f_string_are_not_listed_to_the_user():
+    with pytest.raises(ExpressionError) as e:
+        evaluate("nope(1)")
+    assert "__fstr" not in str(e.value) and "contains" in str(e.value)
+
+
+def test_an_f_string_in_a_condition_and_in_a_context_expression_runs_in_a_graph():
+    from graphlang.grafr.runtime import GraphLangRuntime
+    graph = {"version": "1.0-graph", "workflow": {"name": "t", "inputs": [{"name": "n", "type": "INTEGER", "default": 7}], "outputs": [{"name": "text", "type": "TEXT"}]},
+             "nodes": [{"id": "s", "type": "INPUT", "ports": ["entry", "out_n"]},
+                       {"id": "c", "type": "CONTEXT", "config": {"action": "set", "expression": "f'step {@in_n}: ' + 'ok'"}, "ports": ["trigger", "complete", "in_n", "out_text"]},
+                       {"id": "o", "type": "OUTPUT", "ports": ["trigger", "in_text"]}],
+             "edges": [{"source": "s.entry", "target": "c.trigger", "type": "triggers"}, {"source": "s.out_n", "target": "c.in_n", "type": "binds"},
+                       {"source": "c.out_text", "target": "o.in_text", "type": "binds"}, {"source": "c.complete", "target": "o.trigger", "type": "triggers"}]}
+    assert GraphLangRuntime(graph, verbose=False).execute({}) == {"text": "step 7: ok"}

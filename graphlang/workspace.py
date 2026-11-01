@@ -3,10 +3,11 @@
 A pip-installed graflang has no repository to point at, so its work area is `~/.graflang/` (or `$GRAFLANG_HOME`):
 
     ~/.graflang/cookbook/   the shipped recipes (copied here; treated as read-only: editing one first copies it to apps/)
+    ~/.graflang/solvers/    the solver recipes ported from SPL.py (also read-only; editing one first copies it to apps/)
     ~/.graflang/apps/       your own apps: created, cloned or imported ones
     ~/.graflang/settings.json   provider, model and API keys (readable by you only)
 
-`graf vis --edit --src-dir DIR` works on DIR instead of cookbook/ and apps/: then DIR is the only root and it is writable.
+`graf vis --edit --src-dir DIR` works on DIR instead of cookbook/, solvers/ and apps/: then DIR is the only root and it is writable.
 Nothing here overwrites: a name that is taken is an error, and the caller picks another.
 """
 from __future__ import annotations
@@ -48,6 +49,10 @@ def apps_dir() -> Path:
     return home() / "apps"
 
 
+def solvers_dir() -> Path:
+    return home() / "solvers"
+
+
 def settings_path() -> Path:
     return home() / "settings.json"
 
@@ -81,7 +86,7 @@ class Workspace:
     def roots(self) -> List[Root]:
         if self.src_dir is not None:
             return [Root("src", self.src_dir, True)]
-        return [Root("apps", apps_dir(), True), Root("cookbook", default_src_dir(), False)]
+        return [Root("apps", apps_dir(), True), Root("cookbook", default_src_dir(), False), Root("solvers", solvers_dir(), False)]
 
     @property
     def write_root(self) -> Path:

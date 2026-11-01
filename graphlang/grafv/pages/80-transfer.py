@@ -24,7 +24,7 @@ def transfer_page() -> None:
     workspace = ui.current_workspace()
     ui.settings()
     st.title("Import / Export")
-    cookbook_root = workspace.roots[-1].path if workspace.src_dir is None else workspace.src_dir
+    cookbook_root = next(r.path for r in workspace.roots if r.name in ("cookbook", "src"))
 
     st.subheader("Install the cookbook")
     repo = ws.find_repo_cookbook()

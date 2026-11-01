@@ -3,7 +3,7 @@
 The picture is the same cytoscape view `graf vis` writes. Editing goes through `GraphEditor`: nothing is written until Save, Save
 refuses while `graf validate` reports errors, comments in the file are kept, and every edit can be undone; the chat on the left changes
 the graph through the same methods. `graf vis --edit` sets GRAF_EDIT_FILE (the file to open, optional) and GRAF_SRC_DIR (the work area
-instead of ~/.graflang/cookbook and apps, optional).
+instead of ~/.graflang/cookbook, solvers and apps, optional).
 """
 from __future__ import annotations
 
@@ -277,7 +277,13 @@ def open_box(workspace: ws.Workspace, current: "Path | None" = None) -> None:
         if not folders:
             st.caption("No recipes yet: create one, import one, or install the cookbook (Import / Export page).")
             return
-        names = {f"{r.root}/{folder.name}" + ("" if r.writable else "  (shipped, read-only)"): folder for folder, r in folders.items()}
+        order = [r.name for r in workspace.roots] + ["here"]                    # "here": the open file's own folder when it is outside the work area
+        present = [n for n in order if any(x.root == n for x in folders.values())]
+        shown = st.multiselect("Folders", present, default=present, key="open_roots", help="show only the recipes of these folders")
+        names = {f"{r.root}/{folder.name}" + ("" if r.writable else "  (shipped, read-only)"): folder for folder, r in folders.items() if r.root in shown}
+        if not names:
+            st.caption("No recipe in the folders chosen.")
+            return
         labels = list(names)
         start = next((i for i, f in enumerate(names.values()) if f == here), 0)
         folder = names[str(st.selectbox("Recipe", labels, index=start, key="open_pick"))]

@@ -32,9 +32,9 @@ def make_recipe(root: Path, name="r", graphs=("r",), extra=None):
     return folder
 
 
-def test_default_roots_are_apps_then_cookbook_and_only_apps_is_writable(home):
+def test_default_roots_are_apps_cookbook_solvers_and_only_apps_is_writable(home):
     roots = ws.Workspace().roots
-    assert [(r.name, r.path, r.writable) for r in roots] == [("apps", home / "apps", True), ("cookbook", home / "cookbook", False)]
+    assert [(r.name, r.path, r.writable) for r in roots] == [("apps", home / "apps", True), ("cookbook", home / "cookbook", False), ("solvers", home / "solvers", False)]
     assert ws.Workspace().write_root == home / "apps"
 
 
@@ -248,3 +248,19 @@ def test_every_shipped_recipe_validates_from_a_copy_elsewhere(tmp_path):
         for graph in ws.graphs_in(folder):
             result = CliRunner().invoke(main, ["validate", str(graph)])
             assert "does not exist" not in result.output, f"{graph}: {result.output}"
+
+
+def test_the_solvers_folder_is_a_third_read_only_root(home):
+    w = ws.Workspace()
+    assert [(r.name, r.writable) for r in w.roots] == [("apps", True), ("cookbook", False), ("solvers", False)]
+    assert ws.solvers_dir() == home / "solvers" and w.write_root == home / "apps"
+    graph = home / "solvers" / "z3_compliance" / "z3_compliance.graph.yaml"
+    graph.parent.mkdir(parents=True)
+    graph.write_text("version: 1.0-graph\nworkflow: {name: z, inputs: [], outputs: []}\nnodes: []\nedges: []\n")
+    assert [r.label for r in w.recipes()] == ["solvers/z3_compliance/z3_compliance"]
+    assert w.is_shipped(graph) and not w.writable_for(graph)                    # like the cookbook: copy it to your apps to edit
+    assert w.recipe_folder(graph) == (home / "solvers" / "z3_compliance").resolve()
+
+
+def test_a_src_dir_replaces_all_three_roots(tmp_path):
+    assert [r.name for r in ws.Workspace(tmp_path).roots] == ["src"]

@@ -86,6 +86,7 @@ FUNCS: Dict[str, Callable[..., Any]] = {
     "has_pii": has_pii,
     "latest": lambda initial, state: initial if state is None else state,      # a LOOP variable: its value before the loop until an iteration sets it
     "is_empty": lambda a: a is None or (hasattr(a, "__len__") and len(a) == 0),
+    "__fstr": lambda *p: _fstr(*p), "__fmt": lambda v, s, c: _fmt(v, s, c),                  # what an f-string is rewritten to (see _lower_fstrings)
 }
 
 _ALLOWED = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.USub, ast.UAdd,
@@ -97,6 +98,114 @@ _BINOPS = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: l
 _CMPS = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
          ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
          ast.In: lambda a, b: a in b, ast.NotIn: lambda a, b: a not in b}
+
+
+_SPEC = re.compile(r"^(.?[<>=^])?[+\- ]?#?0?\d{0,3}[,_]?(\.\d{1,3})?[bcdeEfFgGnosxX%]?$")
+_STRING_START = re.compile(r"([rRbBuUfF]{0,2})('''|\"\"\"|'|\")")
+
+
+def _field_end(body: str, start: int, expr: str):
+    """(end of the expression text, conversion, format spec, index of the closing brace) of the f-string field that starts at `start`."""
+    depth, j, quote, text_end, conv, n = 0, start, None, None, "", len(body)
+    while j < n:
+        ch = body[j]
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}" and (ch != "}" or depth > 0):
+            depth -= 1
+        elif ch == "}":
+            return (j if text_end is None else text_end), conv, "", j
+        elif depth == 0 and ch == "!" and body[j + 1:j + 2] != "=" and text_end is None:
+            text_end, conv, j = j, body[j + 1:j + 2], j + 1
+        elif depth == 0 and ch == ":":
+            end = body.find("}", j)
+            spec = body[j + 1:end] if end >= 0 else ""
+            if end < 0 or "{" in spec:
+                raise ExpressionError(f"unclosed or nested field in an f-string in {expr!r} (fields inside a format spec are not allowed)")
+            return (j if text_end is None else text_end), conv, spec, end
+        j += 1
+    raise ExpressionError(f"unclosed '{{' in an f-string in {expr!r}")
+
+
+def _fstring_parts(body: str, quote: str, raw: bool, expr: str) -> list:
+    """An f-string's text (between its quotes) as Python source for the arguments of `__fstr`: a repr of each literal piece, `__fmt(...)` of each field."""
+    parts, lit, i, n = [], [], 0, len(body)
+
+    def flush():
+        if lit:
+            text = "".join(lit)
+            lit.clear()
+            try:
+                parts.append(repr(text if raw else ast.literal_eval(quote + text + quote)))
+            except (SyntaxError, ValueError):
+                raise ExpressionError(f"bad escape in an f-string in {expr!r}") from None
+    while i < n:
+        two = body[i:i + 2]
+        if two in ("{{", "}}"):
+            lit.append(two[0])
+            i += 2
+        elif body[i] == "}":
+            raise ExpressionError(f"a single '}}' in an f-string in {expr!r}")
+        elif body[i] == "{":
+            flush()
+            text_end, conv, spec, close = _field_end(body, i + 1, expr)
+            field = body[i + 1:text_end].strip()
+            if not field or field.endswith("="):
+                raise ExpressionError(f"an f-string field needs an expression (`=` is not supported) in {expr!r}")
+            if conv not in ("", "r", "s", "a"):
+                raise ExpressionError(f"unknown f-string conversion !{conv} in {expr!r}")
+            if spec and not _SPEC.match(spec):
+                raise ExpressionError(f"format spec {spec!r} is not allowed (width up to 999, precision up to 3 digits, one type letter)")
+            parts.append(f"__fmt(({field}), {spec!r}, {conv!r})")
+            i = close + 1
+        else:
+            lit.append(body[i])
+            i += 1
+    flush()
+    return parts
+
+
+def _lower_fstrings(expr: str) -> str:
+    """Rewrite each f-string literal as a call of the internal functions `__fstr` and `__fmt`: f'{@a}-{@b:.1f}' becomes
+    __fstr(__fmt((@a), '', ''), '-', __fmt((@b), '.1f', '')), so the fields pass through the same whitelist as any expression."""
+    if not re.search(r"[fF]{1}[rR]?['\"]|[rR][fF]['\"]", expr):
+        return expr
+    out, i, n = [], 0, len(expr)
+    while i < n:
+        m = _STRING_START.match(expr, i) if (i == 0 or not (expr[i - 1].isalnum() or expr[i - 1] in "_@.")) else None
+        if m is None:
+            out.append(expr[i])
+            i += 1
+            continue
+        prefix, quote = m.group(1).lower(), m.group(2)
+        k = m.end()
+        while k < n and expr[k:k + len(quote)] != quote:
+            k += 2 if expr[k] == "\\" else 1
+        if k >= n:
+            raise ExpressionError(f"unclosed string in {expr!r}")
+        if "f" in prefix:
+            if "b" in prefix or "u" in prefix:
+                raise ExpressionError("an f-string cannot be bytes or u-prefixed")
+            parts = _fstring_parts(expr[m.end():k], quote, "r" in prefix, expr)
+            out.append("__fstr(" + ", ".join(parts) + ")" if parts else "''")
+        else:
+            out.append(expr[i:k + len(quote)])
+        i = k + len(quote)
+    return "".join(out)
+
+
+def _fmt(value: Any, spec: str, conv: str) -> str:
+    if conv:
+        value = {"r": repr, "s": str, "a": ascii}[conv](value)
+    return format(value, spec)
+
+
+def _fstr(*pieces: Any) -> str:
+    return "".join(str(p) for p in pieces)
 
 
 def _translate(expr: str) -> str:
@@ -125,7 +234,7 @@ def parse(expr: str) -> ast.Expression:
     if len(expr) > MAX_LEN:
         raise ExpressionError(f"expression longer than {MAX_LEN} characters")
     try:
-        tree = ast.parse(_translate(expr.strip()).strip(), mode="eval")
+        tree = ast.parse(_translate(_lower_fstrings(expr.strip())).strip(), mode="eval")
     except (SyntaxError, tokenize.TokenError, IndentationError) as e:
         raise ExpressionError(f"cannot parse {expr!r}: {e}") from None
     nodes = list(ast.walk(tree))
@@ -138,7 +247,7 @@ def parse(expr: str) -> ast.Expression:
             raise ExpressionError(f"literal {n.value!r} is not allowed")
         if isinstance(n, ast.Call):
             if not isinstance(n.func, ast.Name) or n.func.id not in FUNCS:
-                raise ExpressionError(f"only these functions may be called: {sorted(FUNCS)}")
+                raise ExpressionError(f"only these functions may be called: {sorted(f for f in FUNCS if not f.startswith('__'))}")
             if n.keywords or any(isinstance(a, ast.Starred) for a in n.args):
                 raise ExpressionError("keyword and star arguments are not allowed")
         if isinstance(n, ast.Name) and not n.id.startswith(VAR_PREFIX) \

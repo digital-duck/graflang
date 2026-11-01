@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The Edit page's *Browse files* box has a **Folders** multiselect (apps, cookbook, solvers; all chosen to begin with) that filters the Recipe list.
+
+- The expression language reads **f-strings**: `f'{@step_no}. {@line}\n'` in a `CONTEXT` expression or a condition. Each field is an expression under the usual whitelist; `!r`/`!s`/`!a` and a plain format spec (`{@x:.2f}`) work, fields inside a format spec, `=` and bytes f-strings are refused. They are rewritten to internal calls (`__fstr`, `__fmt`) before the parse, so nothing new can be called. This is what the lift of SPL's string building produced, and it unblocks `lean_proof`, `symbolic_math` and the other solver recipes that stopped at it.
+- `graf vis --edit` adds `~/.graflang/solvers/` as a third, read-only root (after `apps` and `cookbook`): its recipes show on the Edit and Browse pages, are found for Create's examples, and are copied to `apps/` to edit. `workspace.solvers_dir()`; `--src-dir` still replaces all three.
+
 - `graf describe PATH [-o FILE|-] [--force] [--llm [ADAPTER:MODEL]]` (`graphlang/grafc/describe.py`): PATH is a graph file or a recipe folder; the text is written to `RECIPE.spec.md` in the folder (`FILE.spec.md` beside a graph file), `-o -` prints it, an existing default is kept unless `--force`. Without `--llm`, a plain-language description built from the graph alone (no model): purpose, inputs and defaults, output, the steps in run order (prompts, function names and docstrings, conditions; `LOOP`/`BATCH` bodies nested), where each step's data comes from, and a count of model and program steps. With `--llm` one billed call has a model write a specification from that structure and the folder's readme, prompts, procedures, tools and policies (`build_spec_prompt`). It is the `--spec @FILE` for `graf create`, for the round trip `.spl` -> graph (spl2graph) -> specification (describe --llm) -> graph (create).
 
 - New recipe `cookbook/stock_analysis` (lifted from SPL.py's `066_stock_analysis`, then reworked): Python fetches prices and computes metrics, a `BATCH` walks the list of tickers, the model comments on each and writes one outlook. The lift had made a `LOOP` over `@in_ticker IN @in_tickers`, which stops at once with `unknown variable @in_ticker`.
