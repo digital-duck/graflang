@@ -1,0 +1,516 @@
+version: 1.0-graph
+workflow:
+  name: pandera_schema
+  inputs:
+  - name: schema_description
+    type: TEXT
+    default: 'Employee payroll CSV: 200 rows, columns employee_id (int), name (str),
+      department (str), salary (float), hire_year (int). Imported from HR system monthly
+      export.'
+  - name: data_csv
+    type: TEXT
+    default: demo
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  outputs:
+  - name: report
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_schema_description
+  - out_data_csv
+  - out_use_solver
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: get_default_schema
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_PAYROLL_SCHEMA = {'schema_name': 'EmployeePayroll_v1', 'columns': [{'name': 'employee_id', 'dtype': 'int64', 'nullable': False, 'unique': True, 'checks': [{'type': 'gt', 'value': 999}]}, {'name': 'name', 'dtype': 'object', 'nullable': False, 'unique': False, 'checks': []}, {'name': 'department', 'dtype': 'object', 'nullable': False, 'unique': False, 'checks': [{'type': 'isin', 'value': ['Engineering', 'Sales', 'HR', 'Finance', 'Operations']}]}, {'name': 'salary', 'dtype': 'float64', 'nullable': False, 'unique': False, 'checks': [{'type': 'gt', 'value': 0}, {'type': 'lt', 'value': 500000}]}, {'name': 'hire_year', 'dtype': 'int64', 'nullable': False, 'unique': False, 'checks': [{'type': 'ge', 'value': 2000}, {'type': 'le', 'value': 2026}]}]}
+
+      def get_default_schema() -> str:
+          """Return the default payroll schema JSON."""
+          return json.dumps(_DEFAULT_PAYROLL_SCHEMA)
+      _spl_result = get_default_schema()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - out_schema_json
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_use_solver
+  - out_use_solver
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: '@in_use_solver == ''true'''
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_use_solver
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: validate_schema
+    backend: kernel
+    arguments:
+    - '@schema_json'
+    - '@data_csv'
+    code: |
+      import json
+
+      from io import StringIO
+
+      def _make_demo_dataframe():
+          """Synthetic payroll DataFrame with embedded schema violations."""
+          import pandas as pd
+          import numpy as np
+          rng = np.random.default_rng(7)
+          n = 200
+          depts = ['Engineering', 'Sales', 'HR', 'Finance', 'Operations']
+          df = pd.DataFrame({'employee_id': range(1000, 1000 + n), 'name': [f'Employee_{i}' for i in range(n)], 'department': rng.choice(depts, n), 'salary': rng.uniform(40000, 200000, n).round(2), 'hire_year': rng.integers(2000, 2027, n)})
+          zero_idx = rng.choice(n, size=6, replace=False)
+          df.loc[zero_idx, 'salary'] = 0.0
+          bad_dept_idx = rng.choice(n, size=4, replace=False)
+          df.loc[bad_dept_idx, 'department'] = 'Temp'
+          null_idx = rng.choice(n, size=3, replace=False)
+          df.loc[null_idx, 'name'] = None
+          return df
+
+      def validate_schema(schema_json: str, data_csv: str) -> str:
+          """Validate a DataFrame against a pandera schema.
+
+          Returns:
+            {"schema_name": str, "n_rows": int, "status": "PASS"|"FAIL"|"ERROR",
+             "n_violations": int, "violations": [{column, check, n_failed, samples}]}
+          """
+          try:
+              import pandas as pd
+              import pandera as pa
+          except ImportError as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e) + ' — run: pip install pandera'})
+          try:
+              schema_def = json.loads(schema_json)
+              if data_csv.strip() in ('', 'demo'):
+                  df = _make_demo_dataframe()
+              else:
+                  df = pd.read_csv(StringIO(data_csv))
+              check_map = {'gt': pa.Check.gt, 'ge': pa.Check.ge, 'lt': pa.Check.lt, 'le': pa.Check.le, 'isin': pa.Check.isin, 'ne': pa.Check.ne}
+              pa_cols: dict = {}
+              for col_def in schema_def['columns']:
+                  checks = [check_map[c['type']](c['value']) for c in col_def.get('checks', []) if c['type'] in check_map]
+                  dtype_map = {'int64': int, 'float64': float, 'object': str}
+                  dtype = dtype_map.get(col_def['dtype'], str)
+                  pa_cols[col_def['name']] = pa.Column(dtype, checks=checks, nullable=col_def.get('nullable', True), unique=col_def.get('unique', False))
+              schema = pa.DataFrameSchema(pa_cols)
+              violations = []
+              try:
+                  schema.validate(df, lazy=True)
+                  return json.dumps({'schema_name': schema_def.get('schema_name', 'unnamed'), 'n_rows': len(df), 'status': 'PASS', 'n_violations': 0, 'violations': []})
+              except pa.errors.SchemaErrors as e:
+                  errors_df = e.failure_cases
+                  for _, grp in errors_df.groupby(['schema_context', 'column'], dropna=False):
+                      row = grp.iloc[0]
+                      col = row.get('column', '?')
+                      import math
+                      if isinstance(col, float) and math.isnan(col):
+                          col = 'DataFrame'
+                      raw_samples = grp['failure_case'].head(5).tolist()
+                      samples = [None if isinstance(s, float) and math.isnan(s) else s for s in raw_samples]
+                      violations.append({'column': str(col), 'check': str(row.get('check', '?')), 'n_failed': len(grp), 'samples': samples})
+                  return json.dumps({'schema_name': schema_def.get('schema_name', 'unnamed'), 'n_rows': len(df), 'status': 'FAIL', 'n_violations': len(violations), 'violations': violations})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = validate_schema(schema_json, data_csv)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - schema_json
+    - data_csv
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_schema_json
+  - in_data_csv
+  - out_result_json
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: format_schema_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_schema_report(result_json: str) -> str:
+          """Markdown report of schema validation results."""
+          try:
+              data = json.loads(result_json)
+              status = data.get('status', 'ERROR')
+              if status == 'ERROR':
+                  return f"## pandera Schema Report — Error\n\n**Error:** {data.get('error', 'unknown error')}\n\nRun `pip install pandera` if pandera is not installed."
+              violations = data.get('violations', [])
+              status_sym = '✓ PASS' if status == 'PASS' else '✗ FAIL'
+              lines = [f"## pandera Schema Report — {data.get('schema_name', 'Schema')}", '', f"**Dataset:** {data.get('n_rows', '?')} rows  ", f'**Status:** {status_sym}  ', f"**Violations:** {data.get('n_violations', 0)} column checks failed", '']
+              if violations:
+                  lines += ['| Column | Check | Failures | Sample Values |', '|---|---|---|---|']
+                  for v in violations:
+                      raw = v.get('samples', [])[:3]
+                      samples = str(['(null)' if s is None else s for s in raw])
+                      lines.append(f"| {v['column']} | {v['check']} | {v['n_failed']} | {samples} |")
+              else:
+                  lines.append('All column checks passed.')
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_schema_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_result_json
+  - out_schema_report
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - '''n_violations'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_violations')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_result_json
+  - out_n_violations
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - '''n_rows'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_rows')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_result_json
+  - out_n_rows
+- id: gen_1
+  type: GENERATE
+  config:
+    function: explain_violations_prompt
+    params:
+    - schema_report
+    prompt_inline: |-
+      You are a data quality analyst. pandera just validated an employee payroll DataFrame.
+
+      SCHEMA REPORT:
+      {{in_schema_report}}
+
+      Explain the violations in plain English (≤120 words):
+      1. What specific data errors were found?
+      2. What is the likely business cause of each error type?
+      3. Which violation is highest priority to fix and why?
+      4. What data pipeline fix would prevent this class of errors in future ingestion?
+    arguments:
+    - '@schema_report'
+  ports:
+  - trigger
+  - complete
+  - in_schema_report
+  - out_explanation
+- id: tool_7
+  type: SOLVE
+  config:
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@schema_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(schema_report: str, explanation: str) -> str:
+          return f'=== pandera Schema Validator (r104) | solver=ON ===\n\n{schema_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(schema_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - schema_report
+    - explanation
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_schema_report
+  - in_explanation
+  - out_report
+- id: eval_2
+  type: EVALUATE
+  config:
+    condition: '@in_use_solver == ''false'''
+    branch: 2
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_use_solver
+- id: gen_2
+  type: GENERATE
+  config:
+    function: describe_schema_prompt
+    params:
+    - schema_description
+    prompt_inline: |-
+      You are a data engineer reviewing an employee payroll dataset.
+
+      DATASET DESCRIPTION:
+      {{in_schema_description}}
+
+      Expected schema for the payroll DataFrame:
+      - employee_id: integer, unique, >= 1000
+      - name: string, not null
+      - department: one of [Engineering, Sales, HR, Finance, Operations]
+      - salary: float, > 0, < $500,000
+      - hire_year: integer, between 2000 and 2026
+
+      Task:
+      1. Which columns are most likely to have quality issues, and why?
+      2. Give 3 example records that would PASS this schema.
+      3. Give 3 example records that would FAIL this schema (be specific about the violation).
+      4. What downstream analysis would break if each violation type were left uncorrected?
+
+      Be specific. Do not run any code — reason from the schema definition.
+    arguments:
+    - '@schema_description'
+  ports:
+  - trigger
+  - complete
+  - in_schema_description
+  - out_llm_analysis
+- id: tool_8
+  type: SOLVE
+  config:
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_analysis'
+    code: |
+      def format_report_solver_off(llm_analysis: str) -> str:
+          return f'=== pandera Schema Validator (r104) | solver=OFF ===\n\n── LLM Schema Analysis ─────────────────────────────────────\n{llm_analysis}\n\nNote: LLM describes expected violations. Run --param use_solver=true\nto validate all rows with pandera.'
+      _spl_result = format_report_solver_off(llm_analysis)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_analysis
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_llm_analysis
+  - out_report
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: wf_entry.out_use_solver
+  target: tool_2.in_use_solver
+  type: binds
+- source: tool_2.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_2.out_use_solver
+  target: eval_1.in_use_solver
+  type: binds
+- source: eval_1.pass
+  target: tool_3.trigger
+  type: triggers
+- source: tool_1.out_schema_json
+  target: tool_3.in_schema_json
+  type: binds
+- source: wf_entry.out_data_csv
+  target: tool_3.in_data_csv
+  type: binds
+- source: tool_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: tool_3.out_result_json
+  target: tool_4.in_result_json
+  type: binds
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_3.out_result_json
+  target: tool_5.in_result_json
+  type: binds
+- source: tool_5.complete
+  target: tool_6.trigger
+  type: triggers
+- source: tool_3.out_result_json
+  target: tool_6.in_result_json
+  type: binds
+- source: tool_6.complete
+  target: gen_1.trigger
+  type: triggers
+- source: tool_4.out_schema_report
+  target: gen_1.in_schema_report
+  type: binds
+- source: gen_1.complete
+  target: tool_7.trigger
+  type: triggers
+- source: tool_4.out_schema_report
+  target: tool_7.in_schema_report
+  type: binds
+- source: gen_1.out_explanation
+  target: tool_7.in_explanation
+  type: binds
+- source: eval_1.fail
+  target: eval_2.trigger
+  type: triggers
+- source: tool_2.out_use_solver
+  target: eval_2.in_use_solver
+  type: binds
+- source: eval_2.pass
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_schema_description
+  target: gen_2.in_schema_description
+  type: binds
+- source: gen_2.complete
+  target: tool_8.trigger
+  type: triggers
+- source: gen_2.out_llm_analysis
+  target: tool_8.in_llm_analysis
+  type: binds
+- source: tool_7.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: tool_8.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: tool_7.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: tool_8.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: eval_2.fail
+  target: wf_exit.trigger
+  type: triggers

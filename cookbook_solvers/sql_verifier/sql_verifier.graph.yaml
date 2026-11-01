@@ -1,0 +1,1163 @@
+version: 1.0-graph
+workflow:
+  name: sql_verifier
+  inputs:
+    - name: question
+      type: TEXT
+      default: What is the average salary in the Engineering department?
+    - name: ground_truth_sql
+      type: TEXT
+      default: SELECT AVG(salary) AS avg_salary FROM employees WHERE department = 'Engineering';
+    - name: enable_solver
+      type: TEXT
+      default: 'true'
+    - name: max_tries
+      type: INTEGER
+      default: 3
+    - name: out_dir
+      type: TEXT
+      default: ./cookbook/84_sql_verifier/output
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_question
+      - out_ground_truth_sql
+      - out_enable_solver
+      - out_max_tries
+      - out_out_dir
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_start
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: time_now
+      backend: kernel
+      arguments: []
+      code: |
+        import datetime
+
+        def time_now() -> str:
+            """TIME_NOW() — current local time as a filesystem-safe string:
+            YYYY-MM-DD_HH-MM-SS."""
+            return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        _spl_result = time_now()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_ts_safe
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@enable_solver'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(enable_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_enable_solver
+      - out_solver_mode
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: schema_description
+      backend: kernel
+      arguments: []
+      code: |
+        def schema_description() -> str:
+            """Human-readable schema + sample rows, shown to the LLM (and to the
+            unaided baseline arm) so it can write/reason about SQL without ever
+            seeing the live database connection."""
+            return (
+                "Table: employees(id INTEGER, name TEXT, department TEXT, "
+                "salary REAL, hire_year INTEGER)\n"
+                "Rows:\n"
+                "  1, Alice, Engineering, 95000, 2019\n"
+                "  2, Bob,   Engineering, 87000, 2021\n"
+                "  3, Carol, Sales,       72000, 2018\n"
+                "  4, Dave,  Sales,       68000, 2022\n"
+                "  5, Eve,   Marketing,   77000, 2020\n"
+                "  6, Frank, Engineering, 110000, 2016"
+            )
+        _spl_result = schema_description()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_schema
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode == 'yes')
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solver_mode
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''yes'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''no'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''no'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: solve_directly
+      params:
+        - question
+        - schema
+      prompt_inline: |-
+        Answer this question about the following data, WITHOUT writing or running
+        any SQL — reason about the rows yourself, from scratch, in plain English.
+
+        {{in_schema}}
+
+        Question: {{in_question}}
+
+        Write a clear walkthrough in under 8 sentences that shows your reasoning
+        over the rows above and gives the final answer plainly.
+      arguments:
+        - '@question'
+        - '@schema'
+    ports:
+      - trigger
+      - complete
+      - in_question
+      - in_schema
+      - out_report
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@report'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_report
+      - out_report
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_tries
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''init'''
+    ports:
+      - trigger
+      - complete
+      - out_status
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_llm_sql
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_llm_result
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: latest(@in_tries, @tries) < @in_max_tries
+      outputs:
+        tries:
+          from:
+            - set_7.out_tries
+            - set_8.out_tries
+            - set_9.out_tries
+        llm_sql:
+          from:
+            - gen_2.out_llm_sql
+            - gen_3.out_llm_sql
+        llm_result:
+          from:
+            - tool_6.out_llm_result
+            - tool_9.out_llm_result
+        status:
+          from:
+            - tool_7.out_status
+            - tool_10.out_status
+        error_info:
+          from: tool_8.out_error_info
+      subgraph:
+        nodes:
+          - id: eval_3
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''OK'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: set_7
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_max_tries'
+            ports:
+              - trigger
+              - complete
+              - in_max_tries
+              - out_tries
+          - id: eval_4
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''init'''
+              branch: 2
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: gen_2
+            type: GENERATE
+            config:
+              function: formulate_sql
+              params:
+                - question
+                - schema
+              prompt_inline: |-
+                You are a SQL expert. Write ONE SQLite SELECT statement that answers this
+                question, using EXACTLY this schema (no other tables or columns exist):
+
+                {{in_schema}}
+
+                Question: {{in_question}}
+
+                Rules:
+                - Output ONLY the raw SQL statement — no markdown fences, no commentary,
+                  no trailing explanation
+                - Use only the table/columns given above
+                - End the statement with a semicolon
+              arguments:
+                - '@question'
+                - '@schema'
+            ports:
+              - trigger
+              - complete
+              - in_question
+              - in_schema
+              - out_llm_sql
+          - id: tool_6
+            type: SOLVE
+            config:
+              tool: run_sql
+              backend: kernel
+              arguments:
+                - '@llm_sql'
+              code: |
+                def run_sql(sql: str) -> str:
+                    """Execute LLM-generated SQL against a freshly-seeded in-memory
+                    SQLite database and return a JSON result dict. The LLM writes the
+                    SQL; this function is the deterministic oracle — every call gets an
+                    identically-seeded database so results are reproducible.
+
+                    Returns {"status": "OK", "columns": [...], "rows": [[...], ...]}
+                    On any error returns {"status": "Error", "error": "<msg>"}.
+                    """
+                    import json
+                    import re
+                    import sqlite3
+
+                    sql = re.sub(r'^```(?:sql)?\s*\n?', '', sql.strip(), flags=re.IGNORECASE)
+                    sql = re.sub(r'\n?```\s*$', '', sql)
+
+                    seed = [
+                        (1, "Alice", "Engineering", 95000.0, 2019),
+                        (2, "Bob",   "Engineering", 87000.0, 2021),
+                        (3, "Carol", "Sales",       72000.0, 2018),
+                        (4, "Dave",  "Sales",       68000.0, 2022),
+                        (5, "Eve",   "Marketing",   77000.0, 2020),
+                        (6, "Frank", "Engineering", 110000.0, 2016),
+                    ]
+                    conn = sqlite3.connect(":memory:")
+                    try:
+                        conn.executescript(
+                            "CREATE TABLE employees ("
+                            "id INTEGER PRIMARY KEY, name TEXT, department TEXT, "
+                            "salary REAL, hire_year INTEGER);"
+                        )
+                        conn.executemany("INSERT INTO employees VALUES (?,?,?,?,?)", seed)
+                        conn.commit()
+                        cur = conn.execute(sql)
+                        rows = cur.fetchall()
+                        cols = [d[0] for d in cur.description] if cur.description else []
+                        return json.dumps({"status": "OK", "columns": cols, "rows": rows})
+                    except Exception as e:
+                        return json.dumps({"status": "Error", "error": str(e)})
+                    finally:
+                        conn.close()
+                _spl_result = run_sql(llm_sql)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - sql
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_llm_sql
+              - out_llm_result
+          - id: tool_7
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@llm_result'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(llm_result)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_llm_result
+              - out_status
+          - id: set_8
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: tool_8
+            type: SOLVE
+            config:
+              tool: result_error
+              backend: kernel
+              arguments:
+                - '@llm_result'
+              code: |
+                import json
+
+                def result_error(result_json: str) -> str:
+                    """RESULT_ERROR(result_json) — extract the 'error' field from a SOLVER
+                    result JSON dict (falls back to 'status', then 'unknown error')."""
+                    try:
+                        d = json.loads(result_json)
+                        return d.get('error', d.get('status', 'unknown error'))
+                    except Exception:
+                        return result_json
+                _spl_result = result_error(llm_result)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_llm_result
+              - out_error_info
+          - id: gen_3
+            type: GENERATE
+            config:
+              function: repair_sql
+              params:
+                - question
+                - schema
+                - sql
+                - error_info
+              prompt_inline: |-
+                This SQLite statement produced an error.
+
+                Schema:
+                {{in_schema}}
+
+                Question: {{in_question}}
+
+                Previous SQL:
+                {{in_sql}}
+
+                Error:
+                {{in_error_info}}
+
+                Fix the SQL. Common causes: unknown column name, unknown table name,
+                syntax error, wrong aggregate/GROUP BY usage.
+
+                Output ONLY the corrected SQL statement — no markdown fences, no commentary.
+              arguments:
+                - '@question'
+                - '@schema'
+                - '@llm_sql'
+                - '@error_info'
+            ports:
+              - trigger
+              - complete
+              - in_question
+              - in_schema
+              - in_sql
+              - in_error_info
+              - out_llm_sql
+          - id: tool_9
+            type: SOLVE
+            config:
+              tool: run_sql
+              backend: kernel
+              arguments:
+                - '@llm_sql'
+              code: |
+                def run_sql(sql: str) -> str:
+                    """Execute LLM-generated SQL against a freshly-seeded in-memory
+                    SQLite database and return a JSON result dict. The LLM writes the
+                    SQL; this function is the deterministic oracle — every call gets an
+                    identically-seeded database so results are reproducible.
+
+                    Returns {"status": "OK", "columns": [...], "rows": [[...], ...]}
+                    On any error returns {"status": "Error", "error": "<msg>"}.
+                    """
+                    import json
+                    import re
+                    import sqlite3
+
+                    sql = re.sub(r'^```(?:sql)?\s*\n?', '', sql.strip(), flags=re.IGNORECASE)
+                    sql = re.sub(r'\n?```\s*$', '', sql)
+
+                    seed = [
+                        (1, "Alice", "Engineering", 95000.0, 2019),
+                        (2, "Bob",   "Engineering", 87000.0, 2021),
+                        (3, "Carol", "Sales",       72000.0, 2018),
+                        (4, "Dave",  "Sales",       68000.0, 2022),
+                        (5, "Eve",   "Marketing",   77000.0, 2020),
+                        (6, "Frank", "Engineering", 110000.0, 2016),
+                    ]
+                    conn = sqlite3.connect(":memory:")
+                    try:
+                        conn.executescript(
+                            "CREATE TABLE employees ("
+                            "id INTEGER PRIMARY KEY, name TEXT, department TEXT, "
+                            "salary REAL, hire_year INTEGER);"
+                        )
+                        conn.executemany("INSERT INTO employees VALUES (?,?,?,?,?)", seed)
+                        conn.commit()
+                        cur = conn.execute(sql)
+                        rows = cur.fetchall()
+                        cols = [d[0] for d in cur.description] if cur.description else []
+                        return json.dumps({"status": "OK", "columns": cols, "rows": rows})
+                    except Exception as e:
+                        return json.dumps({"status": "Error", "error": str(e)})
+                    finally:
+                        conn.close()
+                _spl_result = run_sql(llm_sql)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - sql
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_llm_sql
+              - out_llm_result
+          - id: tool_10
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@llm_result'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(llm_result)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_llm_result
+              - out_status
+          - id: set_9
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+        edges:
+          - source: eval_3.pass
+            target: set_7.trigger
+            type: triggers
+          - source: eval_3.fail
+            target: eval_4.trigger
+            type: triggers
+          - source: eval_4.pass
+            target: gen_2.trigger
+            type: triggers
+          - source: gen_2.complete
+            target: tool_6.trigger
+            type: triggers
+          - source: gen_2.out_llm_sql
+            target: tool_6.in_llm_sql
+            type: binds
+          - source: tool_6.complete
+            target: tool_7.trigger
+            type: triggers
+          - source: tool_6.out_llm_result
+            target: tool_7.in_llm_result
+            type: binds
+          - source: tool_7.complete
+            target: set_8.trigger
+            type: triggers
+          - source: eval_4.fail
+            target: tool_8.trigger
+            type: triggers
+          - source: tool_8.complete
+            target: gen_3.trigger
+            type: triggers
+          - source: tool_8.out_error_info
+            target: gen_3.in_error_info
+            type: binds
+          - source: gen_3.complete
+            target: tool_9.trigger
+            type: triggers
+          - source: gen_3.out_llm_sql
+            target: tool_9.in_llm_sql
+            type: binds
+          - source: tool_9.complete
+            target: tool_10.trigger
+            type: triggers
+          - source: tool_9.out_llm_result
+            target: tool_10.in_llm_result
+            type: binds
+          - source: tool_10.complete
+            target: set_9.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_status
+      - in_max_tries
+      - in_question
+      - in_schema
+      - in_tries
+      - in_llm_result
+      - in_llm_sql
+      - out_tries
+      - out_llm_sql
+      - out_llm_result
+      - out_status
+      - out_error_info
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: result_ok
+      backend: kernel
+      arguments:
+        - '@llm_result'
+      code: |
+        import json
+
+        def result_ok(result_json: str) -> bool:
+            """RESULT_OK(result_json) — ASSERT gate: True only when result_json's
+            'status' field is exactly "OK"."""
+            try:
+                return json.loads(result_json).get('status') == 'OK'
+            except Exception:
+                return False
+        _spl_result = result_ok(llm_result)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_llm_result
+      - out_tool_11
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_11'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_llm_result
+      - in_tool_11
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: ground_truth_result
+      backend: kernel
+      arguments:
+        - '@ground_truth_sql'
+      code: |
+        def ground_truth_result(ground_truth_sql: str) -> str:
+            """Run the human-authored, KNOWN-CORRECT SQL for this recipe's default
+            question against the identically-seeded database. This is the
+            reference the LLM's own SQL is diffed against — never written by
+            the LLM itself."""
+            import json
+            import sqlite3
+
+            seed = [
+                (1, "Alice", "Engineering", 95000.0, 2019),
+                (2, "Bob",   "Engineering", 87000.0, 2021),
+                (3, "Carol", "Sales",       72000.0, 2018),
+                (4, "Dave",  "Sales",       68000.0, 2022),
+                (5, "Eve",   "Marketing",   77000.0, 2020),
+                (6, "Frank", "Engineering", 110000.0, 2016),
+            ]
+            conn = sqlite3.connect(":memory:")
+            try:
+                conn.executescript(
+                    "CREATE TABLE employees ("
+                    "id INTEGER PRIMARY KEY, name TEXT, department TEXT, "
+                    "salary REAL, hire_year INTEGER);"
+                )
+                conn.executemany("INSERT INTO employees VALUES (?,?,?,?,?)", seed)
+                conn.commit()
+                cur = conn.execute(ground_truth_sql)
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description] if cur.description else []
+                return json.dumps({"status": "OK", "columns": cols, "rows": rows})
+            except Exception as e:
+                return json.dumps({"status": "Error", "error": str(e)})
+            finally:
+                conn.close()
+        _spl_result = ground_truth_result(ground_truth_sql)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - ground_truth_sql
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_ground_truth_sql
+      - out_truth_result
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: classify_roundtrip
+      backend: kernel
+      arguments:
+        - '@llm_result'
+        - '@truth_result'
+      code: |
+        def classify_roundtrip(llm_result_json: str, truth_result_json: str) -> str:
+            """Row-level, order-insensitive diff between the LLM's SQL result and
+            the ground-truth SQL result over the identically-seeded database.
+            Floats are rounded to 2dp before comparison to absorb harmless
+            floating-point noise. Returns 'match' / 'mismatch' / 'unverifiable'.
+            """
+            import json
+            try:
+                llm = json.loads(llm_result_json)
+                truth = json.loads(truth_result_json)
+            except Exception:
+                return "unverifiable"
+            if llm.get("status") != "OK" or truth.get("status") != "OK":
+                return "unverifiable"
+
+            def _norm(rows):
+                out = []
+                for r in rows:
+                    norm_r = []
+                    for v in r:
+                        if isinstance(v, float):
+                            norm_r.append(round(v, 2))
+                        else:
+                            norm_r.append(v)
+                    out.append(tuple(norm_r))
+                return sorted(out, key=lambda t: str(t))
+
+            a = _norm(llm.get("rows", []))
+            b = _norm(truth.get("rows", []))
+            return "match" if a == b else "mismatch"
+        _spl_result = classify_roundtrip(llm_result, truth_result)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_result_json
+        - truth_result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_result
+      - in_truth_result
+      - out_roundtrip
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: interpret_sql_result
+      params:
+        - question
+        - llm_result_json
+      prompt_inline: |-
+        You are a data analyst. Interpret this VERIFIED SQL query result for a
+        general audience.
+
+        Question: {{in_question}}
+
+        Verified result (JSON — the SQL actually ran against the real database;
+        trust these rows completely):
+        {{in_llm_result_json}}
+
+        Provide a concise interpretation (under 80 words) stating the answer to
+        the question, referencing the actual row values from the JSON. No
+        speculation beyond what the rows show.
+      arguments:
+        - '@question'
+        - '@llm_result'
+    ports:
+      - trigger
+      - complete
+      - in_question
+      - in_llm_result_json
+      - out_narrative
+  - id: tool_14
+    type: SOLVE
+    config:
+      tool: format_report
+      backend: kernel
+      arguments:
+        - '@question'
+        - '@llm_sql'
+        - '@llm_result'
+        - '@truth_result'
+        - '@narrative'
+        - '@roundtrip'
+      code: |
+        def format_report(question: str, llm_sql: str, llm_result_json: str,
+                          truth_result_json: str, narrative: str, roundtrip: str) -> str:
+            import json
+            try:
+                llm_r = json.loads(llm_result_json)
+            except Exception:
+                llm_r = {}
+            try:
+                truth_r = json.loads(truth_result_json)
+            except Exception:
+                truth_r = {}
+            lines = [
+                "# Text-to-SQL Verification Report",
+                "",
+                f"**Question:** {question.strip()}",
+                "",
+                f"**LLM SQL result:** `{llm_r.get('rows', '?')}`",
+                f"**Ground-truth result:** `{truth_r.get('rows', '?')}`",
+                f"**Round-trip check (row diff):** `{roundtrip}`",
+                "",
+                "## Interpretation", "", narrative.strip(),
+                "", "## LLM-generated SQL", "",
+                "```sql", llm_sql.strip(), "```",
+            ]
+            return "\n".join(lines)
+        _spl_result = format_report(question, llm_sql, llm_result, truth_result, narrative, roundtrip)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - question
+        - llm_sql
+        - llm_result_json
+        - truth_result_json
+        - narrative
+        - roundtrip
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_question
+      - in_llm_sql
+      - in_llm_result
+      - in_truth_result
+      - in_narrative
+      - in_roundtrip
+      - out_report
+  - id: tool_15
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@out_dir}/sql_verifier_{@ts_safe}.md'
+        - '@report'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{out_dir}/sql_verifier_{ts_safe}.md', report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_out_dir
+      - in_ts_safe
+      - in_report
+      - out_out_path
+  - id: tool_16
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_start'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_start)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_start
+      - out_elapsed
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_enable_solver
+    target: tool_3.in_enable_solver
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_4.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_solver_mode
+    target: eval_1.in_solver_mode
+    type: binds
+  - source: eval_1.pass
+    target: set_1.trigger
+    type: triggers
+  - source: eval_1.fail
+    target: set_2.trigger
+    type: triggers
+  - source: set_1.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_1.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: set_2.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_question
+    target: gen_1.in_question
+    type: binds
+  - source: tool_4.out_schema
+    target: gen_1.in_schema
+    type: binds
+  - source: gen_1.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: gen_1.out_report
+    target: tool_5.in_report
+    type: binds
+  - source: tool_5.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_5.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: set_4.out_status
+    target: loop_1.in_status
+    type: binds
+  - source: wf_entry.out_max_tries
+    target: loop_1.in_max_tries
+    type: binds
+  - source: wf_entry.out_question
+    target: loop_1.in_question
+    type: binds
+  - source: tool_4.out_schema
+    target: loop_1.in_schema
+    type: binds
+  - source: set_3.out_tries
+    target: loop_1.in_tries
+    type: binds
+  - source: set_6.out_llm_result
+    target: loop_1.in_llm_result
+    type: binds
+  - source: set_5.out_llm_sql
+    target: loop_1.in_llm_sql
+    type: binds
+  - source: loop_1.exit
+    target: tool_11.trigger
+    type: triggers
+  - source: loop_1.out_llm_result
+    target: tool_11.in_llm_result
+    type: binds
+  - source: tool_11.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: loop_1.out_llm_result
+    target: assert_1.in_llm_result
+    type: binds
+  - source: tool_11.out_tool_11
+    target: assert_1.in_tool_11
+    type: binds
+  - source: assert_1.pass
+    target: tool_12.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_12.trigger
+    type: triggers
+  - source: wf_entry.out_ground_truth_sql
+    target: tool_12.in_ground_truth_sql
+    type: binds
+  - source: tool_12.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: loop_1.out_llm_result
+    target: tool_13.in_llm_result
+    type: binds
+  - source: tool_12.out_truth_result
+    target: tool_13.in_truth_result
+    type: binds
+  - source: tool_13.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_question
+    target: gen_4.in_question
+    type: binds
+  - source: loop_1.out_llm_result
+    target: gen_4.in_llm_result_json
+    type: binds
+  - source: gen_4.complete
+    target: tool_14.trigger
+    type: triggers
+  - source: wf_entry.out_question
+    target: tool_14.in_question
+    type: binds
+  - source: loop_1.out_llm_sql
+    target: tool_14.in_llm_sql
+    type: binds
+  - source: loop_1.out_llm_result
+    target: tool_14.in_llm_result
+    type: binds
+  - source: tool_12.out_truth_result
+    target: tool_14.in_truth_result
+    type: binds
+  - source: gen_4.out_narrative
+    target: tool_14.in_narrative
+    type: binds
+  - source: tool_13.out_roundtrip
+    target: tool_14.in_roundtrip
+    type: binds
+  - source: tool_14.complete
+    target: tool_15.trigger
+    type: triggers
+  - source: wf_entry.out_out_dir
+    target: tool_15.in_out_dir
+    type: binds
+  - source: tool_2.out_ts_safe
+    target: tool_15.in_ts_safe
+    type: binds
+  - source: tool_14.out_report
+    target: tool_15.in_report
+    type: binds
+  - source: tool_15.complete
+    target: tool_16.trigger
+    type: triggers
+  - source: tool_1.out_t_start
+    target: tool_16.in_t_start
+    type: binds
+  - source: tool_14.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_16.complete
+    target: wf_exit.trigger
+    type: triggers

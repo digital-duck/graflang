@@ -1,0 +1,765 @@
+version: 1.0-graph
+workflow:
+  name: demand_forecast
+  inputs:
+    - name: problem
+      type: TEXT
+      default: Use the default 36-month widget sales dataset.
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: periods
+      type: TEXT
+      default: '6'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_use_solver
+      - out_periods
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_status
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_forecast_json
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: get_default_problem
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _DEFAULT_PROBLEM = {'description': 'Monthly widget sales — 3 years of historical data with upward trend and Q4 seasonal spike', 'frequency': 'monthly', 'seasonal_period': 12, 'history': [95, 90, 102, 108, 112, 115, 118, 120, 115, 112, 135, 152, 102, 97, 110, 116, 120, 124, 127, 129, 124, 121, 145, 164, 109, 104, 118, 125, 129, 133, 137, 139, 133, 130, 156, 176]}
+
+        def get_default_problem() -> str:
+            return json.dumps(_DEFAULT_PROBLEM)
+        _spl_result = get_default_problem()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_default_problem_json
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: describe_ts_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Describe this time-series forecasting problem as a JSON object.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "description": "<one-sentence summary>",
+          "frequency": "monthly",
+          "seasonal_period": 12,
+          "history": [<list of numeric values in chronological order>]
+        }}
+
+        Rules:
+        - history must be a flat list of numbers (no labels, no dates)
+        - seasonal_period: 12 for monthly, 4 for quarterly, 7 for daily-weekly
+        - if the problem provides raw data, use it exactly
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: fit_structural_ts
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@periods'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def fit_structural_ts(problem_json: str, periods: str='6') -> str:
+            """Fit statsmodels UnobservedComponents and forecast future periods.
+
+            Uses local-linear-trend + seasonal components (Kalman filter / MLE).
+            Holds out the last seasonal_period // 2 observations for RMSE validation.
+
+            Returns:
+                {"status": "OK", "forecast": [...], "lower": [...], "upper": [...],
+                 "n_periods": int, "rmse_holdout": float, "naive_rmse": float,
+                 "beats_naive": bool}
+            """
+            try:
+                import statsmodels.api as sm
+                import numpy as np
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'statsmodels not installed — run: pip install statsmodels'})
+            try:
+                data = json.loads(_strip_fences(problem_json))
+            except Exception as e:
+                return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+            history = [float(v) for v in data.get('history', [])]
+            seasonal_period = int(data.get('seasonal_period', 12))
+            n_forecast = max(1, int(periods))
+            if len(history) < 2 * seasonal_period:
+                return json.dumps({'status': 'INSUFFICIENT_DATA', 'error': f'need at least {2 * seasonal_period} observations for seasonal fit'})
+            n_holdout = seasonal_period // 2
+            train = history[:-n_holdout]
+            holdout = history[-n_holdout:]
+            try:
+                model = sm.tsa.UnobservedComponents(train, level='local linear trend', seasonal=seasonal_period)
+                result = model.fit(disp=False)
+            except Exception as e:
+                return json.dumps({'status': 'FIT_ERROR', 'error': str(e)})
+            fc = result.get_forecast(steps=n_holdout + n_forecast)
+            mean_all = np.asarray(fc.predicted_mean)
+            ci_arr = np.asarray(fc.conf_int())
+            lower_all = ci_arr[:, 0]
+            upper_all = ci_arr[:, 1]
+            holdout_pred = mean_all[:n_holdout]
+            forecast = mean_all[n_holdout:]
+            lower = lower_all[n_holdout:]
+            upper = upper_all[n_holdout:]
+            rmse = float(np.sqrt(np.mean((np.array(holdout) - holdout_pred) ** 2)))
+            naive_pred = np.full(n_holdout, train[-1])
+            naive_rmse = float(np.sqrt(np.mean((np.array(holdout) - naive_pred) ** 2)))
+            return json.dumps({'status': 'OK', 'forecast': [round(float(v), 1) for v in forecast], 'lower': [round(float(v), 1) for v in lower], 'upper': [round(float(v), 1) for v in upper], 'n_periods': n_forecast, 'rmse_holdout': round(rmse, 2), 'naive_rmse': round(naive_rmse, 2), 'beats_naive': bool(rmse < naive_rmse)})
+        _spl_result = fit_structural_ts(problem_json, periods)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - periods
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_periods
+      - out_forecast_json
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: is_forecast_valid
+      backend: kernel
+      arguments:
+        - '@forecast_json'
+      code: |
+        import json
+
+        def is_forecast_valid(forecast_json: str) -> bool:
+            """ASSERT gate: status==OK and RMSE beats naïve baseline."""
+            try:
+                d = json.loads(forecast_json)
+                return d.get('status') == 'OK' and d.get('beats_naive', False)
+            except Exception:
+                return False
+        _spl_result = is_forecast_valid(forecast_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - forecast_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_forecast_json
+      - out_tool_4
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_4'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_forecast_json
+      - in_tool_4
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: format_forecast_table
+      backend: kernel
+      arguments:
+        - '@forecast_json'
+      code: |
+        import json
+
+        def format_forecast_table(forecast_json: str) -> str:
+            """Format forecast as markdown table with confidence interval."""
+            try:
+                d = json.loads(forecast_json)
+                forecast = d.get('forecast', [])
+                lower = d.get('lower', [])
+                upper = d.get('upper', [])
+                if not forecast:
+                    return 'No forecast points.'
+                lines = ['| Period | Forecast | Lower 95% | Upper 95% |', '|---|---|---|---|']
+                for i, (f, lo, hi) in enumerate(zip(forecast, lower, upper), 1):
+                    lines.append(f'| +{i} | {f:.1f} | {lo:.1f} | {hi:.1f} |')
+                rmse = d.get('rmse_holdout')
+                naive = d.get('naive_rmse')
+                if rmse is not None and naive is not None:
+                    lines.append(f"\nHold-out RMSE: **{rmse:.2f}** vs naïve baseline {naive:.2f} ({('✓ beats naïve' if d.get('beats_naive') else '✗ does not beat naïve')})")
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'Could not format forecast table: {e}'
+        _spl_result = format_forecast_table(forecast_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - forecast_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_forecast_json
+      - out_forecast_table
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: interpret_forecast
+      params:
+        - problem
+        - forecast_table
+      prompt_inline: |-
+        Interpret this demand forecast for a supply chain or inventory planner.
+
+        Problem: {{in_problem}}
+
+        Forecast table (statsmodels UnobservedComponents — local linear trend + seasonal):
+        {{in_forecast_table}}
+
+        Your interpretation should:
+        1. Summarize the overall trend direction.
+        2. Identify any seasonal pattern visible in the forecast.
+        3. Give a plain-English recommendation for inventory planning based on the forecast.
+        4. Note any uncertainty (wide vs. narrow confidence intervals).
+
+        Be concise and practical — one paragraph.
+      arguments:
+        - '@problem'
+        - '@forecast_table'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_forecast_table
+      - out_interpretation
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@forecast_json'
+        - '''n_periods'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(forecast_json, 'n_periods')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_forecast_json
+      - out_n_periods_str
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@n_periods_str'
+        - '@forecast_table'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_on(problem: str, n_periods: str, forecast_table: str, interpretation: str, llm_calls: str) -> str:
+            return f'=== Demand Forecasting (solver=ON / statsmodels UnobservedComponents) ===\n\nProblem:\n{problem}\n\nForecast ({n_periods} periods ahead):\n{forecast_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_on(problem, n_periods_str, forecast_table, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - n_periods
+        - forecast_table
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_n_periods_str
+      - in_forecast_table
+      - in_interpretation
+      - in_llm_calls
+      - out_report
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: propose_forecast_heuristic
+      params:
+        - problem
+      prompt_inline: |-
+        You are a demand planner. Given this historical time-series, forecast the next 6 periods
+        using seasonal trend extrapolation (no solver — use your judgment).
+
+        {{in_problem}}
+
+        Steps:
+        1. Identify the trend (growing, flat, declining).
+        2. Identify any seasonal pattern (e.g. Q4 spike).
+        3. Extrapolate the next 6 periods, respecting both trend and seasonality.
+        4. Return a JSON object:
+        {{
+          "forecast": [<6 numeric values>],
+          "trend": "<growing|flat|declining>",
+          "reasoning": "<one sentence>"
+        }}
+
+        Return ONLY the JSON — no markdown, no prose.
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_forecast_text
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: verify_forecast_off
+      backend: kernel
+      arguments:
+        - '@default_problem_json'
+        - '@forecast_text'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def verify_forecast_off(problem_json: str, forecast_json: str) -> str:
+            """Sanity-check LLM heuristic forecast.
+
+            Checks:
+            - forecast values are positive
+            - forecast stays within ±50% of last observed value (gross sanity)
+            - number of periods matches requested
+
+            Returns {"verdict": "PASS"/"FAIL", "notes": str}
+            """
+            try:
+                problem = json.loads(_strip_fences(problem_json))
+                fc = json.loads(_strip_fences(forecast_json))
+            except Exception as e:
+                return json.dumps({'verdict': 'FAIL', 'notes': f'parse error: {e}'})
+            history = problem.get('history', [])
+            last_val = float(history[-1]) if history else 0.0
+            forecast = fc.get('forecast', [])
+            notes = []
+            ok = True
+            if not forecast:
+                return json.dumps({'verdict': 'FAIL', 'notes': 'forecast list is empty'})
+            for i, v in enumerate(forecast):
+                v = float(v)
+                if v <= 0:
+                    notes.append(f'period +{i + 1}: non-positive value {v}')
+                    ok = False
+                if last_val > 0 and (v < last_val * 0.5 or v > last_val * 1.5):
+                    notes.append(f'period +{i + 1}: value {v:.1f} is >50% away from last observed {last_val:.1f}')
+                    ok = False
+            return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'notes': '; '.join(notes) if notes else 'all sanity checks passed'})
+        _spl_result = verify_forecast_off(default_problem_json, forecast_text)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - forecast_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_default_problem_json
+      - in_forecast_text
+      - out_verify_result
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''verdict'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(verify_result, 'verdict')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_verify_status
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@forecast_text'
+        - '@forecast_text'
+        - '@verify_result'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_off(problem: str, forecast_text: str, forecast_json: str, verify_result: str, llm_calls: str) -> str:
+            return f'=== Demand Forecasting (solver=OFF / LLM heuristic) ===\n\nProblem:\n{problem}\n\nLLM Forecast:\n{forecast_text}\n\nExtracted (JSON):\n{forecast_json}\n\nSanity check:\n{verify_result}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_off(problem, forecast_text, forecast_text, verify_result, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - forecast_text
+        - forecast_json
+        - verify_result
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_forecast_text
+      - in_verify_result
+      - in_llm_calls
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_1.in_use_solver
+    type: binds
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_2.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_3.out_llm_calls
+    target: set_4.in_llm_calls
+    type: binds
+  - source: set_4.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_3.in_problem_json
+    type: binds
+  - source: wf_entry.out_periods
+    target: tool_3.in_periods
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_3.out_forecast_json
+    target: tool_4.in_forecast_json
+    type: binds
+  - source: tool_4.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_3.out_forecast_json
+    target: assert_1.in_forecast_json
+    type: binds
+  - source: tool_4.out_tool_4
+    target: assert_1.in_tool_4
+    type: binds
+  - source: assert_1.pass
+    target: tool_5.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_3.out_forecast_json
+    target: tool_5.in_forecast_json
+    type: binds
+  - source: tool_5.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_2.in_problem
+    type: binds
+  - source: tool_5.out_forecast_table
+    target: gen_2.in_forecast_table
+    type: binds
+  - source: gen_2.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_4.out_llm_calls
+    target: set_5.in_llm_calls
+    type: binds
+  - source: set_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_3.out_forecast_json
+    target: tool_6.in_forecast_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_7.in_problem
+    type: binds
+  - source: tool_6.out_n_periods_str
+    target: tool_7.in_n_periods_str
+    type: binds
+  - source: tool_5.out_forecast_table
+    target: tool_7.in_forecast_table
+    type: binds
+  - source: gen_2.out_interpretation
+    target: tool_7.in_interpretation
+    type: binds
+  - source: set_5.out_llm_calls
+    target: tool_7.in_llm_calls
+    type: binds
+  - source: eval_1.fail
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_3.in_problem
+    type: binds
+  - source: gen_3.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_3.out_llm_calls
+    target: set_6.in_llm_calls
+    type: binds
+  - source: set_6.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_2.out_default_problem_json
+    target: tool_8.in_default_problem_json
+    type: binds
+  - source: gen_3.out_forecast_text
+    target: tool_8.in_forecast_text
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_8.out_verify_result
+    target: tool_9.in_verify_result
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_10.in_problem
+    type: binds
+  - source: gen_3.out_forecast_text
+    target: tool_10.in_forecast_text
+    type: binds
+  - source: tool_8.out_verify_result
+    target: tool_10.in_verify_result
+    type: binds
+  - source: set_6.out_llm_calls
+    target: tool_10.in_llm_calls
+    type: binds
+  - source: tool_7.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_7.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers

@@ -1,0 +1,967 @@
+version: 1.0-graph
+workflow:
+  name: job_shop_scheduling
+  inputs:
+    - name: problem
+      type: TEXT
+      default: '3 jobs, 3 machines. Job1: M1(3)->M2(2)->M3(2). Job2: M2(2)->M1(3)->M3(1). Job3: M3(2)->M2(1)->M1(2). Minimize makespan. Known optimal: 8.'
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: adapter
+      type: TEXT
+      default: claude_cli
+    - name: model
+      type: TEXT
+      default: ''
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_use_solver
+      - out_adapter
+      - out_model
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_makespan_str
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_status
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_solution_json
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: extract_job_structure
+      params:
+        - problem
+      prompt_inline: |-
+        Extract this job-shop scheduling problem into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "jobs": [
+            {{"name": "Job1", "operations": [
+              {{"machine": "M1", "duration": 3}},
+              {{"machine": "M2", "duration": 2}}
+            ]}},
+            ...
+          ],
+          "machines": ["M1", "M2", ...],
+          "deadline": null
+        }}
+
+        Rules:
+        - Each operation must specify exactly one machine and an integer duration.
+        - Operations within a job are in the required processing order.
+        - deadline is null unless the problem states one.
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: solve_job_shop
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        from typing import Any
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def solve_job_shop(problem_json: str) -> str:
+            """
+            Solve a job-shop scheduling problem using OR-Tools CP-SAT.
+            Input: JSON string with keys: jobs, machines, deadline (optional)
+            Returns: JSON with keys: status, makespan, schedule, solver_log
+            """
+            from ortools.sat.python import cp_model
+            try:
+                data = json.loads(_strip_fences(problem_json))
+            except Exception as e:
+                return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+            jobs_data: list[dict[str, Any]] = data.get('jobs', [])
+            deadline: int | None = data.get('deadline')
+            if not jobs_data:
+                return json.dumps({'status': 'INVALID_INPUT', 'error': 'no jobs'})
+            model = cp_model.CpModel()
+            horizon = sum((op['duration'] for job in jobs_data for op in job.get('operations', [])))
+            all_tasks: dict[tuple[int, int], dict] = {}
+            machine_to_intervals: dict[str, list] = {}
+            for job_id, job in enumerate(jobs_data):
+                for task_id, op in enumerate(job.get('operations', [])):
+                    machine = op['machine']
+                    duration = int(op['duration'])
+                    suffix = f'_j{job_id}_t{task_id}'
+                    start_var = model.NewIntVar(0, horizon, f'start{suffix}')
+                    end_var = model.NewIntVar(0, horizon, f'end{suffix}')
+                    interval_var = model.NewIntervalVar(start_var, duration, end_var, f'interval{suffix}')
+                    all_tasks[job_id, task_id] = {'start': start_var, 'end': end_var, 'interval': interval_var, 'machine': machine, 'duration': duration}
+                    if machine not in machine_to_intervals:
+                        machine_to_intervals[machine] = []
+                    machine_to_intervals[machine].append(interval_var)
+            for machine, intervals in machine_to_intervals.items():
+                model.AddNoOverlap(intervals)
+            for job_id, job in enumerate(jobs_data):
+                ops = job.get('operations', [])
+                for task_id in range(len(ops) - 1):
+                    model.Add(all_tasks[job_id, task_id + 1]['start'] >= all_tasks[job_id, task_id]['end'])
+            makespan_var = model.NewIntVar(0, horizon, 'makespan')
+            model.AddMaxEquality(makespan_var, [all_tasks[job_id, len(job['operations']) - 1]['end'] for job_id, job in enumerate(jobs_data) if job.get('operations')])
+            if deadline is not None:
+                model.Add(makespan_var <= deadline)
+            model.Minimize(makespan_var)
+            solver = cp_model.CpSolver()
+            solver.parameters.max_time_in_seconds = 30.0
+            status_code = solver.Solve(model)
+            status_name = solver.StatusName(status_code)
+            if status_code not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                return json.dumps({'status': status_name, 'makespan': None, 'schedule': [], 'solver_log': f'CP-SAT returned {status_name}'})
+            makespan = solver.ObjectiveValue()
+            schedule = []
+            for job_id, job in enumerate(jobs_data):
+                for task_id, op in enumerate(job.get('operations', [])):
+                    t = all_tasks[job_id, task_id]
+                    schedule.append({'job': job.get('name', f'Job{job_id + 1}'), 'operation': task_id + 1, 'machine': op['machine'], 'start': solver.Value(t['start']), 'end': solver.Value(t['end']), 'duration': t['duration']})
+            schedule.sort(key=lambda x: (x['machine'], x['start']))
+            return json.dumps({'status': status_name, 'makespan': int(makespan), 'schedule': schedule, 'solver_log': f'CP-SAT {status_name}; makespan={int(makespan)}'})
+        _spl_result = solve_job_shop(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_solution_json
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: is_scheduled
+      backend: kernel
+      arguments:
+        - '@solution_json'
+      code: |
+        import json
+
+        def is_scheduled(solution_json: str) -> bool:
+            """Return True when CP-SAT status is OPTIMAL or FEASIBLE."""
+            import json
+            try:
+                data = json.loads(solution_json)
+                return data.get('status', '') in ('OPTIMAL', 'FEASIBLE')
+            except Exception:
+                return 'OPTIMAL' in solution_json or 'FEASIBLE' in solution_json
+        _spl_result = is_scheduled(solution_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solution_json
+      - out_tool_3
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_3'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solution_json
+      - in_tool_3
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: format_gantt
+      backend: kernel
+      arguments:
+        - '@solution_json'
+      code: |
+        import json
+
+        def format_gantt(solution_json: str) -> str:
+            """
+            Render a simple ASCII Gantt chart from the CP-SAT solution.
+            """
+            try:
+                sol = json.loads(solution_json)
+            except Exception:
+                return 'Could not parse solution for Gantt chart.'
+            schedule: list[dict] = sol.get('schedule', [])
+            if not schedule:
+                return 'No schedule to render.'
+            makespan = sol.get('makespan', max((e['end'] for e in schedule)))
+            width = min(makespan, 60)
+            scale = width / makespan if makespan > 0 else 1.0
+            machines = sorted({e['machine'] for e in schedule})
+            lines = [f'Makespan = {makespan} time units', '']
+            header = 'Machine  |' + ''.join((str(t % 10) for t in range(width + 1)))
+            lines.append(header)
+            lines.append('-' * len(header))
+            for machine in machines:
+                row = ['.'] * (width + 1)
+                ops = [e for e in schedule if e['machine'] == machine]
+                for op in ops:
+                    s = int(op['start'] * scale)
+                    e = int(op['end'] * scale)
+                    label = op['job'][0] if op['job'] else '?'
+                    for i in range(s, min(e, width + 1)):
+                        row[i] = label
+                lines.append(f"{machine:<9}|{''.join(row)}")
+            return '\n'.join(lines)
+        _spl_result = format_gantt(solution_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solution_json
+      - out_gantt
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: interpret_schedule
+      params:
+        - problem
+        - solution_json
+        - gantt
+      prompt_inline: |-
+        Interpret this job-shop scheduling result for a non-expert.
+
+        Problem: {{in_problem}}
+        Schedule (JSON): {{in_solution_json}}
+        Gantt chart:
+        {{in_gantt}}
+
+        Your interpretation should:
+        1. State the optimal makespan and what it means
+        2. Identify the bottleneck machine (most loaded)
+        3. Describe the schedule in plain language (which job runs when on which machine)
+        4. Note any waiting time and why it occurs
+        5. One-sentence practical takeaway
+
+        Be concise and practical.
+      arguments:
+        - '@problem'
+        - '@solution_json'
+        - '@gantt'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_solution_json
+      - in_gantt
+      - out_interpretation
+  - id: set_7
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@solution_json'
+        - '''makespan'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(solution_json, 'makespan')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_solution_json
+      - out_makespan_str
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@solution_json'
+        - '@gantt'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_on(problem: str, solution_json: str, gantt: str, interpretation: str, llm_calls: str) -> str:
+            return f'=== Job-Shop Scheduling (solver=ON / OR-Tools CP-SAT) ===\n\nProblem:\n{problem}\n\nCP-SAT Solution (JSON):\n{solution_json}\n\nGantt Chart:\n{gantt}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_on(problem, solution_json, gantt, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - solution_json
+        - gantt
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_solution_json
+      - in_gantt
+      - in_interpretation
+      - in_llm_calls
+      - out_report
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: solve_directly_js
+      params:
+        - problem
+      prompt_inline: |-
+        You are an expert operations researcher. Solve this job-shop scheduling problem.
+
+        Problem: {{in_problem}}
+
+        Job-shop rules:
+        - Each job has a fixed sequence of operations on specific machines.
+        - Each machine handles only one job at a time (no overlap).
+        - Operations within a job must run in order (no preemption).
+        - Goal: minimise the total makespan (time to finish all jobs).
+
+        Steps:
+        1. List all jobs, their operation sequences, and durations.
+        2. Build a schedule using a dispatching heuristic (FIFO, SPT, or NEH).
+        3. Show the Gantt chart as a text table (machine vs time slots).
+        4. State the makespan.
+        5. Verify no machine overlap and no precedence violation.
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_llm_schedule
+  - id: set_8
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: extract_solution_json_js
+      params:
+        - problem
+        - schedule_text
+      prompt_inline: |-
+        Convert this job-shop schedule description to JSON.
+        Return ONLY a JSON object — no markdown:
+        {{
+          "makespan": <integer>,
+          "schedule": [
+            {{"job": "Job1", "operation": 1, "machine": "M1", "start": 0, "end": 3, "duration": 3}},
+            ...
+          ]
+        }}
+
+        Problem: {{in_problem}}
+        Schedule description:
+        {{in_schedule_text}}
+      arguments:
+        - '@problem'
+        - '@llm_schedule'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_schedule_text
+      - out_solution_json
+  - id: set_9
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_5
+    type: GENERATE
+    config:
+      function: extract_job_structure
+      params:
+        - problem
+      prompt_inline: |-
+        Extract this job-shop scheduling problem into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "jobs": [
+            {{"name": "Job1", "operations": [
+              {{"machine": "M1", "duration": 3}},
+              {{"machine": "M2", "duration": 2}}
+            ]}},
+            ...
+          ],
+          "machines": ["M1", "M2", ...],
+          "deadline": null
+        }}
+
+        Rules:
+        - Each operation must specify exactly one machine and an integer duration.
+        - Operations within a job are in the required processing order.
+        - deadline is null unless the problem states one.
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_10
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: verify_job_shop
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@solution_json'
+      code: |
+        import json
+
+        def verify_job_shop(problem_json: str, solution_json: str) -> str:
+            """
+            Back-substitution verifier for solver=OFF path.
+            Checks: precedence constraints, no-overlap on machines, correct makespan.
+            """
+            try:
+                problem = json.loads(problem_json)
+                sol = json.loads(solution_json)
+            except Exception as e:
+                return json.dumps({'verdict': 'UNPARSEABLE', 'notes': str(e)})
+            schedule: list[dict] = sol.get('schedule', [])
+            if not schedule:
+                return json.dumps({'verdict': 'UNPARSEABLE', 'notes': 'empty schedule'})
+            jobs_data = problem.get('jobs', [])
+            notes: list[str] = []
+            ok = True
+            machine_ops: dict[str, list[dict]] = {}
+            for entry in schedule:
+                m = entry['machine']
+                machine_ops.setdefault(m, []).append(entry)
+            for machine, ops in machine_ops.items():
+                ops_sorted = sorted(ops, key=lambda x: x['start'])
+                for i in range(len(ops_sorted) - 1):
+                    a, b = (ops_sorted[i], ops_sorted[i + 1])
+                    if a['end'] > b['start']:
+                        notes.append(f"overlap on {machine}: {a['job']}[{a['start']},{a['end']}) vs {b['job']}[{b['start']},{b['end']})")
+                        ok = False
+            for job in jobs_data:
+                job_name = job.get('name', '')
+                job_ops = [e for e in schedule if e['job'] == job_name]
+                job_ops.sort(key=lambda x: x['operation'])
+                for i in range(len(job_ops) - 1):
+                    if job_ops[i]['end'] > job_ops[i + 1]['start']:
+                        notes.append(f"precedence violated for {job_name}: op{i + 1} ends {job_ops[i]['end']} > op{i + 2} starts {job_ops[i + 1]['start']}")
+                        ok = False
+            claimed_makespan = sol.get('makespan')
+            actual_makespan = max((e['end'] for e in schedule), default=0)
+            if claimed_makespan is not None and int(claimed_makespan) != actual_makespan:
+                notes.append(f'makespan mismatch: claimed={claimed_makespan}, actual={actual_makespan}')
+                ok = False
+            return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'claimed_makespan': claimed_makespan, 'actual_makespan': actual_makespan, 'notes': '; '.join(notes) if notes else 'all constraints satisfied'})
+        _spl_result = verify_job_shop(problem_json, solution_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_solution_json
+      - out_verify_result
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''verdict'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(verify_result, 'verdict')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_verify_status
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@solution_json'
+        - '''makespan'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(solution_json, 'makespan')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_solution_json
+      - out_makespan_str
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@llm_schedule'
+        - '@solution_json'
+        - '@verify_result'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_off(problem: str, llm_schedule: str, solution_json: str, verify_result: str, llm_calls: str) -> str:
+            return f'=== Job-Shop Scheduling (solver=OFF / LLM direct) ===\n\nProblem:\n{problem}\n\nLLM Schedule:\n{llm_schedule}\n\nExtracted Schedule (JSON):\n{solution_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_off(problem, llm_schedule, solution_json, verify_result, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - llm_schedule
+        - solution_json
+        - verify_result
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_llm_schedule
+      - in_solution_json
+      - in_verify_result
+      - in_llm_calls
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_1.in_use_solver
+    type: binds
+  - source: tool_1.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_5.out_llm_calls
+    target: set_6.in_llm_calls
+    type: binds
+  - source: set_6.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_2.out_solution_json
+    target: tool_3.in_solution_json
+    type: binds
+  - source: tool_3.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_2.out_solution_json
+    target: assert_1.in_solution_json
+    type: binds
+  - source: tool_3.out_tool_3
+    target: assert_1.in_tool_3
+    type: binds
+  - source: assert_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_2.out_solution_json
+    target: tool_4.in_solution_json
+    type: binds
+  - source: tool_4.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_2.in_problem
+    type: binds
+  - source: tool_2.out_solution_json
+    target: gen_2.in_solution_json
+    type: binds
+  - source: tool_4.out_gantt
+    target: gen_2.in_gantt
+    type: binds
+  - source: gen_2.complete
+    target: set_7.trigger
+    type: triggers
+  - source: set_6.out_llm_calls
+    target: set_7.in_llm_calls
+    type: binds
+  - source: set_7.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_2.out_solution_json
+    target: tool_5.in_solution_json
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_6.in_problem
+    type: binds
+  - source: tool_2.out_solution_json
+    target: tool_6.in_solution_json
+    type: binds
+  - source: tool_4.out_gantt
+    target: tool_6.in_gantt
+    type: binds
+  - source: gen_2.out_interpretation
+    target: tool_6.in_interpretation
+    type: binds
+  - source: set_7.out_llm_calls
+    target: tool_6.in_llm_calls
+    type: binds
+  - source: eval_1.fail
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_3.in_problem
+    type: binds
+  - source: gen_3.complete
+    target: set_8.trigger
+    type: triggers
+  - source: set_5.out_llm_calls
+    target: set_8.in_llm_calls
+    type: binds
+  - source: set_8.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_4.in_problem
+    type: binds
+  - source: gen_3.out_llm_schedule
+    target: gen_4.in_schedule_text
+    type: binds
+  - source: gen_4.complete
+    target: set_9.trigger
+    type: triggers
+  - source: set_8.out_llm_calls
+    target: set_9.in_llm_calls
+    type: binds
+  - source: set_9.complete
+    target: gen_5.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_5.in_problem
+    type: binds
+  - source: gen_5.complete
+    target: set_10.trigger
+    type: triggers
+  - source: set_9.out_llm_calls
+    target: set_10.in_llm_calls
+    type: binds
+  - source: set_10.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: gen_5.out_problem_json
+    target: tool_7.in_problem_json
+    type: binds
+  - source: gen_4.out_solution_json
+    target: tool_7.in_solution_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_7.out_verify_result
+    target: tool_8.in_verify_result
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: gen_4.out_solution_json
+    target: tool_9.in_solution_json
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_10.in_problem
+    type: binds
+  - source: gen_3.out_llm_schedule
+    target: tool_10.in_llm_schedule
+    type: binds
+  - source: gen_4.out_solution_json
+    target: tool_10.in_solution_json
+    type: binds
+  - source: tool_7.out_verify_result
+    target: tool_10.in_verify_result
+    type: binds
+  - source: set_10.out_llm_calls
+    target: tool_10.in_llm_calls
+    type: binds
+  - source: tool_6.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_6.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers

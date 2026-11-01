@@ -1,0 +1,1217 @@
+version: 1.0-graph
+workflow:
+  name: nonlinear_opt
+  inputs:
+    - name: problem_type
+      type: TEXT
+      default: pricing
+    - name: demand_scale
+      type: TEXT
+      default: '10000'
+    - name: elasticity
+      type: TEXT
+      default: '1.5'
+    - name: revenue_scale
+      type: TEXT
+      default: '20'
+    - name: saturation
+      type: TEXT
+      default: '0.02'
+    - name: congestion
+      type: TEXT
+      default: '0.05'
+    - name: unit_cost
+      type: TEXT
+      default: '8'
+    - name: fixed_cost
+      type: TEXT
+      default: '200'
+    - name: x_min
+      type: TEXT
+      default: '6'
+    - name: x_max
+      type: TEXT
+      default: '150'
+    - name: min_demand
+      type: TEXT
+      default: '0'
+    - name: method
+      type: TEXT
+      default: SLSQP
+    - name: max_iterations
+      type: TEXT
+      default: '1000'
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: out_dir
+      type: TEXT
+      default: ./cookbook-solver/114_scipy_nonlinear/output
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem_type
+      - out_demand_scale
+      - out_elasticity
+      - out_revenue_scale
+      - out_saturation
+      - out_congestion
+      - out_unit_cost
+      - out_fixed_cost
+      - out_x_min
+      - out_x_max
+      - out_min_demand
+      - out_method
+      - out_max_iterations
+      - out_use_solver
+      - out_out_dir
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_problem_type == ''pricing'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_problem_type
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: formulate_pricing_problem
+      params:
+        - demand_scale
+        - elasticity
+        - unit_cost
+        - fixed_cost
+        - x_min
+        - x_max
+        - min_demand
+      prompt_inline: |-
+        Formulate the following nonlinear pricing problem as a JSON specification.
+
+        A company sells a product with a power demand curve:
+          D(price) = {{in_demand_scale}} * price^(-{{in_elasticity}})
+
+        Economics:
+          Unit cost:   ${{in_unit_cost}}
+          Fixed cost:  ${{in_fixed_cost}} per period
+          Price range: [${{in_x_min}}, ${{in_x_max}}]
+          Min demand:  {{in_min_demand}} units (0 = unconstrained)
+
+        Objective: maximize profit = (price - unit_cost) * D(price) - fixed_cost
+
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "type": "pricing",
+          "sense": "maximize",
+          "params": {{
+            "demand_scale": {{in_demand_scale}},
+            "elasticity": {{in_elasticity}},
+            "unit_cost": {{in_unit_cost}},
+            "fixed_cost": {{in_fixed_cost}},
+            "min_demand": {{in_min_demand}}
+          }},
+          "bounds": {{"x_min": {{in_x_min}}, "x_max": {{in_x_max}}}}
+        }}
+      arguments:
+        - '@demand_scale'
+        - '@elasticity'
+        - '@unit_cost'
+        - '@fixed_cost'
+        - '@x_min'
+        - '@x_max'
+        - '@min_demand'
+    ports:
+      - trigger
+      - complete
+      - in_demand_scale
+      - in_elasticity
+      - in_unit_cost
+      - in_fixed_cost
+      - in_x_min
+      - in_x_max
+      - in_min_demand
+      - out_problem_json
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: formulate_logistics_problem
+      params:
+        - fixed_cost
+        - unit_cost
+        - congestion_factor
+        - revenue_scale
+        - saturation_factor
+        - x_min
+        - x_max
+        - min_demand
+      prompt_inline: |-
+        Formulate the following nonlinear logistics problem as a JSON specification.
+
+        A firm ships x units per period with quadratic cost and revenue:
+          Revenue(x) = {{in_revenue_scale}} * x - {{in_saturation_factor}} * x^2
+          Cost(x)    = {{in_fixed_cost}} + {{in_unit_cost}} * x + {{in_congestion_factor}} * x^2
+
+        Volume range: [{{in_x_min}}, {{in_x_max}}] units
+        Min demand:   {{in_min_demand}} units (0 = unconstrained)
+
+        Objective: maximize profit = Revenue(x) - Cost(x)
+
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "type": "logistics",
+          "sense": "maximize",
+          "params": {{
+            "fixed_cost": {{in_fixed_cost}},
+            "unit_cost": {{in_unit_cost}},
+            "congestion_factor": {{in_congestion_factor}},
+            "revenue_scale": {{in_revenue_scale}},
+            "saturation_factor": {{in_saturation_factor}},
+            "min_demand": {{in_min_demand}}
+          }},
+          "bounds": {{"x_min": {{in_x_min}}, "x_max": {{in_x_max}}}}
+        }}
+      arguments:
+        - '@fixed_cost'
+        - '@unit_cost'
+        - '@congestion'
+        - '@revenue_scale'
+        - '@saturation'
+        - '@x_min'
+        - '@x_max'
+        - '@min_demand'
+    ports:
+      - trigger
+      - complete
+      - in_fixed_cost
+      - in_unit_cost
+      - in_congestion_factor
+      - in_revenue_scale
+      - in_saturation_factor
+      - in_x_min
+      - in_x_max
+      - in_min_demand
+      - out_problem_json
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: solve_nonlinear
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@method'
+        - '@max_iterations'
+      code: |
+        import json
+
+        import re
+
+        def _clean_json(text: str) -> str:
+            """Strip markdown code fences that LLMs sometimes add around JSON output."""
+            text = text.strip()
+            m = re.match('^```(?:json)?\\s*(.*?)\\s*```$', text, re.DOTALL)
+            return m.group(1) if m else text
+
+        def solve_nonlinear(problem_json: str, method: str='SLSQP', max_iterations: int=1000) -> str:
+            """
+            Solve a constrained nonlinear optimization problem using scipy.optimize.
+
+            Args:
+                problem_json:   JSON with keys: type, params, bounds, constraints (optional).
+                method:         Scipy solver — "SLSQP" (default, handles constraints),
+                                "Nelder-Mead" (derivative-free, bounds only),
+                                "differential_evolution" (global search, bounds only).
+                                Must be one of these three.
+                max_iterations: Max solver iterations, must be in [100, 10000] (default 1000).
+
+            Returns JSON: {success, method, x_opt, objective, n_iterations, message}
+            """
+            max_iterations = int(max_iterations)
+            valid_methods = {'SLSQP', 'Nelder-Mead', 'differential_evolution'}
+            if method not in valid_methods:
+                return json.dumps({'success': False, 'error': f'method must be one of {sorted(valid_methods)}'})
+            if not 100 <= max_iterations <= 10000:
+                return json.dumps({'success': False, 'error': f'max_iterations {max_iterations} out of range [100, 10000]'})
+            try:
+                from scipy.optimize import minimize, differential_evolution
+                prob = json.loads(_clean_json(problem_json))
+                ptype = prob.get('type', 'pricing')
+                params = prob.get('params', {})
+                bounds_raw = prob.get('bounds', {})
+                x_min = float(bounds_raw.get('x_min', 1.0))
+                x_max = float(bounds_raw.get('x_max', 100.0))
+                if ptype == 'pricing':
+                    demand_scale = float(params.get('demand_scale', 10000.0))
+                    elasticity = float(params.get('elasticity', 1.5))
+                    unit_cost = float(params.get('unit_cost', 5.0))
+                    fixed_cost = float(params.get('fixed_cost', 50.0))
+                    min_demand = float(params.get('min_demand', 0.0))
+
+                    def _neg_profit_pricing(p):
+                        demand = demand_scale * p[0] ** (-elasticity)
+                        return -((p[0] - unit_cost) * demand - fixed_cost)
+                    objective_fn = _neg_profit_pricing
+                    constraints = []
+                    if min_demand > 0:
+                        constraints.append({'type': 'ineq', 'fun': lambda p: demand_scale * p[0] ** (-elasticity) - min_demand})
+                elif ptype == 'logistics':
+                    fixed_cost = float(params.get('fixed_cost', 200.0))
+                    unit_cost = float(params.get('unit_cost', 8.0))
+                    congestion = float(params.get('congestion_factor', 0.05))
+                    revenue_scale = float(params.get('revenue_scale', 20.0))
+                    saturation = float(params.get('saturation_factor', 0.02))
+                    min_demand = float(params.get('min_demand', 0.0))
+
+                    def _neg_profit_logistics(x):
+                        revenue = revenue_scale * x[0] - saturation * x[0] ** 2
+                        cost = fixed_cost + unit_cost * x[0] + congestion * x[0] ** 2
+                        return -(revenue - cost)
+                    objective_fn = _neg_profit_logistics
+                    constraints = []
+                    if min_demand > 0:
+                        constraints.append({'type': 'ineq', 'fun': lambda x: x[0] - min_demand})
+                else:
+                    return json.dumps({'success': False, 'error': f"unknown problem type '{ptype}'; use 'pricing' or 'logistics'"})
+                scipy_bounds = [(x_min, x_max)]
+                x0 = [(x_min + x_max) / 2.0]
+                if method == 'differential_evolution':
+                    result = differential_evolution(objective_fn, bounds=scipy_bounds, maxiter=max_iterations, seed=42, tol=1e-08)
+                    x_opt = float(result.x[0])
+                else:
+                    result = minimize(objective_fn, x0, method=method, bounds=scipy_bounds, constraints=constraints if method == 'SLSQP' else [], options={'maxiter': max_iterations, 'ftol': 1e-10})
+                    x_opt = float(result.x[0])
+                objective = float(-result.fun)
+                return json.dumps({'success': bool(result.success), 'method': method, 'problem_type': ptype, 'x_opt': round(x_opt, 4), 'objective': round(objective, 4), 'n_iterations': int(result.nit) if hasattr(result, 'nit') else None, 'message': result.message})
+            except Exception as e:
+                return json.dumps({'success': False, 'error': str(e)})
+        _spl_result = solve_nonlinear(problem_json, method, max_iterations)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - method
+        - max_iterations
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_method
+      - in_max_iterations
+      - out_solution_json
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: is_optimal
+      backend: kernel
+      arguments:
+        - '@solution_json'
+      code: |
+        import json
+
+        import math
+
+        def is_optimal(solution_json: str) -> bool:
+            """Return True when scipy reports success and objective is finite."""
+            try:
+                data = json.loads(solution_json)
+                return data.get('success') is True and data.get('objective') is not None and math.isfinite(float(data['objective']))
+            except Exception:
+                return False
+        _spl_result = is_optimal(solution_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solution_json
+      - out_tool_3
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_3'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solution_json
+      - in_tool_3
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: verify_solution
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@solution_json'
+      code: |
+        import json
+
+        import re
+
+        def _clean_json(text: str) -> str:
+            """Strip markdown code fences that LLMs sometimes add around JSON output."""
+            text = text.strip()
+            m = re.match('^```(?:json)?\\s*(.*?)\\s*```$', text, re.DOTALL)
+            return m.group(1) if m else text
+
+        def verify_solution(problem_json: str, solution_json: str) -> str:
+            """
+            Independent back-substitution verifier.
+            Recomputes the objective from scratch at x_opt and checks it matches.
+
+            Args:
+                problem_json:  Same JSON passed to solve_nonlinear.
+                solution_json: JSON output from solve_nonlinear.
+
+            Returns JSON: {verdict, x_opt, recomputed_objective, reported_objective, delta, notes}
+            """
+            try:
+                prob = json.loads(_clean_json(problem_json))
+                sol = json.loads(_clean_json(solution_json))
+                if not sol.get('success'):
+                    return json.dumps({'verdict': 'SKIP', 'notes': 'solver did not succeed'})
+                ptype = prob.get('type', 'pricing')
+                params = prob.get('params', {})
+                x_opt = float(sol['x_opt'])
+                reported = float(sol['objective'])
+                notes: list[str] = []
+                if ptype == 'pricing':
+                    demand_scale = float(params.get('demand_scale', 10000.0))
+                    elasticity = float(params.get('elasticity', 1.5))
+                    unit_cost = float(params.get('unit_cost', 5.0))
+                    fixed_cost = float(params.get('fixed_cost', 50.0))
+                    demand = demand_scale * x_opt ** (-elasticity)
+                    recomputed = round((x_opt - unit_cost) * demand - fixed_cost, 4)
+                elif ptype == 'logistics':
+                    fixed_cost = float(params.get('fixed_cost', 200.0))
+                    unit_cost = float(params.get('unit_cost', 8.0))
+                    congestion = float(params.get('congestion_factor', 0.05))
+                    revenue_scale = float(params.get('revenue_scale', 20.0))
+                    saturation = float(params.get('saturation_factor', 0.02))
+                    revenue = revenue_scale * x_opt - saturation * x_opt ** 2
+                    cost = fixed_cost + unit_cost * x_opt + congestion * x_opt ** 2
+                    recomputed = round(revenue - cost, 4)
+                else:
+                    return json.dumps({'verdict': 'SKIP', 'notes': f"unknown type '{ptype}'"})
+                delta = abs(recomputed - reported)
+                if delta > 0.01:
+                    notes.append(f'objective mismatch: recomputed={recomputed}, reported={reported}, Δ={delta:.4f}')
+                bounds_raw = prob.get('bounds', {})
+                x_min = float(bounds_raw.get('x_min', 1.0))
+                x_max = float(bounds_raw.get('x_max', 100.0))
+                if not x_min <= x_opt <= x_max:
+                    notes.append(f'x_opt={x_opt} outside bounds [{x_min}, {x_max}]')
+                ok = len(notes) == 0
+                return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'x_opt': x_opt, 'recomputed_objective': recomputed, 'reported_objective': reported, 'delta': round(delta, 6), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+            except Exception as e:
+                return json.dumps({'verdict': 'ERROR', 'notes': str(e)})
+        _spl_result = verify_solution(problem_json, solution_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_solution_json
+      - out_verify_json
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: interpret_result
+      params:
+        - problem_type
+        - problem_json
+        - solution_json
+        - verify_json
+      prompt_inline: |-
+        Interpret this nonlinear optimization result for a business decision-maker.
+
+        Problem type: {{in_problem_type}}
+        Problem specification: {{in_problem_json}}
+        Solver result: {{in_solution_json}}
+        Verification: {{in_verify_json}}
+
+        Your interpretation should:
+        1. State the optimal decision in plain business terms
+           - pricing: "Set price to $X.XX — this maximizes profit at $Y.YY per period"
+           - logistics: "Ship X.X units per period — this maximizes profit at $Y.YY"
+        2. Explain why the optimum is where it is (e.g. "above this price, demand falls too steeply")
+        3. Report the payoff (profit/loss) at the optimum and at the boundaries as comparison
+        4. State whether the solution passed verification and what that means
+        5. Suggest one sensitivity to explore (e.g. "what happens if elasticity rises to 2.0?")
+
+        Be concrete with numbers. Avoid jargon.
+      arguments:
+        - '@problem_type'
+        - '@problem_json'
+        - '@solution_json'
+        - '@verify_json'
+    ports:
+      - trigger
+      - complete
+      - in_problem_type
+      - in_problem_json
+      - in_solution_json
+      - in_verify_json
+      - out_interpretation
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@method'
+        - '@solution_json'
+        - '@verify_json'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_on(problem_json: str, method: str, solution_json: str, verify_json: str, interpretation: str, llm_calls: str) -> str:
+            return f'── Problem Specification ────────────────────────────────────\n{problem_json}\n\n── Solver Result (solver=ON, method={method}) ──────────────\n{solution_json}\n\n── Verification ─────────────────────────────────────────────\n{verify_json}\n\n── Business Interpretation ──────────────────────────────────\n{interpretation}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_on(problem_json, method, solution_json, verify_json, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - method
+        - solution_json
+        - verify_json
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_method
+      - in_solution_json
+      - in_verify_json
+      - in_interpretation
+      - in_llm_calls
+      - out_body
+  - id: eval_3
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: estimate_optimum
+      params:
+        - problem_type
+        - problem_json
+      prompt_inline: |-
+        You are an operations analyst. Estimate the profit-maximizing decision for this
+        nonlinear {{in_problem_type}} problem WITHOUT using a solver.
+
+        Problem specification: {{in_problem_json}}
+
+        Steps:
+        1. Parse the key parameters from the JSON.
+        2. Reason about the tradeoff: higher x raises revenue but also cost (or lowers demand).
+        3. Estimate where marginal revenue equals marginal cost (the economic optimum).
+        4. Propose a specific value for the decision variable x_opt.
+        5. Estimate the resulting profit.
+
+        Show your reasoning step by step. End with:
+          x_opt: <number>
+          estimated_profit: <number>
+      arguments:
+        - '@problem_type'
+        - '@problem_json'
+    ports:
+      - trigger
+      - complete
+      - in_problem_type
+      - in_problem_json
+      - out_estimate_text
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_5
+    type: GENERATE
+    config:
+      function: extract_solution_json
+      params:
+        - estimate_text
+      prompt_inline: |-
+        Extract the optimization estimate into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "success": true,
+          "method": "LLM-heuristic",
+          "x_opt": <decimal>,
+          "objective": <decimal>
+        }}
+
+        Estimate text: {{in_estimate_text}}
+      arguments:
+        - '@estimate_text'
+    ports:
+      - trigger
+      - complete
+      - in_estimate_text
+      - out_solution_json
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: verify_solution
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@solution_json'
+      code: |
+        import json
+
+        import re
+
+        def _clean_json(text: str) -> str:
+            """Strip markdown code fences that LLMs sometimes add around JSON output."""
+            text = text.strip()
+            m = re.match('^```(?:json)?\\s*(.*?)\\s*```$', text, re.DOTALL)
+            return m.group(1) if m else text
+
+        def verify_solution(problem_json: str, solution_json: str) -> str:
+            """
+            Independent back-substitution verifier.
+            Recomputes the objective from scratch at x_opt and checks it matches.
+
+            Args:
+                problem_json:  Same JSON passed to solve_nonlinear.
+                solution_json: JSON output from solve_nonlinear.
+
+            Returns JSON: {verdict, x_opt, recomputed_objective, reported_objective, delta, notes}
+            """
+            try:
+                prob = json.loads(_clean_json(problem_json))
+                sol = json.loads(_clean_json(solution_json))
+                if not sol.get('success'):
+                    return json.dumps({'verdict': 'SKIP', 'notes': 'solver did not succeed'})
+                ptype = prob.get('type', 'pricing')
+                params = prob.get('params', {})
+                x_opt = float(sol['x_opt'])
+                reported = float(sol['objective'])
+                notes: list[str] = []
+                if ptype == 'pricing':
+                    demand_scale = float(params.get('demand_scale', 10000.0))
+                    elasticity = float(params.get('elasticity', 1.5))
+                    unit_cost = float(params.get('unit_cost', 5.0))
+                    fixed_cost = float(params.get('fixed_cost', 50.0))
+                    demand = demand_scale * x_opt ** (-elasticity)
+                    recomputed = round((x_opt - unit_cost) * demand - fixed_cost, 4)
+                elif ptype == 'logistics':
+                    fixed_cost = float(params.get('fixed_cost', 200.0))
+                    unit_cost = float(params.get('unit_cost', 8.0))
+                    congestion = float(params.get('congestion_factor', 0.05))
+                    revenue_scale = float(params.get('revenue_scale', 20.0))
+                    saturation = float(params.get('saturation_factor', 0.02))
+                    revenue = revenue_scale * x_opt - saturation * x_opt ** 2
+                    cost = fixed_cost + unit_cost * x_opt + congestion * x_opt ** 2
+                    recomputed = round(revenue - cost, 4)
+                else:
+                    return json.dumps({'verdict': 'SKIP', 'notes': f"unknown type '{ptype}'"})
+                delta = abs(recomputed - reported)
+                if delta > 0.01:
+                    notes.append(f'objective mismatch: recomputed={recomputed}, reported={reported}, Δ={delta:.4f}')
+                bounds_raw = prob.get('bounds', {})
+                x_min = float(bounds_raw.get('x_min', 1.0))
+                x_max = float(bounds_raw.get('x_max', 100.0))
+                if not x_min <= x_opt <= x_max:
+                    notes.append(f'x_opt={x_opt} outside bounds [{x_min}, {x_max}]')
+                ok = len(notes) == 0
+                return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'x_opt': x_opt, 'recomputed_objective': recomputed, 'reported_objective': reported, 'delta': round(delta, 6), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+            except Exception as e:
+                return json.dumps({'verdict': 'ERROR', 'notes': str(e)})
+        _spl_result = verify_solution(problem_json, solution_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_solution_json
+      - out_verify_json
+  - id: gen_6
+    type: GENERATE
+    config:
+      function: interpret_result
+      params:
+        - problem_type
+        - problem_json
+        - solution_json
+        - verify_json
+      prompt_inline: |-
+        Interpret this nonlinear optimization result for a business decision-maker.
+
+        Problem type: {{in_problem_type}}
+        Problem specification: {{in_problem_json}}
+        Solver result: {{in_solution_json}}
+        Verification: {{in_verify_json}}
+
+        Your interpretation should:
+        1. State the optimal decision in plain business terms
+           - pricing: "Set price to $X.XX — this maximizes profit at $Y.YY per period"
+           - logistics: "Ship X.X units per period — this maximizes profit at $Y.YY"
+        2. Explain why the optimum is where it is (e.g. "above this price, demand falls too steeply")
+        3. Report the payoff (profit/loss) at the optimum and at the boundaries as comparison
+        4. State whether the solution passed verification and what that means
+        5. Suggest one sensitivity to explore (e.g. "what happens if elasticity rises to 2.0?")
+
+        Be concrete with numbers. Avoid jargon.
+      arguments:
+        - '@problem_type'
+        - '@problem_json'
+        - '@solution_json'
+        - '@verify_json'
+    ports:
+      - trigger
+      - complete
+      - in_problem_type
+      - in_problem_json
+      - in_solution_json
+      - in_verify_json
+      - out_interpretation
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@estimate_text'
+        - '@solution_json'
+        - '@verify_json'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_off(problem_json: str, estimate_text: str, solution_json: str, verify_json: str, interpretation: str, llm_calls: str) -> str:
+            return f"── Problem Specification ────────────────────────────────────\n{problem_json}\n\n── LLM Estimate (solver=OFF) ────────────────────────────────\n{estimate_text}\n\n── Extracted Solution ───────────────────────────────────────\n{solution_json}\n\n── Verification ─────────────────────────────────────────────\n{verify_json}\n\n── Business Interpretation ──────────────────────────────────\n{interpretation}\n\nLLM calls: {llm_calls}\nNote: run --param use_solver=true to compare with scipy's exact solution."
+        _spl_result = format_report_solver_off(problem_json, estimate_text, solution_json, verify_json, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - estimate_text
+        - solution_json
+        - verify_json
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_estimate_text
+      - in_solution_json
+      - in_verify_json
+      - in_interpretation
+      - in_llm_calls
+      - out_body
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: format_report_wrapper
+      backend: kernel
+      arguments:
+        - '@problem_type'
+        - '@body'
+      code: |
+        def format_report_wrapper(problem_type: str, body: str) -> str:
+            return f'=== Nonlinear Optimization (scipy.optimize / {problem_type}) ===\n\n{body}'
+        _spl_result = format_report_wrapper(problem_type, body)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_type
+        - body
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_type
+      - in_body
+      - out_report
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: save_report
+      backend: kernel
+      arguments:
+        - '@report'
+        - '@out_dir'
+        - f'{@problem_type}_{@use_solver}_{@method}.txt'
+      code: |
+        def save_report(report: str, out_dir: str, filename: str) -> str:
+            """Write report text to out_dir/filename, creating the directory if needed."""
+            import os
+            from pathlib import Path
+            out = Path(out_dir) if os.path.isabs(out_dir) else Path(os.getcwd()) / out_dir
+            out.mkdir(parents=True, exist_ok=True)
+            dest = out / filename
+            dest.write_text(report, encoding='utf-8')
+            return str(dest)
+        _spl_result = save_report(report, out_dir, f'{problem_type}_{use_solver}_{method}.txt')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - report
+        - out_dir
+        - filename
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_report
+      - in_out_dir
+      - in_problem_type
+      - in_use_solver
+      - in_method
+      - out_saved_path
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem_type
+    target: eval_1.in_problem_type
+    type: binds
+  - source: eval_1.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_demand_scale
+    target: gen_1.in_demand_scale
+    type: binds
+  - source: wf_entry.out_elasticity
+    target: gen_1.in_elasticity
+    type: binds
+  - source: wf_entry.out_unit_cost
+    target: gen_1.in_unit_cost
+    type: binds
+  - source: wf_entry.out_fixed_cost
+    target: gen_1.in_fixed_cost
+    type: binds
+  - source: wf_entry.out_x_min
+    target: gen_1.in_x_min
+    type: binds
+  - source: wf_entry.out_x_max
+    target: gen_1.in_x_max
+    type: binds
+  - source: wf_entry.out_min_demand
+    target: gen_1.in_min_demand
+    type: binds
+  - source: eval_1.fail
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_fixed_cost
+    target: gen_2.in_fixed_cost
+    type: binds
+  - source: wf_entry.out_unit_cost
+    target: gen_2.in_unit_cost
+    type: binds
+  - source: wf_entry.out_congestion
+    target: gen_2.in_congestion_factor
+    type: binds
+  - source: wf_entry.out_revenue_scale
+    target: gen_2.in_revenue_scale
+    type: binds
+  - source: wf_entry.out_saturation
+    target: gen_2.in_saturation_factor
+    type: binds
+  - source: wf_entry.out_x_min
+    target: gen_2.in_x_min
+    type: binds
+  - source: wf_entry.out_x_max
+    target: gen_2.in_x_max
+    type: binds
+  - source: wf_entry.out_min_demand
+    target: gen_2.in_min_demand
+    type: binds
+  - source: gen_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: gen_2.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_1.out_llm_calls
+    target: set_2.in_llm_calls
+    type: binds
+  - source: set_2.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_1.in_use_solver
+    type: binds
+  - source: tool_1.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_1.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: tool_2.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: wf_entry.out_method
+    target: tool_2.in_method
+    type: binds
+  - source: wf_entry.out_max_iterations
+    target: tool_2.in_max_iterations
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_2.out_solution_json
+    target: tool_3.in_solution_json
+    type: binds
+  - source: tool_3.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_2.out_solution_json
+    target: assert_1.in_solution_json
+    type: binds
+  - source: tool_3.out_tool_3
+    target: assert_1.in_tool_3
+    type: binds
+  - source: assert_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_4.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_4.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: tool_4.in_problem_json
+    type: binds
+  - source: tool_2.out_solution_json
+    target: tool_4.in_solution_json
+    type: binds
+  - source: tool_4.complete
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_problem_type
+    target: gen_3.in_problem_type
+    type: binds
+  - source: gen_1.out_problem_json
+    target: gen_3.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: gen_3.in_problem_json
+    type: binds
+  - source: tool_2.out_solution_json
+    target: gen_3.in_solution_json
+    type: binds
+  - source: tool_4.out_verify_json
+    target: gen_3.in_verify_json
+    type: binds
+  - source: gen_3.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_2.out_llm_calls
+    target: set_3.in_llm_calls
+    type: binds
+  - source: set_3.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_5.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: tool_5.in_problem_json
+    type: binds
+  - source: wf_entry.out_method
+    target: tool_5.in_method
+    type: binds
+  - source: tool_2.out_solution_json
+    target: tool_5.in_solution_json
+    type: binds
+  - source: tool_4.out_verify_json
+    target: tool_5.in_verify_json
+    type: binds
+  - source: gen_3.out_interpretation
+    target: tool_5.in_interpretation
+    type: binds
+  - source: set_3.out_llm_calls
+    target: tool_5.in_llm_calls
+    type: binds
+  - source: eval_2.fail
+    target: eval_3.trigger
+    type: triggers
+  - source: tool_1.out_use_solver
+    target: eval_3.in_use_solver
+    type: binds
+  - source: eval_3.pass
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem_type
+    target: gen_4.in_problem_type
+    type: binds
+  - source: gen_1.out_problem_json
+    target: gen_4.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: gen_4.in_problem_json
+    type: binds
+  - source: gen_4.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_2.out_llm_calls
+    target: set_4.in_llm_calls
+    type: binds
+  - source: set_4.complete
+    target: gen_5.trigger
+    type: triggers
+  - source: gen_4.out_estimate_text
+    target: gen_5.in_estimate_text
+    type: binds
+  - source: gen_5.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_4.out_llm_calls
+    target: set_5.in_llm_calls
+    type: binds
+  - source: set_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_6.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: tool_6.in_problem_json
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_6.in_solution_json
+    type: binds
+  - source: tool_6.complete
+    target: gen_6.trigger
+    type: triggers
+  - source: wf_entry.out_problem_type
+    target: gen_6.in_problem_type
+    type: binds
+  - source: gen_1.out_problem_json
+    target: gen_6.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: gen_6.in_problem_json
+    type: binds
+  - source: gen_5.out_solution_json
+    target: gen_6.in_solution_json
+    type: binds
+  - source: tool_6.out_verify_json
+    target: gen_6.in_verify_json
+    type: binds
+  - source: gen_6.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_5.out_llm_calls
+    target: set_6.in_llm_calls
+    type: binds
+  - source: set_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_7.in_problem_json
+    type: binds
+  - source: gen_2.out_problem_json
+    target: tool_7.in_problem_json
+    type: binds
+  - source: gen_4.out_estimate_text
+    target: tool_7.in_estimate_text
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_7.in_solution_json
+    type: binds
+  - source: tool_6.out_verify_json
+    target: tool_7.in_verify_json
+    type: binds
+  - source: gen_6.out_interpretation
+    target: tool_7.in_interpretation
+    type: binds
+  - source: set_6.out_llm_calls
+    target: tool_7.in_llm_calls
+    type: binds
+  - source: tool_5.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: eval_3.fail
+    target: tool_8.trigger
+    type: triggers
+  - source: wf_entry.out_problem_type
+    target: tool_8.in_problem_type
+    type: binds
+  - source: tool_5.out_body
+    target: tool_8.in_body
+    type: binds
+  - source: tool_7.out_body
+    target: tool_8.in_body
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_8.out_report
+    target: tool_9.in_report
+    type: binds
+  - source: wf_entry.out_out_dir
+    target: tool_9.in_out_dir
+    type: binds
+  - source: wf_entry.out_problem_type
+    target: tool_9.in_problem_type
+    type: binds
+  - source: tool_1.out_use_solver
+    target: tool_9.in_use_solver
+    type: binds
+  - source: wf_entry.out_method
+    target: tool_9.in_method
+    type: binds
+  - source: tool_8.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers

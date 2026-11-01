@@ -1,0 +1,361 @@
+version: 1.0-graph
+workflow:
+  name: math_solver
+  inputs:
+  - name: problem
+    type: TEXT
+    default: find the roots of x squared minus 5x plus 6
+  - name: log_dir
+    type: TEXT
+    default: cookbook/67_symbolic_math/logs-spl
+  outputs:
+  - name: explanation
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_problem
+  - out_log_dir
+- id: gen_1
+  type: GENERATE
+  config:
+    function: parse_math_problem
+    params:
+    - problem
+    prompt_inline: |-
+      Convert this math problem into SymPy notation.
+      Reply with exactly one line in this format (no other text):
+        <expression>|<operation>
+
+      Rules:
+      - Use Python/SymPy syntax: ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+      - operation must be exactly one of: solve, diff, integrate, simplify, expand, factor
+      - For "solve", write f(x) with everything moved to the left side (= 0 form)
+
+      Examples:
+        "find the roots of x squared minus 5x plus 6"    →  x**2 - 5*x + 6|solve
+        "differentiate 3x cubed plus 2x"                 →  3*x**3 + 2*x|diff
+        "integrate sine of x"                            →  sin(x)|integrate
+        "factor x squared minus 9"                       →  x**2 - 9|factor
+        "simplify (x^2-1)/(x-1)"                         →  (x**2 - 1)/(x - 1)|simplify
+
+      Problem: {{in_problem}}
+    arguments:
+    - '@problem'
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - out_parsed
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@parsed'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(parsed)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_parsed
+  - out_parsed
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@parsed'
+    - '''|'''
+    - '''1'''
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(parsed, '|', '1')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_parsed
+  - out_expression
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@parsed'
+    - '''|'''
+    - '''2'''
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(parsed, '|', '2')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_parsed
+  - out_operation
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@expression'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(expression)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_expression
+  - out_expression
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@operation'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(operation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_operation
+  - out_operation
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: solve_with_sympy
+    backend: kernel
+    arguments:
+    - '@expression'
+    - '@operation'
+    code: |
+      def solve_with_sympy(expression: str, operation: str) -> str:
+          """Exact symbolic computation. Imports SymPy at call time so the
+          kernel can auto-install it on first use with --self-healing."""
+          from sympy import (
+              symbols, sympify, solve, diff, integrate,
+              simplify, expand, factor, limit, oo
+          )
+
+          try:
+              x, y, z, n = symbols('x y z n')
+              expr = sympify(expression.strip())
+              op = operation.strip().lower()
+
+              if op in ('solve', 'roots', 'zeros'):
+                  result = solve(expr, x)
+                  return f"solve({expression} = 0) → x = {result}"
+              elif op in ('diff', 'differentiate', 'derivative', 'gradient'):
+                  result = diff(expr, x)
+                  return f"d/dx({expression}) = {result}"
+              elif op in ('integrate', 'integral', 'antiderivative'):
+                  result = integrate(expr, x)
+                  return f"∫ {expression} dx = {result} + C"
+              elif op == 'simplify':
+                  result = simplify(expr)
+                  return f"simplify({expression}) = {result}"
+              elif op == 'expand':
+                  result = expand(expr)
+                  return f"expand({expression}) = {result}"
+              elif op == 'factor':
+                  result = factor(expr)
+                  return f"factor({expression}) = {result}"
+              else:
+                  result = simplify(expr)
+                  return f"{expression} = {result}"
+          except Exception as e:
+              return f"sympy_error: {e}"
+      _spl_result = solve_with_sympy(expression, operation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - expression
+    - operation
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_expression
+  - in_operation
+  - out_sympy_result
+- id: gen_2
+  type: GENERATE
+  config:
+    function: explain_solution
+    params:
+    - problem
+    - sympy_result
+    prompt_inline: |-
+      A student asked: "{{in_problem}}"
+
+      The symbolic math engine computed: {{in_sympy_result}}
+
+      Write a clear, friendly explanation in less than 5 sentences that:
+      1. Restates what the problem is asking in plain English
+      2. States the exact answer from the computation above
+      3. Briefly explains the key concept or method used
+      Do not re-derive the answer — trust the symbolic result above as exact.
+    arguments:
+    - '@problem'
+    - '@sympy_result'
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - in_sympy_result
+  - out_explanation
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_explanation
+edges:
+- source: wf_entry.entry
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_problem
+  target: gen_1.in_problem
+  type: binds
+- source: gen_1.complete
+  target: tool_1.trigger
+  type: triggers
+- source: gen_1.out_parsed
+  target: tool_1.in_parsed
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_parsed
+  target: tool_2.in_parsed
+  type: binds
+- source: tool_2.complete
+  target: tool_3.trigger
+  type: triggers
+- source: tool_1.out_parsed
+  target: tool_3.in_parsed
+  type: binds
+- source: tool_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: tool_2.out_expression
+  target: tool_4.in_expression
+  type: binds
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_3.out_operation
+  target: tool_5.in_operation
+  type: binds
+- source: tool_5.complete
+  target: tool_6.trigger
+  type: triggers
+- source: tool_4.out_expression
+  target: tool_6.in_expression
+  type: binds
+- source: tool_5.out_operation
+  target: tool_6.in_operation
+  type: binds
+- source: tool_6.complete
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_problem
+  target: gen_2.in_problem
+  type: binds
+- source: tool_6.out_sympy_result
+  target: gen_2.in_sympy_result
+  type: binds
+- source: gen_2.out_explanation
+  target: wf_exit.in_explanation
+  type: binds
+- source: gen_2.complete
+  target: wf_exit.trigger
+  type: triggers

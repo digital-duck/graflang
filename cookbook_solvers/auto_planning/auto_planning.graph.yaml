@@ -1,0 +1,1198 @@
+version: 1.0-graph
+workflow:
+  name: auto_planning
+  inputs:
+    - name: problem_text
+      type: TEXT
+      default: Truck t1 starts at A. Package p1 starts at A, package p2 starts at B. Deliver BOTH packages to location C using t1 (t1 can carry any number of packages at once; it can drive directly between any two locations).
+    - name: problem_json
+      type: TEXT
+      default: '{"truck_at": {"t1": "A"}, "pkg_at": {"p1": "A", "p2": "B"}, "pkg_in": {}, "goal": {"pkg_at": {"p1": "C", "p2": "C"}}}'
+    - name: enable_solver
+      type: TEXT
+      default: 'true'
+    - name: max_tries
+      type: INTEGER
+      default: 4
+    - name: out_dir
+      type: TEXT
+      default: ./cookbook/93_auto_planning/output
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem_text
+      - out_problem_json
+      - out_enable_solver
+      - out_max_tries
+      - out_out_dir
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_start
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: time_now
+      backend: kernel
+      arguments: []
+      code: |
+        import datetime
+
+        def time_now() -> str:
+            """TIME_NOW() — current local time as a filesystem-safe string:
+            YYYY-MM-DD_HH-MM-SS."""
+            return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        _spl_result = time_now()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_ts_safe
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@enable_solver'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(enable_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_enable_solver
+      - out_solver_mode
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: domain_description
+      backend: kernel
+      arguments: []
+      code: |
+        def domain_description() -> str:
+            """Fixed STRIPS logistics-lite domain, shown to the LLM (and to the
+            unaided baseline arm) exactly as the ground truth the validator
+            will replay the plan against."""
+            return (
+                "STRIPS DOMAIN: logistics-lite\n"
+                "Objects: truck t1; packages p1, p2; locations A, B, C "
+                "(any location reachable directly from any other — no roads to worry about)\n"
+                "Predicates: truck_at(T, L), pkg_at(P, L), pkg_in(P, T)\n"
+                "Actions (grounded, one per plan step):\n"
+                "  {\"action\": \"drive\", \"truck\": T, \"from\": L1, \"to\": L2}\n"
+                "    precondition: truck_at(T, L1)\n"
+                "    effect: truck no longer at L1, truck now at L2\n"
+                "  {\"action\": \"load\", \"truck\": T, \"pkg\": P, \"loc\": L}\n"
+                "    precondition: truck_at(T, L) AND pkg_at(P, L)\n"
+                "    effect: P no longer at L, P now in T\n"
+                "  {\"action\": \"unload\", \"truck\": T, \"pkg\": P, \"loc\": L}\n"
+                "    precondition: truck_at(T, L) AND pkg_in(P, T)\n"
+                "    effect: P no longer in T, P now at L\n"
+            )
+        _spl_result = domain_description()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_domain
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode == 'yes')
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solver_mode
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''yes'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''no'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''no'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: solve_directly
+      params:
+        - domain
+        - problem
+      prompt_inline: |-
+        You are an automated planner. There is no plan validator backing you
+        up this time — work out a plan yourself, from scratch, and reason in
+        prose about whether each step's precondition holds.
+
+        {{in_domain}}
+
+        Problem: {{in_problem}}
+
+        Write a clear step-by-step plan in under 10 sentences, explicitly
+        checking each action's precondition against the state at that point.
+        State the final number of steps in the plan plainly.
+
+        End your response with a line in EXACTLY this format (no extra words,
+        number only):
+        Final answer: <value>
+      arguments:
+        - '@domain'
+        - '@problem_text'
+    ports:
+      - trigger
+      - complete
+      - in_domain
+      - in_problem
+      - out_report
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@report'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_report
+      - out_report
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_tries
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''init'''
+    ports:
+      - trigger
+      - complete
+      - out_status
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''[]'''
+    ports:
+      - trigger
+      - complete
+      - out_plan
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_solution
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: latest(@in_tries, @tries) < @in_max_tries
+      outputs:
+        tries:
+          from:
+            - set_7.out_tries
+            - set_8.out_tries
+            - set_9.out_tries
+        plan:
+          from:
+            - gen_2.out_plan
+            - gen_3.out_plan
+        solution:
+          from:
+            - tool_6.out_solution
+            - tool_9.out_solution
+        status:
+          from:
+            - tool_7.out_status
+            - tool_10.out_status
+        error_info:
+          from: tool_8.out_error_info
+      subgraph:
+        nodes:
+          - id: eval_3
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''OK'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: set_7
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_max_tries'
+            ports:
+              - trigger
+              - complete
+              - in_max_tries
+              - out_tries
+          - id: eval_4
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''init'''
+              branch: 2
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: gen_2
+            type: GENERATE
+            config:
+              function: formulate_plan
+              params:
+                - domain
+                - problem
+              prompt_inline: |-
+                You are an automated planner. Given this STRIPS domain and problem,
+                produce a valid grounded plan.
+
+                {{in_domain}}
+
+                Problem: {{in_problem}}
+
+                Output ONLY a JSON list of grounded actions, each one of:
+                  {{"action": "drive", "truck": "t1", "from": "A", "to": "B"}}
+                  {{"action": "load", "truck": "t1", "pkg": "p1", "loc": "A"}}
+                  {{"action": "unload", "truck": "t1", "pkg": "p1", "loc": "C"}}
+
+                No markdown fences, no commentary — raw JSON array only.
+              arguments:
+                - '@domain'
+                - '@problem_text'
+            ports:
+              - trigger
+              - complete
+              - in_domain
+              - in_problem
+              - out_plan
+          - id: tool_6
+            type: SOLVE
+            config:
+              tool: run_plan_check
+              backend: kernel
+              arguments:
+                - '@problem_json'
+                - '@plan'
+              code: |
+                def run_plan_check(problem_json: str, plan_json: str) -> str:
+                    """Replay a proposed plan (a JSON list of grounded actions) against
+                    the logistics-lite STRIPS domain's precondition/effect semantics,
+                    starting from `problem_json`'s initial state, and check the goal.
+                    Acts as a minimal VAL-style plan validator: every action's
+                    preconditions must hold in the CURRENT simulated state before its
+                    effects are applied; if any precondition is violated, the plan is
+                    invalid at that step (with the reason reported for repair).
+                    """
+                    import json
+                    import re
+
+                    def strip_fences(s):
+                        s = re.sub(r'^```(?:json)?\s*\n?', '', s.strip(), flags=re.IGNORECASE)
+                        return re.sub(r'\n?```\s*$', '', s)
+
+                    try:
+                        problem = json.loads(strip_fences(problem_json))
+                        plan = json.loads(strip_fences(plan_json))
+                        if not isinstance(plan, list):
+                            return json.dumps({"status": "Error", "error": "plan must be a JSON list of actions", "step": 0})
+
+                        truck_at = dict(problem["truck_at"])          # {"t1": "A"}
+                        pkg_at = dict(problem.get("pkg_at", {}))       # {"p1": "A", "p2": "B"}
+                        pkg_in = dict(problem.get("pkg_in", {}))       # {} initially
+                        goal = problem["goal"]                         # {"pkg_at": {"p1": "C", "p2": "C"}}
+
+                        for i, step in enumerate(plan, start=1):
+                            act = step.get("action")
+                            if act == "drive":
+                                t, l1, l2 = step["truck"], step["from"], step["to"]
+                                if truck_at.get(t) != l1:
+                                    return json.dumps({
+                                        "status": "Error", "step": i,
+                                        "error": f"step {i} drive({t},{l1}->{l2}): precondition failed — "
+                                                 f"{t} is at '{truck_at.get(t)}', not '{l1}'",
+                                    })
+                                truck_at[t] = l2
+                            elif act == "load":
+                                t, p, l = step["truck"], step["pkg"], step["loc"]
+                                if truck_at.get(t) != l or pkg_at.get(p) != l:
+                                    return json.dumps({
+                                        "status": "Error", "step": i,
+                                        "error": f"step {i} load({p},{t}@{l}): precondition failed — "
+                                                 f"truck_at={truck_at.get(t)}, pkg_at={pkg_at.get(p)}, expected both '{l}'",
+                                    })
+                                del pkg_at[p]
+                                pkg_in[p] = t
+                            elif act == "unload":
+                                t, p, l = step["truck"], step["pkg"], step["loc"]
+                                if truck_at.get(t) != l or pkg_in.get(p) != t:
+                                    return json.dumps({
+                                        "status": "Error", "step": i,
+                                        "error": f"step {i} unload({p},{t}@{l}): precondition failed — "
+                                                 f"truck_at={truck_at.get(t)}, pkg_in={pkg_in.get(p)}, expected truck at '{l}' with pkg in '{t}'",
+                                    })
+                                del pkg_in[p]
+                                pkg_at[p] = l
+                            else:
+                                return json.dumps({"status": "Error", "step": i, "error": f"step {i}: unknown action '{act}'"})
+
+                        goal_pkg_at = goal.get("pkg_at", {})
+                        unmet = [f"{p} should be at {l} but is at {pkg_at.get(p, pkg_in.get(p, '?'))}"
+                                 for p, l in goal_pkg_at.items() if pkg_at.get(p) != l]
+                        if unmet:
+                            return json.dumps({
+                                "status": "Error", "step": len(plan),
+                                "error": "plan executed legally but goal not reached: " + "; ".join(unmet),
+                            })
+
+                        return json.dumps({
+                            "status": "OK",
+                            "answer": len(plan),
+                            "final_pkg_at": pkg_at,
+                            "final_truck_at": truck_at,
+                        })
+                    except KeyError as e:
+                        return json.dumps({"status": "Error", "step": 0, "error": f"malformed action, missing field {e}"})
+                    except Exception as e:
+                        return json.dumps({"status": "Error", "step": 0, "error": str(e)})
+                _spl_result = run_plan_check(problem_json, plan)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - problem_json
+                - plan_json
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_problem_json
+              - in_plan
+              - out_solution
+          - id: tool_7
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_8
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: tool_8
+            type: SOLVE
+            config:
+              tool: result_error
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_error(result_json: str) -> str:
+                    """RESULT_ERROR(result_json) — extract the 'error' field from a SOLVER
+                    result JSON dict (falls back to 'status', then 'unknown error')."""
+                    try:
+                        d = json.loads(result_json)
+                        return d.get('error', d.get('status', 'unknown error'))
+                    except Exception:
+                        return result_json
+                _spl_result = result_error(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_error_info
+          - id: gen_3
+            type: GENERATE
+            config:
+              function: repair_plan
+              params:
+                - domain
+                - problem
+                - plan_json
+                - error_info
+              prompt_inline: |-
+                This proposed plan is not VAL-valid — a precondition was violated (or
+                the goal was not reached) when the plan was replayed step by step.
+
+                {{in_domain}}
+
+                Problem: {{in_problem}}
+
+                Previous plan:
+                {{in_plan_json}}
+
+                Validator error:
+                {{in_error_info}}
+
+                Fix the plan so every action's precondition holds in the state at the
+                time it is executed, and the final state reaches the goal. Output
+                ONLY the corrected JSON list of grounded actions — no markdown fences,
+                no commentary.
+              arguments:
+                - '@domain'
+                - '@problem_text'
+                - '@plan'
+                - '@error_info'
+            ports:
+              - trigger
+              - complete
+              - in_domain
+              - in_problem
+              - in_plan_json
+              - in_error_info
+              - out_plan
+          - id: tool_9
+            type: SOLVE
+            config:
+              tool: run_plan_check
+              backend: kernel
+              arguments:
+                - '@problem_json'
+                - '@plan'
+              code: |
+                def run_plan_check(problem_json: str, plan_json: str) -> str:
+                    """Replay a proposed plan (a JSON list of grounded actions) against
+                    the logistics-lite STRIPS domain's precondition/effect semantics,
+                    starting from `problem_json`'s initial state, and check the goal.
+                    Acts as a minimal VAL-style plan validator: every action's
+                    preconditions must hold in the CURRENT simulated state before its
+                    effects are applied; if any precondition is violated, the plan is
+                    invalid at that step (with the reason reported for repair).
+                    """
+                    import json
+                    import re
+
+                    def strip_fences(s):
+                        s = re.sub(r'^```(?:json)?\s*\n?', '', s.strip(), flags=re.IGNORECASE)
+                        return re.sub(r'\n?```\s*$', '', s)
+
+                    try:
+                        problem = json.loads(strip_fences(problem_json))
+                        plan = json.loads(strip_fences(plan_json))
+                        if not isinstance(plan, list):
+                            return json.dumps({"status": "Error", "error": "plan must be a JSON list of actions", "step": 0})
+
+                        truck_at = dict(problem["truck_at"])          # {"t1": "A"}
+                        pkg_at = dict(problem.get("pkg_at", {}))       # {"p1": "A", "p2": "B"}
+                        pkg_in = dict(problem.get("pkg_in", {}))       # {} initially
+                        goal = problem["goal"]                         # {"pkg_at": {"p1": "C", "p2": "C"}}
+
+                        for i, step in enumerate(plan, start=1):
+                            act = step.get("action")
+                            if act == "drive":
+                                t, l1, l2 = step["truck"], step["from"], step["to"]
+                                if truck_at.get(t) != l1:
+                                    return json.dumps({
+                                        "status": "Error", "step": i,
+                                        "error": f"step {i} drive({t},{l1}->{l2}): precondition failed — "
+                                                 f"{t} is at '{truck_at.get(t)}', not '{l1}'",
+                                    })
+                                truck_at[t] = l2
+                            elif act == "load":
+                                t, p, l = step["truck"], step["pkg"], step["loc"]
+                                if truck_at.get(t) != l or pkg_at.get(p) != l:
+                                    return json.dumps({
+                                        "status": "Error", "step": i,
+                                        "error": f"step {i} load({p},{t}@{l}): precondition failed — "
+                                                 f"truck_at={truck_at.get(t)}, pkg_at={pkg_at.get(p)}, expected both '{l}'",
+                                    })
+                                del pkg_at[p]
+                                pkg_in[p] = t
+                            elif act == "unload":
+                                t, p, l = step["truck"], step["pkg"], step["loc"]
+                                if truck_at.get(t) != l or pkg_in.get(p) != t:
+                                    return json.dumps({
+                                        "status": "Error", "step": i,
+                                        "error": f"step {i} unload({p},{t}@{l}): precondition failed — "
+                                                 f"truck_at={truck_at.get(t)}, pkg_in={pkg_in.get(p)}, expected truck at '{l}' with pkg in '{t}'",
+                                    })
+                                del pkg_in[p]
+                                pkg_at[p] = l
+                            else:
+                                return json.dumps({"status": "Error", "step": i, "error": f"step {i}: unknown action '{act}'"})
+
+                        goal_pkg_at = goal.get("pkg_at", {})
+                        unmet = [f"{p} should be at {l} but is at {pkg_at.get(p, pkg_in.get(p, '?'))}"
+                                 for p, l in goal_pkg_at.items() if pkg_at.get(p) != l]
+                        if unmet:
+                            return json.dumps({
+                                "status": "Error", "step": len(plan),
+                                "error": "plan executed legally but goal not reached: " + "; ".join(unmet),
+                            })
+
+                        return json.dumps({
+                            "status": "OK",
+                            "answer": len(plan),
+                            "final_pkg_at": pkg_at,
+                            "final_truck_at": truck_at,
+                        })
+                    except KeyError as e:
+                        return json.dumps({"status": "Error", "step": 0, "error": f"malformed action, missing field {e}"})
+                    except Exception as e:
+                        return json.dumps({"status": "Error", "step": 0, "error": str(e)})
+                _spl_result = run_plan_check(problem_json, plan)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - problem_json
+                - plan_json
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_problem_json
+              - in_plan
+              - out_solution
+          - id: tool_10
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_9
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+        edges:
+          - source: eval_3.pass
+            target: set_7.trigger
+            type: triggers
+          - source: eval_3.fail
+            target: eval_4.trigger
+            type: triggers
+          - source: eval_4.pass
+            target: gen_2.trigger
+            type: triggers
+          - source: gen_2.complete
+            target: tool_6.trigger
+            type: triggers
+          - source: gen_2.out_plan
+            target: tool_6.in_plan
+            type: binds
+          - source: tool_6.complete
+            target: tool_7.trigger
+            type: triggers
+          - source: tool_6.out_solution
+            target: tool_7.in_solution
+            type: binds
+          - source: tool_7.complete
+            target: set_8.trigger
+            type: triggers
+          - source: eval_4.fail
+            target: tool_8.trigger
+            type: triggers
+          - source: tool_8.complete
+            target: gen_3.trigger
+            type: triggers
+          - source: tool_8.out_error_info
+            target: gen_3.in_error_info
+            type: binds
+          - source: gen_3.complete
+            target: tool_9.trigger
+            type: triggers
+          - source: gen_3.out_plan
+            target: tool_9.in_plan
+            type: binds
+          - source: tool_9.complete
+            target: tool_10.trigger
+            type: triggers
+          - source: tool_9.out_solution
+            target: tool_10.in_solution
+            type: binds
+          - source: tool_10.complete
+            target: set_9.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_status
+      - in_max_tries
+      - in_domain
+      - in_problem_text
+      - in_problem_json
+      - in_tries
+      - in_solution
+      - in_plan
+      - out_tries
+      - out_plan
+      - out_solution
+      - out_status
+      - out_error_info
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: result_ok
+      backend: kernel
+      arguments:
+        - '@solution'
+      code: |
+        import json
+
+        def result_ok(result_json: str) -> bool:
+            """RESULT_OK(result_json) — ASSERT gate: True only when result_json's
+            'status' field is exactly "OK"."""
+            try:
+                return json.loads(result_json).get('status') == 'OK'
+            except Exception:
+                return False
+        _spl_result = result_ok(solution)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_solution
+      - out_tool_11
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_11'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solution
+      - in_tool_11
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: interpret_plan_result
+      params:
+        - problem
+        - solution_json
+      prompt_inline: |-
+        You are an automated-planning expert. Interpret this VALIDATED plan
+        for a general audience.
+
+        Problem: {{in_problem}}
+
+        Verified result (JSON, independently replayed step-by-step against
+        the domain's precondition/effect semantics by a VAL-style validator —
+        trust it completely, do not re-derive it):
+        {{in_solution_json}}
+
+        Provide a concise interpretation (under 100 words):
+        1. Restate the logistics goal
+        2. State how many steps the validated plan took, referencing the
+           exact value from the JSON
+        3. One sentence on why every precondition holding at each step matters
+           (a plan that "looks right" can still violate one silently)
+
+        End your response with a line in EXACTLY this format (no extra words,
+        number only):
+        Final answer: <value>
+      arguments:
+        - '@problem_text'
+        - '@solution'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_solution_json
+      - out_narrative
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: classify_roundtrip
+      backend: kernel
+      arguments:
+        - '@narrative'
+        - '@solution'
+      code: |
+        def classify_roundtrip(narrative: str, result_json: str) -> str:
+            """Round-trip check: does the LLM's own 'Final answer: ...' line, in
+            its narration of the VALIDATED plan, match the verified plan length
+            (number of steps)?
+
+            Returns 'match' / 'mismatch' / 'unverifiable'.
+            """
+            import re
+            import json
+            m = re.search(r'final answer\s*:?\s*(.+)', narrative, re.IGNORECASE)
+            if not m:
+                return "unverifiable"
+            llm_val = m.group(1).strip().rstrip('.')
+            try:
+                truth = json.loads(result_json).get("answer")
+            except Exception:
+                return "unverifiable"
+            if truth is None:
+                return "unverifiable"
+
+            nums = re.findall(r'\d+', llm_val)
+            if not nums:
+                return "unverifiable"
+            return "match" if int(nums[0]) == int(truth) else "mismatch"
+        _spl_result = classify_roundtrip(narrative, solution)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - narrative
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_narrative
+      - in_solution
+      - out_roundtrip
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: format_report
+      backend: kernel
+      arguments:
+        - '@problem_text'
+        - '@plan'
+        - '@solution'
+        - '@narrative'
+        - '@roundtrip'
+      code: |
+        def format_report(problem: str, plan_json: str, solution_json: str,
+                          narrative: str, roundtrip: str) -> str:
+            import json
+            try:
+                sol = json.loads(solution_json)
+            except Exception:
+                sol = {}
+            lines = [
+                "# Automated Planning Report",
+                "",
+                f"**Problem:** {problem.strip()}",
+                "",
+                f"**Validator status (VAL-style):** `{sol.get('status', 'Unknown')}`",
+                f"**Plan length:** `{sol.get('answer', '?')} steps`",
+                f"**Final package locations:** `{sol.get('final_pkg_at', '?')}`",
+                f"**Round-trip check:** `{roundtrip}`",
+                "",
+                "## Interpretation", "", narrative.strip(),
+                "", "## Proposed Plan (LLM-generated, JSON)", "",
+                "```json", plan_json.strip(), "```",
+            ]
+            return "\n".join(lines)
+        _spl_result = format_report(problem_text, plan, solution, narrative, roundtrip)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - plan_json
+        - solution_json
+        - narrative
+        - roundtrip
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_text
+      - in_plan
+      - in_solution
+      - in_narrative
+      - in_roundtrip
+      - out_report
+  - id: tool_14
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@out_dir}/plan_{@ts_safe}.md'
+        - '@report'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{out_dir}/plan_{ts_safe}.md', report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_out_dir
+      - in_ts_safe
+      - in_report
+      - out_out_path
+  - id: tool_15
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_start'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_start)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_start
+      - out_elapsed
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_enable_solver
+    target: tool_3.in_enable_solver
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_4.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_solver_mode
+    target: eval_1.in_solver_mode
+    type: binds
+  - source: eval_1.pass
+    target: set_1.trigger
+    type: triggers
+  - source: eval_1.fail
+    target: set_2.trigger
+    type: triggers
+  - source: set_1.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_1.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: set_2.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_4.out_domain
+    target: gen_1.in_domain
+    type: binds
+  - source: wf_entry.out_problem_text
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: gen_1.out_report
+    target: tool_5.in_report
+    type: binds
+  - source: tool_5.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_5.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: set_4.out_status
+    target: loop_1.in_status
+    type: binds
+  - source: wf_entry.out_max_tries
+    target: loop_1.in_max_tries
+    type: binds
+  - source: tool_4.out_domain
+    target: loop_1.in_domain
+    type: binds
+  - source: wf_entry.out_problem_text
+    target: loop_1.in_problem_text
+    type: binds
+  - source: wf_entry.out_problem_json
+    target: loop_1.in_problem_json
+    type: binds
+  - source: set_3.out_tries
+    target: loop_1.in_tries
+    type: binds
+  - source: set_6.out_solution
+    target: loop_1.in_solution
+    type: binds
+  - source: set_5.out_plan
+    target: loop_1.in_plan
+    type: binds
+  - source: loop_1.exit
+    target: tool_11.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: tool_11.in_solution
+    type: binds
+  - source: tool_11.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: assert_1.in_solution
+    type: binds
+  - source: tool_11.out_tool_11
+    target: assert_1.in_tool_11
+    type: binds
+  - source: assert_1.pass
+    target: gen_4.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem_text
+    target: gen_4.in_problem
+    type: binds
+  - source: loop_1.out_solution
+    target: gen_4.in_solution_json
+    type: binds
+  - source: gen_4.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: gen_4.out_narrative
+    target: tool_12.in_narrative
+    type: binds
+  - source: loop_1.out_solution
+    target: tool_12.in_solution
+    type: binds
+  - source: tool_12.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: wf_entry.out_problem_text
+    target: tool_13.in_problem_text
+    type: binds
+  - source: loop_1.out_plan
+    target: tool_13.in_plan
+    type: binds
+  - source: loop_1.out_solution
+    target: tool_13.in_solution
+    type: binds
+  - source: gen_4.out_narrative
+    target: tool_13.in_narrative
+    type: binds
+  - source: tool_12.out_roundtrip
+    target: tool_13.in_roundtrip
+    type: binds
+  - source: tool_13.complete
+    target: tool_14.trigger
+    type: triggers
+  - source: wf_entry.out_out_dir
+    target: tool_14.in_out_dir
+    type: binds
+  - source: tool_2.out_ts_safe
+    target: tool_14.in_ts_safe
+    type: binds
+  - source: tool_13.out_report
+    target: tool_14.in_report
+    type: binds
+  - source: tool_14.complete
+    target: tool_15.trigger
+    type: triggers
+  - source: tool_1.out_t_start
+    target: tool_15.in_t_start
+    type: binds
+  - source: tool_13.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_15.complete
+    target: wf_exit.trigger
+    type: triggers

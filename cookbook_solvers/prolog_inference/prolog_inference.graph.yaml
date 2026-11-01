@@ -1,0 +1,635 @@
+version: 1.0-graph
+workflow:
+  name: prolog_inference
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_default_policy
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _DEFAULT_POLICY = {'policy_name': 'ComprehensiveAuto_v3', 'customers': ['alice', 'bob', 'carol'], 'query': 'emergency_claim', 'description': 'Insurance eligibility: a customer can file an emergency claim if they have a comprehensive policy, the policy is active (not lapsed), and either the deductible is met OR the event is catastrophic. Alice: comprehensive, active, deductible met, emergency event. Bob: basic policy only (lapsed — policy_active missing). Carol: comprehensive, active, catastrophic event (no deductible needed).'}
+
+        def get_default_policy() -> str:
+            return json.dumps(_DEFAULT_POLICY)
+        _spl_result = get_default_policy()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_policy_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@policy_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(policy_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_policy_json
+      - out_policy_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: run_inference
+      backend: kernel
+      arguments:
+        - '@policy_json'
+      code: |
+        import json
+
+        class KnowledgeBase:
+            """Holds facts (ground atoms) and rules (head :- body)."""
+
+            def __init__(self):
+                self.facts: list[tuple] = []
+                self.rules: list[dict] = []
+
+            def add_fact(self, predicate: str, *args):
+                self.facts.append((predicate, *args))
+
+            def add_rule(self, head: dict, body: list[dict]):
+                self.rules.append({'head': head, 'body': body})
+
+            def query(self, goal: dict, bindings: dict | None=None) -> list[dict]:
+                """Find all binding sets that satisfy the goal (backward chaining)."""
+                if bindings is None:
+                    bindings = {}
+                pred = goal['pred']
+                args = [bindings.get(a, a) for a in goal.get('args', [])]
+                results: list[dict] = []
+                for fact in self.facts:
+                    if fact[0] != pred or len(fact) - 1 != len(args):
+                        continue
+                    new_b = dict(bindings)
+                    match = True
+                    for got, want in zip(fact[1:], args):
+                        if want.startswith('?'):
+                            new_b[want] = got
+                        elif got != want:
+                            match = False
+                            break
+                    if match:
+                        results.append(new_b)
+                for rule in self.rules:
+                    head = rule['head']
+                    if head['pred'] != pred or len(head.get('args', [])) != len(args):
+                        continue
+                    new_b = dict(bindings)
+                    match = True
+                    for got, want in zip(head.get('args', []), args):
+                        if got.startswith('?'):
+                            new_b[got] = want
+                        elif got != want:
+                            match = False
+                            break
+                    if not match:
+                        continue
+                    body_solutions = [new_b]
+                    for body_goal in rule['body']:
+                        next_solutions: list[dict] = []
+                        for sol in body_solutions:
+                            next_solutions.extend(self.query(body_goal, sol))
+                        body_solutions = next_solutions
+                        if not body_solutions:
+                            break
+                    results.extend(body_solutions)
+                return results
+
+        def _build_default_kb() -> KnowledgeBase:
+            kb = KnowledgeBase()
+            kb.add_fact('has_policy', 'alice', 'comprehensive')
+            kb.add_fact('policy_active', 'alice')
+            kb.add_fact('deductible_met', 'alice')
+            kb.add_fact('claim_type', 'alice', 'emergency_repair')
+            kb.add_fact('emergency_event', 'alice')
+            kb.add_fact('has_policy', 'bob', 'basic')
+            kb.add_fact('claim_type', 'bob', 'emergency_repair')
+            kb.add_fact('has_policy', 'carol', 'comprehensive')
+            kb.add_fact('policy_active', 'carol')
+            kb.add_fact('catastrophic_event', 'carol')
+            kb.add_fact('claim_type', 'carol', 'emergency_repair')
+            kb.add_rule(head={'pred': 'eligible_claim', 'args': ['?X', '?Type']}, body=[{'pred': 'has_policy', 'args': ['?X', 'comprehensive']}, {'pred': 'policy_active', 'args': ['?X']}, {'pred': 'claim_covered', 'args': ['?X', '?Type']}])
+            kb.add_rule(head={'pred': 'claim_covered', 'args': ['?X', 'emergency_repair']}, body=[{'pred': 'deductible_met', 'args': ['?X']}])
+            kb.add_rule(head={'pred': 'claim_covered', 'args': ['?X', 'emergency_repair']}, body=[{'pred': 'catastrophic_event', 'args': ['?X']}])
+            kb.add_rule(head={'pred': 'emergency_claim', 'args': ['?X']}, body=[{'pred': 'eligible_claim', 'args': ['?X', 'emergency_repair']}, {'pred': 'emergency_event', 'args': ['?X']}])
+            return kb
+
+        def run_inference(policy_json: str) -> str:
+            """Run backward-chaining inference for all customers in the policy.
+
+            Returns:
+              {"policy_name": str, "n_customers": int, "n_eligible": int,
+               "results": [{customer, eligible, proof_chain}]}
+            """
+            try:
+                policy = json.loads(policy_json)
+                kb = _build_default_kb()
+                query_pred = policy.get('query', 'emergency_claim')
+                results = []
+                for customer in policy.get('customers', []):
+                    solutions = kb.query({'pred': query_pred, 'args': [customer]})
+                    eligible = len(solutions) > 0
+                    results.append({'customer': customer, 'eligible': eligible, 'n_solutions': len(solutions), 'verdict': f"{customer}: {('ELIGIBLE' if eligible else 'NOT ELIGIBLE')} for {query_pred}"})
+                n_eligible = sum((1 for r in results if r['eligible']))
+                return json.dumps({'policy_name': policy.get('policy_name', 'Policy'), 'query': query_pred, 'n_customers': len(results), 'n_eligible': n_eligible, 'status': 'OK', 'results': results})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e), 'n_eligible': 0})
+        _spl_result = run_inference(policy_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_json
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: inference_succeeded
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def inference_succeeded(result_json: str) -> bool:
+            """ASSERT gate: inference ran without error and at least one result exists."""
+            try:
+                data = json.loads(result_json)
+                return data.get('status') == 'OK' and data.get('n_customers', 0) > 0
+            except Exception:
+                return False
+        _spl_result = inference_succeeded(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_inference_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def format_inference_report(result_json: str) -> str:
+            """Markdown report of inference results."""
+            try:
+                data = json.loads(result_json)
+                results = data.get('results', [])
+                lines = [f"## Prolog Inference Report — {data.get('policy_name', 'Policy')}", '', f"**Query:** `{data.get('query', '?')}`  ", f"**Customers:** {data.get('n_customers', '?')}  ", f"**Eligible:** {data.get('n_eligible', '?')}", '', '| Customer | Eligible | Verdict |', '|---|---|---|']
+                for r in results:
+                    mark = '✓' if r['eligible'] else '✗'
+                    lines.append(f"| {r['customer']} | {mark} | {r['verdict']} |")
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_inference_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_inference_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''n_eligible'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'n_eligible')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_n_eligible
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''n_customers'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'n_customers')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_n_customers
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_inference_prompt
+      params:
+        - inference_report
+        - policy_description
+      prompt_inline: |-
+        You are an insurance compliance analyst. The Prolog inference engine just evaluated 3 customers.
+
+        POLICY:
+        {{in_policy_description}}
+
+        INFERENCE RESULT:
+        {{in_inference_report}}
+
+        Explain (≤150 words):
+        1. Why is carol eligible? Walk through the exact proof chain.
+        2. Why is bob NOT eligible? Which fact is missing?
+        3. What is the risk of manual rule tracing (solver=OFF) for this policy?
+        4. How would adding a 9th rule (e.g. high_value_client → deductible_waived) change the inference?
+      arguments:
+        - '@inference_report'
+        - '@policy_description'
+    ports:
+      - trigger
+      - complete
+      - in_inference_report
+      - in_policy_description
+      - out_explanation
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@inference_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(inference_report: str, explanation: str) -> str:
+            return f'=== Prolog Inference Engine (r105) | solver=ON ===\n\n{inference_report}\n\n── Explanation ─────────────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(inference_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - inference_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_inference_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: trace_rules_manually_prompt
+      params:
+        - policy_description
+      prompt_inline: |-
+        You are an insurance compliance analyst. Evaluate whether each customer can file an emergency repair claim.
+
+        POLICY RULES:
+        1. eligible_claim(X, Type) IF has_policy(X, comprehensive) AND policy_active(X) AND claim_covered(X, Type)
+        2. claim_covered(X, emergency_repair) IF deductible_met(X)
+        3. claim_covered(X, emergency_repair) IF catastrophic_event(X)
+        4. emergency_claim(X) IF eligible_claim(X, emergency_repair) AND emergency_event(X)
+
+        CUSTOMER FACTS:
+        {{in_policy_description}}
+
+        For each customer, trace through the rules step-by-step:
+        - Does the rule chain lead to emergency_claim(customer) being provable?
+        - Which rule path proves or refutes the claim?
+        - Are there any indirect proof paths you might miss on a first read?
+
+        Conclude with a table: Customer | Eligible | Reason
+      arguments:
+        - '@policy_description'
+    ports:
+      - trigger
+      - complete
+      - in_policy_description
+      - out_llm_trace
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_trace'
+      code: |
+        def format_report_solver_off(llm_trace: str) -> str:
+            return f'=== Prolog Inference Engine (r105) | solver=OFF ===\n\n── LLM Manual Rule Tracing ─────────────────────────────────\n{llm_trace}\n\nNote: LLM traces rules sequentially. Run with --param use_solver=true\nto verify with backward-chaining inference (catches indirect proof paths).'
+        _spl_result = format_report_solver_off(llm_trace)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_trace
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_trace
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_policy_json
+    target: tool_2.in_policy_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_policy_json
+    target: tool_4.in_policy_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_8.in_result_json
+    type: binds
+  - source: tool_8.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_inference_report
+    target: gen_1.in_inference_report
+    type: binds
+  - source: tool_2.out_policy_description
+    target: gen_1.in_policy_description
+    type: binds
+  - source: gen_1.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_6.out_inference_report
+    target: tool_9.in_inference_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_9.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_policy_description
+    target: gen_2.in_policy_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: gen_2.out_llm_trace
+    target: tool_10.in_llm_trace
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

@@ -1,0 +1,1168 @@
+version: 1.0-graph
+workflow:
+  name: platypus_moea
+  inputs:
+    - name: problem
+      type: TEXT
+      default: 'A service center runs 3 shift types. Day shift: $100/employee, 0.90 service quality, 0.10 fatigue risk, min 10 max 20 staff. Evening shift: $130/employee, 1.00 quality, 0.25 risk, min 10 max 20. Night shift: $160/employee, 0.70 quality, 0.40 risk, min 10 max 20. Total minimum: 30 staff. Find staffing plans that minimize cost, maximize quality, and minimize fatigue risk simultaneously.'
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: n_eval
+      type: TEXT
+      default: '5000'
+    - name: pop_size
+      type: TEXT
+      default: '100'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_use_solver
+      - out_n_eval
+      - out_pop_size
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_anchors_json
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_front_json
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_surface_table
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_status
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_n_points_str
+  - id: set_7
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: extract_workforce_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Extract this workforce scheduling problem into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "shifts": [
+            {{"name": "Day",     "cost": 100.0, "quality": 0.90, "risk": 0.10, "min": 10, "max": 20}},
+            {{"name": "Evening", "cost": 130.0, "quality": 1.00, "risk": 0.25, "min": 10, "max": 20}},
+            {{"name": "Night",   "cost": 160.0, "quality": 0.70, "risk": 0.40, "min": 10, "max": 20}}
+          ],
+          "total_min": 30
+        }}
+
+        Rules:
+        - shifts is a list; each entry has name, cost, quality, risk, min, max.
+        - total_min is the minimum total headcount across all shifts.
+        - If any value is missing, use the defaults above.
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_8
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: compute_utopia_anchors
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def compute_utopia_anchors(problem_json: str) -> str:
+            """Compute per-objective optimal solutions via PuLP (continuous relaxation).
+
+            Returns:
+                {"min_cost": {...}, "max_quality": {...}, "min_risk": {...}}
+            """
+            import pulp
+            try:
+                data = json.loads(_strip_fences(problem_json))
+            except Exception as e:
+                return json.dumps({'error': f'parse error: {e}'})
+            shifts = data.get('shifts', [])
+            total_min = float(data.get('total_min', 30))
+            names = [s['name'] for s in shifts]
+            if len(shifts) < 2:
+                return json.dumps({'error': 'need at least 2 shifts'})
+            costs = {s['name']: float(s['cost']) for s in shifts}
+            qualities = {s['name']: float(s['quality']) for s in shifts}
+            risks = {s['name']: float(s['risk']) for s in shifts}
+            mins = {s['name']: float(s['min']) for s in shifts}
+            maxs = {s['name']: float(s['max']) for s in shifts}
+
+            def make_vars(prob):
+                return {n: pulp.LpVariable(f'x_{n}', lowBound=mins[n], upBound=maxs[n]) for n in names}
+
+            def calc_metrics(x_vals, total):
+                cost_v = sum((costs[n] * x_vals[n] for n in names))
+                quality_v = sum((qualities[n] * x_vals[n] for n in names)) / total if total > 0 else 0.0
+                risk_v = sum((risks[n] * x_vals[n] for n in names)) / total if total > 0 else 0.0
+                return (cost_v, quality_v, risk_v)
+            anchors = {}
+            for label, sense, objective_fn in [('min_cost', pulp.LpMinimize, lambda x: pulp.lpSum((costs[n] * x[n] for n in names))), ('max_quality', pulp.LpMinimize, lambda x: -pulp.lpSum((qualities[n] * x[n] for n in names))), ('min_risk', pulp.LpMinimize, lambda x: pulp.lpSum((risks[n] * x[n] for n in names)))]:
+                try:
+                    prob = pulp.LpProblem(label, sense)
+                    x = make_vars(prob)
+                    prob += objective_fn(x)
+                    prob += pulp.lpSum((x[n] for n in names)) >= total_min
+                    prob.solve(pulp.PULP_CBC_CMD(msg=False))
+                    x_vals = {n: pulp.value(x[n]) or 0.0 for n in names}
+                    total = sum(x_vals.values())
+                    cost_v, quality_v, risk_v = calc_metrics(x_vals, total)
+                    anchor = {'cost': round(cost_v, 2), 'quality': round(quality_v, 6), 'risk': round(risk_v, 6)}
+                    for name in names:
+                        anchor[f'x{name[0]}'] = round(float(x_vals[name]), 2)
+                    anchors[label] = anchor
+                except Exception as e:
+                    anchors[label] = {'error': str(e)}
+            return json.dumps(anchors)
+        _spl_result = compute_utopia_anchors(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_anchors_json
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: solve_workforce_platypus
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@n_eval'
+        - '@pop_size'
+      code: |
+        import json
+
+        import random
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def solve_workforce_platypus(problem_json: str, n_eval: str='5000', pop_size: str='100') -> str:
+            """Run platypus NSGA-II on the 3-objective integer workforce problem.
+
+            Returns:
+                {"status": "OK", "n_points": int, "algorithm": "platypus-NSGA-II", "pareto_front": [
+                    {"xD": int, "xE": int, "xN": int, "cost": float, "quality": float, "risk": float}
+                ]}
+
+            Requires: pip install platypus-opt
+            """
+            from platypus import NSGAII, Problem, Integer, nondominated
+            try:
+                data = json.loads(_strip_fences(problem_json))
+            except Exception as e:
+                return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+            shifts = data.get('shifts', [])
+            total_min = int(data.get('total_min', 30))
+            if len(shifts) < 2:
+                return json.dumps({'status': 'INVALID_INPUT', 'error': 'need at least 2 shifts'})
+            costs_list = [s['cost'] for s in shifts]
+            qualities_list = [s['quality'] for s in shifts]
+            risks_list = [s['risk'] for s in shifts]
+
+            def evaluate(variables):
+                xs = [int(v) for v in variables]
+                total = sum(xs)
+                cost_v = sum((xs[i] * costs_list[i] for i in range(len(xs))))
+                quality_v = -(sum((xs[i] * qualities_list[i] for i in range(len(xs)))) / total)
+                risk_v = sum((xs[i] * risks_list[i] for i in range(len(xs)))) / total
+                return ([cost_v, quality_v, risk_v], [total - total_min])
+            try:
+                n_var = len(shifts)
+                problem = Problem(n_var, 3, 1)
+                problem.types[:] = [Integer(s['min'], s['max']) for s in shifts]
+                problem.constraints[:] = '>=0'
+                problem.function = evaluate
+                random.seed(42)
+                algorithm = NSGAII(problem, population_size=int(pop_size))
+                algorithm.run(int(n_eval))
+                front = nondominated(algorithm.result)
+                pareto_points = []
+                seen = set()
+                for sol in front:
+                    if sol.feasible:
+                        xs = [problem.types[i].decode(sol.variables[i]) for i in range(n_var)]
+                        key = tuple(xs)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        total = sum(xs)
+                        if total < total_min:
+                            continue
+                        cost_val = float(sum((xs[i] * costs_list[i] for i in range(n_var))))
+                        quality_val = float(sum((xs[i] * qualities_list[i] for i in range(n_var)))) / total
+                        risk_val = float(sum((xs[i] * risks_list[i] for i in range(n_var)))) / total
+                        point = {'cost': round(cost_val, 2), 'quality': round(quality_val, 6), 'risk': round(risk_val, 6)}
+                        for i, s in enumerate(shifts):
+                            point[f"x{s['name'][0]}"] = xs[i]
+                        pareto_points.append(point)
+                pareto_points.sort(key=lambda p: p['cost'])
+                return json.dumps({'status': 'OK', 'algorithm': 'platypus-NSGA-II', 'n_points': len(pareto_points), 'pareto_front': pareto_points})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+        _spl_result = solve_workforce_platypus(problem_json, n_eval, pop_size)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - n_eval
+        - pop_size
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_n_eval
+      - in_pop_size
+      - out_front_json
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: is_pareto_feasible
+      backend: kernel
+      arguments:
+        - '@front_json'
+      code: |
+        import json
+
+        def is_pareto_feasible(front_json: str) -> bool:
+            """ASSERT gate: True if status==OK and n_points >= 3."""
+            try:
+                data = json.loads(front_json)
+                return data.get('status') == 'OK' and int(data.get('n_points', 0)) >= 3
+            except Exception:
+                return False
+        _spl_result = is_pareto_feasible(front_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - front_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_tool_4
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_4'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_front_json
+      - in_tool_4
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@front_json'
+        - '''n_points'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(front_json, 'n_points')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_n_points_str
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_pareto_surface
+      backend: kernel
+      arguments:
+        - '@front_json'
+      code: |
+        import json
+
+        def format_pareto_surface(front_json: str) -> str:
+            """Format Pareto front as markdown table sorted by cost ascending.
+
+            Columns: xD | xE | xN | Cost ($) | Quality | Risk
+            """
+            try:
+                data = json.loads(front_json)
+                points = data.get('pareto_front', [])
+                algo = data.get('algorithm', 'platypus-NSGA-II')
+                if not points:
+                    return 'No Pareto-optimal points found.'
+                shift_keys = sorted((k for k in points[0].keys() if k.startswith('x') and len(k) == 2))
+                header_parts = ' | '.join(shift_keys)
+                lines = [f'| {header_parts} | Cost ($) | Quality | Risk | Algorithm |', '|' + '|'.join(['---'] * (len(shift_keys) + 4)) + '|']
+                costs = [p['cost'] for p in points]
+                qualities = [p['quality'] for p in points]
+                risks = [p['risk'] for p in points]
+                for pt in points:
+                    shift_vals = ' | '.join((str(pt.get(k, 0)) for k in shift_keys))
+                    lines.append(f"| {shift_vals} | {pt['cost']:,.0f} | {pt['quality']:.4f} | {pt['risk']:.4f} | {algo} |")
+                lines.append('')
+                lines.append(f'**Cost:** ${min(costs):,.0f} – ${max(costs):,.0f}  |  **Quality:** {min(qualities):.4f} – {max(qualities):.4f}  |  **Risk:** {min(risks):.4f} – {max(risks):.4f}')
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'Could not format Pareto surface: {e}'
+        _spl_result = format_pareto_surface(front_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - front_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_surface_table
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: interpret_pareto_surface
+      params:
+        - problem
+        - surface_table
+        - anchors_json
+      prompt_inline: |-
+        You are a workforce planning expert. Interpret this 3-objective Pareto surface for a manager.
+        The surface was computed by platypus NSGA-II — a pure-Python multi-objective evolutionary solver.
+
+        Problem:
+        {{in_problem}}
+
+        Pareto surface (sorted by cost, showing representative rows):
+        {{in_surface_table}}
+
+        Utopia anchors (best possible per objective, computed analytically):
+        {{in_anchors_json}}
+
+        Your interpretation must cover:
+        1. The nature of the 3-way tradeoff: explain why cost and risk align (both prefer Day shifts)
+           while quality pulls toward Evening shifts.
+        2. Identify 2-3 recommended operating points from the table with justification:
+           - A cost-minimizing option (for budget-constrained operations)
+           - A quality-maximizing option (for customer-facing peak periods)
+           - A balanced option (reasonable cost, acceptable quality and risk)
+        3. How close are the Pareto-optimal points to the utopia anchors?
+        4. One-sentence practical recommendation for a typical service center.
+
+        Be concise (under 200 words). No JSON, no code.
+      arguments:
+        - '@problem'
+        - '@surface_table'
+        - '@anchors_json'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_surface_table
+      - in_anchors_json
+      - out_interpretation
+  - id: set_9
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@anchors_json'
+        - '@n_points_str'
+        - '@surface_table'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_on(problem: str, anchors_json: str, n_points_str: str, surface_table: str, interpretation: str, llm_calls: str) -> str:
+            return f'=== Platypus MOEA Workforce Scheduling (r121) | solver=ON ===\n\nProblem:\n{problem}\n\nUtopia Anchors (per-objective best):\n{anchors_json}\n\nPareto Surface ({n_points_str} non-dominated points):\n{surface_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_on(problem, anchors_json, n_points_str, surface_table, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - anchors_json
+        - n_points_str
+        - surface_table
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_anchors_json
+      - in_n_points_str
+      - in_surface_table
+      - in_interpretation
+      - in_llm_calls
+      - out_report
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: extract_workforce_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Extract this workforce scheduling problem into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "shifts": [
+            {{"name": "Day",     "cost": 100.0, "quality": 0.90, "risk": 0.10, "min": 10, "max": 20}},
+            {{"name": "Evening", "cost": 130.0, "quality": 1.00, "risk": 0.25, "min": 10, "max": 20}},
+            {{"name": "Night",   "cost": 160.0, "quality": 0.70, "risk": 0.40, "min": 10, "max": 20}}
+          ],
+          "total_min": 30
+        }}
+
+        Rules:
+        - shifts is a list; each entry has name, cost, quality, risk, min, max.
+        - total_min is the minimum total headcount across all shifts.
+        - If any value is missing, use the defaults above.
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_10
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: compute_utopia_anchors
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def compute_utopia_anchors(problem_json: str) -> str:
+            """Compute per-objective optimal solutions via PuLP (continuous relaxation).
+
+            Returns:
+                {"min_cost": {...}, "max_quality": {...}, "min_risk": {...}}
+            """
+            import pulp
+            try:
+                data = json.loads(_strip_fences(problem_json))
+            except Exception as e:
+                return json.dumps({'error': f'parse error: {e}'})
+            shifts = data.get('shifts', [])
+            total_min = float(data.get('total_min', 30))
+            names = [s['name'] for s in shifts]
+            if len(shifts) < 2:
+                return json.dumps({'error': 'need at least 2 shifts'})
+            costs = {s['name']: float(s['cost']) for s in shifts}
+            qualities = {s['name']: float(s['quality']) for s in shifts}
+            risks = {s['name']: float(s['risk']) for s in shifts}
+            mins = {s['name']: float(s['min']) for s in shifts}
+            maxs = {s['name']: float(s['max']) for s in shifts}
+
+            def make_vars(prob):
+                return {n: pulp.LpVariable(f'x_{n}', lowBound=mins[n], upBound=maxs[n]) for n in names}
+
+            def calc_metrics(x_vals, total):
+                cost_v = sum((costs[n] * x_vals[n] for n in names))
+                quality_v = sum((qualities[n] * x_vals[n] for n in names)) / total if total > 0 else 0.0
+                risk_v = sum((risks[n] * x_vals[n] for n in names)) / total if total > 0 else 0.0
+                return (cost_v, quality_v, risk_v)
+            anchors = {}
+            for label, sense, objective_fn in [('min_cost', pulp.LpMinimize, lambda x: pulp.lpSum((costs[n] * x[n] for n in names))), ('max_quality', pulp.LpMinimize, lambda x: -pulp.lpSum((qualities[n] * x[n] for n in names))), ('min_risk', pulp.LpMinimize, lambda x: pulp.lpSum((risks[n] * x[n] for n in names)))]:
+                try:
+                    prob = pulp.LpProblem(label, sense)
+                    x = make_vars(prob)
+                    prob += objective_fn(x)
+                    prob += pulp.lpSum((x[n] for n in names)) >= total_min
+                    prob.solve(pulp.PULP_CBC_CMD(msg=False))
+                    x_vals = {n: pulp.value(x[n]) or 0.0 for n in names}
+                    total = sum(x_vals.values())
+                    cost_v, quality_v, risk_v = calc_metrics(x_vals, total)
+                    anchor = {'cost': round(cost_v, 2), 'quality': round(quality_v, 6), 'risk': round(risk_v, 6)}
+                    for name in names:
+                        anchor[f'x{name[0]}'] = round(float(x_vals[name]), 2)
+                    anchors[label] = anchor
+                except Exception as e:
+                    anchors[label] = {'error': str(e)}
+            return json.dumps(anchors)
+        _spl_result = compute_utopia_anchors(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_anchors_json
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: propose_schedule
+      params:
+        - problem
+        - problem_json
+      prompt_inline: |-
+        You are a workforce planning expert. Propose a staffing schedule for this problem.
+
+        Problem: {{in_problem}}
+
+        Shift parameters (JSON): {{in_problem_json}}
+
+        Choose integer staff counts (xD for Day, xE for Evening, xN for Night) that balance
+        cost, service quality, and fatigue risk well.
+
+        Constraints:
+        - xD in [10, 20], xE in [10, 20], xN in [10, 20] (all integers)
+        - xD + xE + xN >= 30
+
+        Compute the exact values:
+          cost    = 100*xD + 130*xE + 160*xN
+          quality = (0.90*xD + 1.00*xE + 0.70*xN) / (xD+xE+xN)
+          risk    = (0.10*xD + 0.25*xE + 0.40*xN) / (xD+xE+xN)
+
+        Output ONLY a JSON object — no prose, no fences:
+        {{
+          "xD": <integer>,
+          "xE": <integer>,
+          "xN": <integer>,
+          "cost": <number>,
+          "quality": <number>,
+          "risk": <number>,
+          "reasoning": "<one sentence explaining the tradeoff choice>"
+        }}
+      arguments:
+        - '@problem'
+        - '@problem_json'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_problem_json
+      - out_schedule_text
+  - id: set_11
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_5
+    type: GENERATE
+    config:
+      function: extract_schedule_json
+      params:
+        - problem
+        - schedule_text
+      prompt_inline: |-
+        Extract the workforce schedule from this text as JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "xD": <integer>,
+          "xE": <integer>,
+          "xN": <integer>,
+          "cost": <number>,
+          "quality": <number>,
+          "risk": <number>
+        }}
+
+        Problem: {{in_problem}}
+        Schedule text:
+        {{in_schedule_text}}
+
+        If values are missing, set them to 0. Use integer values for xD, xE, xN.
+      arguments:
+        - '@problem'
+        - '@schedule_text'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_schedule_text
+      - out_solution_json
+  - id: set_12
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: verify_workforce_off
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@solution_json'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def verify_workforce_off(problem_json: str, solution_json: str) -> str:
+            """Verify LLM-proposed schedule: integer feasibility, bounds, total, cost/quality/risk.
+
+            Returns {"verdict": "PASS"/"FAIL"/"PARTIAL", "notes": str}
+            """
+            try:
+                problem = json.loads(_strip_fences(problem_json))
+                sol = json.loads(_strip_fences(solution_json))
+            except Exception as e:
+                return json.dumps({'verdict': 'FAIL', 'notes': f'parse error: {e}'})
+            shifts = problem.get('shifts', [])
+            total_min = int(problem.get('total_min', 30))
+            shift_map = {s['name']: s for s in shifts}
+            notes = []
+            ok = True
+            partial = False
+            x_vals = {}
+            for s in shifts:
+                key = f"x{s['name'][0]}"
+                val = sol.get(key)
+                if val is None:
+                    notes.append(f'missing {key}')
+                    ok = False
+                    x_vals[s['name']] = 0
+                    continue
+                try:
+                    float_val = float(val)
+                    int_val = int(round(float_val))
+                    if abs(float_val - int_val) > 0.01:
+                        notes.append(f'{key}={val} not integer')
+                        partial = True
+                    x_vals[s['name']] = int_val
+                except Exception:
+                    notes.append(f'{key} not numeric: {val}')
+                    ok = False
+                    x_vals[s['name']] = 0
+            for s in shifts:
+                v = x_vals.get(s['name'], 0)
+                if v < s['min'] or v > s['max']:
+                    notes.append(f"x{s['name'][0]}={v} out of bounds [{s['min']}, {s['max']}]")
+                    ok = False
+            total = sum(x_vals.values())
+            if total < total_min:
+                notes.append(f'total staff {total} < minimum {total_min}')
+                ok = False
+            recomp_cost = recomp_quality = recomp_risk = None
+            if total > 0:
+                recomp_cost = sum((shift_map[n]['cost'] * v for n, v in x_vals.items() if n in shift_map))
+                recomp_quality = sum((shift_map[n]['quality'] * v for n, v in x_vals.items() if n in shift_map)) / total
+                recomp_risk = sum((shift_map[n]['risk'] * v for n, v in x_vals.items() if n in shift_map)) / total
+                if sol.get('cost') is not None and abs(float(sol['cost']) - recomp_cost) > 5.0:
+                    notes.append(f"cost mismatch: claimed={float(sol['cost']):.0f}, actual={recomp_cost:.0f}")
+                    ok = False
+                if sol.get('quality') is not None and abs(float(sol['quality']) - recomp_quality) > 0.01:
+                    notes.append(f"quality mismatch: claimed={float(sol['quality']):.4f}, actual={recomp_quality:.4f}")
+                    partial = True
+                if sol.get('risk') is not None and abs(float(sol['risk']) - recomp_risk) > 0.01:
+                    notes.append(f"risk mismatch: claimed={float(sol['risk']):.4f}, actual={recomp_risk:.4f}")
+                    partial = True
+            verdict = 'PASS' if ok and (not partial) else 'PARTIAL' if partial and ok else 'FAIL'
+            return json.dumps({'verdict': verdict, 'total_staff': total, 'recomputed_cost': round(recomp_cost, 2) if recomp_cost is not None else None, 'recomputed_quality': round(recomp_quality, 4) if recomp_quality is not None else None, 'recomputed_risk': round(recomp_risk, 4) if recomp_risk is not None else None, 'notes': '; '.join(notes) if notes else 'all checks passed'})
+        _spl_result = verify_workforce_off(problem_json, solution_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_solution_json
+      - out_verify_result
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''verdict'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(verify_result, 'verdict')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_verify_status
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@anchors_json'
+        - '@schedule_text'
+        - '@solution_json'
+        - '@verify_result'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_off(problem: str, anchors_json: str, schedule_text: str, solution_json: str, verify_result: str, llm_calls: str) -> str:
+            return f'=== Platypus MOEA Workforce Scheduling (r121) | solver=OFF ===\n\nProblem:\n{problem}\n\nUtopia Anchors (reference):\n{anchors_json}\n\nLLM Proposed Schedule:\n{schedule_text}\n\nExtracted Schedule (JSON):\n{solution_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_off(problem, anchors_json, schedule_text, solution_json, verify_result, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - anchors_json
+        - schedule_text
+        - solution_json
+        - verify_result
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_anchors_json
+      - in_schedule_text
+      - in_solution_json
+      - in_verify_result
+      - in_llm_calls
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: set_7.trigger
+    type: triggers
+  - source: set_7.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_1.in_use_solver
+    type: binds
+  - source: tool_1.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: set_8.trigger
+    type: triggers
+  - source: set_7.out_llm_calls
+    target: set_8.in_llm_calls
+    type: binds
+  - source: set_8.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_3.in_problem_json
+    type: binds
+  - source: wf_entry.out_n_eval
+    target: tool_3.in_n_eval
+    type: binds
+  - source: wf_entry.out_pop_size
+    target: tool_3.in_pop_size
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_3.out_front_json
+    target: tool_4.in_front_json
+    type: binds
+  - source: tool_4.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_3.out_front_json
+    target: assert_1.in_front_json
+    type: binds
+  - source: tool_4.out_tool_4
+    target: assert_1.in_tool_4
+    type: binds
+  - source: assert_1.pass
+    target: tool_5.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_3.out_front_json
+    target: tool_5.in_front_json
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_3.out_front_json
+    target: tool_6.in_front_json
+    type: binds
+  - source: tool_6.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_2.in_problem
+    type: binds
+  - source: tool_6.out_surface_table
+    target: gen_2.in_surface_table
+    type: binds
+  - source: tool_2.out_anchors_json
+    target: gen_2.in_anchors_json
+    type: binds
+  - source: gen_2.complete
+    target: set_9.trigger
+    type: triggers
+  - source: set_8.out_llm_calls
+    target: set_9.in_llm_calls
+    type: binds
+  - source: set_9.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_7.in_problem
+    type: binds
+  - source: tool_2.out_anchors_json
+    target: tool_7.in_anchors_json
+    type: binds
+  - source: tool_5.out_n_points_str
+    target: tool_7.in_n_points_str
+    type: binds
+  - source: tool_6.out_surface_table
+    target: tool_7.in_surface_table
+    type: binds
+  - source: gen_2.out_interpretation
+    target: tool_7.in_interpretation
+    type: binds
+  - source: set_9.out_llm_calls
+    target: tool_7.in_llm_calls
+    type: binds
+  - source: eval_1.fail
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_3.in_problem
+    type: binds
+  - source: gen_3.complete
+    target: set_10.trigger
+    type: triggers
+  - source: set_7.out_llm_calls
+    target: set_10.in_llm_calls
+    type: binds
+  - source: set_10.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: gen_3.out_problem_json
+    target: tool_8.in_problem_json
+    type: binds
+  - source: tool_8.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_4.in_problem
+    type: binds
+  - source: gen_3.out_problem_json
+    target: gen_4.in_problem_json
+    type: binds
+  - source: gen_4.complete
+    target: set_11.trigger
+    type: triggers
+  - source: set_10.out_llm_calls
+    target: set_11.in_llm_calls
+    type: binds
+  - source: set_11.complete
+    target: gen_5.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_5.in_problem
+    type: binds
+  - source: gen_4.out_schedule_text
+    target: gen_5.in_schedule_text
+    type: binds
+  - source: gen_5.complete
+    target: set_12.trigger
+    type: triggers
+  - source: set_11.out_llm_calls
+    target: set_12.in_llm_calls
+    type: binds
+  - source: set_12.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: gen_3.out_problem_json
+    target: tool_9.in_problem_json
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_9.in_solution_json
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: tool_9.out_verify_result
+    target: tool_10.in_verify_result
+    type: binds
+  - source: tool_10.complete
+    target: tool_11.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_11.in_problem
+    type: binds
+  - source: tool_8.out_anchors_json
+    target: tool_11.in_anchors_json
+    type: binds
+  - source: gen_4.out_schedule_text
+    target: tool_11.in_schedule_text
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_11.in_solution_json
+    type: binds
+  - source: tool_9.out_verify_result
+    target: tool_11.in_verify_result
+    type: binds
+  - source: set_12.out_llm_calls
+    target: tool_11.in_llm_calls
+    type: binds
+  - source: tool_7.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_11.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_7.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_11.complete
+    target: wf_exit.trigger
+    type: triggers

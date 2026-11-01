@@ -1,0 +1,555 @@
+version: 1.0-graph
+workflow:
+  name: math_solver_multi_step
+  inputs:
+    - name: problem
+      type: TEXT
+      default: differentiate e**x and then simplify the result
+    - name: log_dir
+      type: TEXT
+      default: cookbook/67_symbolic_math/logs-spl
+  outputs:
+    - name: explanation
+      type: TEXT
+resources:
+  procedures:
+    solve_one_step: ./sympy_math_multi_step.spl
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_log_dir
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: decompose_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Translate this math problem into an ordered list of symbolic operations.
+
+        Output format — one step per line, NOTHING ELSE:
+          <expression>|<operation>
+
+        STRICT OUTPUT RULES (violating any of these causes the pipeline to fail):
+        - Plain text output ONLY — no code fences, no backticks, no markdown, no numbering
+        - No Python code (no import statements, no variable assignments, no function calls)
+        - No prose, no explanations, no blank lines
+        - The FIRST step's <expression> is the starting expression in Python/SymPy syntax:
+            ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+        - Every step AFTER the first must use the literal word PREV as the expression —
+            it means "the result of the previous step". NEVER write a new expression
+            after the first line.
+        - <operation> must be exactly one token from this list:
+            solve, diff, integrate, simplify, expand, factor,
+            series, apart, limit(x,0), laplace, inverse_laplace,
+            trigsimp, summation(n,1,oo), eigenvalues, solve_system,
+            dsolve, dsolve_ic
+        - dsolve   — general ODE solution (no initial conditions)
+        - dsolve_ic — IVP: expression MUST be [Eq(ODE), {y(0): val, ...}]
+        - If the problem needs only ONE operation, output exactly one line
+        - The expressions in the examples below (exp(x), x**2 - 4, sin(x)/x, ...)
+            illustrate the FORMAT only. Your first <expression> must be transcribed
+            from the Problem at the bottom — copying an expression from an example
+            is a failure.
+
+        CORRECT examples:
+          "differentiate e to the x and then simplify the result"
+            exp(x)|diff
+            PREV|simplify
+
+          "integrate 5*x**4 + 2, then expand the result, then solve for x"
+            5*x**4 + 2|integrate
+            PREV|expand
+            PREV|solve
+
+          "expand (x+1) squared, then factor the expanded form"
+            (x + 1)**2|expand
+            PREV|factor
+
+          "find the roots of x squared minus 4"
+            x**2 - 4|solve
+
+          "find the limit of sin(x)/x as x approaches 0"
+            sin(x)/x|limit(x,0)
+
+          "expand sin(x) as a Taylor series around x=0 up to degree 5"
+            sin(x)|series
+
+          "find the partial fraction decomposition of 1/(x**2-1)"
+            1/(x**2 - 1)|apart
+
+          "find the Laplace transform of exp(-2*t)"
+            exp(-2*t)|laplace
+
+          "compute the sum of 1/n**2 from n=1 to infinity"
+            1/n**2|summation(n,1,oo)
+
+          "find the eigenvalues of the matrix [[1,2],[3,4]]"
+            [[1,2],[3,4]]|eigenvalues
+
+          "solve the system x + y = 5 and x - y = 1"
+            [x + y - 5, x - y - 1]|solve_system
+
+          "compute the inverse Laplace transform of s/(s**2+4), then verify"
+            s/(s**2 + 4)|inverse_laplace
+            PREV|laplace
+
+          "find the general solution to y'(x) = y(x)"
+            Eq(y(x).diff(x), y(x))|dsolve
+
+          "solve the ODE y'(x) = y(x) with initial condition y(0) = 1"
+            [Eq(y(x).diff(x), y(x)), {y(0): 1}]|dsolve_ic
+
+          "solve the second-order ODE y''(x) - 3*y'(x) + 2*y(x) = 0"
+            Eq(y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x), 0)|dsolve
+
+        INCORRECT examples (DO NOT produce output like this):
+          \boxed{sin(x)*cos(x)}|integrate  ← NO: LaTeX wrappers in expressions are forbidden
+          ```plaintext              ← NO: code fences are forbidden
+          exp(x)|diff
+          ```
+          x = sp.symbols('x')      ← NO: Python variable assignments are forbidden
+          from sympy import diff    ← NO: Python import statements are forbidden
+          Step 1: exp(x)|diff       ← NO: labels and numbering are forbidden
+          1. exp(x)|diff             ← NO: numbered lists are forbidden
+          x**2 - 4|solve             ← NO (as a later line): every line after the
+                                        first must be PREV|<operation>
+          exp(x)|diff                ← NO (when the problem says something else):
+                                        this copies an example instead of the Problem
+
+        Now translate ONLY the problem below. Transcribe its expression EXACTLY —
+        same digits, signs, exponents — and use PREV for every step after the first.
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_steps_text
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: step_count
+      backend: kernel
+      arguments:
+        - '@steps_text'
+      code: |
+        def step_count(steps_text: str) -> str:
+            """Deterministic, 0-token: counts non-blank lines in the
+            decomposed step list (mirrors chunk_plan in recipe 13)."""
+            return str(len([line for line in steps_text.splitlines() if line.strip()]))
+        _spl_result = step_count(steps_text)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - steps_text
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_steps_text
+      - out_n_steps
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_i
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_running_expression
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_trace
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: latest(@in_i, @i) < int(@in_n_steps)
+      outputs:
+        step:
+          from: tool_2.out_step
+        step_summary:
+          from: call_1.out_step_summary
+        running_expression:
+          from: tool_3.out_running_expression
+        trace_line:
+          from: tool_4.out_trace_line
+        step_no:
+          from: set_4.out_step_no
+        trace:
+          from: set_5.out_trace
+        i:
+          from: set_6.out_i
+      subgraph:
+        nodes:
+          - id: tool_2
+            type: SOLVE
+            config:
+              tool: extract_step
+              backend: kernel
+              arguments:
+                - '@steps_text'
+                - '@i'
+              code: |
+                def extract_step(steps_text: str, index: str) -> str:
+                    """Deterministic, 0-token: returns the i-th non-blank line of
+                    the decomposed step list (mirrors extract_chunk in recipe 13)."""
+                    lines = [line.strip() for line in steps_text.splitlines() if line.strip()]
+                    i = int(index)
+                    return lines[i] if 0 <= i < len(lines) else ""
+                _spl_result = extract_step(steps_text, i)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - steps_text
+                - index
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_steps_text
+              - in_i
+              - out_step
+          - id: call_1
+            type: GENERATE
+            config:
+              procedure_ref: procedures.solve_one_step
+              arguments:
+                - '@step'
+                - '@running_expression'
+            ports:
+              - trigger
+              - complete
+              - in_step
+              - in_running_expression
+              - out_step_summary
+          - id: tool_3
+            type: SOLVE
+            config:
+              tool: split_part
+              backend: kernel
+              arguments:
+                - '@step_summary'
+                - '''|'''
+                - '''1'''
+              code: |
+                def trim(value: str) -> str:
+                    """TRIM(value) — remove leading and trailing whitespace."""
+                    return str(value).strip()
+
+                def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                    """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                    The part comes back whitespace-trimmed by default: delimited protocol
+                    lines ('a | b') are padded for readability and virtually every caller
+                    wants the bare field (list_get behaves the same way). Pass trim='false'
+                    to keep the raw part, padding included.
+                    """
+                    parts = str(value).split(str(delimiter))
+                    idx = int(part) - 1
+                    if not 0 <= idx < len(parts):
+                        return ''
+                    raw = parts[idx]
+                    if str(trim).strip().lower() in {'false', '0', 'no'}:
+                        return raw
+                    return raw.strip()
+                _spl_result = split_part(step_summary, '|', '1')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+                - delimiter
+                - part
+                - trim
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_step_summary
+              - out_running_expression
+          - id: tool_4
+            type: SOLVE
+            config:
+              tool: split_part
+              backend: kernel
+              arguments:
+                - '@step_summary'
+                - '''|'''
+                - '''2'''
+              code: |
+                def trim(value: str) -> str:
+                    """TRIM(value) — remove leading and trailing whitespace."""
+                    return str(value).strip()
+
+                def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                    """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                    The part comes back whitespace-trimmed by default: delimited protocol
+                    lines ('a | b') are padded for readability and virtually every caller
+                    wants the bare field (list_get behaves the same way). Pass trim='false'
+                    to keep the raw part, padding included.
+                    """
+                    parts = str(value).split(str(delimiter))
+                    idx = int(part) - 1
+                    if not 0 <= idx < len(parts):
+                        return ''
+                    raw = parts[idx]
+                    if str(trim).strip().lower() in {'false', '0', 'no'}:
+                        return raw
+                    return raw.strip()
+                _spl_result = split_part(step_summary, '|', '2')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+                - delimiter
+                - part
+                - trim
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_step_summary
+              - out_trace_line
+          - id: set_4
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_i + 1'
+            ports:
+              - trigger
+              - complete
+              - in_i
+              - out_step_no
+          - id: set_5
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_trace + f''{@in_step_no}. {@in_trace_line}\n'''
+            ports:
+              - trigger
+              - complete
+              - in_trace
+              - in_step_no
+              - in_trace_line
+              - out_trace
+          - id: set_6
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_i + 1'
+            ports:
+              - trigger
+              - complete
+              - in_i
+              - out_i
+        edges:
+          - source: tool_2.complete
+            target: call_1.trigger
+            type: triggers
+          - source: tool_2.out_step
+            target: call_1.in_step
+            type: binds
+          - source: call_1.complete
+            target: tool_3.trigger
+            type: triggers
+          - source: call_1.out_step_summary
+            target: tool_3.in_step_summary
+            type: binds
+          - source: tool_3.complete
+            target: tool_4.trigger
+            type: triggers
+          - source: call_1.out_step_summary
+            target: tool_4.in_step_summary
+            type: binds
+          - source: tool_4.complete
+            target: set_4.trigger
+            type: triggers
+          - source: set_4.complete
+            target: set_5.trigger
+            type: triggers
+          - source: set_4.out_step_no
+            target: set_5.in_step_no
+            type: binds
+          - source: tool_4.out_trace_line
+            target: set_5.in_trace_line
+            type: binds
+          - source: set_5.complete
+            target: set_6.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_steps_text
+      - in_i
+      - in_running_expression
+      - in_trace
+      - in_n_steps
+      - out_step
+      - out_step_summary
+      - out_running_expression
+      - out_trace_line
+      - out_step_no
+      - out_trace
+      - out_i
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@log_dir}/chain_trace.md'
+        - '@trace'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{log_dir}/chain_trace.md', trace)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_dir
+      - in_trace
+      - out_write_file
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: explain_chain
+      params:
+        - problem
+        - trace
+      prompt_inline: |-
+        A student asked: "{{in_problem}}"
+
+        The symbolic math engine computed this chain of EXACT steps, in order:
+        {{in_trace}}
+
+        Write a clear, friendly explanation in less than 6 sentences that:
+        1. Restates what the problem is asking in plain English
+        2. Walks through the chain step by step, in order, stating each exact result
+        3. Gives the final answer plainly at the end
+        Do not re-derive any step — trust the computed chain above as exact.
+      arguments:
+        - '@problem'
+        - '@trace'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_trace
+      - out_explanation
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_explanation
+edges:
+  - source: wf_entry.entry
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: gen_1.out_steps_text
+    target: tool_1.in_steps_text
+    type: binds
+  - source: tool_1.complete
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: gen_1.out_steps_text
+    target: loop_1.in_steps_text
+    type: binds
+  - source: set_1.out_i
+    target: loop_1.in_i
+    type: binds
+  - source: set_2.out_running_expression
+    target: loop_1.in_running_expression
+    type: binds
+  - source: set_3.out_trace
+    target: loop_1.in_trace
+    type: binds
+  - source: tool_1.out_n_steps
+    target: loop_1.in_n_steps
+    type: binds
+  - source: loop_1.exit
+    target: tool_5.trigger
+    type: triggers
+  - source: wf_entry.out_log_dir
+    target: tool_5.in_log_dir
+    type: binds
+  - source: loop_1.out_trace
+    target: tool_5.in_trace
+    type: binds
+  - source: tool_5.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_2.in_problem
+    type: binds
+  - source: loop_1.out_trace
+    target: gen_2.in_trace
+    type: binds
+  - source: gen_2.out_explanation
+    target: wf_exit.in_explanation
+    type: binds
+  - source: gen_2.complete
+    target: wf_exit.trigger
+    type: triggers

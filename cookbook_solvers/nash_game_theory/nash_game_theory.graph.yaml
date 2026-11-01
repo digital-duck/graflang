@@ -1,0 +1,533 @@
+version: 1.0-graph
+workflow:
+  name: nash_game_theory
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_default_game
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _DEFAULT_PRICING_GAME = {'game_name': 'SaaS Pricing Duopoly', 'description': 'Two SaaS firms A and B simultaneously choose a monthly subscription price: High ($100/mo) or Low ($70/mo). If both choose High: each earns $40K/mo profit (40% market share × $100 margin). If both choose Low: each earns $25K/mo profit (50% share × $50 margin). If A chooses High and B chooses Low: A earns $10K (loses share) and B earns $55K. If A chooses Low and B chooses High: A earns $55K and B earns $10K.', 'players': ['Firm A', 'Firm B'], 'strategies': {'Firm A': ['High', 'Low'], 'Firm B': ['High', 'Low']}, 'payoff_matrix_A': [[40, 10], [55, 25]], 'payoff_matrix_B': [[40, 55], [10, 25]], 'joint_optimal': {'strategies': ['High', 'High'], 'payoffs': [40, 40]}, 'known_nash': {'strategies': ['Low', 'Low'], 'payoffs': [25, 25]}, 'known_nash_type': "Dominant strategy equilibrium (Prisoner's Dilemma)"}
+
+        def get_default_game() -> str:
+            """Return default pricing duopoly game JSON."""
+            return json.dumps(_DEFAULT_PRICING_GAME)
+        _spl_result = get_default_game()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_game_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@game_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(game_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_game_json
+      - out_game_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: find_nash_equilibria
+      backend: kernel
+      arguments:
+        - '@game_json'
+      code: |
+        import json
+
+        def find_nash_equilibria(game_json: str) -> str:
+            """Find all Nash equilibria using nashpy support enumeration.
+
+            Returns:
+              {"game_name": str, "n_equilibria": int, "equilibria": [{sigma_A, sigma_B, payoffs}],
+               "joint_optimal": {...}, "gap": str, "status": "OK"|"ERROR"}
+            """
+            try:
+                import nashpy as nash
+                import numpy as np
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'nashpy not installed — run: pip install nashpy'})
+            try:
+                game = json.loads(game_json)
+                A = np.array(game['payoff_matrix_A'], dtype=float)
+                B = np.array(game['payoff_matrix_B'], dtype=float)
+                g = nash.Game(A, B)
+                equilibria = []
+                for eq in g.support_enumeration():
+                    sigma_A, sigma_B = eq
+                    payoff_A = float(sigma_A @ A @ sigma_B)
+                    payoff_B = float(sigma_A @ B @ sigma_B)
+                    strats_A = game['strategies']['Firm A']
+                    strats_B = game['strategies']['Firm B']
+
+                    def label_strategy(sigma, strats):
+                        for i, p in enumerate(sigma):
+                            if abs(p - 1.0) < 1e-06:
+                                return strats[i]
+                        parts = [f'{p:.2f}×{s}' for p, s in zip(sigma, strats) if p > 1e-06]
+                        return ' + '.join(parts)
+                    equilibria.append({'sigma_A': sigma_A.tolist(), 'sigma_B': sigma_B.tolist(), 'label_A': label_strategy(sigma_A, strats_A), 'label_B': label_strategy(sigma_B, strats_B), 'payoff_A': round(payoff_A, 2), 'payoff_B': round(payoff_B, 2)})
+                opt = game.get('joint_optimal', {})
+                opt_payoffs = opt.get('payoffs', [0, 0])
+                gap_lines = []
+                for eq in equilibria:
+                    gap_A = round(opt_payoffs[0] - eq['payoff_A'], 2)
+                    gap_B = round(opt_payoffs[1] - eq['payoff_B'], 2)
+                    gap_lines.append(f"Nash ({eq['label_A']}, {eq['label_B']}): Firm A earns ${eq['payoff_A']}K vs optimal ${opt_payoffs[0]}K (gap=${gap_A}K); Firm B earns ${eq['payoff_B']}K vs optimal ${opt_payoffs[1]}K (gap=${gap_B}K)")
+                return json.dumps({'game_name': game.get('game_name', 'Game'), 'n_equilibria': len(equilibria), 'equilibria': equilibria, 'joint_optimal': opt, 'pd_gap': ' | '.join(gap_lines), 'status': 'OK'})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+        _spl_result = find_nash_equilibria(game_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - game_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_game_json
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: nash_found
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def nash_found(result_json: str) -> bool:
+            """ASSERT gate: at least one Nash equilibrium was found."""
+            try:
+                data = json.loads(result_json)
+                return data.get('status') == 'OK' and data.get('n_equilibria', 0) > 0
+            except Exception:
+                return False
+        _spl_result = nash_found(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_nash_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def format_nash_report(result_json: str) -> str:
+            """Markdown report of Nash equilibrium results."""
+            try:
+                data = json.loads(result_json)
+                eqs = data.get('equilibria', [])
+                opt = data.get('joint_optimal', {})
+                lines = [f"## Nash Equilibrium Report — {data.get('game_name', 'Game')}", '', f"**Nash equilibria found:** {data.get('n_equilibria', 0)}", '', '### Equilibria', '', '| # | Firm A plays | Firm B plays | Payoff A | Payoff B |', '|---|---|---|---|---|']
+                for i, eq in enumerate(eqs, 1):
+                    lines.append(f"| {i} | {eq['label_A']} | {eq['label_B']} | ${eq['payoff_A']}K | ${eq['payoff_B']}K |")
+                if opt:
+                    lines += ['', '### Joint Optimum (cooperative — NOT a Nash equilibrium)', '', f'| Firm A plays | Firm B plays | Payoff A | Payoff B |', '|---|---|---|---|', f"| {opt['strategies'][0]} | {opt['strategies'][1]} | ${opt['payoffs'][0]}K | ${opt['payoffs'][1]}K |"]
+                if data.get('pd_gap'):
+                    lines += ['', "### Prisoner's Dilemma Gap", '', data['pd_gap']]
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_nash_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_nash_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''n_equilibria'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'n_equilibria')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_n_eq
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_nash_prompt
+      params:
+        - nash_report
+        - game_description
+      prompt_inline: |-
+        You are a game theory analyst. nashpy just computed the Nash equilibria for this pricing game.
+
+        GAME DESCRIPTION:
+        {{in_game_description}}
+
+        NASH EQUILIBRIUM RESULT:
+        {{in_nash_report}}
+
+        Explain (≤150 words):
+        1. What is the Nash equilibrium outcome and what does it mean in business terms?
+        2. Why does each firm choose Low even though both would be better off at High?
+        3. What is the Prisoner's Dilemma gap — the collective cost of rational self-interest?
+        4. What mechanism could break the dilemma in practice (contract, regulation, reputation)?
+      arguments:
+        - '@nash_report'
+        - '@game_description'
+    ports:
+      - trigger
+      - complete
+      - in_nash_report
+      - in_game_description
+      - out_explanation
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@nash_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(nash_report: str, explanation: str) -> str:
+            return f'=== Nash Equilibrium Game Theory (r110) | solver=ON ===\n\n{nash_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(nash_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - nash_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_nash_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: reason_about_pricing_prompt
+      params:
+        - game_description
+      prompt_inline: |-
+        You are a business strategy consultant advising two SaaS companies in a competitive pricing situation.
+
+        SITUATION:
+        {{in_game_description}}
+
+        Without computing Nash equilibria, reason through this strategically:
+        1. What price should Firm A set and why?
+        2. What price should Firm B set and why?
+        3. Is there a stable outcome where neither firm regrets their choice?
+        4. What is the "cooperative" optimum — and why might it not hold?
+
+        Give concrete recommendations with reasoning. Do not use game theory formulas — reason from first principles.
+      arguments:
+        - '@game_description'
+    ports:
+      - trigger
+      - complete
+      - in_game_description
+      - out_llm_strategy
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_strategy'
+      code: |
+        def format_report_solver_off(llm_strategy: str) -> str:
+            return f'=== Nash Equilibrium Game Theory (r110) | solver=OFF ===\n\n── LLM Strategic Reasoning ─────────────────────────────────\n{llm_strategy}\n\nNote: LLM reasons from intuition. Run --param use_solver=true to find\nNash equilibria with nashpy (often differs from cooperative intuition).'
+        _spl_result = format_report_solver_off(llm_strategy)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_strategy
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_strategy
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_game_json
+    target: tool_2.in_game_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_game_json
+    target: tool_4.in_game_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_nash_report
+    target: gen_1.in_nash_report
+    type: binds
+  - source: tool_2.out_game_description
+    target: gen_1.in_game_description
+    type: binds
+  - source: gen_1.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_6.out_nash_report
+    target: tool_8.in_nash_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_8.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_game_description
+    target: gen_2.in_game_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: gen_2.out_llm_strategy
+    target: tool_9.in_llm_strategy
+    type: binds
+  - source: tool_8.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_8.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

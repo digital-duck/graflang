@@ -1,0 +1,882 @@
+version: 1.0-graph
+workflow:
+  name: trading_rule_z3
+  inputs:
+    - name: rules_text
+      type: TEXT
+      default: ''
+    - name: snapshot_json
+      type: TEXT
+      default: ''
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_rules_text
+      - out_snapshot_json
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: is_empty_policy
+      backend: kernel
+      arguments:
+        - '@rules_text'
+      code: |
+        def is_empty_policy(policy_text: str) -> str:
+            """Return 'true' if no custom policy was provided."""
+            return 'true' if not policy_text.strip() else 'false'
+        _spl_result = is_empty_policy(rules_text)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_text
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_rules_text
+      - out_use_default
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_subject == ''true'''
+      semantic: true
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_subject
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: get_default_policy
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _DEFAULT_TRADING_POLICY = {'policy': 'Momentum Breakout Strategy v1.0', 'variables': [{'name': 'rsi', 'type': 'int', 'range': [0, 100]}, {'name': 'price_vs_ma200', 'type': 'int', 'range': [-100, 200]}, {'name': 'volume_ratio', 'type': 'int', 'range': [0, 500]}, {'name': 'adr_pct', 'type': 'int', 'range': [0, 200]}, {'name': 'in_uptrend', 'type': 'bool'}, {'name': 'earnings_week', 'type': 'bool'}], 'entry_rules': [{'id': 'E1', 'desc': 'RSI oversold: 28 ≤ RSI ≤ 35 (momentum but not panic)', 'op': 'and', 'args': [{'op': 'gte', 'var': 'rsi', 'value': 28}, {'op': 'lte', 'var': 'rsi', 'value': 35}]}, {'id': 'E2', 'desc': 'Price above 200-day MA (uptrend context)', 'op': 'gte', 'var': 'price_vs_ma200', 'value': 0}, {'id': 'E3', 'desc': 'Volume surge: at least 1.5x average', 'op': 'gte', 'var': 'volume_ratio', 'value': 150}, {'id': 'E4', 'desc': 'Sufficient volatility: ADR% ≥ 2.0', 'op': 'gte', 'var': 'adr_pct', 'value': 20}], 'risk_rules': [{'id': 'R1', 'desc': 'Never enter during earnings week', 'op': 'eq', 'var': 'earnings_week', 'value': False}, {'id': 'R2', 'desc': 'Only enter in confirmed uptrend', 'op': 'eq', 'var': 'in_uptrend', 'value': True}], 'query': 'find_triggering_scenario'}
+
+        def get_default_policy() -> str:
+            """Return the hardcoded Momentum Breakout policy (demo / fallback)."""
+            return json.dumps(_DEFAULT_TRADING_POLICY)
+        _spl_result = get_default_policy()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_policy_json
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_subject == ''false'''
+      semantic: true
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_subject
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: extract_rules_prompt
+      params:
+        - rules_text
+      prompt_inline: |-
+        You are a quantitative trading systems engineer. Convert the natural-language trading rules below into a structured JSON object matching this schema exactly. Output JSON only — no explanation, no markdown fences.
+
+        SCHEMA:
+        {
+          "policy": "<strategy name string>",
+          "variables": [
+            {"name": "<var_name>", "type": "int", "range": [<min>, <max>]},
+            {"name": "<var_name>", "type": "bool"}
+          ],
+          "entry_rules": [
+            {"id": "E1", "desc": "<human description>", <op structure>}
+          ],
+          "risk_rules": [
+            {"id": "R1", "desc": "<human description>", <op structure>}
+          ],
+          "query": "find_triggering_scenario"
+        }
+
+        SUPPORTED OPS:
+        - Comparison:  {"op": "gte"|"lte"|"eq"|"neq", "var": "<name>", "value": <number|bool>}
+        - Logical:     {"op": "and"|"or", "args": [<rule>, ...]}
+        - Negation:    {"op": "not", "arg": <rule>}
+        - Implication: {"op": "implies", "condition": <rule>, "then": <rule>}
+
+        VARIABLE CONVENTIONS (use these names when the rule mentions these concepts):
+        - RSI (0-100 int): "rsi"
+        - Price vs 200-day MA in % × 10 (-100 to 200 int): "price_vs_ma200"
+        - Volume / avg_volume × 100 (0-500 int): "volume_ratio"
+        - Average daily range % × 10 (0-200 int): "adr_pct"
+        - Boolean flags: use descriptive snake_case names (e.g. "earnings_week", "in_uptrend", "fed_day")
+        - For other numeric indicators: choose a clear snake_case name with appropriate range
+
+        EXAMPLE:
+        Rules text: "Enter when RSI is between 25 and 38, and price is above the 50-day MA. Never trade on Fed announcement days."
+        Output:
+        {
+          "policy": "RSI Pullback Strategy",
+          "variables": [
+            {"name": "rsi", "type": "int", "range": [0, 100]},
+            {"name": "price_vs_ma50", "type": "int", "range": [-100, 200]},
+            {"name": "fed_day", "type": "bool"}
+          ],
+          "entry_rules": [
+            {"id": "E1", "desc": "RSI between 25 and 38",
+             "op": "and", "args": [
+               {"op": "gte", "var": "rsi", "value": 25},
+               {"op": "lte", "var": "rsi", "value": 38}
+             ]},
+            {"id": "E2", "desc": "Price above 50-day MA",
+             "op": "gte", "var": "price_vs_ma50", "value": 0}
+          ],
+          "risk_rules": [
+            {"id": "R1", "desc": "No trading on Fed announcement days",
+             "op": "eq", "var": "fed_day", "value": false}
+          ],
+          "query": "find_triggering_scenario"
+        }
+
+        NOW CONVERT:
+        Trading rules: {{in_rules_text}}
+      arguments:
+        - '@rules_text'
+    ports:
+      - trigger
+      - complete
+      - in_rules_text
+      - out_policy_json_raw
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: parse_policy_json
+      backend: kernel
+      arguments:
+        - '@policy_json_raw'
+      code: |
+        import json
+
+        _DEFAULT_TRADING_POLICY = {'policy': 'Momentum Breakout Strategy v1.0', 'variables': [{'name': 'rsi', 'type': 'int', 'range': [0, 100]}, {'name': 'price_vs_ma200', 'type': 'int', 'range': [-100, 200]}, {'name': 'volume_ratio', 'type': 'int', 'range': [0, 500]}, {'name': 'adr_pct', 'type': 'int', 'range': [0, 200]}, {'name': 'in_uptrend', 'type': 'bool'}, {'name': 'earnings_week', 'type': 'bool'}], 'entry_rules': [{'id': 'E1', 'desc': 'RSI oversold: 28 ≤ RSI ≤ 35 (momentum but not panic)', 'op': 'and', 'args': [{'op': 'gte', 'var': 'rsi', 'value': 28}, {'op': 'lte', 'var': 'rsi', 'value': 35}]}, {'id': 'E2', 'desc': 'Price above 200-day MA (uptrend context)', 'op': 'gte', 'var': 'price_vs_ma200', 'value': 0}, {'id': 'E3', 'desc': 'Volume surge: at least 1.5x average', 'op': 'gte', 'var': 'volume_ratio', 'value': 150}, {'id': 'E4', 'desc': 'Sufficient volatility: ADR% ≥ 2.0', 'op': 'gte', 'var': 'adr_pct', 'value': 20}], 'risk_rules': [{'id': 'R1', 'desc': 'Never enter during earnings week', 'op': 'eq', 'var': 'earnings_week', 'value': False}, {'id': 'R2', 'desc': 'Only enter in confirmed uptrend', 'op': 'eq', 'var': 'in_uptrend', 'value': True}], 'query': 'find_triggering_scenario'}
+
+        def parse_policy_json(json_str: str) -> str:
+            """Validate LLM-extracted trading policy JSON; fall back to default on failure."""
+            import re
+            text = json_str.strip()
+            m = re.search('```(?:json)?\\s*([\\s\\S]*?)```', text)
+            if m:
+                text = m.group(1).strip()
+            try:
+                policy = json.loads(text)
+                if 'variables' not in policy:
+                    raise ValueError('missing variables')
+                if 'rules' in policy and 'entry_rules' not in policy:
+                    policy['entry_rules'] = policy.pop('rules')
+                if 'entry_rules' not in policy:
+                    raise ValueError('missing entry_rules')
+                policy.setdefault('risk_rules', [])
+                policy.setdefault('query', 'find_triggering_scenario')
+                return json.dumps(policy)
+            except Exception:
+                return json.dumps(_DEFAULT_TRADING_POLICY)
+        _spl_result = parse_policy_json(policy_json_raw)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_json_raw
+      - out_policy_json
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: is_empty_policy
+      backend: kernel
+      arguments:
+        - '@snapshot_json'
+      code: |
+        def is_empty_policy(policy_text: str) -> str:
+            """Return 'true' if no custom policy was provided."""
+            return 'true' if not policy_text.strip() else 'false'
+        _spl_result = is_empty_policy(snapshot_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_text
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_snapshot_json
+      - out_is_audit_mode
+  - id: eval_3
+    type: EVALUATE
+    config:
+      condition: '@in_subject == ''true'''
+      semantic: true
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_subject
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: check_z3_strategy
+      backend: kernel
+      arguments:
+        - '@policy_json'
+      code: |
+        import json
+
+        def _build_constraint(rule: dict, z3_vars: dict):
+            """Recursively translate a rule dict into a Z3 expression."""
+            from z3 import And, Or, Not, Implies
+            op = rule['op']
+            if op == 'gte':
+                return z3_vars[rule['var']] >= rule['value']
+            if op == 'lte':
+                return z3_vars[rule['var']] <= rule['value']
+            if op == 'eq':
+                return z3_vars[rule['var']] == rule['value']
+            if op == 'neq':
+                return z3_vars[rule['var']] != rule['value']
+            if op == 'and':
+                return And(*[_build_constraint(a, z3_vars) for a in rule['args']])
+            if op == 'or':
+                return Or(*[_build_constraint(a, z3_vars) for a in rule['args']])
+            if op == 'not':
+                return Not(_build_constraint(rule['arg'], z3_vars))
+            if op == 'implies':
+                return Implies(_build_constraint(rule['condition'], z3_vars), _build_constraint(rule['then'], z3_vars))
+            raise ValueError(f'Unknown op: {op}')
+
+        def _make_z3_vars(policy: dict) -> dict:
+            from z3 import Int, Bool
+            z3_vars: dict = {}
+            for v in policy['variables']:
+                if v['type'] == 'int':
+                    z3_vars[v['name']] = Int(v['name'])
+                elif v['type'] == 'bool':
+                    z3_vars[v['name']] = Bool(v['name'])
+            return z3_vars
+
+        def _add_range_constraints(solver, policy: dict, z3_vars: dict):
+            for v in policy['variables']:
+                if v['type'] == 'int' and 'range' in v:
+                    solver.add(z3_vars[v['name']] >= v['range'][0])
+                    solver.add(z3_vars[v['name']] <= v['range'][1])
+
+        def check_z3_strategy(policy_json: str) -> str:
+            """Run Z3 on all entry + risk rules.
+
+            Returns SAT → triggering market scenario, UNSAT → contradictory rules.
+            """
+            try:
+                from z3 import Solver, sat, unsat
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'z3-solver not installed — run: pip install z3-solver'})
+            policy = json.loads(policy_json)
+            z3_vars = _make_z3_vars(policy)
+            s = Solver()
+            _add_range_constraints(s, policy, z3_vars)
+            all_rules = policy.get('entry_rules', []) + policy.get('risk_rules', [])
+            for rule in all_rules:
+                s.add(_build_constraint(rule, z3_vars))
+            result = s.check()
+            if result == sat:
+                model = s.model()
+                scenario: dict = {}
+                for v in policy['variables']:
+                    val = model[z3_vars[v['name']]]
+                    if val is None:
+                        continue
+                    if v['type'] == 'bool':
+                        scenario[v['name']] = bool(val)
+                    else:
+                        try:
+                            scenario[v['name']] = int(str(val))
+                        except Exception:
+                            scenario[v['name']] = str(val)
+                return json.dumps({'status': 'SAT', 'verdict': 'Strategy is consistent — a triggering market scenario exists', 'triggering_scenario': scenario, 'n_entry_rules': len(policy.get('entry_rules', [])), 'n_risk_rules': len(policy.get('risk_rules', []))})
+            if result == unsat:
+                return json.dumps({'status': 'UNSAT', 'verdict': 'Strategy is CONTRADICTORY — no market state can ever trigger all rules simultaneously', 'triggering_scenario': {}, 'n_entry_rules': len(policy.get('entry_rules', [])), 'n_risk_rules': len(policy.get('risk_rules', []))})
+            return json.dumps({'status': 'UNKNOWN', 'verdict': 'Z3 could not determine satisfiability'})
+        _spl_result = check_z3_strategy(policy_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_json
+      - out_z3_result
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: is_strategy_consistent
+      backend: kernel
+      arguments:
+        - '@z3_result'
+      code: |
+        import json
+
+        def is_strategy_consistent(result_json: str) -> bool:
+            """ASSERT gate: strategy rules are not contradictory."""
+            try:
+                return json.loads(result_json).get('status') == 'SAT'
+            except Exception:
+                return False
+        _spl_result = is_strategy_consistent(z3_result)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_z3_result
+      - out_tool_6
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_6'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_z3_result
+      - in_tool_6
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: format_strategy_report
+      backend: kernel
+      arguments:
+        - '@z3_result'
+        - '@policy_json'
+      code: |
+        import json
+
+        def format_strategy_report(result_json: str, policy_json: str) -> str:
+            """Markdown report of Z3 strategy audit."""
+            try:
+                res = json.loads(result_json)
+                policy = json.loads(policy_json)
+                lines = [f"## Z3 Trading Rule Audit — {policy.get('policy', 'Strategy')}", '', f"**Status:** {res['status']}  ", f"**Verdict:** {res['verdict']}", f"**Entry rules checked:** {res.get('n_entry_rules', '?')}  ", f"**Risk rules checked:** {res.get('n_risk_rules', '?')}", '']
+                if res['status'] == 'SAT' and res.get('triggering_scenario'):
+                    lines += ['### Triggering Market Scenario Found by Z3', '']
+                    lines += ['| Indicator | Value |', '|---|---|']
+                    for k, v in res['triggering_scenario'].items():
+                        lines.append(f'| {k} | {v} |')
+                    lines += ['', "> Z3 found the **minimum boundary** scenario — the exact threshold where all rules first become simultaneously satisfiable. A manual trace typically picks a 'typical' example and misses these edges."]
+                elif res['status'] == 'UNSAT':
+                    lines += ['### Contradiction Detected', '', 'Z3 proved that no combination of market indicators can satisfy all entry and risk rules simultaneously. This strategy can **never** trigger a trade.', '', 'Common causes:', '- An entry rule requires condition X while a risk rule forbids X', '- Two rules bound the same variable from opposite sides with no overlap', '- A boolean flag is required both True and False']
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_strategy_report(z3_result, policy_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+        - policy_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_z3_result
+      - in_policy_json
+      - out_solver_report
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@z3_result'
+        - '''status'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(z3_result, 'status')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_z3_result
+      - out_sat_status
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: explain_audit_prompt
+      params:
+        - strategy_report
+        - rules_text
+      prompt_inline: |-
+        You are a quantitative trading analyst reviewing a Z3 formal verification of a trading strategy.
+
+        RULES:
+        {{in_rules_text}}
+
+        Z3 AUDIT RESULT:
+        {{in_strategy_report}}
+
+        Explain the result in plain English for a trader (≤200 words):
+        1. What did Z3 find? (consistent strategy, or contradictory rules?)
+        2. If SAT: what does the triggering scenario tell us? Is it a realistic market state?
+        3. If UNSAT: which rules are likely conflicting? What should the trader fix?
+        4. What is the key insight a manual rule-check would have missed?
+        5. What is the risk of running this strategy without a formal consistency check?
+      arguments:
+        - '@solver_report'
+        - '@rules_text'
+    ports:
+      - trigger
+      - complete
+      - in_strategy_report
+      - in_rules_text
+      - out_explanation
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_audit
+      backend: kernel
+      arguments:
+        - '@solver_report'
+        - '@explanation'
+      code: |
+        def format_report_audit(solver_report: str, explanation: str) -> str:
+            return f'=== Z3 Trading Rule Checker (r118) | mode=AUDIT ===\n\n{solver_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_audit(solver_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - solver_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solver_report
+      - in_explanation
+      - out_report
+  - id: eval_4
+    type: EVALUATE
+    config:
+      condition: '@in_subject == ''false'''
+      semantic: true
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_subject
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: check_market_snapshot
+      backend: kernel
+      arguments:
+        - '@policy_json'
+        - '@snapshot_json'
+      code: |
+        import json
+
+        def _build_constraint(rule: dict, z3_vars: dict):
+            """Recursively translate a rule dict into a Z3 expression."""
+            from z3 import And, Or, Not, Implies
+            op = rule['op']
+            if op == 'gte':
+                return z3_vars[rule['var']] >= rule['value']
+            if op == 'lte':
+                return z3_vars[rule['var']] <= rule['value']
+            if op == 'eq':
+                return z3_vars[rule['var']] == rule['value']
+            if op == 'neq':
+                return z3_vars[rule['var']] != rule['value']
+            if op == 'and':
+                return And(*[_build_constraint(a, z3_vars) for a in rule['args']])
+            if op == 'or':
+                return Or(*[_build_constraint(a, z3_vars) for a in rule['args']])
+            if op == 'not':
+                return Not(_build_constraint(rule['arg'], z3_vars))
+            if op == 'implies':
+                return Implies(_build_constraint(rule['condition'], z3_vars), _build_constraint(rule['then'], z3_vars))
+            raise ValueError(f'Unknown op: {op}')
+
+        def _make_z3_vars(policy: dict) -> dict:
+            from z3 import Int, Bool
+            z3_vars: dict = {}
+            for v in policy['variables']:
+                if v['type'] == 'int':
+                    z3_vars[v['name']] = Int(v['name'])
+                elif v['type'] == 'bool':
+                    z3_vars[v['name']] = Bool(v['name'])
+            return z3_vars
+
+        def check_market_snapshot(policy_json: str, snapshot_json: str) -> str:
+            """Given today's market indicator values, check which rules fire.
+
+            snapshot_json: {"rsi": 31, "price_vs_ma200": 5, "volume_ratio": 180, ...}
+            Returns: {"signal": "BUY"|"NO_SIGNAL", "failed_rules": [...], "passed_rules": [...]}
+            """
+            try:
+                from z3 import Solver, sat
+                from z3 import Not
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'z3-solver not installed'})
+            policy = json.loads(policy_json)
+            snapshot = json.loads(snapshot_json)
+            z3_vars = _make_z3_vars(policy)
+            all_rules = policy.get('entry_rules', []) + policy.get('risk_rules', [])
+            passed, failed = ([], [])
+            for rule in all_rules:
+                s = Solver()
+                for v in policy['variables']:
+                    name = v['name']
+                    if name in snapshot:
+                        s.add(z3_vars[name] == snapshot[name])
+                s.add(Not(_build_constraint(rule, z3_vars)))
+                if s.check() == sat:
+                    s2 = Solver()
+                    for v in policy['variables']:
+                        name = v['name']
+                        if name in snapshot:
+                            s2.add(z3_vars[name] == snapshot[name])
+                    s2.add(_build_constraint(rule, z3_vars))
+                    if s2.check() != sat:
+                        failed.append({'rule_id': rule['id'], 'desc': rule['desc']})
+                    else:
+                        passed.append(rule['id'])
+                else:
+                    passed.append(rule['id'])
+            signal = 'BUY' if not failed else 'NO_SIGNAL'
+            return json.dumps({'signal': signal, 'passed_rules': passed, 'failed_rules': failed, 'verdict': f'Signal: {signal}.' + (f" Blocking rules: {[r['rule_id'] for r in failed]}" if failed else ' All rules satisfied.')})
+        _spl_result = check_market_snapshot(policy_json, snapshot_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_json
+        - snapshot_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_json
+      - in_snapshot_json
+      - out_snapshot_result
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@snapshot_result'
+        - '''signal'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(snapshot_result, 'signal')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_snapshot_result
+      - out_signal
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: explain_snapshot_prompt
+      params:
+        - snapshot_result
+        - policy_text
+      prompt_inline: |-
+        You are a quantitative trading analyst. Z3 just evaluated today's market against a trading strategy.
+
+        STRATEGY:
+        {{in_policy_text}}
+
+        SNAPSHOT CHECK RESULT:
+        {{in_snapshot_result}}
+
+        Explain in plain English for the trader (≤150 words):
+        1. Signal: BUY or NO_SIGNAL?
+        2. Which rules passed? Which blocked the signal?
+        3. What would need to change in the market for a signal to fire?
+      arguments:
+        - '@snapshot_result'
+        - '@rules_text'
+    ports:
+      - trigger
+      - complete
+      - in_snapshot_result
+      - in_policy_text
+      - out_explanation
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: format_report_snapshot
+      backend: kernel
+      arguments:
+        - '@snapshot_result'
+        - '@explanation'
+      code: |
+        def format_report_snapshot(snapshot_result: str, explanation: str) -> str:
+            return f'=== Z3 Trading Rule Checker (r118) | mode=SNAPSHOT ===\n\n── Market Snapshot Evaluation ──────────────────────────────\n{snapshot_result}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_snapshot(snapshot_result, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - snapshot_result
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_snapshot_result
+      - in_explanation
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_rules_text
+    target: tool_1.in_rules_text
+    type: binds
+  - source: tool_1.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_use_default
+    target: eval_1.in_subject
+    type: binds
+  - source: eval_1.pass
+    target: tool_2.trigger
+    type: triggers
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_1.out_use_default
+    target: eval_2.in_subject
+    type: binds
+  - source: eval_2.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_rules_text
+    target: gen_1.in_rules_text
+    type: binds
+  - source: gen_1.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: gen_1.out_policy_json_raw
+    target: tool_3.in_policy_json_raw
+    type: binds
+  - source: tool_2.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: tool_4.trigger
+    type: triggers
+  - source: wf_entry.out_snapshot_json
+    target: tool_4.in_snapshot_json
+    type: binds
+  - source: tool_4.complete
+    target: eval_3.trigger
+    type: triggers
+  - source: tool_4.out_is_audit_mode
+    target: eval_3.in_subject
+    type: binds
+  - source: eval_3.pass
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_2.out_policy_json
+    target: tool_5.in_policy_json
+    type: binds
+  - source: tool_3.out_policy_json
+    target: tool_5.in_policy_json
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: tool_6.in_z3_result
+    type: binds
+  - source: tool_6.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: assert_1.in_z3_result
+    type: binds
+  - source: tool_6.out_tool_6
+    target: assert_1.in_tool_6
+    type: binds
+  - source: assert_1.pass
+    target: tool_7.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: tool_7.in_z3_result
+    type: binds
+  - source: tool_2.out_policy_json
+    target: tool_7.in_policy_json
+    type: binds
+  - source: tool_3.out_policy_json
+    target: tool_7.in_policy_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: tool_8.in_z3_result
+    type: binds
+  - source: tool_8.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_7.out_solver_report
+    target: gen_2.in_strategy_report
+    type: binds
+  - source: wf_entry.out_rules_text
+    target: gen_2.in_rules_text
+    type: binds
+  - source: gen_2.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_7.out_solver_report
+    target: tool_9.in_solver_report
+    type: binds
+  - source: gen_2.out_explanation
+    target: tool_9.in_explanation
+    type: binds
+  - source: eval_3.fail
+    target: eval_4.trigger
+    type: triggers
+  - source: tool_4.out_is_audit_mode
+    target: eval_4.in_subject
+    type: binds
+  - source: eval_4.pass
+    target: tool_10.trigger
+    type: triggers
+  - source: tool_2.out_policy_json
+    target: tool_10.in_policy_json
+    type: binds
+  - source: tool_3.out_policy_json
+    target: tool_10.in_policy_json
+    type: binds
+  - source: wf_entry.out_snapshot_json
+    target: tool_10.in_snapshot_json
+    type: binds
+  - source: tool_10.complete
+    target: tool_11.trigger
+    type: triggers
+  - source: tool_10.out_snapshot_result
+    target: tool_11.in_snapshot_result
+    type: binds
+  - source: tool_11.complete
+    target: gen_3.trigger
+    type: triggers
+  - source: tool_10.out_snapshot_result
+    target: gen_3.in_snapshot_result
+    type: binds
+  - source: wf_entry.out_rules_text
+    target: gen_3.in_policy_text
+    type: binds
+  - source: gen_3.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: tool_10.out_snapshot_result
+    target: tool_12.in_snapshot_result
+    type: binds
+  - source: gen_3.out_explanation
+    target: tool_12.in_explanation
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_12.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_12.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_4.fail
+    target: wf_exit.trigger
+    type: triggers

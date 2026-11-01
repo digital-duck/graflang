@@ -1,0 +1,633 @@
+version: 1.0-graph
+workflow:
+  name: insurance_policy_z3
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_default_policy
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _DEFAULT_POLICY = {'policy_name': 'ComprehensiveAuto_v3', 'description': 'Insurance eligibility for emergency_claim: requires comprehensive policy AND active status AND (deductible_met OR catastrophic_event) AND emergency_event. Alice: comprehensive, active, deductible_met, emergency_event. Bob: basic policy only (no comprehensive, no policy_active). Carol: comprehensive, active, catastrophic_event — but NO emergency_event.', 'predicates': ['has_comprehensive', 'policy_active', 'deductible_met', 'emergency_event', 'catastrophic_event', 'claim_covered', 'eligible_claim', 'emergency_claim'], 'base_predicates': ['has_comprehensive', 'policy_active', 'deductible_met', 'emergency_event', 'catastrophic_event'], 'customers': ['alice', 'bob', 'carol'], 'facts': [['has_comprehensive', 'alice'], ['policy_active', 'alice'], ['deductible_met', 'alice'], ['emergency_event', 'alice'], ['has_comprehensive', 'carol'], ['policy_active', 'carol'], ['catastrophic_event', 'carol']], 'rules': [{'id': 'R2', 'desc': 'Covered if deductible is met', 'head': 'claim_covered', 'body': ['deductible_met']}, {'id': 'R3', 'desc': 'Covered if catastrophic event occurred', 'head': 'claim_covered', 'body': ['catastrophic_event']}, {'id': 'R1', 'desc': 'Eligible if comprehensive + active + covered', 'head': 'eligible_claim', 'body': ['has_comprehensive', 'policy_active', 'claim_covered']}, {'id': 'R4', 'desc': 'Emergency claim approved if eligible + emergency event', 'head': 'emergency_claim', 'body': ['eligible_claim', 'emergency_event']}], 'query': 'emergency_claim'}
+
+        def get_default_policy() -> str:
+            """Return the ComprehensiveAuto_v3 policy JSON."""
+            return json.dumps(_DEFAULT_POLICY)
+        _spl_result = get_default_policy()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_policy_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@policy_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(policy_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_policy_json
+      - out_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: run_z3_inference
+      backend: kernel
+      arguments:
+        - '@policy_json'
+      code: |
+        import json
+
+        def _build_engine(policy: dict):
+            """Build Z3 Fixedpoint engine from policy JSON.
+
+            Returns (fp, preds, cust_val) where cust_val maps customer name → BitVecVal.
+            Uses BitVecSort(8) — required by Z3 Datalog (IntSort is rejected as infinite).
+            """
+            from z3 import BitVecSort, BitVec, BitVecVal, BoolSort, Function, Fixedpoint, ForAll, And, Implies
+            C = BitVecSort(8)
+            x = BitVec('x', 8)
+            fp = Fixedpoint()
+            fp.set('engine', 'datalog')
+            preds: dict = {}
+            for pred_name in policy['predicates']:
+                fn = Function(pred_name, C, BoolSort())
+                fp.register_relation(fn)
+                preds[pred_name] = fn
+            cust_val = {c: BitVecVal(i, 8) for i, c in enumerate(policy['customers'])}
+            for fact in policy['facts']:
+                pred_name, customer = (fact[0], fact[1])
+                fp.add_rule(preds[pred_name](cust_val[customer]))
+            for rule in policy['rules']:
+                head_fn = preds[rule['head']]
+                body_exprs = [preds[b](x) for b in rule['body']]
+                body_expr = And(*body_exprs) if len(body_exprs) > 1 else body_exprs[0]
+                fp.add_rule(ForAll([x], Implies(body_expr, head_fn(x))))
+            return (fp, preds, cust_val)
+
+        def _check_all(fp, preds: dict, idx) -> dict:
+            """Return {pred_name: provable} for all predicates for a given customer index."""
+            from z3 import sat
+            return {name: fp.query(fn(idx)) == sat for name, fn in preds.items()}
+
+        def _explain_failure(provable: dict, policy: dict) -> list:
+            """Goal-directed diagnosis: find which predicates block the top query."""
+            query = policy['query']
+            blocking = []
+            for rule in policy['rules']:
+                if rule['head'] != query:
+                    continue
+                for body_pred in rule['body']:
+                    if provable.get(body_pred):
+                        continue
+                    sub_reasons = []
+                    for sub_rule in policy['rules']:
+                        if sub_rule['head'] != body_pred:
+                            continue
+                        for sub_body in sub_rule['body']:
+                            if not provable.get(sub_body):
+                                sub_reasons.append(sub_body)
+                    if sub_reasons:
+                        blocking.append(f"{body_pred} (blocked by: {', '.join(sub_reasons)})")
+                    else:
+                        blocking.append(body_pred)
+            return blocking or [f'{query} not derivable']
+
+        def run_z3_inference(policy_json: str) -> str:
+            """Z3 Fixedpoint (Datalog) inference for all customers in the policy.
+
+            For each customer returns:
+              - eligible: bool
+              - provable: list of predicates Z3 derived
+              - missing: list of blocking predicates for NOT ELIGIBLE customers
+
+            Returns:
+              {"policy_name", "query", "n_customers", "n_eligible", "status", "results"}
+            """
+            try:
+                from z3 import sat
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'z3-solver not installed — run: pip install z3-solver'})
+            try:
+                policy = json.loads(policy_json)
+                fp, preds, cust_val = _build_engine(policy)
+                query_fn = preds[policy['query']]
+                results = []
+                for customer in policy['customers']:
+                    idx = cust_val[customer]
+                    eligible = fp.query(query_fn(idx)) == sat
+                    provable = _check_all(fp, preds, idx)
+                    proved_list = [p for p in policy['predicates'] if provable.get(p)]
+                    missing_list = _explain_failure(provable, policy) if not eligible else []
+                    results.append({'customer': customer, 'eligible': eligible, 'verdict': f"{customer}: {('ELIGIBLE' if eligible else 'NOT ELIGIBLE')} for {policy['query']}", 'proved': proved_list, 'missing': missing_list})
+                n_eligible = sum((1 for r in results if r['eligible']))
+                return json.dumps({'policy_name': policy.get('policy_name', 'Policy'), 'query': policy['query'], 'n_customers': len(results), 'n_eligible': n_eligible, 'status': 'OK', 'results': results})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+        _spl_result = run_z3_inference(policy_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_json
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: inference_verified
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def inference_verified(result_json: str) -> bool:
+            """ASSERT gate: Z3 ran successfully and produced results for all customers."""
+            try:
+                data = json.loads(result_json)
+                return data.get('status') == 'OK' and data.get('n_customers', 0) > 0
+            except Exception:
+                return False
+        _spl_result = inference_verified(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_z3_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def format_z3_report(result_json: str) -> str:
+            """Markdown report: per-customer verdicts, proof paths, and missing facts."""
+            try:
+                data = json.loads(result_json)
+                status = data.get('status', 'ERROR')
+                if status == 'ERROR':
+                    return f"## Z3 Inference Report — Error\n\n**Error:** {data.get('error', 'unknown')}\n\nRun `pip install z3-solver` if Z3 is not installed."
+                results = data.get('results', [])
+                lines = [f"## Z3 Inference Report — {data.get('policy_name', 'Policy')}", '', f"**Query:** `{data.get('query', '?')}`  ", f"**Customers:** {data.get('n_customers', '?')}  ", f"**Eligible:** {data.get('n_eligible', '?')}", '', '| Customer | Eligible | Z3 Proved | Missing / Blocking |', '|---|---|---|---|']
+                for r in results:
+                    mark = '✓' if r['eligible'] else '✗'
+                    proved = ', '.join(r.get('proved', [])) or '—'
+                    missing = '; '.join(r.get('missing', [])) or '—'
+                    lines.append(f"| {r['customer']} | {mark} | {proved} | {missing} |")
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_z3_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_z3_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''n_eligible'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'n_eligible')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_n_eligible
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''n_customers'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'n_customers')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_n_customers
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_z3_findings_prompt
+      params:
+        - report
+      prompt_inline: |-
+        You are an insurance auditor reviewing Z3 formal verification results.
+
+        Z3 INFERENCE REPORT:
+        {{in_report}}
+
+        The verdicts above were computed by Z3's Fixedpoint (Datalog) engine — a sound
+        formal reasoner that applies the closed-world assumption strictly.
+        The "Z3 Proved" column lists predicates Z3 derived from stated facts and rules only.
+        The "Missing / Blocking" column is machine-extracted: these are the exact predicates
+        absent from the knowledge base that prevent the claim from being approved.
+
+        CRITICAL: Do NOT infer that any missing fact is implied by another present fact.
+        In particular, catastrophic_event does NOT imply emergency_event unless that rule
+        is explicitly stated — it is not.
+
+        Explain in ≤150 words:
+        1. Why each NOT ELIGIBLE customer is denied — cite only the machine-listed missing facts
+        2. Why the ELIGIBLE customer qualifies — follow the Z3-proved predicate chain
+        3. What this reveals about formal verification vs. LLM rule-tracing for insurance policy
+      arguments:
+        - '@z3_report'
+    ports:
+      - trigger
+      - complete
+      - in_report
+      - out_explanation
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@z3_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(z3_report: str, explanation: str) -> str:
+            return f'=== Insurance Policy Z3 Inference (r120) | solver=ON ===\n\n{z3_report}\n\n── Z3 Explanation ───────────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(z3_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - z3_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_z3_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: trace_policy_manually_prompt
+      params:
+        - description
+      prompt_inline: |-
+        You are an insurance claims analyst performing manual rule tracing.
+
+        POLICY DESCRIPTION:
+        {{in_description}}
+
+        Policy rules (ComprehensiveAuto_v3):
+          R1. eligible_claim(X)  :- has_comprehensive(X), policy_active(X), claim_covered(X)
+          R2. claim_covered(X)   :- deductible_met(X)
+          R3. claim_covered(X)   :- catastrophic_event(X)
+          R4. emergency_claim(X) :- eligible_claim(X), emergency_event(X)
+
+        Customer facts in knowledge base:
+          alice: has_comprehensive, policy_active, deductible_met, emergency_event
+          bob:   (basic policy only — no comprehensive, no policy_active)
+          carol: has_comprehensive, policy_active, catastrophic_event
+
+        For each customer, trace whether emergency_claim is provable step by step.
+        Show which rules fire and which facts are used.
+        Note: LLM traces rules sequentially. Run with --param use_solver=true
+        to verify with Z3 Fixedpoint inference (catches all proof paths).
+      arguments:
+        - '@description'
+    ports:
+      - trigger
+      - complete
+      - in_description
+      - out_llm_trace
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_trace'
+      code: |
+        def format_report_solver_off(llm_trace: str) -> str:
+            return f'=== Insurance Policy Z3 Inference (r120) | solver=OFF ===\n\n── LLM Manual Rule Tracing ─────────────────────────────────\n{llm_trace}\n\nNote: LLM traces rules from description only. Run --param use_solver=true\nto verify with Z3 Fixedpoint inference.'
+        _spl_result = format_report_solver_off(llm_trace)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_trace
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_trace
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_policy_json
+    target: tool_2.in_policy_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_policy_json
+    target: tool_4.in_policy_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_8.in_result_json
+    type: binds
+  - source: tool_8.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_z3_report
+    target: gen_1.in_report
+    type: binds
+  - source: gen_1.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_6.out_z3_report
+    target: tool_9.in_z3_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_9.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_description
+    target: gen_2.in_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: gen_2.out_llm_trace
+    target: tool_10.in_llm_trace
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

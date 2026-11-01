@@ -1,0 +1,775 @@
+version: 1.0-graph
+workflow:
+  name: simpy_des
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: n_patients
+      type: TEXT
+      default: '10000'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+      - out_n_patients
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_ed_problem
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _ED_PROBLEM = {'problem_name': 'Hospital Emergency Department Simulation', 'description': 'Simulate an emergency department with bursty arrivals and lognormal treatment. Mean arrival rate: 3.2 patients/hour (non-Poisson — shift handovers at 8am/4pm cause burst factors up to 2.5×). Resources: 3 triage nurses (2 min average, exponential), 8 treatment bays (lognormal mean=40 min, σ=25 min), 2 specialist consultants (50% of patients, exponential mean=30 min). M/M/c formula assumes Poisson arrivals and exponential service — significantly underestimates tail wait times for this ED.', 'mean_arrival_rate_per_hr': 3.2, 'triage_nurses': 3, 'triage_mean_min': 2.0, 'treatment_bays': 8, 'treatment_mean_min': 40.0, 'treatment_sigma_min': 25.0, 'specialist_docs': 2, 'specialist_prob': 0.5, 'specialist_mean_min': 30.0, 'sim_hours': 168, 'burst_hours': [8, 16, 0], 'burst_factor': 2.5}
+
+        def get_ed_problem() -> str:
+            return json.dumps(_ED_PROBLEM)
+        _spl_result = get_ed_problem()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(problem_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_problem_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: compute_mmc_baseline
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        import math
+
+        def compute_mmc_baseline(problem_json: str) -> str:
+            """Erlang-C M/M/c formula for mean and approximate 95th-percentile wait.
+
+            Uses treatment bay as the bottleneck resource (highest utilization).
+            Returns JSON with mean_wait_min, p95_wait_min, utilization.
+            """
+            try:
+                p = json.loads(problem_json)
+                lam = p['mean_arrival_rate_per_hr'] / 60.0
+                mu_bay = 1.0 / p['treatment_mean_min']
+                c = p['treatment_bays']
+                rho_unit = lam / (c * mu_bay)
+                if rho_unit >= 1.0:
+                    return json.dumps({'status': 'overloaded', 'p95_wait_min': 9999, 'mean_wait_min': 9999})
+                rho_total = lam / mu_bay
+                c0 = _erlang_c(c, rho_total)
+                wq_bay = c0 / (c * mu_bay - lam)
+                mean_triage_sojourn = p['triage_mean_min']
+                mean_bay_sojourn = wq_bay + p['treatment_mean_min']
+                mean_spec_sojourn = p['specialist_mean_min']
+                mean_total = mean_triage_sojourn + mean_bay_sojourn + p['specialist_prob'] * mean_spec_sojourn
+                p95_total = mean_total + mean_bay_sojourn
+                util_pct = round(100.0 * rho_unit, 1)
+                return json.dumps({'status': 'OK', 'formula': 'M/M/c Erlang-C — total sojourn (queue + service, all stages)', 'c_servers': c, 'mean_wait_min': round(mean_total, 1), 'p95_wait_min': round(p95_total, 1), 'utilization_pct': util_pct, 'erlang_c': round(c0, 4), 'wq_bay_min': round(wq_bay, 2)})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+
+        def _erlang_c(c: int, rho: float) -> float:
+            """Erlang-C blocking probability (P[wait > 0])."""
+            import math
+            sum_terms = sum((rho ** n / math.factorial(n) for n in range(c)))
+            last_term = rho ** c / math.factorial(c) * (c / (c - rho))
+            p0 = 1.0 / (sum_terms + last_term)
+            erlang_c = rho ** c / math.factorial(c) * (c / (c - rho)) * p0
+            return erlang_c
+        _spl_result = compute_mmc_baseline(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_mmc_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: format_mmc_report
+      backend: kernel
+      arguments:
+        - '@mmc_json'
+      code: |
+        import json
+
+        def format_mmc_report(mmc_json: str) -> str:
+            try:
+                d = json.loads(mmc_json)
+                if d.get('status') != 'OK':
+                    return f"M/M/c: {d.get('status', 'error')}"
+                return f"**M/M/c Analytic Baseline ({d['formula']}):**  \nMean wait: {d['mean_wait_min']} min | P95 wait: {d['p95_wait_min']} min | Bay utilization: {d['utilization_pct']}%"
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_mmc_report(mmc_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - mmc_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_mmc_json
+      - out_mmc_report
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: run_ed_simulation
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@n_patients'
+      code: |
+        import json
+
+        import math
+
+        import random
+
+        import statistics
+
+        def run_ed_simulation(problem_json: str, n_patients: str) -> str:
+            """Run SimPy DES simulation of the ED.
+
+            Uses bursty non-Poisson arrivals and lognormal treatment times.
+            Returns JSON with mean_wait_min, p95_wait_min, utilization stats,
+            and a histogram of wait times.
+            """
+            try:
+                import simpy
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'simpy not installed — run: pip install simpy'})
+            p = json.loads(problem_json)
+            n_pat = int(n_patients)
+            rng = random.Random(42)
+            wait_times_min = []
+            triage_waits = []
+            specialist_waits = []
+            resource_busy: dict[str, float] = {'triage': 0.0, 'bay': 0.0, 'specialist': 0.0}
+            env = simpy.Environment()
+            triage_res = simpy.Resource(env, capacity=p['triage_nurses'])
+            bay_res = simpy.Resource(env, capacity=p['treatment_bays'])
+            spec_res = simpy.Resource(env, capacity=p['specialist_docs'])
+            burst_hours_set = set(p.get('burst_hours', [8, 16, 0]))
+            burst_factor = p.get('burst_factor', 2.5)
+            mean_arr = p['mean_arrival_rate_per_hr'] / 60.0
+            triage_mean = p['triage_mean_min']
+            treat_mean = p['treatment_mean_min']
+            treat_sigma = p['treatment_sigma_min']
+            spec_prob = p['specialist_prob']
+            spec_mean = p['specialist_mean_min']
+            patients_done = []
+
+            def patient_process(env, patient_id):
+                arrive = env.now
+                with triage_res.request() as req:
+                    t_wait_start = env.now
+                    yield req
+                    triage_waits.append(env.now - t_wait_start)
+                    triage_dur = rng.expovariate(1.0 / triage_mean)
+                    resource_busy['triage'] += triage_dur
+                    yield env.timeout(triage_dur)
+                with bay_res.request() as req:
+                    yield req
+                    mu_ln = math.log(treat_mean ** 2 / math.sqrt(treat_sigma ** 2 + treat_mean ** 2))
+                    sigma_ln = math.sqrt(math.log(1 + (treat_sigma / treat_mean) ** 2))
+                    treat_dur = rng.lognormvariate(mu_ln, sigma_ln)
+                    resource_busy['bay'] += treat_dur
+                    yield env.timeout(treat_dur)
+                if rng.random() < spec_prob:
+                    with spec_res.request() as req:
+                        spec_wait_start = env.now
+                        yield req
+                        specialist_waits.append(env.now - spec_wait_start)
+                        spec_dur = rng.expovariate(1.0 / spec_mean)
+                        resource_busy['specialist'] += spec_dur
+                        yield env.timeout(spec_dur)
+                total_wait = env.now - arrive
+                wait_times_min.append(total_wait)
+                patients_done.append(patient_id)
+
+            def arrival_generator(env):
+                pid = 0
+                while pid < n_pat:
+                    current_hour = int(env.now / 60.0) % 24
+                    effective_rate = mean_arr * (burst_factor if current_hour in burst_hours_set else 1.0)
+                    iat = rng.expovariate(effective_rate)
+                    yield env.timeout(iat)
+                    env.process(patient_process(env, pid))
+                    pid += 1
+            env.process(arrival_generator(env))
+            env.run(until=n_pat * (60.0 / (mean_arr * 60.0)) * 2.0 + 500)
+            env.run(until=env.now + 300)
+            if not wait_times_min:
+                return json.dumps({'status': 'ERROR', 'error': 'No patients completed simulation'})
+            wait_times_min.sort()
+            n_completed = len(wait_times_min)
+            mean_wait = round(statistics.mean(wait_times_min), 1)
+            p95_idx = int(0.95 * n_completed)
+            p95_wait = round(wait_times_min[p95_idx], 1)
+            p50_wait = round(statistics.median(wait_times_min), 1)
+            sim_duration = env.now
+            util = {'triage_pct': round(100.0 * resource_busy['triage'] / (sim_duration * p['triage_nurses']), 1), 'bay_pct': round(100.0 * resource_busy['bay'] / (sim_duration * p['treatment_bays']), 1), 'specialist_pct': round(100.0 * resource_busy['specialist'] / (sim_duration * p['specialist_docs']), 1)}
+            buckets = [0, 10, 20, 30, 45, 60, 90, 120, 9999]
+            hist = {}
+            for i in range(len(buckets) - 1):
+                lo, hi = (buckets[i], buckets[i + 1])
+                label = f"{lo}-{(hi if hi < 9999 else '120+')}min"
+                hist[label] = sum((1 for w in wait_times_min if lo <= w < hi))
+            return json.dumps({'status': 'OK', 'n_patients_completed': n_completed, 'mean_wait_min': mean_wait, 'p50_wait_min': p50_wait, 'p95_wait_min': p95_wait, 'utilization': util, 'wait_histogram': hist, 'triage_mean_wait_min': round(statistics.mean(triage_waits), 1) if triage_waits else 0, 'specialist_mean_wait_min': round(statistics.mean(specialist_waits), 1) if specialist_waits else 0})
+        _spl_result = run_ed_simulation(problem_json, n_patients)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - n_patients
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_n_patients
+      - out_sim_json
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: simulation_valid
+      backend: kernel
+      arguments:
+        - '@sim_json, @mmc_json'
+      code: |
+        import json
+
+        def simulation_valid(sim_json: str, mmc_json: str) -> bool:
+            """ASSERT: simulation ran successfully with enough patients.
+
+            Requires ≥ 200 patients completed and plausible mean wait.
+            (The comparison with M/M/c is narrative, not a pass/fail gate — both
+            measure total sojourn, but lognormal service produces a heavier tail
+            than M/M/c's exponential assumption.)
+            """
+            try:
+                sim = json.loads(sim_json)
+                if sim.get('status') != 'OK':
+                    return False
+                n_done = sim.get('n_patients_completed', 0)
+                mean_wait = sim.get('mean_wait_min', 0)
+                return n_done >= 200 and mean_wait > 5.0
+            except Exception:
+                return False
+        _spl_result = simulation_valid(sim_json, mmc_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - sim_json
+        - mmc_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_sim_json
+      - in_mmc_json
+      - out_tool_7
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_7'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_sim_json
+      - in_mmc_json
+      - in_tool_7
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: format_sim_report
+      backend: kernel
+      arguments:
+        - '@sim_json'
+      code: |
+        import json
+
+        _ED_PROBLEM = {'problem_name': 'Hospital Emergency Department Simulation', 'description': 'Simulate an emergency department with bursty arrivals and lognormal treatment. Mean arrival rate: 3.2 patients/hour (non-Poisson — shift handovers at 8am/4pm cause burst factors up to 2.5×). Resources: 3 triage nurses (2 min average, exponential), 8 treatment bays (lognormal mean=40 min, σ=25 min), 2 specialist consultants (50% of patients, exponential mean=30 min). M/M/c formula assumes Poisson arrivals and exponential service — significantly underestimates tail wait times for this ED.', 'mean_arrival_rate_per_hr': 3.2, 'triage_nurses': 3, 'triage_mean_min': 2.0, 'treatment_bays': 8, 'treatment_mean_min': 40.0, 'treatment_sigma_min': 25.0, 'specialist_docs': 2, 'specialist_prob': 0.5, 'specialist_mean_min': 30.0, 'sim_hours': 168, 'burst_hours': [8, 16, 0], 'burst_factor': 2.5}
+
+        def format_sim_report(sim_json: str) -> str:
+            try:
+                d = json.loads(sim_json)
+                util = d.get('utilization', {})
+                hist = d.get('wait_histogram', {})
+                lines = [f'## SimPy DES Report — Emergency Department', '', f"**Patients simulated:** {d.get('n_patients_completed', '?'):,}  ", f"**Mean total wait:** {d.get('mean_wait_min', '?')} min  ", f"**Median wait:** {d.get('p50_wait_min', '?')} min  ", f"**95th-percentile wait:** {d.get('p95_wait_min', '?')} min  ", '', '### Resource Utilization', '', '| Resource | Utilization |', '|---|---|', f"| Triage nurses (×{_ED_PROBLEM['triage_nurses']}) | {util.get('triage_pct', '?')}% |", f"| Treatment bays (×{_ED_PROBLEM['treatment_bays']}) | {util.get('bay_pct', '?')}% |", f"| Specialists (×{_ED_PROBLEM['specialist_docs']}) | {util.get('specialist_pct', '?')}% |", '', '### Wait Time Distribution', '', '| Bucket | Patients |', '|---|---|']
+                for bucket, count in hist.items():
+                    lines.append(f'| {bucket} | {count:,} |')
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_sim_report(sim_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - sim_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_sim_json
+      - out_sim_report
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@sim_json'
+        - '''p95_wait_min'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(sim_json, 'p95_wait_min')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_sim_json
+      - out_p95_wait
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@mmc_json'
+        - '''p95_wait_min'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(mmc_json, 'p95_wait_min')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_mmc_json
+      - out_mmc_p95
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_simulation_prompt
+      params:
+        - sim_report
+        - mmc_report
+      prompt_inline: |-
+        You are a healthcare operations researcher explaining simulation results.
+
+        SIMULATION RESULT (SimPy DES):
+        {{in_sim_report}}
+
+        ANALYTIC BASELINE (M/M/c queuing):
+        {{in_mmc_report}}
+
+        Explain (≤200 words):
+        1. Why does the simulation show a higher 95th-percentile wait than M/M/c predicts?
+           What does "bursty arrivals" mean mathematically (coefficient of variation > 1)?
+        2. What is the "inspection paradox" in queuing — why does arriving during a busy period
+           feel different from the average utilization?
+        3. What operational changes would reduce the 95th-percentile wait the most?
+           (Hint: look at which resource has the highest utilization in the simulation)
+        4. Why can't you optimize the staffing level from simulation alone — what do you need
+           to add to turn a simulation into an optimization?
+      arguments:
+        - '@sim_report'
+        - '@mmc_report'
+    ports:
+      - trigger
+      - complete
+      - in_sim_report
+      - in_mmc_report
+      - out_explanation
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@sim_report'
+        - '@mmc_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(sim_report: str, mmc_report: str, explanation: str) -> str:
+            return f'=== Discrete-Event Simulation — Hospital ED (r124) | solver=ON ===\n\n{sim_report}\n\n── M/M/c Analytic Baseline ─────────────────────────────────\n{mmc_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(sim_report, mmc_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - sim_report
+        - mmc_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_sim_report
+      - in_mmc_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: mmc_queuing_prompt
+      params:
+        - problem_description
+      prompt_inline: |-
+        You are a hospital operations analyst using classic queuing theory.
+
+        ED PROBLEM:
+        {{in_problem_description}}
+
+        Using the M/M/c formula (Poisson arrivals, exponential service, c servers):
+        1. Compute or estimate the mean wait time in queue (Wq) using the Erlang-C formula.
+           Show the formula: ρ = λ/(c·μ), then compute P0 (idle probability) and Wq.
+        2. Estimate the 95th-percentile wait time (assume exponential tail: W_95 ≈ Wq × ln(20)).
+        3. Compute triage nurse utilization (ρ_triage) and treatment bay utilization (ρ_bay).
+        4. Under what conditions does M/M/c give accurate predictions?
+           Why might an ED violate the "Poisson arrivals" assumption?
+
+        Show your calculations. Use: λ=3.2 patients/hour (mean), μ_triage=30/hr, μ_treat=1.5/hr.
+      arguments:
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_problem_description
+      - out_llm_mmc
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_mmc'
+        - '@mmc_report'
+      code: |
+        def format_report_solver_off(llm_mmc: str, mmc_report: str) -> str:
+            return f'=== Discrete-Event Simulation — Hospital ED (r124) | solver=OFF ===\n\n── M/M/c Analytic Baseline (computed) ─────────────────────\n{mmc_report}\n\n── LLM Queuing Theory Analysis ─────────────────────────────\n{llm_mmc}\n\nNote: Both M/M/c and LLM assume Poisson arrivals. Run --param use_solver=true\nfor SimPy simulation capturing bursty arrivals and lognormal service.'
+        _spl_result = format_report_solver_off(llm_mmc, mmc_report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_mmc
+        - mmc_report
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_mmc
+      - in_mmc_report
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_4.in_problem_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_mmc_json
+    target: tool_5.in_mmc_json
+    type: binds
+  - source: tool_5.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_6.in_problem_json
+    type: binds
+  - source: wf_entry.out_n_patients
+    target: tool_6.in_n_patients
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_6.out_sim_json
+    target: tool_7.in_sim_json
+    type: binds
+  - source: tool_4.out_mmc_json
+    target: tool_7.in_mmc_json
+    type: binds
+  - source: tool_7.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_6.out_sim_json
+    target: assert_1.in_sim_json
+    type: binds
+  - source: tool_4.out_mmc_json
+    target: assert_1.in_mmc_json
+    type: binds
+  - source: tool_7.out_tool_7
+    target: assert_1.in_tool_7
+    type: binds
+  - source: assert_1.pass
+    target: tool_8.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_6.out_sim_json
+    target: tool_8.in_sim_json
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_6.out_sim_json
+    target: tool_9.in_sim_json
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: tool_4.out_mmc_json
+    target: tool_10.in_mmc_json
+    type: binds
+  - source: tool_10.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_8.out_sim_report
+    target: gen_1.in_sim_report
+    type: binds
+  - source: tool_5.out_mmc_report
+    target: gen_1.in_mmc_report
+    type: binds
+  - source: gen_1.complete
+    target: tool_11.trigger
+    type: triggers
+  - source: tool_8.out_sim_report
+    target: tool_11.in_sim_report
+    type: binds
+  - source: tool_5.out_mmc_report
+    target: tool_11.in_mmc_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_11.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_problem_description
+    target: gen_2.in_problem_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: gen_2.out_llm_mmc
+    target: tool_12.in_llm_mmc
+    type: binds
+  - source: tool_5.out_mmc_report
+    target: tool_12.in_mmc_report
+    type: binds
+  - source: tool_11.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_12.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_11.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_12.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

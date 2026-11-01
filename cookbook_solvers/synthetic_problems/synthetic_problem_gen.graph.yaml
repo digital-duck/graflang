@@ -1,0 +1,1090 @@
+version: 1.0-graph
+workflow:
+  name: synthetic_problem_gen
+  inputs:
+    - name: sample_problem
+      type: TEXT
+      default: 'A factory produces two products. Product A yields $10 profit per unit, requires 2 labor-hours and 3 kg material. Product B yields $6 profit per unit, requires 1 labor-hour and 2 kg material. Available resources: 20 labor-hours and 30 kg material per day. All production quantities must be non-negative. Maximize total daily profit. Known optimal: 10 units of A, 0 units of B, profit = $100.'
+    - name: domain
+      type: TEXT
+      default: LP
+    - name: n_variants
+      type: TEXT
+      default: '5'
+    - name: n_size
+      type: TEXT
+      default: '5'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_sample_problem
+      - out_domain
+      - out_n_variants
+      - out_n_size
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_attempts
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_parse_error
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''0'''
+    ports:
+      - trigger
+      - complete
+      - out_n_valid
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''0'''
+    ports:
+      - trigger
+      - complete
+      - out_n_ok
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''0'''
+    ports:
+      - trigger
+      - complete
+      - out_n_total
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''(not saved)'''
+    ports:
+      - trigger
+      - complete
+      - out_suite_path
+  - id: set_7
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''(no variants generated)'''
+    ports:
+      - trigger
+      - complete
+      - out_suite_table
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: generate_variants_prompt
+      params:
+        - sample_problem
+        - domain
+        - n_variants
+        - n_size
+      prompt_inline: |-
+        You are a problem-set designer for operations research benchmarks.
+
+        TASK: Generate {{in_n_variants}} STRUCTURAL VARIANTS of the reference problem below.
+
+        PROBLEM SIZE: n_size={{in_n_size}}
+        - For LP/ILP: each variant must have exactly {{in_n_size}} decision variables
+          (e.g. n_size=5 → 5 products; n_size=10 → 10 products; n_size=20 → 20 products)
+        - For supply-sourcing: each variant must have exactly {{in_n_size}} suppliers
+        - This mirrors the r78 ablation scale levels: n05 (small), n10 (medium), n20 (large)
+        - Larger n_size stresses LLM constraint-mapping and is where solver=OFF breaks down
+
+        Each variant must:
+        - Keep the same solver class ({{in_domain}}) and same decision-variable types
+        - Have exactly {{in_n_size}} decision variables — no more, no fewer
+        - Change the numbers (coefficients, resource limits, capacities) for variety
+        - Cover a range of difficulty: some easy (large slack), some tight (near-binding constraints)
+
+        REFERENCE PROBLEM:
+        {{in_sample_problem}}
+
+        OUTPUT FORMAT — return a JSON array, one object per variant.
+        For LP/ILP domains each object must have ALL of these keys:
+
+        [
+          {{
+            "id": "v001",
+            "domain": "{{in_domain}}",
+            "problem_text": "Plain English description a business user would read.",
+            "variables": [
+              {{"name": "x1", "type": "continuous", "lb": 0}},
+              {{"name": "x2", "type": "continuous", "lb": 0}}
+            ],
+            "objective": {{
+              "sense": "maximize",
+              "coefficients": {{"x1": 10, "x2": 6}}
+            }},
+            "constraints": [
+              {{"name": "labor",    "lhs": {{"x1": 2, "x2": 1}}, "op": "<=", "rhs": 20}},
+              {{"name": "material", "lhs": {{"x1": 3, "x2": 2}}, "op": "<=", "rhs": 30}}
+            ]
+          }},
+          ...
+        ]
+
+        For supply-sourcing domains each object must have ALL of these keys:
+        [
+          {{
+            "id": "v001",
+            "domain": "supply-sourcing",
+            "problem_text": "Plain English description.",
+            "suppliers": [
+              {{"name": "S1", "cost": 10, "fill_rate": 0.95, "capacity": 400}},
+              {{"name": "S2", "cost": 7,  "fill_rate": 0.80, "capacity": 500}}
+            ],
+            "total_demand": 1000
+          }},
+          ...
+        ]
+
+        RULES:
+        - Return ONLY the JSON array — no prose, no markdown headers
+        - Ensure every constraint coefficient and objective coefficient is a number, not a string
+        - For ILP: set "type": "integer" on integer variables
+        - Make problem_text self-contained: a reader should be able to solve it from the text alone
+        - Vary coefficients and resource limits across variants so optimal values differ meaningfully
+        - For ILP: set "type": "integer" on integer variables; for LP leave as "continuous"
+      arguments:
+        - '@sample_problem'
+        - '@domain'
+        - '@n_variants'
+        - '@n_size'
+    ports:
+      - trigger
+      - complete
+      - in_sample_problem
+      - in_domain
+      - in_n_variants
+      - in_n_size
+      - out_variants_raw
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: parse_variants
+      backend: kernel
+      arguments:
+        - '@variants_raw'
+        - '@domain'
+      code: |
+        import json
+
+        import re
+
+        def _extract_json(text: str):
+            """Pull the first JSON array or object from fenced or raw text."""
+            for pat in ['```(?:json)?\\s*([\\[{].*?)\\s*```', '((?:\\[|\\{)(?:.|\\n)*(?:\\]|\\}))']:
+                m = re.search(pat, text, re.DOTALL)
+                if m:
+                    try:
+                        return json.loads(m.group(1))
+                    except json.JSONDecodeError:
+                        continue
+            raise ValueError('No parseable JSON found in LLM output')
+
+        _REQUIRED = {'lp': {'id', 'problem_text', 'variables', 'objective', 'constraints'}, 'ilp': {'id', 'problem_text', 'variables', 'objective', 'constraints'}, 'supply-sourcing': {'id', 'problem_text', 'suppliers', 'total_demand'}}
+
+        def parse_variants(variants_raw: str, domain: str) -> str:
+            """Parse LLM-generated variant JSON and validate required fields.
+
+            Returns:
+              {"status": "OK"|"EMPTY"|"PARSE_ERROR", "n_valid": int, "n_errors": int,
+               "errors": [str], "variants": [dict]}
+            """
+            try:
+                data = _extract_json(variants_raw)
+                if isinstance(data, dict):
+                    data = data.get('variants', [data])
+                dom_key = domain.lower().replace(' ', '-')
+                required = _REQUIRED.get(dom_key, _REQUIRED['lp'])
+                valid, errors = ([], [])
+                for i, v in enumerate(data):
+                    vid = v.get('id', f'v{i + 1:03d}')
+                    v['id'] = vid
+                    missing = required - set(v.keys())
+                    if missing:
+                        errors.append(f'{vid}: missing {sorted(missing)}')
+                    else:
+                        v['domain'] = dom_key
+                        valid.append(v)
+                return json.dumps({'status': 'OK' if valid else 'EMPTY', 'n_valid': len(valid), 'n_errors': len(errors), 'errors': errors, 'variants': valid})
+            except Exception as e:
+                return json.dumps({'status': 'PARSE_ERROR', 'error': str(e), 'n_valid': 0, 'n_errors': 1, 'errors': [str(e)], 'variants': []})
+        _spl_result = parse_variants(variants_raw, domain)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - variants_raw
+        - domain
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_variants_raw
+      - in_domain
+      - out_variants_json
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: has_valid_variants
+      backend: kernel
+      arguments:
+        - '@variants_json'
+      code: |
+        import json
+
+        def has_valid_variants(variants_json: str) -> bool:
+            """ASSERT gate: at least 1 variant parsed successfully."""
+            try:
+                return json.loads(variants_json).get('n_valid', 0) >= 1
+            except Exception:
+                return False
+        _spl_result = has_valid_variants(variants_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - variants_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_variants_json
+      - out_tool_4
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: NOT latest(@in_tool_4, @tool_5) AND latest(@in_attempts, @attempts) < 3
+      outputs:
+        parse_error:
+          from: tool_2.out_parse_error
+        variants_raw:
+          from: gen_2.out_variants_raw
+        variants_json:
+          from: tool_3.out_variants_json
+        attempts:
+          from: set_8.out_attempts
+        tool_5:
+          from: tool_5.out_tool_5
+      subgraph:
+        nodes:
+          - id: tool_2
+            type: SOLVE
+            config:
+              tool: get_parse_errors
+              backend: kernel
+              arguments:
+                - '@variants_json'
+              code: |
+                import json
+
+                def get_parse_errors(variants_json: str) -> str:
+                    """Return error summary for the repair-loop prompt."""
+                    try:
+                        data = json.loads(variants_json)
+                        errors = data.get('errors', [])
+                        return '; '.join(errors) if errors else f"status={data.get('status')}"
+                    except Exception:
+                        return 'JSON parse error'
+                _spl_result = get_parse_errors(variants_json)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - variants_json
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_variants_json
+              - out_parse_error
+          - id: gen_2
+            type: GENERATE
+            config:
+              function: repair_variants_prompt
+              params:
+                - variants_raw
+                - errors
+              prompt_inline: |-
+                The previous JSON output had these validation errors:
+                {{in_errors}}
+
+                Here was your output:
+                {{in_variants_raw}}
+
+                Fix the JSON so every variant object has all required fields.
+                Return ONLY the corrected JSON array — no prose.
+              arguments:
+                - '@variants_raw'
+                - '@parse_error'
+            ports:
+              - trigger
+              - complete
+              - in_variants_raw
+              - in_errors
+              - out_variants_raw
+          - id: tool_3
+            type: SOLVE
+            config:
+              tool: parse_variants
+              backend: kernel
+              arguments:
+                - '@variants_raw'
+                - '@domain'
+              code: |
+                import json
+
+                import re
+
+                def _extract_json(text: str):
+                    """Pull the first JSON array or object from fenced or raw text."""
+                    for pat in ['```(?:json)?\\s*([\\[{].*?)\\s*```', '((?:\\[|\\{)(?:.|\\n)*(?:\\]|\\}))']:
+                        m = re.search(pat, text, re.DOTALL)
+                        if m:
+                            try:
+                                return json.loads(m.group(1))
+                            except json.JSONDecodeError:
+                                continue
+                    raise ValueError('No parseable JSON found in LLM output')
+
+                _REQUIRED = {'lp': {'id', 'problem_text', 'variables', 'objective', 'constraints'}, 'ilp': {'id', 'problem_text', 'variables', 'objective', 'constraints'}, 'supply-sourcing': {'id', 'problem_text', 'suppliers', 'total_demand'}}
+
+                def parse_variants(variants_raw: str, domain: str) -> str:
+                    """Parse LLM-generated variant JSON and validate required fields.
+
+                    Returns:
+                      {"status": "OK"|"EMPTY"|"PARSE_ERROR", "n_valid": int, "n_errors": int,
+                       "errors": [str], "variants": [dict]}
+                    """
+                    try:
+                        data = _extract_json(variants_raw)
+                        if isinstance(data, dict):
+                            data = data.get('variants', [data])
+                        dom_key = domain.lower().replace(' ', '-')
+                        required = _REQUIRED.get(dom_key, _REQUIRED['lp'])
+                        valid, errors = ([], [])
+                        for i, v in enumerate(data):
+                            vid = v.get('id', f'v{i + 1:03d}')
+                            v['id'] = vid
+                            missing = required - set(v.keys())
+                            if missing:
+                                errors.append(f'{vid}: missing {sorted(missing)}')
+                            else:
+                                v['domain'] = dom_key
+                                valid.append(v)
+                        return json.dumps({'status': 'OK' if valid else 'EMPTY', 'n_valid': len(valid), 'n_errors': len(errors), 'errors': errors, 'variants': valid})
+                    except Exception as e:
+                        return json.dumps({'status': 'PARSE_ERROR', 'error': str(e), 'n_valid': 0, 'n_errors': 1, 'errors': [str(e)], 'variants': []})
+                _spl_result = parse_variants(variants_raw, domain)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - variants_raw
+                - domain
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_variants_raw
+              - in_domain
+              - out_variants_json
+          - id: set_8
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_attempts + 1'
+            ports:
+              - trigger
+              - complete
+              - in_attempts
+              - out_attempts
+          - id: tool_5
+            type: SOLVE
+            config:
+              tool: has_valid_variants
+              backend: kernel
+              arguments:
+                - '@variants_json'
+              code: |
+                import json
+
+                def has_valid_variants(variants_json: str) -> bool:
+                    """ASSERT gate: at least 1 variant parsed successfully."""
+                    try:
+                        return json.loads(variants_json).get('n_valid', 0) >= 1
+                    except Exception:
+                        return False
+                _spl_result = has_valid_variants(variants_json)
+              result: _spl_result
+              out_type: BOOL
+              tool_params:
+                - variants_json
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_variants_json
+              - out_tool_5
+        edges:
+          - source: tool_2.complete
+            target: gen_2.trigger
+            type: triggers
+          - source: tool_2.out_parse_error
+            target: gen_2.in_errors
+            type: binds
+          - source: gen_2.complete
+            target: tool_3.trigger
+            type: triggers
+          - source: gen_2.out_variants_raw
+            target: tool_3.in_variants_raw
+            type: binds
+          - source: tool_3.complete
+            target: set_8.trigger
+            type: triggers
+          - source: set_8.complete
+            target: tool_5.trigger
+            type: triggers
+          - source: tool_3.out_variants_json
+            target: tool_5.in_variants_json
+            type: binds
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_variants_json
+      - in_variants_raw
+      - in_domain
+      - in_attempts
+      - in_tool_4
+      - in_parse_error
+      - out_parse_error
+      - out_variants_raw
+      - out_variants_json
+      - out_attempts
+      - out_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: has_valid_variants
+      backend: kernel
+      arguments:
+        - '@variants_json'
+      code: |
+        import json
+
+        def has_valid_variants(variants_json: str) -> bool:
+            """ASSERT gate: at least 1 variant parsed successfully."""
+            try:
+                return json.loads(variants_json).get('n_valid', 0) >= 1
+            except Exception:
+                return False
+        _spl_result = has_valid_variants(variants_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - variants_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_variants_json
+      - out_tool_6
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_6'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_variants_json
+      - in_tool_6
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@variants_json'
+        - '''n_valid'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(variants_json, 'n_valid')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_variants_json
+      - out_n_valid
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: batch_solve
+      backend: kernel
+      arguments:
+        - '@variants_json'
+        - '@domain'
+      code: |
+        import json
+
+        def _solve_lp(spec: dict) -> dict:
+            """Build and solve an LP/ILP from a structured spec dict via PuLP."""
+            import pulp
+            sense = pulp.LpMaximize if spec['objective'].get('sense', 'maximize') == 'maximize' else pulp.LpMinimize
+            prob = pulp.LpProblem(f"variant_{spec['id']}", sense)
+            vtype_map = {'continuous': pulp.LpContinuous, 'integer': pulp.LpInteger, 'binary': pulp.LpBinary}
+            lp_vars = {}
+            for v in spec['variables']:
+                vtype = vtype_map.get(str(v.get('type', 'continuous')).lower(), pulp.LpContinuous)
+                lp_vars[v['name']] = pulp.LpVariable(v['name'], lowBound=v.get('lb', 0), upBound=v.get('ub', None), cat=vtype)
+            coeffs = spec['objective']['coefficients']
+            prob += pulp.lpSum((float(coeffs.get(n, 0)) * lp_vars[n] for n in lp_vars if n in coeffs))
+            for c in spec.get('constraints', []):
+                lhs = pulp.lpSum((float(c['lhs'].get(n, 0)) * lp_vars[n] for n in lp_vars if n in c['lhs']))
+                rhs = float(c['rhs'])
+                op = c.get('op', '<=')
+                if op == '<=':
+                    prob += lhs <= rhs
+                elif op == '>=':
+                    prob += lhs >= rhs
+                else:
+                    prob += lhs == rhs
+            prob.solve(pulp.PULP_CBC_CMD(msg=False))
+            status = pulp.LpStatus[prob.status]
+            if status == 'Optimal':
+                raw_obj = pulp.value(prob.objective)
+                obj = round(float(raw_obj) if isinstance(raw_obj, float) else 0.0, 4)
+                vals = {n: round(float(v) if isinstance((v := pulp.value(lp_vars[n])), float) else 0.0, 4) for n in lp_vars}
+                return {'status': 'OPTIMAL', 'objective': obj, 'variables': vals}
+            return {'status': status, 'objective': None, 'variables': {}}
+
+        def _solve_supply_sourcing(spec: dict) -> dict:
+            """Solve a supply-sourcing cost-minimization problem via PuLP."""
+            import pulp
+            suppliers = spec['suppliers']
+            demand = float(spec['total_demand'])
+            prob = pulp.LpProblem('supply_sourcing', pulp.LpMinimize)
+            x = {s['name']: pulp.LpVariable(f"x_{s['name']}", lowBound=0, upBound=float(s['capacity'])) for s in suppliers}
+            prob += pulp.lpSum((float(s['cost']) * x[s['name']] for s in suppliers))
+            prob += pulp.lpSum((x[s['name']] for s in suppliers)) == demand
+            prob.solve(pulp.PULP_CBC_CMD(msg=False))
+            if pulp.LpStatus[prob.status] == 'Optimal':
+                alloc = {s['name']: round(float(v) if isinstance((v := pulp.value(x[s['name']])), float) else 0.0, 2) for s in suppliers}
+                raw_cost = pulp.value(prob.objective)
+                cost = round(float(raw_cost) if isinstance(raw_cost, float) else 0.0, 2)
+                fill = round(sum((float(s['fill_rate']) * alloc[s['name']] for s in suppliers)) / demand, 4)
+                return {'status': 'OPTIMAL', 'objective': cost, 'fill_rate': fill, 'allocation': alloc}
+            return {'status': pulp.LpStatus[prob.status], 'objective': None}
+
+        def batch_solve(variants_json: str, domain: str) -> str:
+            """Solve all parsed variants; route by domain.
+
+            Returns:
+              {"status": "OK", "n_total": int, "n_optimal": int, "n_failed": int, "results": [...]}
+            """
+            try:
+                data = json.loads(variants_json)
+                variants = data.get('variants', [])
+                results = []
+                for v in variants:
+                    dom = v.get('domain', domain).lower()
+                    try:
+                        sol = _solve_supply_sourcing(v) if 'supply' in dom else _solve_lp(v)
+                        results.append({'id': v['id'], 'domain': dom, 'problem_text': v.get('problem_text', ''), 'solver_status': sol['status'], 'optimal': sol.get('objective'), 'variables': sol.get('variables', {}), 'fill_rate': sol.get('fill_rate')})
+                    except Exception as e:
+                        results.append({'id': v['id'], 'domain': dom, 'problem_text': v.get('problem_text', ''), 'solver_status': 'ERROR', 'error': str(e), 'optimal': None, 'variables': {}})
+                n_ok = sum((1 for r in results if r['solver_status'] == 'OPTIMAL'))
+                return json.dumps({'status': 'OK', 'n_total': len(results), 'n_optimal': n_ok, 'n_failed': len(results) - n_ok, 'results': results})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e), 'n_total': 0, 'n_optimal': 0, 'n_failed': 0, 'results': []})
+        _spl_result = batch_solve(variants_json, domain)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - variants_json
+        - domain
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_variants_json
+      - in_domain
+      - out_results_json
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@results_json'
+        - '''n_optimal'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(results_json, 'n_optimal')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_results_json
+      - out_n_ok
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@results_json'
+        - '''n_total'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(results_json, 'n_total')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_results_json
+      - out_n_total
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: format_test_suite
+      backend: kernel
+      arguments:
+        - '@results_json'
+      code: |
+        import json
+
+        def format_test_suite(results_json: str) -> str:
+            """Format batch-solve results as a markdown table."""
+            try:
+                data = json.loads(results_json)
+                results = data.get('results', [])
+                lines = [f"**{data.get('n_optimal', 0)}/{data.get('n_total', 0)} variants solved optimally**", '', '| ID | Domain | Status | Optimal | Problem (excerpt) |', '|---|---|---|---|---|']
+                for r in results:
+                    excerpt = r['problem_text'][:80].replace('|', '/')
+                    opt = str(r['optimal']) if r['optimal'] is not None else '—'
+                    fill = f"  fill={r['fill_rate']:.2%}" if r.get('fill_rate') else ''
+                    lines.append(f"| {r['id']} | {r['domain']} | {r['solver_status']} | {opt}{fill} | {excerpt}… |")
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_test_suite(results_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - results_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_results_json
+      - out_suite_table
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: save_test_suite
+      backend: kernel
+      arguments:
+        - '@results_json'
+        - '@domain'
+      code: |
+        import json
+
+        import os
+
+        from datetime import datetime
+
+        def save_test_suite(results_json: str, domain: str) -> str:
+            """Persist test suite JSON to cookbook-solver/109_synthetic_problems/output/."""
+            try:
+                out_dir = os.path.join(os.getcwd(), 'cookbook-solver', '109_synthetic_problems', 'output')
+                os.makedirs(out_dir, exist_ok=True)
+                ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+                path = os.path.join(out_dir, f'{domain.lower()}_{ts}.json')
+                with open(path, 'w') as f:
+                    json.dump(json.loads(results_json), f, indent=2)
+                return path
+            except Exception as e:
+                return f'save error: {e}'
+        _spl_result = save_test_suite(results_json, domain)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - results_json
+        - domain
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_results_json
+      - in_domain
+      - out_suite_path
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: analyze_difficulty
+      params:
+        - suite_table
+        - domain
+        - n_variants
+        - n_size
+      prompt_inline: |-
+        You are a benchmark analyst reviewing a synthetic test suite for {{in_domain}} problems.
+
+        Test suite: {{in_n_variants}} variants at n_size={{in_n_size}} (each problem has {{in_n_size}} decision variables).
+        This mirrors the r78 ablation scale levels — n05/n10/n20 stress-test LLM constraint-mapping.
+
+        {{in_suite_table}}
+
+        Write a concise analysis (≤200 words) covering:
+        1. What fraction solved optimally — and what caused failures (infeasible formulation,
+           unbounded, solver error)?
+        2. Difficulty at this size: is n_size={{in_n_size}} too easy (all trivial) or too hard
+           (many failures)? What does that predict about solver=OFF correctness at this scale?
+        3. Which variant would best stress-test an LLM's NL→decomposition ability and why?
+        4. Recommended next n_size: should the next batch go larger (scale up), smaller
+           (find the crossover), or stay here with varied constraint tightness?
+      arguments:
+        - '@suite_table'
+        - '@domain'
+        - '@n_variants'
+        - '@n_size'
+    ports:
+      - trigger
+      - complete
+      - in_suite_table
+      - in_domain
+      - in_n_variants
+      - in_n_size
+      - out_analysis
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: format_report
+      backend: kernel
+      arguments:
+        - '@domain'
+        - '@n_size'
+        - '@n_variants'
+        - '@n_valid'
+        - '@n_ok'
+        - '@n_total'
+        - '@attempts'
+        - '@suite_path'
+        - '@suite_table'
+        - '@analysis'
+      code: |
+        def format_report(domain: str, n_size: str, n_variants: str, n_valid: str, n_ok: str, n_total: str, attempts: str, suite_path: str, suite_table: str, analysis: str) -> str:
+            return f'=== Synthetic Problem Generator (r109) ===\n\nDomain      : {domain}\nn_size      : {n_size} decision variables per problem\nRequested   : {n_variants} variants\nGenerated   : {n_valid} valid variants\nSolved      : {n_ok}/{n_total} optimally\nRepair loops: {attempts}\nSaved to    : {suite_path}\n\n── Test Suite ──────────────────────────────────────────────\n{suite_table}\n\n── Difficulty Analysis ─────────────────────────────────────\n{analysis}'
+        _spl_result = format_report(domain, n_size, n_variants, n_valid, n_ok, n_total, attempts, suite_path, suite_table, analysis)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - domain
+        - n_size
+        - n_variants
+        - n_valid
+        - n_ok
+        - n_total
+        - attempts
+        - suite_path
+        - suite_table
+        - analysis
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_domain
+      - in_n_size
+      - in_n_variants
+      - in_n_valid
+      - in_n_ok
+      - in_n_total
+      - in_attempts
+      - in_suite_path
+      - in_suite_table
+      - in_analysis
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: set_7.trigger
+    type: triggers
+  - source: set_7.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_sample_problem
+    target: gen_1.in_sample_problem
+    type: binds
+  - source: wf_entry.out_domain
+    target: gen_1.in_domain
+    type: binds
+  - source: wf_entry.out_n_variants
+    target: gen_1.in_n_variants
+    type: binds
+  - source: wf_entry.out_n_size
+    target: gen_1.in_n_size
+    type: binds
+  - source: gen_1.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: gen_1.out_variants_raw
+    target: tool_1.in_variants_raw
+    type: binds
+  - source: wf_entry.out_domain
+    target: tool_1.in_domain
+    type: binds
+  - source: tool_1.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_variants_json
+    target: tool_4.in_variants_json
+    type: binds
+  - source: tool_4.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: tool_1.out_variants_json
+    target: loop_1.in_variants_json
+    type: binds
+  - source: gen_1.out_variants_raw
+    target: loop_1.in_variants_raw
+    type: binds
+  - source: wf_entry.out_domain
+    target: loop_1.in_domain
+    type: binds
+  - source: set_1.out_attempts
+    target: loop_1.in_attempts
+    type: binds
+  - source: tool_4.out_tool_4
+    target: loop_1.in_tool_4
+    type: binds
+  - source: set_2.out_parse_error
+    target: loop_1.in_parse_error
+    type: binds
+  - source: loop_1.exit
+    target: tool_6.trigger
+    type: triggers
+  - source: loop_1.out_variants_json
+    target: tool_6.in_variants_json
+    type: binds
+  - source: tool_6.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: loop_1.out_variants_json
+    target: assert_1.in_variants_json
+    type: binds
+  - source: tool_6.out_tool_6
+    target: assert_1.in_tool_6
+    type: binds
+  - source: assert_1.pass
+    target: tool_7.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_7.trigger
+    type: triggers
+  - source: loop_1.out_variants_json
+    target: tool_7.in_variants_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: loop_1.out_variants_json
+    target: tool_8.in_variants_json
+    type: binds
+  - source: wf_entry.out_domain
+    target: tool_8.in_domain
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_8.out_results_json
+    target: tool_9.in_results_json
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: tool_8.out_results_json
+    target: tool_10.in_results_json
+    type: binds
+  - source: tool_10.complete
+    target: tool_11.trigger
+    type: triggers
+  - source: tool_8.out_results_json
+    target: tool_11.in_results_json
+    type: binds
+  - source: tool_11.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: tool_8.out_results_json
+    target: tool_12.in_results_json
+    type: binds
+  - source: wf_entry.out_domain
+    target: tool_12.in_domain
+    type: binds
+  - source: tool_12.complete
+    target: gen_3.trigger
+    type: triggers
+  - source: tool_11.out_suite_table
+    target: gen_3.in_suite_table
+    type: binds
+  - source: wf_entry.out_domain
+    target: gen_3.in_domain
+    type: binds
+  - source: wf_entry.out_n_variants
+    target: gen_3.in_n_variants
+    type: binds
+  - source: wf_entry.out_n_size
+    target: gen_3.in_n_size
+    type: binds
+  - source: gen_3.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: wf_entry.out_domain
+    target: tool_13.in_domain
+    type: binds
+  - source: wf_entry.out_n_size
+    target: tool_13.in_n_size
+    type: binds
+  - source: wf_entry.out_n_variants
+    target: tool_13.in_n_variants
+    type: binds
+  - source: tool_7.out_n_valid
+    target: tool_13.in_n_valid
+    type: binds
+  - source: tool_9.out_n_ok
+    target: tool_13.in_n_ok
+    type: binds
+  - source: tool_10.out_n_total
+    target: tool_13.in_n_total
+    type: binds
+  - source: loop_1.out_attempts
+    target: tool_13.in_attempts
+    type: binds
+  - source: tool_12.out_suite_path
+    target: tool_13.in_suite_path
+    type: binds
+  - source: tool_11.out_suite_table
+    target: tool_13.in_suite_table
+    type: binds
+  - source: gen_3.out_analysis
+    target: tool_13.in_analysis
+    type: binds
+  - source: tool_13.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_13.complete
+    target: wf_exit.trigger
+    type: triggers

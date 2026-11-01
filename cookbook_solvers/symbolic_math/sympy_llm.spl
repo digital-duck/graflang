@@ -1,0 +1,159 @@
+-- ============================================================
+-- Recipe 67c: sympy_llm — an A/B harness for "architecture vs. scale"
+--
+-- Same kernel shape as sympy_math_multi_step.spl — decompose (LLM) ->
+-- verified chain (SymPy) -> explain (LLM) — behind ONE switch:
+--   @enable_solver = true   plan -> verified SymPy chain -> explain
+--   @enable_solver = false  the unaided LLM, one shot (baseline)
+-- Same model, same problem, one --param flip (RQ1 of
+-- case-2-hackernews.md).
+--
+-- Fail-fast policy: with the solver on, ANY failure in the verified
+-- chain exits immediately with an explicit status and NO LLM fallback —
+-- a loud, attributable failure is better data than a quiet save.
+--
+-- Requires: pip install sympy (or run with --self-healing)
+-- ============================================================
+
+IMPORT 'sympy_tools'
+
+-- ── One chain step, CALLed once per item ─────────────────────
+-- Renamed from sympy_math_multi_step.spl's solve_one_step to avoid a
+-- registry collision when both files load side by side.
+
+WORKFLOW solve_chain_step
+  INPUT @step TEXT
+  INPUT @running_expression TEXT := ""
+  OUTPUT @step_summary TEXT
+DO
+  CALL split_part(@step, '|', '1') INTO @raw_expression;
+  CALL split_part(@step, '|', '2') INTO @operation;
+
+  -- Resolve PREV deterministically (lower-case both sides: EVALUATE
+  -- lower-cases the literal but not the value).
+  CALL lower(@raw_expression) INTO @raw_expression_lc;
+  EVALUATE @raw_expression_lc
+    WHEN = 'prev' THEN
+      @expression := @running_expression
+    ELSE
+      @expression := @raw_expression
+  END
+
+  CALL solve_step_with_sympy(@expression, @operation) INTO @step_summary;
+
+  -- '<bare_result>|<human_readable_line>'; bare_result is 'sympy_error'
+  -- on failure — the caller fail-fasts on it.
+  RETURN @step_summary
+END;
+
+-- ── WORKFLOW ─────────────────────────────────────────────────
+
+WORKFLOW math_solver_ab
+  INPUT @problem TEXT := 'differentiate 3*x**3 - x, then factor if needed, finally solve for x'
+  INPUT @log_dir TEXT := 'cookbook/67_symbolic_math/logs-spl'
+  INPUT @enable_solver TEXT := 'true'
+  OUTPUT @explanation TEXT
+DO
+  CALL lower(@enable_solver) INTO @solver_mode;
+
+  -- WHEN needs an operator (`=`/`IS`/`IN`) — a bare literal would parse
+  -- as an LLM-judged SemanticCondition.
+  EVALUATE @solver_mode
+    WHEN IN ('true', '1', 'yes') THEN
+      @use_solver := 'yes'
+    ELSE
+      @use_solver := 'no'
+  END
+
+  EVALUATE @use_solver
+    WHEN = 'yes' THEN
+      DO
+        -- ── ARM A: plan -> verified SymPy chain -> explain ──
+        LOGGING f"[arm=solver] Problem '@{@problem}' — planning the chain ..." LEVEL INFO
+
+        GENERATE decompose_problem(@problem) INTO @steps_text;
+        CALL trim(@steps_text) INTO @steps_text;
+        CALL step_count(@steps_text) INTO @n_steps;
+
+        LOGGING f"[arm=solver] decomposed into {@n_steps} step(s):\n\n\n{@steps_text}\n\n" LEVEL INFO
+
+        -- Checkpoint 1: unusable plan — exit before computing anything.
+        EVALUATE @n_steps
+          WHEN = '0' THEN
+            LOGGING f'[arm=solver] PLAN FAILURE — decompose_problem produced no usable steps' LEVEL ERROR
+            CALL write_file(f'{@log_dir}/chain_trace.md',
+              f'(planning failed — raw decomposition output below)\n{@steps_text}') INTO NONE;
+            RETURN f'[PLAN FAILURE] The planning step could not decompose "{@problem}" into usable operations.\nRaw decomposition output: {@steps_text}'
+              WITH status = 'plan_error', arm = 'solver', steps = 0
+        END
+
+        @i := 0
+        @running_expression := ""
+        @trace := ""
+
+        WHILE @i < @n_steps DO
+          CALL extract_step(@steps_text, @i) INTO @step;
+          CALL solve_chain_step(@step, @running_expression) INTO @step_summary;
+          CALL split_part(@step_summary, '|', '1') INTO @running_expression;
+          CALL split_part(@step_summary, '|', '2') INTO @trace_line;
+
+          @step_no := @i + 1
+
+          -- Checkpoint 2: kernel rejected this step — exit with the
+          -- verified prefix preserved for diagnosis.
+          EVALUATE @running_expression
+            WHEN = 'sympy_error' THEN
+              LOGGING f'[arm=solver] SOLVER FAILURE at step {@step_no}/{@n_steps}: {@trace_line}' LEVEL ERROR
+              CALL write_file(f'{@log_dir}/chain_trace.md',
+                f'{@trace}{@step_no}. SOLVER ERROR — {@trace_line}\n') INTO NONE;
+              RETURN f'[SOLVER FAILURE] Step {@step_no}/{@n_steps} could not be computed: {@trace_line}\nVerified chain up to this point:\n{@trace}'
+                WITH status = 'solver_error', arm = 'solver', steps = @step_no
+          END
+
+          @trace := @trace + f'{@step_no}. {@trace_line}\n'
+          LOGGING f'[arm=solver][step {@step_no}/{@n_steps}] {@trace_line}' LEVEL INFO
+          @i := @i + 1
+        END
+
+        CALL write_file(f'{@log_dir}/chain_trace.md', @trace) INTO NONE;
+
+        GENERATE explain_chain(@problem, @trace) INTO @explanation;
+        CALL trim(@explanation) INTO @explanation;
+
+        -- Checkpoint 3: empty narration — surface the verified chain
+        -- itself; a retry is still a fallback to the same unreliable step.
+        EVALUATE @explanation
+          WHEN = "" THEN
+            LOGGING f'[arm=solver] NARRATION FAILURE — explain_chain returned empty content' LEVEL ERROR
+            RETURN f'[NARRATION FAILURE] The chain verified correctly but the explanation step returned nothing.\nVerified chain:\n{@trace}'
+              WITH status = 'narration_error', arm = 'solver', steps = @n_steps
+        END
+
+        RETURN @explanation WITH status = 'complete', arm = 'solver', steps = @n_steps
+      END
+
+    ELSE
+      DO
+        -- ── ARM B: unaided LLM, one shot — no kernel ──
+        LOGGING f"[arm=llm_only] Problem '@{@problem}' — solving with NO symbolic kernel" LEVEL INFO
+
+        CALL write_file(f'{@log_dir}/chain_trace.md',
+          '(solver disabled for this run — no verified chain; the LLM solved it unaided)\n') INTO NONE;
+
+        GENERATE solve_directly(@problem) INTO @explanation;
+        CALL trim(@explanation) INTO @explanation;
+
+        EVALUATE @explanation
+          WHEN = "" THEN
+            LOGGING f'[arm=llm_only] FAILURE — solve_directly returned empty content' LEVEL ERROR
+            RETURN '[FAILURE] The unaided LLM returned nothing for this problem.'
+              WITH status = 'llm_error', arm = 'llm_only', steps = 0
+        END
+
+        RETURN @explanation WITH status = 'complete', arm = 'llm_only', steps = 0
+      END
+  END
+EXCEPTION
+  WHEN BudgetExceeded THEN
+    RETURN @explanation WITH status = 'budget_limit'
+END;

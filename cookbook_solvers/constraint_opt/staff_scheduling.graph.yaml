@@ -1,0 +1,1634 @@
+version: 1.0-graph
+workflow:
+  name: staff_scheduling
+  inputs:
+    - name: problem
+      type: TEXT
+      default: 'A clinic needs to staff one day with 3 shifts: Morning, Afternoon, and Night. Minimum nurse coverage required: Morning needs at least 2 nurses, Afternoon needs at least 2 nurses, Night needs at least 1 nurse. Five nurses are available (Nurse1 through Nurse5). Each nurse can work at most 1 shift today. Wage per nurse-shift: Morning costs $200, Afternoon costs $180, Night costs $320. Assign nurses to shifts to meet all minimum coverage requirements at minimum total wage cost.'
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: max_tries
+      type: INTEGER
+      default: 3
+    - name: lang
+      type: TEXT
+      default: English
+    - name: out_dir
+      type: TEXT
+      default: ./cookbook/78_constraint_opt/output
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_use_solver
+      - out_max_tries
+      - out_lang
+      - out_out_dir
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_start
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: time_now
+      backend: kernel
+      arguments: []
+      code: |
+        import datetime
+
+        def time_now() -> str:
+            """TIME_NOW() — current local time as a filesystem-safe string:
+            YYYY-MM-DD_HH-MM-SS."""
+            return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        _spl_result = time_now()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_ts_safe
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_tries
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_status
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_lp_code
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_solution
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''0'''
+    ports:
+      - trigger
+      - complete
+      - out_stage1_s
+  - id: set_7
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''0'''
+    ports:
+      - trigger
+      - complete
+      - out_stage2_s
+  - id: set_8
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_obj_str
+  - id: set_9
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_status
+  - id: set_10
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_result
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_s1
+  - id: set_11
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''init'''
+    ports:
+      - trigger
+      - complete
+      - out_status
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: latest(@in_tries, @tries) < @in_max_tries
+      outputs:
+        tries:
+          from:
+            - set_12.out_tries
+            - set_14.out_tries
+            - set_16.out_tries
+        lp_code:
+          from:
+            - gen_1.out_lp_code
+            - gen_2.out_lp_code
+        llm_calls:
+          from:
+            - set_13.out_llm_calls
+            - set_15.out_llm_calls
+        solution:
+          from:
+            - tool_4.out_solution
+            - tool_7.out_solution
+        status:
+          from:
+            - tool_5.out_status
+            - tool_8.out_status
+        error_info:
+          from: tool_6.out_error_info
+      subgraph:
+        nodes:
+          - id: eval_2
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''Optimal'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: set_12
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_max_tries'
+            ports:
+              - trigger
+              - complete
+              - in_max_tries
+              - out_tries
+          - id: eval_3
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''init'''
+              branch: 2
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: gen_1
+            type: GENERATE
+            config:
+              function: formulate_scheduling_ilp
+              params:
+                - problem
+              prompt_inline: |-
+                You are an operations research expert specializing in workforce scheduling.
+                Convert this staff scheduling problem to runnable PuLP ILP code.
+
+                Follow the TEMPLATE below EXACTLY — replace the placeholder data with the actual
+                nurses, shifts, wages, and coverage requirements from the problem.
+
+                The `pulp` module is already in scope. Do NOT import anything.
+                Output ONLY raw Python code — no markdown fences, no comments.
+
+                TEMPLATE (copy this structure, fill in the actual data):
+
+                nurses = ["Nurse1", "Nurse2", "Nurse3", "Nurse4", "Nurse5"]
+                shifts = ["Morning", "Afternoon", "Night"]
+                wage         = {"Morning": 200, "Afternoon": 180, "Night": 320}
+                min_coverage = {"Morning": 2, "Afternoon": 2, "Night": 1}
+                max_per_nurse = 1   # each nurse works at most this many shifts
+
+                prob = pulp.LpProblem("scheduling", pulp.LpMinimize)
+
+                # CRITICAL: x is a 2D DICT — x[nurse][shift] — NOT a single variable
+                # Every nurse × shift combination gets its own LpVariable
+                x = {n: {s: pulp.LpVariable(f"x_{n}_{s}", cat="Binary")
+                         for s in shifts}
+                     for n in nurses}
+
+                # Objective: minimize total wage cost
+                prob += pulp.lpSum(wage[s] * x[n][s] for n in nurses for s in shifts)
+
+                # Coverage constraints: each shift gets enough nurses
+                for s in shifts:
+                    prob += pulp.lpSum(x[n][s] for n in nurses) >= min_coverage[s]
+
+                # Workload constraints: each nurse works at most max_per_nurse shifts
+                for n in nurses:
+                    prob += pulp.lpSum(x[n][s] for s in shifts) <= max_per_nurse
+
+                prob.solve(pulp.PULP_CBC_CMD(msg=0))
+                _result = {
+                    "status": pulp.LpStatus[prob.status],
+                    "objective": pulp.value(prob.objective),
+                    "variables": {v.name: pulp.value(v) for v in prob.variables()}
+                }
+
+                IMPORTANT: use `pulp.LpStatus[prob.status]` — NEVER `pulp.pulp.LpStatus`.
+
+                Now write the code for this problem (same structure, actual data):
+
+                Problem:
+                {{in_problem}}
+              arguments:
+                - '@problem'
+            ports:
+              - trigger
+              - complete
+              - in_problem
+              - out_lp_code
+          - id: set_13
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_llm_calls + 1'
+            ports:
+              - trigger
+              - complete
+              - in_llm_calls
+              - out_llm_calls
+          - id: tool_4
+            type: SOLVE
+            config:
+              tool: run_pulp
+              backend: kernel
+              arguments:
+                - '@lp_code'
+              code: |
+                def run_pulp(code: str) -> str:
+                    import json, re, pulp
+                    code = re.sub(r'^```(?:python)?\s*\n?', '', code.strip(), flags=re.IGNORECASE)
+                    code = re.sub(r'\n?```\s*$', '', code)
+                    code = re.sub(r'(?m)^\s*import\s+pulp\s*(?:#.*)?$', '', code)
+                    code = re.sub(r'(?m)^\s*from\s+pulp\s+import\s+.*$', '', code)
+                    code = code.replace('pulp.pulp.LpStatus', 'pulp.LpStatus')
+                    namespace = {"pulp": pulp}
+                    namespace.update({k: getattr(pulp, k) for k in dir(pulp) if not k.startswith('_') and k != 'pulp'})
+                    try:
+                        exec(code, namespace)
+                        result = namespace.get("_result")
+                        if result is None:
+                            return json.dumps({"status": "Error",
+                                               "error": "code did not set _result"})
+                        return json.dumps(result, default=str)
+                    except Exception as e:
+                        err = str(e)
+                        hint = ""
+                        if "pulp.pulp" in err and "LpStatus" in err:
+                            hint = " — use pulp.LpStatus[prob.status], never pulp.pulp.LpStatus"
+                        return json.dumps({"status": "Error", "error": err + hint})
+                _spl_result = run_pulp(lp_code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_lp_code
+              - out_solution
+          - id: tool_5
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_14
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: tool_6
+            type: SOLVE
+            config:
+              tool: result_error
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_error(result_json: str) -> str:
+                    """RESULT_ERROR(result_json) — extract the 'error' field from a SOLVER
+                    result JSON dict (falls back to 'status', then 'unknown error')."""
+                    try:
+                        d = json.loads(result_json)
+                        return d.get('error', d.get('status', 'unknown error'))
+                    except Exception:
+                        return result_json
+                _spl_result = result_error(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_error_info
+          - id: gen_2
+            type: GENERATE
+            config:
+              function: repair_scheduling_ilp
+              params:
+                - problem
+                - lp_code
+                - error_info
+              prompt_inline: |-
+                This PuLP staff scheduling ILP code produced an error or non-Optimal result.
+
+                Problem:
+                {{in_problem}}
+
+                Previous code:
+                {{in_lp_code}}
+
+                Error / solver status:
+                {{in_error_info}}
+
+                Fix the code. Common causes for scheduling ILPs:
+                - x must be a 2D DICT: x = {n: {s: LpVariable(...) for s in shifts} for n in nurses}
+                  If you wrote a single variable in a loop it gets overwritten — EVERY nurse×shift pair
+                  needs its own variable
+                - Forgot cat='Binary' on decision variables (treats them as continuous)
+                - Coverage constraint uses wrong direction (must be >=, not <=)
+                - Infeasible: total nurse capacity < total minimum coverage required
+                  → Check if sum(max_shifts_per_nurse * num_nurses) >= sum(min_coverage)
+                - Variable name typos in constraints
+                - Missing _result assignment
+                - Using `pulp.pulp.LpStatus` — ALWAYS use `pulp.LpStatus[prob.status]` instead
+                - Adding `import pulp` at top — the module is already injected, do not import it
+
+                Output ONLY the corrected Python code — no markdown fences, no commentary.
+              arguments:
+                - '@problem'
+                - '@lp_code'
+                - '@error_info'
+            ports:
+              - trigger
+              - complete
+              - in_problem
+              - in_lp_code
+              - in_error_info
+              - out_lp_code
+          - id: set_15
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_llm_calls + 1'
+            ports:
+              - trigger
+              - complete
+              - in_llm_calls
+              - out_llm_calls
+          - id: tool_7
+            type: SOLVE
+            config:
+              tool: run_pulp
+              backend: kernel
+              arguments:
+                - '@lp_code'
+              code: |
+                def run_pulp(code: str) -> str:
+                    import json, re, pulp
+                    code = re.sub(r'^```(?:python)?\s*\n?', '', code.strip(), flags=re.IGNORECASE)
+                    code = re.sub(r'\n?```\s*$', '', code)
+                    code = re.sub(r'(?m)^\s*import\s+pulp\s*(?:#.*)?$', '', code)
+                    code = re.sub(r'(?m)^\s*from\s+pulp\s+import\s+.*$', '', code)
+                    code = code.replace('pulp.pulp.LpStatus', 'pulp.LpStatus')
+                    namespace = {"pulp": pulp}
+                    namespace.update({k: getattr(pulp, k) for k in dir(pulp) if not k.startswith('_') and k != 'pulp'})
+                    try:
+                        exec(code, namespace)
+                        result = namespace.get("_result")
+                        if result is None:
+                            return json.dumps({"status": "Error",
+                                               "error": "code did not set _result"})
+                        return json.dumps(result, default=str)
+                    except Exception as e:
+                        err = str(e)
+                        hint = ""
+                        if "pulp.pulp" in err and "LpStatus" in err:
+                            hint = " — use pulp.LpStatus[prob.status], never pulp.pulp.LpStatus"
+                        return json.dumps({"status": "Error", "error": err + hint})
+                _spl_result = run_pulp(lp_code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_lp_code
+              - out_solution
+          - id: tool_8
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_16
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+        edges:
+          - source: eval_2.pass
+            target: set_12.trigger
+            type: triggers
+          - source: eval_2.fail
+            target: eval_3.trigger
+            type: triggers
+          - source: eval_3.pass
+            target: gen_1.trigger
+            type: triggers
+          - source: gen_1.complete
+            target: set_13.trigger
+            type: triggers
+          - source: set_13.complete
+            target: tool_4.trigger
+            type: triggers
+          - source: gen_1.out_lp_code
+            target: tool_4.in_lp_code
+            type: binds
+          - source: tool_4.complete
+            target: tool_5.trigger
+            type: triggers
+          - source: tool_4.out_solution
+            target: tool_5.in_solution
+            type: binds
+          - source: tool_5.complete
+            target: set_14.trigger
+            type: triggers
+          - source: eval_3.fail
+            target: tool_6.trigger
+            type: triggers
+          - source: tool_6.complete
+            target: gen_2.trigger
+            type: triggers
+          - source: tool_6.out_error_info
+            target: gen_2.in_error_info
+            type: binds
+          - source: gen_2.complete
+            target: set_15.trigger
+            type: triggers
+          - source: set_15.complete
+            target: tool_7.trigger
+            type: triggers
+          - source: gen_2.out_lp_code
+            target: tool_7.in_lp_code
+            type: binds
+          - source: tool_7.complete
+            target: tool_8.trigger
+            type: triggers
+          - source: tool_7.out_solution
+            target: tool_8.in_solution
+            type: binds
+          - source: tool_8.complete
+            target: set_16.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_status
+      - in_max_tries
+      - in_problem
+      - in_llm_calls
+      - in_tries
+      - in_solution
+      - in_lp_code
+      - out_tries
+      - out_lp_code
+      - out_llm_calls
+      - out_solution
+      - out_status
+      - out_error_info
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_s1'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_s1)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_s1
+      - out_stage1_s
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: is_optimal
+      backend: kernel
+      arguments:
+        - '@solution'
+      code: |
+        def is_optimal(result_json: str) -> bool:
+            import json
+            try:
+                return json.loads(result_json).get("status") == "Optimal"
+            except Exception:
+                return False
+        _spl_result = is_optimal(solution)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solution
+      - out_tool_10
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_10'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solution
+      - in_tool_10
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: json_get_objective
+      backend: kernel
+      arguments:
+        - '@solution'
+      code: |
+        def json_get_objective(result_json: str) -> str:
+            import json
+            try:
+                v = json.loads(result_json).get("objective")
+                return str(v) if v is not None else ""
+            except Exception:
+                return ""
+        _spl_result = json_get_objective(solution)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solution
+      - out_obj_str
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_s3
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: interpret_schedule
+      params:
+        - problem
+        - solution_json
+        - lang
+      prompt_inline: |-
+        You are an HR operations analyst. Interpret this staff scheduling result for
+        a shift manager.
+
+        Problem:
+        {{in_problem}}
+
+        Optimal schedule (JSON — variables with value 1.0 are assigned):
+        {{in_solution_json}}
+
+        Your response must have two sections:
+
+        ## Interpretation
+        Concise summary (under 150 words):
+        1. What is the total minimum wage cost for this shift plan?
+        2. Which nurses are assigned to which shifts?
+        3. Are minimum coverage requirements exactly met, or does any shift have extra staff?
+        4. One practical suggestion for the manager (e.g., cross-training, standby roster).
+
+        ## Solution Verification
+        Walk through the math to confirm correctness:
+        - For each shift, count assigned nurses and confirm coverage ≥ minimum (show arithmetic).
+        - For each nurse, confirm they work at most the allowed number of shifts.
+        - Compute total wage cost step by step (nurses per shift × wage, then sum).
+        - Confirm the computed cost matches the solver's reported value.
+
+        Write in {{in_lang}}. No JSON, no code.
+      arguments:
+        - '@problem'
+        - '@solution'
+        - '@lang'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_solution_json
+      - in_lang
+      - out_narrative
+  - id: set_17
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_s3'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_s3)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_s3
+      - out_stage2_s
+  - id: tool_14
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_s1
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: solve_directly_staff
+      params:
+        - problem
+        - lang
+      prompt_inline: |-
+        You are an HR operations analyst. Solve this staff scheduling problem using
+        mathematical reasoning only — no solver software.
+
+        Problem: {{in_problem}}
+
+        Your response must have two sections:
+
+        ## Solution
+        Work through the assignment step by step:
+        1. List all nurses, shifts, wages, and coverage requirements.
+        2. Calculate the minimum number of nurse-shifts needed and verify feasibility
+           (total nurse capacity ≥ total minimum coverage).
+        3. Assign nurses to shifts to minimize total wage cost: start by filling the
+           cheapest shifts first up to minimum coverage, then check if all constraints
+           are satisfied. Enumerate alternatives if the greedy choice is ambiguous.
+        4. State the optimal assignment (which nurse goes to which shift) and the
+           total minimum wage cost.
+
+        ## Verification
+        Confirm the assignment is correct:
+        - For each shift, count the assigned nurses and confirm coverage ≥ minimum (show arithmetic).
+        - For each nurse, confirm they work at most the allowed number of shifts.
+        - Compute total wage cost step by step (nurses per shift × wage, then sum).
+
+        Write in {{in_lang}}. Show all arithmetic explicitly.
+      arguments:
+        - '@problem'
+        - '@lang'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_lang
+      - out_narrative
+  - id: set_18
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_15
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_s1'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_s1)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_s1
+      - out_stage1_s
+  - id: gen_5
+    type: GENERATE
+    config:
+      function: extract_solution_json_staff
+      params:
+        - problem
+        - narrative
+      prompt_inline: |-
+        Extract the staff scheduling solution from the narrative as structured JSON.
+
+        Problem:
+        {{in_problem}}
+
+        Solution narrative:
+        {{in_narrative}}
+
+        Return ONLY a valid JSON object — no prose, no fences:
+        {{
+          "objective": <total wage cost as a number>,
+          "assignment": {{"<NurseN>": "<ShiftName>", ...}},
+          "coverage_min": {{"<ShiftName>": <minimum nurses required>, ...}},
+          "wage": {{"<ShiftName>": <cost per nurse>, ...}}
+        }}
+
+        Instructions:
+        - List every nurse's assigned shift (or omit if unassigned).
+        - Extract coverage minimums and wage rates from the problem statement.
+        - Use the total wage cost the narrative claims as "objective".
+      arguments:
+        - '@problem'
+        - '@narrative'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_narrative
+      - out_claimed_json
+  - id: set_19
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_16
+    type: SOLVE
+    config:
+      tool: verify_off_staff
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@claimed_json'
+      code: |
+        def verify_off_staff(problem: str, claimed_json: str) -> str:
+            import json, re
+            raw = claimed_json.strip()
+            raw = re.sub(r'^```(?:json)?\s*\n?', '', raw, flags=re.IGNORECASE)
+            raw = re.sub(r'\n?```\s*$', '', raw)
+            try:
+                claimed = json.loads(raw)
+            except Exception as e:
+                return json.dumps({"verdict": "UNPARSEABLE", "notes": f"JSON error: {e}",
+                                   "raw_prefix": claimed_json[:120]})
+
+            obj_claimed  = claimed.get("objective")
+            assignment   = claimed.get("assignment", {})
+            coverage_min = claimed.get("coverage_min", {})
+            wage         = claimed.get("wage", {})
+
+            violations = []
+
+            # Normalize: nurse→shift or shift→[nurses]
+            shift_nurses: dict = {}
+            for k, v in assignment.items():
+                if isinstance(v, str):
+                    shift_nurses.setdefault(v, []).append(k)
+                elif isinstance(v, list):
+                    shift_nurses[k] = v
+
+            # Coverage
+            for shift, min_n in coverage_min.items():
+                count = len(shift_nurses.get(shift, []))
+                if count < int(min_n):
+                    violations.append(f"{shift}: {count} nurses < required {min_n}")
+
+            # Each nurse at most 1 shift
+            nurse_counts: dict = {}
+            for shift, nurses in shift_nurses.items():
+                for n in nurses:
+                    nurse_counts[n] = nurse_counts.get(n, 0) + 1
+            for nurse, cnt in nurse_counts.items():
+                if cnt > 1:
+                    violations.append(f"{nurse} assigned to {cnt} shifts (max 1)")
+
+            # Recompute cost
+            if wage and shift_nurses:
+                try:
+                    recomputed = sum(float(wage.get(s, 0)) * len(ns)
+                                    for s, ns in shift_nurses.items())
+                    if obj_claimed is not None and abs(recomputed - float(obj_claimed)) > 0.5:
+                        violations.append(f"cost mismatch: claimed {obj_claimed} vs computed {recomputed:.2f}")
+                except Exception as e:
+                    violations.append(f"cost recompute error: {e}")
+
+            if violations:
+                return json.dumps({"verdict": "FAIL", "claimed_obj": obj_claimed,
+                                   "notes": "; ".join(violations)})
+            if not assignment:
+                return json.dumps({"verdict": "UNPARSEABLE", "claimed_obj": obj_claimed,
+                                   "notes": "no assignment in JSON"})
+            return json.dumps({"verdict": "PASS", "claimed_obj": obj_claimed,
+                               "notes": "coverage and workload constraints verified"})
+        _spl_result = verify_off_staff(problem, claimed_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - claimed_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_claimed_json
+      - out_verify_result
+  - id: tool_17
+    type: SOLVE
+    config:
+      tool: json_get_field
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''verdict'''
+      code: |
+        def json_get_field(result_json: str, field: str) -> str:
+            import json
+            try:
+                v = json.loads(result_json).get(field)
+                return str(v) if v is not None else ""
+            except Exception:
+                return ""
+        _spl_result = json_get_field(verify_result, 'verdict')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+        - field
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_verify_status
+  - id: tool_18
+    type: SOLVE
+    config:
+      tool: json_get_field
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''claimed_obj'''
+      code: |
+        def json_get_field(result_json: str, field: str) -> str:
+            import json
+            try:
+                v = json.loads(result_json).get(field)
+                return str(v) if v is not None else ""
+            except Exception:
+                return ""
+        _spl_result = json_get_field(verify_result, 'claimed_obj')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+        - field
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_obj_str
+  - id: tool_19
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_start'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_start)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_start
+      - out_total_s
+  - id: tool_20
+    type: SOLVE
+    config:
+      tool: make_metrics
+      backend: kernel
+      arguments:
+        - '@use_solver'
+        - '@llm_calls'
+        - '@stage1_s'
+        - '@stage2_s'
+        - '@total_s'
+        - '@_total_input_tokens'
+        - '@_total_output_tokens'
+      code: |
+        def make_metrics(use_solver: str, llm_calls: str,
+                         stage1_s: str, stage2_s: str, total_s: str,
+                         input_tokens: str, output_tokens: str) -> str:
+            solver_on = use_solver.strip().lower() in ("true", "1", "yes")
+            mode      = "solver=ON  (PuLP/CBC + ASSERT gate)" if solver_on else "solver=OFF (LLM reasoning only)"
+            s1_label  = "Stage 1 — formulation + solve (s)" if solver_on else "Stage 1 — direct LLM solve (s)"
+
+            def fmt_f(v):
+                try:
+                    return f"{float(v):.2f}"
+                except Exception:
+                    return v or "—"
+
+            def fmt_i(v):
+                try:
+                    return f"{int(v):,}"
+                except Exception:
+                    return v or "—"
+
+            total_tok = "—"
+            try:
+                total_tok = f"{int(input_tokens) + int(output_tokens):,}"
+            except Exception:
+                pass
+
+            rows = [
+                ("Mode",                         mode),
+                ("LLM calls",                    llm_calls),
+                (s1_label,                       fmt_f(stage1_s)),
+                ("Stage 2 — interpretation (s)", fmt_f(stage2_s) if solver_on else "—"),
+                ("Total latency (s)",            fmt_f(total_s)),
+                ("Input tokens",                 fmt_i(input_tokens)),
+                ("Output tokens",                fmt_i(output_tokens)),
+                ("Total tokens",                 total_tok),
+            ]
+            header = "| Metric | Value |"
+            sep    = "|---|---|"
+            lines  = [header, sep] + [f"| {k} | {v} |" for k, v in rows]
+            return "\n".join(lines)
+        _spl_result = make_metrics(use_solver, llm_calls, stage1_s, stage2_s, total_s, _total_input_tokens, _total_output_tokens)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - use_solver
+        - llm_calls
+        - stage1_s
+        - stage2_s
+        - total_s
+        - input_tokens
+        - output_tokens
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - in_llm_calls
+      - in_stage1_s
+      - in_stage2_s
+      - in_total_s
+      - in__total_input_tokens
+      - in__total_output_tokens
+      - out_metrics
+  - id: tool_21
+    type: SOLVE
+    config:
+      tool: format_schedule
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@use_solver'
+        - '@lp_code'
+        - '@solution'
+        - '@narrative'
+        - '@metrics'
+      code: |
+        def format_schedule(problem: str, use_solver: str, lp_code: str,
+                            solution_json: str, narrative: str, metrics: str) -> str:
+            import json
+            solver_on = use_solver.strip().lower() in ("true", "1", "yes")
+            try:
+                sol = json.loads(solution_json)
+            except Exception:
+                sol = {}
+            status    = sol.get("status")
+            objective = sol.get("objective")
+            variables = sol.get("variables", {})
+
+            lines = [
+                "# Staff Scheduling Report",
+                "",
+                f"**Problem:** {problem.strip()}",
+            ]
+            if solver_on and status:
+                lines += ["", f"**Solver status:** `{status}`"]
+            if solver_on and objective is not None:
+                lines.append(f"**Minimum total wage cost:** ${objective:.2f}")
+            if solver_on and variables:
+                lines += ["", "**Schedule (assigned shifts):**"]
+                for var_name, val in variables.items():
+                    v = float(val) if not isinstance(val, (int, float)) else val
+                    if v > 0.5:
+                        lines.append(f"  - {var_name}: assigned")
+
+            lines += ["", narrative.strip()]
+
+            if solver_on and lp_code.strip():
+                lines += ["", "## Solver Code (LLM-generated, PuLP)", "", "```python", lp_code.strip(), "```"]
+
+            lines += ["", "## Run Metrics", "", metrics]
+            return "\n".join(lines)
+        _spl_result = format_schedule(problem, use_solver, lp_code, solution, narrative, metrics)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - use_solver
+        - lp_code
+        - solution_json
+        - narrative
+        - metrics
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_use_solver
+      - in_lp_code
+      - in_solution
+      - in_narrative
+      - in_metrics
+      - out_report
+  - id: tool_22
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@out_dir}/staff_scheduling_{@ts_safe}.md'
+        - '@report'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{out_dir}/staff_scheduling_{ts_safe}.md', report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_out_dir
+      - in_ts_safe
+      - in_report
+      - out_out_path
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_2.complete
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: set_7.trigger
+    type: triggers
+  - source: set_7.complete
+    target: set_8.trigger
+    type: triggers
+  - source: set_8.complete
+    target: set_9.trigger
+    type: triggers
+  - source: set_9.complete
+    target: set_10.trigger
+    type: triggers
+  - source: set_10.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_3.complete
+    target: set_11.trigger
+    type: triggers
+  - source: set_11.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: set_11.out_status
+    target: loop_1.in_status
+    type: binds
+  - source: wf_entry.out_max_tries
+    target: loop_1.in_max_tries
+    type: binds
+  - source: wf_entry.out_problem
+    target: loop_1.in_problem
+    type: binds
+  - source: set_1.out_llm_calls
+    target: loop_1.in_llm_calls
+    type: binds
+  - source: set_2.out_tries
+    target: loop_1.in_tries
+    type: binds
+  - source: set_5.out_solution
+    target: loop_1.in_solution
+    type: binds
+  - source: set_4.out_lp_code
+    target: loop_1.in_lp_code
+    type: binds
+  - source: loop_1.exit
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_3.out_t_s1
+    target: tool_9.in_t_s1
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: tool_10.in_solution
+    type: binds
+  - source: tool_10.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: assert_1.in_solution
+    type: binds
+  - source: tool_10.out_tool_10
+    target: assert_1.in_tool_10
+    type: binds
+  - source: assert_1.pass
+    target: tool_11.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_11.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: tool_11.in_solution
+    type: binds
+  - source: tool_11.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: tool_12.complete
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_3.in_problem
+    type: binds
+  - source: loop_1.out_solution
+    target: gen_3.in_solution_json
+    type: binds
+  - source: wf_entry.out_lang
+    target: gen_3.in_lang
+    type: binds
+  - source: gen_3.complete
+    target: set_17.trigger
+    type: triggers
+  - source: loop_1.out_llm_calls
+    target: set_17.in_llm_calls
+    type: binds
+  - source: set_17.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: tool_12.out_t_s3
+    target: tool_13.in_t_s3
+    type: binds
+  - source: eval_1.fail
+    target: tool_14.trigger
+    type: triggers
+  - source: tool_14.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_4.in_problem
+    type: binds
+  - source: wf_entry.out_lang
+    target: gen_4.in_lang
+    type: binds
+  - source: gen_4.complete
+    target: set_18.trigger
+    type: triggers
+  - source: set_1.out_llm_calls
+    target: set_18.in_llm_calls
+    type: binds
+  - source: set_18.complete
+    target: tool_15.trigger
+    type: triggers
+  - source: tool_14.out_t_s1
+    target: tool_15.in_t_s1
+    type: binds
+  - source: tool_15.complete
+    target: gen_5.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_5.in_problem
+    type: binds
+  - source: gen_4.out_narrative
+    target: gen_5.in_narrative
+    type: binds
+  - source: gen_5.complete
+    target: set_19.trigger
+    type: triggers
+  - source: set_18.out_llm_calls
+    target: set_19.in_llm_calls
+    type: binds
+  - source: set_19.complete
+    target: tool_16.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_16.in_problem
+    type: binds
+  - source: gen_5.out_claimed_json
+    target: tool_16.in_claimed_json
+    type: binds
+  - source: tool_16.complete
+    target: tool_17.trigger
+    type: triggers
+  - source: tool_16.out_verify_result
+    target: tool_17.in_verify_result
+    type: binds
+  - source: tool_17.complete
+    target: tool_18.trigger
+    type: triggers
+  - source: tool_16.out_verify_result
+    target: tool_18.in_verify_result
+    type: binds
+  - source: tool_13.complete
+    target: tool_19.trigger
+    type: triggers
+  - source: tool_18.complete
+    target: tool_19.trigger
+    type: triggers
+  - source: tool_1.out_t_start
+    target: tool_19.in_t_start
+    type: binds
+  - source: tool_19.complete
+    target: tool_20.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_20.in_use_solver
+    type: binds
+  - source: set_17.out_llm_calls
+    target: tool_20.in_llm_calls
+    type: binds
+  - source: set_19.out_llm_calls
+    target: tool_20.in_llm_calls
+    type: binds
+  - source: tool_9.out_stage1_s
+    target: tool_20.in_stage1_s
+    type: binds
+  - source: tool_15.out_stage1_s
+    target: tool_20.in_stage1_s
+    type: binds
+  - source: tool_13.out_stage2_s
+    target: tool_20.in_stage2_s
+    type: binds
+  - source: set_7.out_stage2_s
+    target: tool_20.in_stage2_s
+    type: binds
+  - source: tool_19.out_total_s
+    target: tool_20.in_total_s
+    type: binds
+  - source: tool_20.complete
+    target: tool_21.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_21.in_problem
+    type: binds
+  - source: wf_entry.out_use_solver
+    target: tool_21.in_use_solver
+    type: binds
+  - source: loop_1.out_lp_code
+    target: tool_21.in_lp_code
+    type: binds
+  - source: set_4.out_lp_code
+    target: tool_21.in_lp_code
+    type: binds
+  - source: loop_1.out_solution
+    target: tool_21.in_solution
+    type: binds
+  - source: set_5.out_solution
+    target: tool_21.in_solution
+    type: binds
+  - source: gen_3.out_narrative
+    target: tool_21.in_narrative
+    type: binds
+  - source: gen_4.out_narrative
+    target: tool_21.in_narrative
+    type: binds
+  - source: tool_20.out_metrics
+    target: tool_21.in_metrics
+    type: binds
+  - source: tool_21.complete
+    target: tool_22.trigger
+    type: triggers
+  - source: wf_entry.out_out_dir
+    target: tool_22.in_out_dir
+    type: binds
+  - source: tool_2.out_ts_safe
+    target: tool_22.in_ts_safe
+    type: binds
+  - source: tool_21.out_report
+    target: tool_22.in_report
+    type: binds
+  - source: tool_21.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_22.complete
+    target: wf_exit.trigger
+    type: triggers

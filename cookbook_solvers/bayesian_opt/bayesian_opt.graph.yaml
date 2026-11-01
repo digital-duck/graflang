@@ -1,0 +1,626 @@
+version: 1.0-graph
+workflow:
+  name: bayesian_opt
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_default_problem
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        import math
+
+        def _conversion_rate(headline: float, layout: float, cta: float) -> float:
+            """Simulate a web page conversion rate (black box).
+
+            Parameters are on [0, 1] scales:
+              headline: 0=generic, 1=personalized
+              layout:   0=cluttered, 1=clean
+              cta:      0=bottom, 1=above-fold
+
+            The true optimum is near (0.75, 0.85, 0.60) — not at corners or center.
+            The function has a ridge and a local optimum near (0.3, 0.4, 0.8).
+            """
+            main = math.exp(-8 * ((headline - 0.75) ** 2 + (layout - 0.85) ** 2 + (cta - 0.6) ** 2))
+            local = 0.55 * math.exp(-10 * ((headline - 0.3) ** 2 + (layout - 0.4) ** 2 + (cta - 0.8) ** 2))
+            base = 0.05 + 0.12 * headline + 0.08 * layout + 0.06 * cta
+            return round(min(0.35, max(0.02, base + 0.2 * main + 0.12 * local)), 4)
+
+        _DEFAULT_OPT_PROBLEM = {'problem_name': 'Web Page Conversion Rate Optimizer', 'description': 'Maximize web page conversion rate by tuning three design parameters: headline_score (0=generic to 1=personalized), layout_score (0=cluttered to 1=clean), cta_placement (0=bottom to 1=above-fold). Budget: 25 experiment slots. Uniform/random baseline: tests parameters evenly, often wastes budget on losers. Bayesian GP: concentrates trials near the promising region found in early trials.', 'parameters': [{'name': 'headline_score', 'low': 0.0, 'high': 1.0}, {'name': 'layout_score', 'low': 0.0, 'high': 1.0}, {'name': 'cta_placement', 'low': 0.0, 'high': 1.0}], 'n_calls': 25, 'n_random_starts': 5, 'true_optimum': {'headline_score': 0.75, 'layout_score': 0.85, 'cta_placement': 0.6}, 'true_max_rate': None, 'random_baseline': {'n_calls': 25, 'seed': 99}}
+
+        def get_default_problem() -> str:
+            p = dict(_DEFAULT_OPT_PROBLEM)
+            opt = p['true_optimum']
+            p['true_max_rate'] = _conversion_rate(opt['headline_score'], opt['layout_score'], opt['cta_placement'])
+            return json.dumps(p)
+        _spl_result = get_default_problem()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(problem_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_problem_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: run_bayesian_opt
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        import math
+
+        import random
+
+        def _conversion_rate(headline: float, layout: float, cta: float) -> float:
+            """Simulate a web page conversion rate (black box).
+
+            Parameters are on [0, 1] scales:
+              headline: 0=generic, 1=personalized
+              layout:   0=cluttered, 1=clean
+              cta:      0=bottom, 1=above-fold
+
+            The true optimum is near (0.75, 0.85, 0.60) — not at corners or center.
+            The function has a ridge and a local optimum near (0.3, 0.4, 0.8).
+            """
+            main = math.exp(-8 * ((headline - 0.75) ** 2 + (layout - 0.85) ** 2 + (cta - 0.6) ** 2))
+            local = 0.55 * math.exp(-10 * ((headline - 0.3) ** 2 + (layout - 0.4) ** 2 + (cta - 0.8) ** 2))
+            base = 0.05 + 0.12 * headline + 0.08 * layout + 0.06 * cta
+            return round(min(0.35, max(0.02, base + 0.2 * main + 0.12 * local)), 4)
+
+        def run_bayesian_opt(problem_json: str) -> str:
+            """Run scikit-optimize GP minimization (negated for maximization).
+
+            Returns:
+              {"problem_name": str, "best_params": {...}, "best_rate": float,
+               "random_best_rate": float, "true_max_rate": float,
+               "trials_to_best": int, "improvement_over_random": float,
+               "top_trials": [{params, rate}], "status": "OK"|"ERROR"}
+            """
+            try:
+                from skopt import gp_minimize
+                from skopt.space import Real
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'scikit-optimize not installed — run: pip install scikit-optimize'})
+            try:
+                problem = json.loads(problem_json)
+                n_calls = problem.get('n_calls', 25)
+                n_rand = problem.get('n_random_starts', 5)
+                params = problem['parameters']
+                space = [Real(p['low'], p['high'], name=p['name']) for p in params]
+
+                def neg_objective(x):
+                    return -_conversion_rate(x[0], x[1], x[2])
+                result = gp_minimize(neg_objective, space, n_calls=n_calls, n_initial_points=n_rand, random_state=42)
+                best_params = {p['name']: round(v, 4) for p, v in zip(params, result.x)}
+                best_rate = round(-result.fun, 4)
+                rng = random.Random(99)
+                rand_rates = [_conversion_rate(rng.random(), rng.random(), rng.random()) for _ in range(n_calls)]
+                random_best = round(max(rand_rates), 4)
+                all_rates = [-y for y in result.func_vals]
+                trials_to_best = int(all_rates.index(max(all_rates))) + 1
+                trial_list = [{'params': {p['name']: round(x, 3) for p, x in zip(params, xs)}, 'rate': round(-y, 4)} for xs, y in zip(result.x_iters, result.func_vals)]
+                top_trials = sorted(trial_list, key=lambda t: t['rate'], reverse=True)[:5]
+                improvement = round((best_rate - random_best) / random_best * 100, 1)
+                return json.dumps({'problem_name': problem.get('problem_name', 'Problem'), 'best_params': best_params, 'best_rate': best_rate, 'random_best_rate': random_best, 'true_max_rate': problem.get('true_max_rate'), 'trials_to_best': trials_to_best, 'n_calls': n_calls, 'improvement_over_random': improvement, 'top_trials': top_trials, 'status': 'OK'})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+        _spl_result = run_bayesian_opt(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: bayesian_improved
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def bayesian_improved(result_json: str) -> bool:
+            """ASSERT gate: Bayesian beats random, or found the true optimum."""
+            try:
+                data = json.loads(result_json)
+                if data.get('status') != 'OK':
+                    return False
+                if data.get('improvement_over_random', 0) > 0:
+                    return True
+                true_max = data.get('true_max_rate')
+                best_rate = data.get('best_rate', 0)
+                return true_max is not None and best_rate >= round(true_max * 0.99, 4)
+            except Exception:
+                return False
+        _spl_result = bayesian_improved(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_bayesian_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def format_bayesian_report(result_json: str) -> str:
+            """Markdown report of Bayesian optimization results."""
+            try:
+                data = json.loads(result_json)
+                bp = data.get('best_params', {})
+                lines = [f"## Bayesian Optimization Report — {data.get('problem_name', 'Problem')}", '', f"**Budget:** {data.get('n_calls', '?')} experiment slots  ", f"**Best conversion rate (Bayesian):** {data.get('best_rate', '?'):.2%}  ", f"**Best conversion rate (random):** {data.get('random_best_rate', '?'):.2%}  ", f"**True optimum:** {data.get('true_max_rate', '?'):.2%}  ", f"**Improvement over random:** +{data.get('improvement_over_random', '?')}%  ", f"**Trials to find best:** {data.get('trials_to_best', '?')} / {data.get('n_calls', '?')}", '', '### Best Parameters Found', '', '| Parameter | Value |', '|---|---|']
+                for k, v in bp.items():
+                    lines.append(f'| {k} | {v:.3f} |')
+                lines += ['', '### Top 5 Trials', '', '| Rank | headline | layout | cta | Conversion Rate |', '|---|---|---|---|---|']
+                for i, t in enumerate(data.get('top_trials', []), 1):
+                    p = t['params']
+                    lines.append(f"| {i} | {p.get('headline_score', '?')} | {p.get('layout_score', '?')} | {p.get('cta_placement', '?')} | {t['rate']:.2%} |")
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_bayesian_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_bayesian_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''best_rate'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'best_rate')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_best_rate
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''improvement_over_random'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'improvement_over_random')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_improvement
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_bayesian_prompt
+      params:
+        - bayesian_report
+        - problem_description
+      prompt_inline: |-
+        You are a CRO analyst. scikit-optimize just ran a 25-trial Bayesian optimization.
+
+        PROBLEM:
+        {{in_problem_description}}
+
+        BAYESIAN RESULT:
+        {{in_bayesian_report}}
+
+        Explain (≤150 words):
+        1. Why did Bayesian optimization outperform random search with the same 25-trial budget?
+        2. What does "Expected Improvement" mean — how does it decide where to sample next?
+        3. The true optimum is at (0.75, 0.85, 0.60) — not at the extremes. Why does CRO often work this way?
+        4. When would you use Bayesian optimization vs Optuna TPE (r112)?
+      arguments:
+        - '@bayesian_report'
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_bayesian_report
+      - in_problem_description
+      - out_explanation
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@bayesian_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(bayesian_report: str, explanation: str) -> str:
+            return f'=== Bayesian Optimization (r113) | solver=ON ===\n\n{bayesian_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(bayesian_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - bayesian_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_bayesian_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: guess_page_design_prompt
+      params:
+        - problem_description
+      prompt_inline: |-
+        You are a conversion rate optimization (CRO) expert helping a product team.
+
+        OPTIMIZATION PROBLEM:
+        {{in_problem_description}}
+
+        The team can tune three continuous design parameters (each on a 0–1 scale):
+        - headline_score: 0 = generic headline, 1 = personalized/dynamic headline
+        - layout_score: 0 = cluttered, 1 = clean minimalist layout
+        - cta_placement: 0 = CTA at bottom, 1 = CTA above the fold
+
+        They have 25 experiment slots. Their intuition says:
+        "Start with a clean layout, personalized headline, and CTA above the fold."
+
+        Without running experiments:
+        1. What specific parameter values would you test first?
+        2. How would you allocate 25 experiment slots across the parameter space?
+        3. What is your predicted optimal configuration?
+        4. What conversion rate do you expect at that configuration?
+      arguments:
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_problem_description
+      - out_llm_guess
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_guess'
+      code: |
+        def format_report_solver_off(llm_guess: str) -> str:
+            return f'=== Bayesian Optimization (r113) | solver=OFF ===\n\n── LLM CRO Heuristics ──────────────────────────────────────\n{llm_guess}\n\nNote: LLM guesses without modeling uncertainty. Run --param use_solver=true\nto use Bayesian GP+EI to find the optimum efficiently.'
+        _spl_result = format_report_solver_off(llm_guess)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_guess
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_guess
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_4.in_problem_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_8.in_result_json
+    type: binds
+  - source: tool_8.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_bayesian_report
+    target: gen_1.in_bayesian_report
+    type: binds
+  - source: tool_2.out_problem_description
+    target: gen_1.in_problem_description
+    type: binds
+  - source: gen_1.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_6.out_bayesian_report
+    target: tool_9.in_bayesian_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_9.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_problem_description
+    target: gen_2.in_problem_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: gen_2.out_llm_guess
+    target: tool_10.in_llm_guess
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

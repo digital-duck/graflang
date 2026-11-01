@@ -1,0 +1,3347 @@
+version: 1.0-graph
+workflow:
+  name: neurosymbolic_solver
+  inputs:
+    - name: problem
+      type: TEXT
+      default: find the Galois group of x**5 - x - 1 over the rationals
+    - name: backend
+      type: TEXT
+      default: sage
+    - name: enable_solver
+      type: TEXT
+      default: 'true'
+    - name: max_tries
+      type: INT
+      default: 3
+    - name: log_dir
+      type: TEXT
+      default: cookbook/77_neurosymbolic/logs-spl
+    - name: hostname
+      type: TEXT
+      default: ''
+    - name: pid
+      type: TEXT
+      default: ''
+    - name: thinking_note
+      type: TEXT
+      default: ''
+  outputs:
+    - name: result
+      type: TEXT
+resources:
+  procedures:
+    solve_chain_step: ./symbolic_math.spl
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_backend
+      - out_enable_solver
+      - out_max_tries
+      - out_log_dir
+      - out_hostname
+      - out_pid
+      - out_thinking_note
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@enable_solver'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(enable_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_enable_solver
+      - out_solver_mode
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@backend'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(backend)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_backend
+      - out_backend_lc
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@backend_lc'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(backend_lc)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_backend_lc
+      - out_backend_lc
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode == 'yes')
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solver_mode
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''yes'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''no'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''no'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@log_dir}/chain_trace.md'
+        - '''(solver disabled for this run — no verified chain; the LLM solved it unaided)\n'''
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{log_dir}/chain_trace.md', '(solver disabled for this run — no verified chain; the LLM solved it unaided)\n')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_dir
+      - out_write_file
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: solve_directly
+      params:
+        - problem
+        - thinking_note
+      prompt_inline: |-
+        {{in_thinking_note}}A student asked: "{{in_problem}}"
+
+        There is NO symbolic math engine or proof assistant backing you up this
+        time — every computation and every proof step must be done correctly by
+        you, from scratch.
+
+        Write a clear, friendly walkthrough in less than 8 sentences that:
+        1. Restates what the problem is asking in plain English
+        2. Shows your own working, step by step, in order — state the exact
+           result of each step as you derive it (do not skip steps)
+        3. Gives the final answer plainly at the end
+
+        Show your work. Do not state any result you have not derived above.
+      arguments:
+        - '@problem'
+        - '@thinking_note'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_thinking_note
+      - out_result
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@result'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(result)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result
+      - out_result
+  - id: eval_3
+    type: EVALUATE
+    config:
+      condition: '@in_result == '''''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''[FAILURE] The unaided LLM returned nothing for this problem.'''
+    ports:
+      - trigger
+      - complete
+      - out_result
+  - id: eval_4
+    type: EVALUATE
+    config:
+      condition: '@in_backend_lc == ''lean'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_backend_lc
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: run_python
+      backend: kernel
+      arguments:
+        - '''from spl3.lean_bridge import LeanREPL; _spl_lean = LeanREPL.mathlib().start(); print("ready")'''
+      code: |
+        def run_python(code: str, timeout: str='30') -> str:
+            """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+            Returns stdout on success, or stderr on failure.
+            Timeout is in seconds (default 30).
+
+            Usage in SPL:
+                CALL run_python(@code_snippet) INTO @output;
+
+            Security note: executes arbitrary code — use only with trusted input.
+
+            Deprecated: with --kernel (now default), deterministic Python belongs in
+            CREATE TOOL_API blocks, which execute in the persistent kernel session and
+            share state across calls. This subprocess fallback remains for --no-kernel
+            mode only. Scheduled for removal in spl-llm v3.2.
+            """
+            import subprocess
+            import sys
+            try:
+                result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+            except subprocess.TimeoutExpired:
+                return f'run_python timed out after {timeout}s'
+            except Exception as e:
+                return f'run_python error: {e}'
+        _spl_result = run_python('from spl3.lean_bridge import LeanREPL; _spl_lean = LeanREPL.mathlib().start(); print("ready")')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - code
+        - timeout
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_lean_status
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_lean_stmt
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''init'''
+    ports:
+      - trigger
+      - complete
+      - out_stmt_ok_lc
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_tries
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: latest(@in_tries, @tries) < @in_max_tries
+      outputs:
+        tries:
+          from:
+            - set_7.out_tries
+            - set_9.out_tries
+            - set_11.out_tries
+        stmt_raw:
+          from:
+            - gen_2.out_stmt_raw
+            - gen_3.out_stmt_raw
+        lean_stmt:
+          from:
+            - tool_7.out_lean_stmt
+            - tool_11.out_lean_stmt
+        check_code:
+          from:
+            - set_8.out_check_code
+            - set_10.out_check_code
+        stmt_ok:
+          from:
+            - tool_8.out_stmt_ok
+            - tool_12.out_stmt_ok
+        lean_feedback:
+          from:
+            - tool_9.out_lean_feedback
+            - tool_13.out_lean_feedback
+        stmt_ok_lc:
+          from:
+            - tool_10.out_stmt_ok_lc
+            - tool_14.out_stmt_ok_lc
+      subgraph:
+        nodes:
+          - id: eval_5
+            type: EVALUATE
+            config:
+              condition: '@in_stmt_ok_lc == ''true'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_stmt_ok_lc
+          - id: set_7
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: eval_6
+            type: EVALUATE
+            config:
+              condition: '@in_stmt_ok_lc == ''init'''
+              branch: 2
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_stmt_ok_lc
+          - id: gen_2
+            type: GENERATE
+            config:
+              function: formalize_claim
+              params:
+                - claim
+              prompt_inline: |-
+                Translate this mathematical claim into a single Lean 4 proposition.
+                Mathlib IS imported — use mathlib vocabulary and notation.
+
+                Rules:
+                - Output ONLY the proposition — what goes after `example :`. No proof,
+                  no `example`, no markdown fences, no commentary.
+                - Bind every variable and every typeclass instance explicitly
+                  (autoImplicit is off): universes, [Field ...], [AddCommGroup ...],
+                  [Module ...], [FiniteDimensional ...] as needed.
+                - Prefer the formulation closest to mathlib's own (Real, Nat.Prime,
+                  abs, Even, Module.finrank, ...).
+                - Example output for "the square of any real number is nonnegative":
+                  ∀ a : ℝ, 0 ≤ a ^ 2
+
+                Claim: {{in_claim}}
+              arguments:
+                - '@problem'
+            ports:
+              - trigger
+              - complete
+              - in_claim
+              - out_stmt_raw
+          - id: tool_7
+            type: SOLVE
+            config:
+              tool: strip_fences
+              backend: kernel
+              arguments:
+                - '@stmt_raw'
+              code: |
+                def strip_fences(text: str) -> str:
+                    """Remove markdown code fences and surrounding noise from LLM output."""
+                    import re
+                    s = text.strip()
+                    # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+                    m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+                    if m:
+                        s = m.group(1)
+                    else:
+                        # Case 2: stray fence lines scattered through otherwise plain output
+                        s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+                        s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+                    return s.strip().replace("'''", "")
+                _spl_result = strip_fences(stmt_raw)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - text
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_stmt_raw
+              - out_lean_stmt
+          - id: set_8
+            type: CONTEXT
+            config:
+              action: set
+              expression: f"print(_spl_lean.statement_ok(r'''{@in_lean_stmt}'''))"
+            ports:
+              - trigger
+              - complete
+              - in_lean_stmt
+              - out_check_code
+          - id: tool_8
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '@check_code'
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python(check_code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_check_code
+              - out_stmt_ok
+          - id: tool_9
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '''print(_spl_lean.feedback)'''
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python('print(_spl_lean.feedback)')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - out_lean_feedback
+          - id: tool_10
+            type: SOLVE
+            config:
+              tool: lower
+              backend: kernel
+              arguments:
+                - '@stmt_ok'
+              code: |
+                def lower(value: str) -> str:
+                    """LOWER(value) — convert to lowercase."""
+                    return str(value).lower()
+                _spl_result = lower(stmt_ok)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_stmt_ok
+              - out_stmt_ok_lc
+          - id: set_9
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: gen_3
+            type: GENERATE
+            config:
+              function: fix_formalization
+              params:
+                - claim
+                - lean_stmt
+                - feedback
+              prompt_inline: |-
+                This Lean 4 proposition failed to typecheck. Mathlib IS imported.
+
+                Claim (prose): {{in_claim}}
+                Attempted proposition: {{in_lean_stmt}}
+                Lean's diagnostics:
+                {{in_feedback}}
+
+                Output ONLY the corrected proposition (what goes after `example :`).
+                No proof, no fences, no commentary. Bind every variable and typeclass
+                instance explicitly (autoImplicit is off).
+              arguments:
+                - '@problem'
+                - '@lean_stmt'
+                - '@lean_feedback'
+            ports:
+              - trigger
+              - complete
+              - in_claim
+              - in_lean_stmt
+              - in_feedback
+              - out_stmt_raw
+          - id: tool_11
+            type: SOLVE
+            config:
+              tool: strip_fences
+              backend: kernel
+              arguments:
+                - '@stmt_raw'
+              code: |
+                def strip_fences(text: str) -> str:
+                    """Remove markdown code fences and surrounding noise from LLM output."""
+                    import re
+                    s = text.strip()
+                    # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+                    m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+                    if m:
+                        s = m.group(1)
+                    else:
+                        # Case 2: stray fence lines scattered through otherwise plain output
+                        s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+                        s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+                    return s.strip().replace("'''", "")
+                _spl_result = strip_fences(stmt_raw)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - text
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_stmt_raw
+              - out_lean_stmt
+          - id: set_10
+            type: CONTEXT
+            config:
+              action: set
+              expression: f"print(_spl_lean.statement_ok(r'''{@in_lean_stmt}'''))"
+            ports:
+              - trigger
+              - complete
+              - in_lean_stmt
+              - out_check_code
+          - id: tool_12
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '@check_code'
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python(check_code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_check_code
+              - out_stmt_ok
+          - id: tool_13
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '''print(_spl_lean.feedback)'''
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python('print(_spl_lean.feedback)')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - out_lean_feedback
+          - id: tool_14
+            type: SOLVE
+            config:
+              tool: lower
+              backend: kernel
+              arguments:
+                - '@stmt_ok'
+              code: |
+                def lower(value: str) -> str:
+                    """LOWER(value) — convert to lowercase."""
+                    return str(value).lower()
+                _spl_result = lower(stmt_ok)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_stmt_ok
+              - out_stmt_ok_lc
+          - id: set_11
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+        edges:
+          - source: eval_5.pass
+            target: set_7.trigger
+            type: triggers
+          - source: eval_5.fail
+            target: eval_6.trigger
+            type: triggers
+          - source: eval_6.pass
+            target: gen_2.trigger
+            type: triggers
+          - source: gen_2.complete
+            target: tool_7.trigger
+            type: triggers
+          - source: gen_2.out_stmt_raw
+            target: tool_7.in_stmt_raw
+            type: binds
+          - source: tool_7.complete
+            target: set_8.trigger
+            type: triggers
+          - source: tool_7.out_lean_stmt
+            target: set_8.in_lean_stmt
+            type: binds
+          - source: set_8.complete
+            target: tool_8.trigger
+            type: triggers
+          - source: set_8.out_check_code
+            target: tool_8.in_check_code
+            type: binds
+          - source: tool_8.complete
+            target: tool_9.trigger
+            type: triggers
+          - source: tool_9.complete
+            target: tool_10.trigger
+            type: triggers
+          - source: tool_8.out_stmt_ok
+            target: tool_10.in_stmt_ok
+            type: binds
+          - source: tool_10.complete
+            target: set_9.trigger
+            type: triggers
+          - source: eval_6.fail
+            target: gen_3.trigger
+            type: triggers
+          - source: gen_3.complete
+            target: tool_11.trigger
+            type: triggers
+          - source: gen_3.out_stmt_raw
+            target: tool_11.in_stmt_raw
+            type: binds
+          - source: tool_11.complete
+            target: set_10.trigger
+            type: triggers
+          - source: tool_11.out_lean_stmt
+            target: set_10.in_lean_stmt
+            type: binds
+          - source: set_10.complete
+            target: tool_12.trigger
+            type: triggers
+          - source: set_10.out_check_code
+            target: tool_12.in_check_code
+            type: binds
+          - source: tool_12.complete
+            target: tool_13.trigger
+            type: triggers
+          - source: tool_13.complete
+            target: tool_14.trigger
+            type: triggers
+          - source: tool_12.out_stmt_ok
+            target: tool_14.in_stmt_ok
+            type: binds
+          - source: tool_14.complete
+            target: set_11.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_stmt_ok_lc
+      - in_tries
+      - in_problem
+      - in_lean_stmt
+      - in_lean_feedback
+      - in_max_tries
+      - out_tries
+      - out_stmt_raw
+      - out_lean_stmt
+      - out_check_code
+      - out_stmt_ok
+      - out_lean_feedback
+      - out_stmt_ok_lc
+  - id: set_12
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''not judged (formalization failed)'''
+    ports:
+      - trigger
+      - complete
+      - out_faithful
+  - id: set_13
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''unverified'''
+    ports:
+      - trigger
+      - complete
+      - out_badge
+  - id: set_14
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_proof
+  - id: set_15
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_tactics
+  - id: set_16
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_citation
+  - id: eval_7
+    type: EVALUATE
+    config:
+      condition: '@in_stmt_ok_lc == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_stmt_ok_lc
+  - id: set_17
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''statement_checked'''
+    ports:
+      - trigger
+      - complete
+      - out_badge
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: judge_faithfulness
+      params:
+        - claim
+        - lean_stmt
+      prompt_inline: |-
+        A prose mathematical claim was formalized in Lean 4 (mathlib).
+
+        Prose claim: {{in_claim}}
+        Lean proposition: {{in_lean_stmt}}
+
+        Does the Lean proposition say exactly what the prose claims — same
+        quantifiers, no vacuous hypotheses, no degenerate specialization?
+        Reply with exactly one line: FAITHFUL or UNFAITHFUL, then a dash and
+        one short reason.
+      arguments:
+        - '@problem'
+        - '@lean_stmt'
+    ports:
+      - trigger
+      - complete
+      - in_claim
+      - in_lean_stmt
+      - out_faithful
+  - id: eval_8
+    type: EVALUATE
+    config:
+      condition: contains(@in_subject, 'UNFAITHFUL')
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_subject
+  - id: set_18
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''unfaithful'''
+    ports:
+      - trigger
+      - complete
+      - out_badge
+  - id: set_19
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''init'''
+    ports:
+      - trigger
+      - complete
+      - out_proof_ok_lc
+  - id: set_20
+    type: CONTEXT
+    config:
+      action: set
+      expression: f"print(_spl_lean.find_citation(r'''{@in_lean_stmt}'''))"
+    ports:
+      - trigger
+      - complete
+      - in_lean_stmt
+      - out_find_code
+  - id: tool_15
+    type: SOLVE
+    config:
+      tool: run_python
+      backend: kernel
+      arguments:
+        - '@find_code'
+      code: |
+        def run_python(code: str, timeout: str='30') -> str:
+            """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+            Returns stdout on success, or stderr on failure.
+            Timeout is in seconds (default 30).
+
+            Usage in SPL:
+                CALL run_python(@code_snippet) INTO @output;
+
+            Security note: executes arbitrary code — use only with trusted input.
+
+            Deprecated: with --kernel (now default), deterministic Python belongs in
+            CREATE TOOL_API blocks, which execute in the persistent kernel session and
+            share state across calls. This subprocess fallback remains for --no-kernel
+            mode only. Scheduled for removal in spl-llm v3.2.
+            """
+            import subprocess
+            import sys
+            try:
+                result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+            except subprocess.TimeoutExpired:
+                return f'run_python timed out after {timeout}s'
+            except Exception as e:
+                return f'run_python error: {e}'
+        _spl_result = run_python(find_code)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - code
+        - timeout
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_find_code
+      - out_citation
+  - id: tool_16
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@citation'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(citation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_citation
+      - out_citation_lc
+  - id: eval_9
+    type: EVALUATE
+    config:
+      condition: '@in_citation_lc == ''none'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_citation_lc
+  - id: set_21
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_citation
+  - id: set_22
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_citation'
+    ports:
+      - trigger
+      - complete
+      - in_citation
+      - out_tactics
+  - id: tool_17
+    type: SOLVE
+    config:
+      tool: make_theorem
+      backend: kernel
+      arguments:
+        - '@lean_stmt'
+        - '@citation'
+      code: |
+        def make_theorem(stmt: str, tactics: str) -> str:
+            """Assemble the final theorem deterministically: the verified statement
+            is spliced in verbatim — the LLM only ever contributes the tactic block,
+            so it can never prove a subtly different statement (recipe 67's lesson)."""
+            body = tactics.strip()
+            if body.startswith(":="):
+                body = body[2:].strip()
+            if body == "by" or body.startswith(("by\n", "by ")):
+                body = body[2:].strip()
+            return f"theorem spl_claim : {stmt} := by\n  {body}"
+        _spl_result = make_theorem(lean_stmt, citation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - stmt
+        - tactics
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_lean_stmt
+      - in_citation
+      - out_proof
+  - id: set_23
+    type: CONTEXT
+    config:
+      action: set
+      expression: f"print(_spl_lean.check(r'''{@in_proof}''')['ok'])"
+    ports:
+      - trigger
+      - complete
+      - in_proof
+      - out_check_code
+  - id: tool_18
+    type: SOLVE
+    config:
+      tool: run_python
+      backend: kernel
+      arguments:
+        - '@check_code'
+      code: |
+        def run_python(code: str, timeout: str='30') -> str:
+            """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+            Returns stdout on success, or stderr on failure.
+            Timeout is in seconds (default 30).
+
+            Usage in SPL:
+                CALL run_python(@code_snippet) INTO @output;
+
+            Security note: executes arbitrary code — use only with trusted input.
+
+            Deprecated: with --kernel (now default), deterministic Python belongs in
+            CREATE TOOL_API blocks, which execute in the persistent kernel session and
+            share state across calls. This subprocess fallback remains for --no-kernel
+            mode only. Scheduled for removal in spl-llm v3.2.
+            """
+            import subprocess
+            import sys
+            try:
+                result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+            except subprocess.TimeoutExpired:
+                return f'run_python timed out after {timeout}s'
+            except Exception as e:
+                return f'run_python error: {e}'
+        _spl_result = run_python(check_code)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - code
+        - timeout
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_check_code
+      - out_proof_ok
+  - id: tool_19
+    type: SOLVE
+    config:
+      tool: run_python
+      backend: kernel
+      arguments:
+        - '''print(_spl_lean.feedback)'''
+      code: |
+        def run_python(code: str, timeout: str='30') -> str:
+            """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+            Returns stdout on success, or stderr on failure.
+            Timeout is in seconds (default 30).
+
+            Usage in SPL:
+                CALL run_python(@code_snippet) INTO @output;
+
+            Security note: executes arbitrary code — use only with trusted input.
+
+            Deprecated: with --kernel (now default), deterministic Python belongs in
+            CREATE TOOL_API blocks, which execute in the persistent kernel session and
+            share state across calls. This subprocess fallback remains for --no-kernel
+            mode only. Scheduled for removal in spl-llm v3.2.
+            """
+            import subprocess
+            import sys
+            try:
+                result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+            except subprocess.TimeoutExpired:
+                return f'run_python timed out after {timeout}s'
+            except Exception as e:
+                return f'run_python error: {e}'
+        _spl_result = run_python('print(_spl_lean.feedback)')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - code
+        - timeout
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_lean_feedback
+  - id: tool_20
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@proof_ok'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(proof_ok)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_proof_ok
+      - out_proof_ok_lc
+  - id: set_24
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_tries
+  - id: loop_2
+    type: LOOP
+    config:
+      condition: latest(@in_tries, @tries) < @in_max_tries
+      outputs:
+        tries:
+          from:
+            - set_25.out_tries
+            - set_27.out_tries
+            - set_29.out_tries
+        tactics_raw:
+          from:
+            - gen_5.out_tactics_raw
+            - gen_6.out_tactics_raw
+        tactics:
+          from:
+            - tool_21.out_tactics
+            - tool_26.out_tactics
+        proof:
+          from:
+            - tool_22.out_proof
+            - tool_27.out_proof
+        check_code:
+          from:
+            - set_26.out_check_code
+            - set_28.out_check_code
+        proof_ok:
+          from:
+            - tool_23.out_proof_ok
+            - tool_28.out_proof_ok
+        lean_feedback:
+          from:
+            - tool_24.out_lean_feedback
+            - tool_29.out_lean_feedback
+        proof_ok_lc:
+          from:
+            - tool_25.out_proof_ok_lc
+            - tool_30.out_proof_ok_lc
+      subgraph:
+        nodes:
+          - id: eval_10
+            type: EVALUATE
+            config:
+              condition: '@in_proof_ok_lc == ''true'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_proof_ok_lc
+          - id: set_25
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: eval_11
+            type: EVALUATE
+            config:
+              condition: '@in_proof_ok_lc == ''init'''
+              branch: 2
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_proof_ok_lc
+          - id: gen_5
+            type: GENERATE
+            config:
+              function: write_tactics
+              params:
+                - lean_stmt
+              prompt_inline: |-
+                Write a Lean 4 tactic proof for this proposition. Mathlib IS imported.
+
+                  {{in_lean_stmt}}
+
+                Rules:
+                - Output ONLY the tactic script — what goes after `:= by`. No fences,
+                  no commentary, no restatement of the proposition, nothing after the
+                  final tactic.
+                - Mathlib tactics are available: simp, ring, linarith, nlinarith,
+                  norm_num, positivity, omega, decide, aesop, field_simp, plus core
+                  intro, induction, cases, calc, exact.
+                - Prefer closing with a named mathlib lemma via `exact` when one fits
+                  (e.g. `exact sq_nonneg a`, `exact abs_add a b`).
+                - Example output for `∀ a : ℝ, 0 ≤ a ^ 2`:  intro a; positivity
+              arguments:
+                - '@lean_stmt'
+            ports:
+              - trigger
+              - complete
+              - in_lean_stmt
+              - out_tactics_raw
+          - id: tool_21
+            type: SOLVE
+            config:
+              tool: strip_fences
+              backend: kernel
+              arguments:
+                - '@tactics_raw'
+              code: |
+                def strip_fences(text: str) -> str:
+                    """Remove markdown code fences and surrounding noise from LLM output."""
+                    import re
+                    s = text.strip()
+                    # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+                    m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+                    if m:
+                        s = m.group(1)
+                    else:
+                        # Case 2: stray fence lines scattered through otherwise plain output
+                        s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+                        s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+                    return s.strip().replace("'''", "")
+                _spl_result = strip_fences(tactics_raw)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - text
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_tactics_raw
+              - out_tactics
+          - id: tool_22
+            type: SOLVE
+            config:
+              tool: make_theorem
+              backend: kernel
+              arguments:
+                - '@lean_stmt'
+                - '@tactics'
+              code: |
+                def make_theorem(stmt: str, tactics: str) -> str:
+                    """Assemble the final theorem deterministically: the verified statement
+                    is spliced in verbatim — the LLM only ever contributes the tactic block,
+                    so it can never prove a subtly different statement (recipe 67's lesson)."""
+                    body = tactics.strip()
+                    if body.startswith(":="):
+                        body = body[2:].strip()
+                    if body == "by" or body.startswith(("by\n", "by ")):
+                        body = body[2:].strip()
+                    return f"theorem spl_claim : {stmt} := by\n  {body}"
+                _spl_result = make_theorem(lean_stmt, tactics)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - stmt
+                - tactics
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_lean_stmt
+              - in_tactics
+              - out_proof
+          - id: set_26
+            type: CONTEXT
+            config:
+              action: set
+              expression: f"print(_spl_lean.check(r'''{@in_proof}''')['ok'])"
+            ports:
+              - trigger
+              - complete
+              - in_proof
+              - out_check_code
+          - id: tool_23
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '@check_code'
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python(check_code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_check_code
+              - out_proof_ok
+          - id: tool_24
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '''print(_spl_lean.feedback)'''
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python('print(_spl_lean.feedback)')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - out_lean_feedback
+          - id: tool_25
+            type: SOLVE
+            config:
+              tool: lower
+              backend: kernel
+              arguments:
+                - '@proof_ok'
+              code: |
+                def lower(value: str) -> str:
+                    """LOWER(value) — convert to lowercase."""
+                    return str(value).lower()
+                _spl_result = lower(proof_ok)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_proof_ok
+              - out_proof_ok_lc
+          - id: set_27
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: gen_6
+            type: GENERATE
+            config:
+              function: repair_tactics
+              params:
+                - lean_stmt
+                - tactics
+                - feedback
+              prompt_inline: |-
+                This Lean 4 tactic proof failed. Mathlib IS imported.
+
+                Proposition: {{in_lean_stmt}}
+                Failed tactic script: {{in_tactics}}
+                Lean's diagnostics:
+                {{in_feedback}}
+
+                Output ONLY a corrected tactic script (what goes after `:= by`) — no
+                fences, no explanation, nothing after the final tactic.
+                Mathlib tactics are available: simp, ring, linarith, nlinarith,
+                norm_num, positivity, omega, decide, aesop, field_simp, plus core
+                intro, induction, cases, calc, exact. Prefer a named mathlib lemma
+                via `exact` when one fits.
+              arguments:
+                - '@lean_stmt'
+                - '@tactics'
+                - '@lean_feedback'
+            ports:
+              - trigger
+              - complete
+              - in_lean_stmt
+              - in_tactics
+              - in_feedback
+              - out_tactics_raw
+          - id: tool_26
+            type: SOLVE
+            config:
+              tool: strip_fences
+              backend: kernel
+              arguments:
+                - '@tactics_raw'
+              code: |
+                def strip_fences(text: str) -> str:
+                    """Remove markdown code fences and surrounding noise from LLM output."""
+                    import re
+                    s = text.strip()
+                    # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+                    m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+                    if m:
+                        s = m.group(1)
+                    else:
+                        # Case 2: stray fence lines scattered through otherwise plain output
+                        s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+                        s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+                    return s.strip().replace("'''", "")
+                _spl_result = strip_fences(tactics_raw)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - text
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_tactics_raw
+              - out_tactics
+          - id: tool_27
+            type: SOLVE
+            config:
+              tool: make_theorem
+              backend: kernel
+              arguments:
+                - '@lean_stmt'
+                - '@tactics'
+              code: |
+                def make_theorem(stmt: str, tactics: str) -> str:
+                    """Assemble the final theorem deterministically: the verified statement
+                    is spliced in verbatim — the LLM only ever contributes the tactic block,
+                    so it can never prove a subtly different statement (recipe 67's lesson)."""
+                    body = tactics.strip()
+                    if body.startswith(":="):
+                        body = body[2:].strip()
+                    if body == "by" or body.startswith(("by\n", "by ")):
+                        body = body[2:].strip()
+                    return f"theorem spl_claim : {stmt} := by\n  {body}"
+                _spl_result = make_theorem(lean_stmt, tactics)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - stmt
+                - tactics
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_lean_stmt
+              - in_tactics
+              - out_proof
+          - id: set_28
+            type: CONTEXT
+            config:
+              action: set
+              expression: f"print(_spl_lean.check(r'''{@in_proof}''')['ok'])"
+            ports:
+              - trigger
+              - complete
+              - in_proof
+              - out_check_code
+          - id: tool_28
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '@check_code'
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python(check_code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_check_code
+              - out_proof_ok
+          - id: tool_29
+            type: SOLVE
+            config:
+              tool: run_python
+              backend: kernel
+              arguments:
+                - '''print(_spl_lean.feedback)'''
+              code: |
+                def run_python(code: str, timeout: str='30') -> str:
+                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
+
+                    Returns stdout on success, or stderr on failure.
+                    Timeout is in seconds (default 30).
+
+                    Usage in SPL:
+                        CALL run_python(@code_snippet) INTO @output;
+
+                    Security note: executes arbitrary code — use only with trusted input.
+
+                    Deprecated: with --kernel (now default), deterministic Python belongs in
+                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
+                    share state across calls. This subprocess fallback remains for --no-kernel
+                    mode only. Scheduled for removal in spl-llm v3.2.
+                    """
+                    import subprocess
+                    import sys
+                    try:
+                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
+                        if result.returncode == 0:
+                            return result.stdout.strip()
+                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
+                    except subprocess.TimeoutExpired:
+                        return f'run_python timed out after {timeout}s'
+                    except Exception as e:
+                        return f'run_python error: {e}'
+                _spl_result = run_python('print(_spl_lean.feedback)')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+                - timeout
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - out_lean_feedback
+          - id: tool_30
+            type: SOLVE
+            config:
+              tool: lower
+              backend: kernel
+              arguments:
+                - '@proof_ok'
+              code: |
+                def lower(value: str) -> str:
+                    """LOWER(value) — convert to lowercase."""
+                    return str(value).lower()
+                _spl_result = lower(proof_ok)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_proof_ok
+              - out_proof_ok_lc
+          - id: set_29
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+        edges:
+          - source: eval_10.pass
+            target: set_25.trigger
+            type: triggers
+          - source: eval_10.fail
+            target: eval_11.trigger
+            type: triggers
+          - source: eval_11.pass
+            target: gen_5.trigger
+            type: triggers
+          - source: gen_5.complete
+            target: tool_21.trigger
+            type: triggers
+          - source: gen_5.out_tactics_raw
+            target: tool_21.in_tactics_raw
+            type: binds
+          - source: tool_21.complete
+            target: tool_22.trigger
+            type: triggers
+          - source: tool_21.out_tactics
+            target: tool_22.in_tactics
+            type: binds
+          - source: tool_22.complete
+            target: set_26.trigger
+            type: triggers
+          - source: tool_22.out_proof
+            target: set_26.in_proof
+            type: binds
+          - source: set_26.complete
+            target: tool_23.trigger
+            type: triggers
+          - source: set_26.out_check_code
+            target: tool_23.in_check_code
+            type: binds
+          - source: tool_23.complete
+            target: tool_24.trigger
+            type: triggers
+          - source: tool_24.complete
+            target: tool_25.trigger
+            type: triggers
+          - source: tool_23.out_proof_ok
+            target: tool_25.in_proof_ok
+            type: binds
+          - source: tool_25.complete
+            target: set_27.trigger
+            type: triggers
+          - source: eval_11.fail
+            target: gen_6.trigger
+            type: triggers
+          - source: gen_6.complete
+            target: tool_26.trigger
+            type: triggers
+          - source: gen_6.out_tactics_raw
+            target: tool_26.in_tactics_raw
+            type: binds
+          - source: tool_26.complete
+            target: tool_27.trigger
+            type: triggers
+          - source: tool_26.out_tactics
+            target: tool_27.in_tactics
+            type: binds
+          - source: tool_27.complete
+            target: set_28.trigger
+            type: triggers
+          - source: tool_27.out_proof
+            target: set_28.in_proof
+            type: binds
+          - source: set_28.complete
+            target: tool_28.trigger
+            type: triggers
+          - source: set_28.out_check_code
+            target: tool_28.in_check_code
+            type: binds
+          - source: tool_28.complete
+            target: tool_29.trigger
+            type: triggers
+          - source: tool_29.complete
+            target: tool_30.trigger
+            type: triggers
+          - source: tool_28.out_proof_ok
+            target: tool_30.in_proof_ok
+            type: binds
+          - source: tool_30.complete
+            target: set_29.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_proof_ok_lc
+      - in_tries
+      - in_lean_stmt
+      - in_tactics
+      - in_lean_feedback
+      - in_proof
+      - in_check_code
+      - in_proof_ok
+      - in_max_tries
+      - out_tries
+      - out_tactics_raw
+      - out_tactics
+      - out_proof
+      - out_check_code
+      - out_proof_ok
+      - out_lean_feedback
+      - out_proof_ok_lc
+  - id: eval_12
+    type: EVALUATE
+    config:
+      condition: '@in_proof_ok_lc == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_proof_ok_lc
+  - id: set_30
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''machine_proved'''
+    ports:
+      - trigger
+      - complete
+      - out_badge
+  - id: set_31
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_proof
+  - id: tool_31
+    type: SOLVE
+    config:
+      tool: lean_report
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@lean_stmt'
+        - '@faithful'
+        - '@proof'
+        - '@badge'
+        - '@citation'
+      code: |
+        def lean_report(claim: str, stmt: str, faithful: str,
+                        proof: str, badge: str, citation: str) -> str:
+            lines = [
+                f"# Lean verification report (mathlib)",
+                f"",
+                f"**Claim (prose):** {claim}",
+                f"",
+                f"**Formalization:** `{stmt or '—'}`",
+                f"",
+                f"**Faithfulness (LLM judge):** {faithful.strip()}",
+                f"",
+                f"**Badge:** `{badge}`",
+            ]
+            if citation.strip() and citation.strip().lower() != "none":
+                lines += ["", f"**Library citation (kernel-checked):** `{citation.strip()}`"]
+            if proof.strip():
+                lines += ["", "**Kernel-checked proof:**", "```lean", proof, "```"]
+            return "\n".join(lines)
+        _spl_result = lean_report(problem, lean_stmt, faithful, proof, badge, citation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - claim
+        - stmt
+        - faithful
+        - proof
+        - badge
+        - citation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_lean_stmt
+      - in_faithful
+      - in_proof
+      - in_badge
+      - in_citation
+      - out_result
+  - id: tool_32
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@log_dir}/chain_trace.md'
+        - '@result'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{log_dir}/chain_trace.md', result)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_dir
+      - in_result
+      - out_write_file
+  - id: gen_7
+    type: GENERATE
+    config:
+      function: decompose_problem
+      params:
+        - problem
+        - thinking_note
+      prompt_inline: |-
+        {{in_thinking_note}}Translate this math problem into an ordered list of symbolic operations.
+
+        Output format — one step per line, NOTHING ELSE:
+          <expression>|<operation>
+
+        The correct answer is always a short list of lines (rarely more than 5) — keep your
+        entire response under 1000 tokens. A long response means you have gone wrong.
+
+        STRICT OUTPUT RULES (violating any of these causes the pipeline to fail):
+        - Plain text output ONLY — no code fences, no backticks, no markdown, no numbering
+        - No Python code (no import statements, no variable assignments, no function calls)
+        - No prose, no explanations, no blank lines
+        - The FIRST step's <expression> is the starting expression in Python syntax:
+            ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+        - Every step AFTER the first must use the literal word PREV as the expression —
+            it means "the result of the previous step". NEVER write a new expression
+            after the first line.
+        - <operation> must be exactly one token from this list:
+            solve, diff, integrate, simplify, expand, factor,
+            series, apart, limit(x,0), laplace, inverse_laplace,
+            trigsimp, summation(n,1,oo), eigenvalues, solve_system,
+            ode_solve, galois, conic, rank, factor_qq
+        - solve_system: ALL equations must be combined into ONE step as a Python list
+            [eq1_lhs - eq1_rhs, eq2_lhs - eq2_rhs, ...]|solve_system
+            NEVER use PREV with solve_system — put every equation in the same list
+        - ode_solve: <expression> is the ODE left-hand side in Python using y(x).diff(x,n)
+            notation, with the right-hand side assumed 0:
+            "y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)"  (not  y'', y', prime notation)
+            For ODE problems the plan is ALWAYS exactly ONE line — never add a second step
+        - galois:    <expression> is a polynomial in x over the rationals
+        - factor_qq: <expression> is a polynomial in x to factor over the rationals
+        - conic:     <expression> is a homogeneous quadratic in x, y, z moved to
+            the "= 0" form (e.g. "x**2 + y**2 = 3*z**2" becomes "x**2 + y**2 - 3*z**2")
+        - rank:      <expression> is the 5-element Weierstrass coefficient list
+            [a1, a2, a3, a4, a6] of the elliptic curve
+            y^2 + a1*x*y + a3*y = x^3 + a2*x^2 + a4*x + a6
+        - If the problem needs only ONE operation, output exactly one line
+        - The expressions in the examples below (exp(x), x**2 - 4, sin(x)/x, ...)
+            illustrate the FORMAT only. Your first <expression> must be transcribed
+            from the Problem at the bottom — copying an expression from an example
+            is a failure.
+
+        CORRECT examples:
+          "differentiate e to the x and then simplify the result"
+            exp(x)|diff
+            PREV|simplify
+
+          "integrate 5*x**4 + 2, then expand the result, then solve for x"
+            5*x**4 + 2|integrate
+            PREV|expand
+            PREV|solve
+
+          "expand (x+1) squared, then factor the expanded form"
+            (x + 1)**2|expand
+            PREV|factor
+
+          "find the roots of x squared minus 4"
+            x**2 - 4|solve
+
+          "find the limit of sin(x)/x as x approaches 0"
+            sin(x)/x|limit(x,0)
+
+          "expand sin(x) as a Taylor series around x=0 up to degree 5"
+            sin(x)|series
+
+          "find the partial fraction decomposition of 1/(x**2-1)"
+            1/(x**2 - 1)|apart
+
+          "find the Laplace transform of exp(-2*t)"
+            exp(-2*t)|laplace
+
+          "compute the sum of 1/n**2 from n=1 to infinity"
+            1/n**2|summation(n,1,oo)
+
+          "find the eigenvalues of the matrix [[1,2],[3,4]]"
+            [[1,2],[3,4]]|eigenvalues
+
+          "solve the system x + y = 5 and x - y = 1"
+            [x + y - 5, x - y - 1]|solve_system
+
+          "compute the inverse Laplace transform of s/(s**2+4), then verify"
+            s/(s**2 + 4)|inverse_laplace
+            PREV|laplace
+
+          "solve the ODE y''(x) - 3*y'(x) + 2*y(x) = 0"
+            y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)|ode_solve
+
+          "solve y'(x) = y(x) with y(0) = 1"
+            y(x).diff(x) - y(x)|ode_solve
+
+          "find the Galois group of x to the fifth minus x minus 1"
+            x**5 - x - 1|galois
+
+          "does x**2 + y**2 = 3*z**2 have a rational solution?"
+            x**2 + y**2 - 3*z**2|conic
+
+          "rank of the curve y^2 + y = x^3 - x^2 - 10*x - 20"
+            [0, -1, 1, -10, -20]|rank
+
+          "factor x**12 - 1 into irreducibles over the rationals"
+            x**12 - 1|factor_qq
+
+        INCORRECT examples (DO NOT produce output like this):
+          ```plaintext              ← NO: code fences are forbidden
+          exp(x)|diff
+          ```
+          x = sp.symbols('x')      ← NO: Python variable assignments are forbidden
+          from sympy import diff    ← NO: Python import statements are forbidden
+          Step 1: exp(x)|diff       ← NO: labels and numbering are forbidden
+          x + y - 5|solve_system
+          PREV - y - 1|solve_system ← NO: solve_system takes ALL equations at once in a list
+          y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)|ode_solve
+          PREV|ode_solve            ← NO: ode_solve is always exactly one step
+          1. exp(x)|diff             ← NO: numbered lists are forbidden
+          x**2 - 4|solve             ← NO (as a later line): every line after the
+                                        first must be PREV|<operation>
+          exp(x)|diff                ← NO (when the problem says something else):
+                                        this copies an example instead of the Problem
+          y''(x) - 3*y'(x)|ode_solve ← NO: prime notation is forbidden; use y(x).diff(x,n)
+          √(4 - x**2)|integrate      ← NO: Unicode symbols are forbidden; use sqrt(4 - x**2)
+
+        Now translate ONLY the problem below. Transcribe its expression EXACTLY —
+        same digits, signs, exponents — and use PREV for every step after the first.
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+        - '@thinking_note'
+      output_budget: 2500
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_thinking_note
+      - out_steps_text
+  - id: tool_33
+    type: SOLVE
+    config:
+      tool: strip_fences
+      backend: kernel
+      arguments:
+        - '@steps_text'
+      code: |
+        def strip_fences(text: str) -> str:
+            """Remove markdown code fences and surrounding noise from LLM output."""
+            import re
+            s = text.strip()
+            # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+            m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+            if m:
+                s = m.group(1)
+            else:
+                # Case 2: stray fence lines scattered through otherwise plain output
+                s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+                s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+            return s.strip().replace("'''", "")
+        _spl_result = strip_fences(steps_text)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - text
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_steps_text
+      - out_steps_text
+  - id: tool_34
+    type: SOLVE
+    config:
+      tool: step_count
+      backend: kernel
+      arguments:
+        - '@steps_text'
+      code: |
+        def step_count(steps_text: str) -> str:
+            """Deterministic, 0-token: counts non-blank lines in the
+            decomposed step list (mirrors chunk_plan in recipe 13)."""
+            return str(len([line for line in steps_text.splitlines() if line.strip()]))
+        _spl_result = step_count(steps_text)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - steps_text
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_steps_text
+      - out_n_steps
+  - id: eval_13
+    type: EVALUATE
+    config:
+      condition: '@in_n_steps == ''0'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_n_steps
+  - id: tool_35
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@log_dir}/chain_trace.md'
+        - f'(planning failed — raw decomposition output below)\n{@steps_text}'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{log_dir}/chain_trace.md', f'(planning failed — raw decomposition output below)\n{steps_text}')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_dir
+      - in_steps_text
+      - out_write_file
+  - id: set_32
+    type: CONTEXT
+    config:
+      action: set
+      expression: 'f''[PLAN FAILURE] The planning step could not decompose "{@in_problem}" into usable operations.\nRaw decomposition output: {@in_steps_text}'''
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_steps_text
+      - out_result
+  - id: set_33
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_i
+  - id: set_34
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_running_expression
+  - id: set_35
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_trace
+  - id: loop_3
+    type: LOOP
+    config:
+      condition: latest(@in_i, @i) < int(@in_n_steps)
+      outputs:
+        step:
+          from: tool_36.out_step
+        step_summary:
+          from: call_1.out_step_summary
+        running_expression:
+          from: tool_37.out_running_expression
+        trace_line:
+          from: tool_38.out_trace_line
+        step_no:
+          from: set_36.out_step_no
+        write_file:
+          from: tool_39.out_write_file
+        trace:
+          from: set_37.out_trace
+        i:
+          from: set_38.out_i
+      subgraph:
+        nodes:
+          - id: tool_36
+            type: SOLVE
+            config:
+              tool: extract_step
+              backend: kernel
+              arguments:
+                - '@steps_text'
+                - '@i'
+              code: |
+                def extract_step(steps_text: str, index: str) -> str:
+                    """Deterministic, 0-token: returns the i-th non-blank line of
+                    the decomposed step list (mirrors extract_chunk in recipe 13)."""
+                    lines = [line.strip() for line in steps_text.splitlines() if line.strip()]
+                    i = int(index)
+                    return lines[i] if 0 <= i < len(lines) else ""
+                _spl_result = extract_step(steps_text, i)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - steps_text
+                - index
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_steps_text
+              - in_i
+              - out_step
+          - id: call_1
+            type: GENERATE
+            config:
+              procedure_ref: procedures.solve_chain_step
+              arguments:
+                - '@step'
+                - '@running_expression'
+                - '@backend_lc'
+            ports:
+              - trigger
+              - complete
+              - in_step
+              - in_running_expression
+              - in_backend_lc
+              - out_step_summary
+          - id: tool_37
+            type: SOLVE
+            config:
+              tool: split_part
+              backend: kernel
+              arguments:
+                - '@step_summary'
+                - '''|'''
+                - '''1'''
+              code: |
+                def trim(value: str) -> str:
+                    """TRIM(value) — remove leading and trailing whitespace."""
+                    return str(value).strip()
+
+                def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                    """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                    The part comes back whitespace-trimmed by default: delimited protocol
+                    lines ('a | b') are padded for readability and virtually every caller
+                    wants the bare field (list_get behaves the same way). Pass trim='false'
+                    to keep the raw part, padding included.
+                    """
+                    parts = str(value).split(str(delimiter))
+                    idx = int(part) - 1
+                    if not 0 <= idx < len(parts):
+                        return ''
+                    raw = parts[idx]
+                    if str(trim).strip().lower() in {'false', '0', 'no'}:
+                        return raw
+                    return raw.strip()
+                _spl_result = split_part(step_summary, '|', '1')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+                - delimiter
+                - part
+                - trim
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_step_summary
+              - out_running_expression
+          - id: tool_38
+            type: SOLVE
+            config:
+              tool: split_part
+              backend: kernel
+              arguments:
+                - '@step_summary'
+                - '''|'''
+                - '''2'''
+              code: |
+                def trim(value: str) -> str:
+                    """TRIM(value) — remove leading and trailing whitespace."""
+                    return str(value).strip()
+
+                def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                    """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                    The part comes back whitespace-trimmed by default: delimited protocol
+                    lines ('a | b') are padded for readability and virtually every caller
+                    wants the bare field (list_get behaves the same way). Pass trim='false'
+                    to keep the raw part, padding included.
+                    """
+                    parts = str(value).split(str(delimiter))
+                    idx = int(part) - 1
+                    if not 0 <= idx < len(parts):
+                        return ''
+                    raw = parts[idx]
+                    if str(trim).strip().lower() in {'false', '0', 'no'}:
+                        return raw
+                    return raw.strip()
+                _spl_result = split_part(step_summary, '|', '2')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - value
+                - delimiter
+                - part
+                - trim
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_step_summary
+              - out_trace_line
+          - id: set_36
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_i + 1'
+            ports:
+              - trigger
+              - complete
+              - in_i
+              - out_step_no
+          - id: eval_14
+            type: EVALUATE
+            config:
+              condition: '@in_running_expression == ''solver_error'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_running_expression
+          - id: tool_39
+            type: SOLVE
+            config:
+              tool: write_file
+              backend: kernel
+              arguments:
+                - f'{@log_dir}/chain_trace.md'
+                - f'{@trace}{@step_no}. SOLVER ERROR — {@trace_line}\n'
+              code: |
+                import pathlib
+
+                def write_file(file_path: str, content: str, mode: str='w') -> str:
+                    """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+                    mode: 'w' (overwrite, default) or 'a' (append).
+                    Creates parent directories automatically.
+                    Returns the absolute path written.
+                    """
+                    p = pathlib.Path(str(file_path).strip())
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    m = str(mode).strip().lower()
+                    if m not in ('w', 'a'):
+                        m = 'w'
+                    with p.open(m, encoding='utf-8') as fh:
+                        fh.write(str(content))
+                    return str(p.resolve())
+                _spl_result = write_file(f'{log_dir}/chain_trace.md', f'{trace}{step_no}. SOLVER ERROR — {trace_line}\n')
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - file_path
+                - content
+                - mode
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_log_dir
+              - in_trace
+              - in_step_no
+              - in_trace_line
+              - out_write_file
+          - id: set_37
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_trace + f''{@in_step_no}. {@in_trace_line}\n'''
+            ports:
+              - trigger
+              - complete
+              - in_trace
+              - in_step_no
+              - in_trace_line
+              - out_trace
+          - id: set_38
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_i + 1'
+            ports:
+              - trigger
+              - complete
+              - in_i
+              - out_i
+        edges:
+          - source: tool_36.complete
+            target: call_1.trigger
+            type: triggers
+          - source: tool_36.out_step
+            target: call_1.in_step
+            type: binds
+          - source: call_1.complete
+            target: tool_37.trigger
+            type: triggers
+          - source: call_1.out_step_summary
+            target: tool_37.in_step_summary
+            type: binds
+          - source: tool_37.complete
+            target: tool_38.trigger
+            type: triggers
+          - source: call_1.out_step_summary
+            target: tool_38.in_step_summary
+            type: binds
+          - source: tool_38.complete
+            target: set_36.trigger
+            type: triggers
+          - source: set_36.complete
+            target: eval_14.trigger
+            type: triggers
+          - source: tool_37.out_running_expression
+            target: eval_14.in_running_expression
+            type: binds
+          - source: eval_14.pass
+            target: tool_39.trigger
+            type: triggers
+          - source: set_36.out_step_no
+            target: tool_39.in_step_no
+            type: binds
+          - source: tool_38.out_trace_line
+            target: tool_39.in_trace_line
+            type: binds
+          - source: tool_39.complete
+            target: set_37.trigger
+            type: triggers
+          - source: eval_14.fail
+            target: set_37.trigger
+            type: triggers
+          - source: set_36.out_step_no
+            target: set_37.in_step_no
+            type: binds
+          - source: tool_38.out_trace_line
+            target: set_37.in_trace_line
+            type: binds
+          - source: set_37.complete
+            target: set_38.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_steps_text
+      - in_i
+      - in_running_expression
+      - in_backend_lc
+      - in_log_dir
+      - in_trace
+      - in_n_steps
+      - out_step
+      - out_step_summary
+      - out_running_expression
+      - out_trace_line
+      - out_step_no
+      - out_write_file
+      - out_trace
+      - out_i
+  - id: tool_40
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@log_dir}/chain_trace.md'
+        - '@trace'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{log_dir}/chain_trace.md', trace)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_dir
+      - in_trace
+      - out_write_file
+  - id: gen_8
+    type: GENERATE
+    config:
+      function: explain_chain
+      params:
+        - problem
+        - trace
+        - thinking_note
+      prompt_inline: |-
+        {{in_thinking_note}}A student asked: "{{in_problem}}"
+
+        The symbolic math engine computed this chain of EXACT steps, in order:
+        {{in_trace}}
+
+        Write a clear, friendly explanation in less than 6 sentences that:
+        1. Restates what the problem is asking in plain English
+        2. Walks through the chain step by step, in order, stating each exact result
+        3. Gives the final answer plainly at the end
+        Do not re-derive any step — trust the computed chain above as exact.
+      arguments:
+        - '@problem'
+        - '@trace'
+        - '@thinking_note'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_trace
+      - in_thinking_note
+      - out_result
+  - id: tool_41
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@result'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(result)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result
+      - out_result
+  - id: tool_42
+    type: SOLVE
+    config:
+      tool: round_trip_check
+      backend: kernel
+      arguments:
+        - '@pid'
+        - '@running_expression'
+        - '@result'
+      code: |
+        def round_trip_check(pid: str, running_expression: str, output_text: str) -> str:
+            """Live round-trip / back-substitution verification of the solver arm's
+            final result, called once the chain of solve_chain_step calls has
+            produced @running_expression (and, since p015's check needs it as a
+            fallback -- see below -- after explain_chain has produced @result).
+            Substitutes the result back into the original problem's defining
+            relation (the same 20 per-pid checks used by the post-hoc
+            verify_roundtrip.py script, imported from roundtrip_checks.py so the
+            two paths can never silently diverge) rather than comparing against a
+            precomputed answer form -- this sidesteps ambiguities like free
+            constants in indefinite integrals/ODE solutions or root/eigenvalue
+            ordering.
+
+            output_text is the workflow's natural-language narration (@result):
+            unused by every check except p015, whose solve_system(...) result can
+            render as a multi-line SymPy repr that split_part(@step_summary, "|", ...)
+            and LOGGING can garble -- output_text gives check_p015 the same
+            narration-text fallback verify_roundtrip.py's post-hoc classify() uses.
+
+            Returns one of: ROUNDTRIP_PASS, ROUNDTRIP_FAIL, UNPARSEABLE, NO_CHECK
+            (pid not in the registered 20 T0-T5 problems, e.g. the Lean/T6 arms
+            this check does not apply to) -- the same verdict vocabulary
+            verify_roundtrip.py's classify() uses, so a live verdict and a
+            post-hoc re-check of the same row are directly comparable."""
+            import sys, os
+            for _cand in (os.path.join(os.getcwd(), "cookbook", "77_neurosymbolic"), os.getcwd()):
+                if _cand not in sys.path:
+                    sys.path.insert(0, _cand)
+            from roundtrip_checks import classify_from_value
+            verdict, _detail = classify_from_value(pid, running_expression, output_text)
+            return verdict
+        _spl_result = round_trip_check(pid, running_expression, result)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - pid
+        - running_expression
+        - output_text
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_pid
+      - in_running_expression
+      - in_result
+      - out_roundtrip
+  - id: eval_15
+    type: EVALUATE
+    config:
+      condition: '@in_result == '''''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result
+  - id: set_39
+    type: CONTEXT
+    config:
+      action: set
+      expression: f'[NARRATION FAILURE] The chain verified correctly but the explanation step returned nothing.\nVerified chain:\n{@in_trace}'
+    ports:
+      - trigger
+      - complete
+      - in_trace
+      - out_result
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_result
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_enable_solver
+    target: tool_1.in_enable_solver
+    type: binds
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: wf_entry.out_backend
+    target: tool_2.in_backend
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_2.out_backend_lc
+    target: tool_3.in_backend_lc
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_solver_mode
+    target: eval_1.in_solver_mode
+    type: binds
+  - source: eval_1.pass
+    target: set_1.trigger
+    type: triggers
+  - source: eval_1.fail
+    target: set_2.trigger
+    type: triggers
+  - source: set_1.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_1.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: set_2.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: wf_entry.out_log_dir
+    target: tool_4.in_log_dir
+    type: binds
+  - source: tool_4.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: wf_entry.out_thinking_note
+    target: gen_1.in_thinking_note
+    type: binds
+  - source: gen_1.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: gen_1.out_result
+    target: tool_5.in_result
+    type: binds
+  - source: tool_5.complete
+    target: eval_3.trigger
+    type: triggers
+  - source: tool_5.out_result
+    target: eval_3.in_result
+    type: binds
+  - source: eval_3.pass
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.out_result
+    target: wf_exit.in_result
+    type: binds
+  - source: set_3.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_5.out_result
+    target: wf_exit.in_result
+    type: binds
+  - source: eval_3.fail
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: eval_4.trigger
+    type: triggers
+  - source: tool_3.out_backend_lc
+    target: eval_4.in_backend_lc
+    type: binds
+  - source: eval_4.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_6.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: set_5.out_stmt_ok_lc
+    target: loop_1.in_stmt_ok_lc
+    type: binds
+  - source: set_6.out_tries
+    target: loop_1.in_tries
+    type: binds
+  - source: wf_entry.out_problem
+    target: loop_1.in_problem
+    type: binds
+  - source: set_4.out_lean_stmt
+    target: loop_1.in_lean_stmt
+    type: binds
+  - source: wf_entry.out_max_tries
+    target: loop_1.in_max_tries
+    type: binds
+  - source: loop_1.exit
+    target: set_12.trigger
+    type: triggers
+  - source: set_12.complete
+    target: set_13.trigger
+    type: triggers
+  - source: set_13.complete
+    target: set_14.trigger
+    type: triggers
+  - source: set_14.complete
+    target: set_15.trigger
+    type: triggers
+  - source: set_15.complete
+    target: set_16.trigger
+    type: triggers
+  - source: set_16.complete
+    target: eval_7.trigger
+    type: triggers
+  - source: loop_1.out_stmt_ok_lc
+    target: eval_7.in_stmt_ok_lc
+    type: binds
+  - source: eval_7.pass
+    target: set_17.trigger
+    type: triggers
+  - source: set_17.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_4.in_claim
+    type: binds
+  - source: loop_1.out_lean_stmt
+    target: gen_4.in_lean_stmt
+    type: binds
+  - source: gen_4.complete
+    target: eval_8.trigger
+    type: triggers
+  - source: gen_4.out_faithful
+    target: eval_8.in_subject
+    type: binds
+  - source: eval_8.pass
+    target: set_18.trigger
+    type: triggers
+  - source: eval_8.fail
+    target: set_19.trigger
+    type: triggers
+  - source: set_19.complete
+    target: set_20.trigger
+    type: triggers
+  - source: loop_1.out_lean_stmt
+    target: set_20.in_lean_stmt
+    type: binds
+  - source: set_20.complete
+    target: tool_15.trigger
+    type: triggers
+  - source: set_20.out_find_code
+    target: tool_15.in_find_code
+    type: binds
+  - source: tool_15.complete
+    target: tool_16.trigger
+    type: triggers
+  - source: tool_15.out_citation
+    target: tool_16.in_citation
+    type: binds
+  - source: tool_16.complete
+    target: eval_9.trigger
+    type: triggers
+  - source: tool_16.out_citation_lc
+    target: eval_9.in_citation_lc
+    type: binds
+  - source: eval_9.pass
+    target: set_21.trigger
+    type: triggers
+  - source: eval_9.fail
+    target: set_22.trigger
+    type: triggers
+  - source: tool_15.out_citation
+    target: set_22.in_citation
+    type: binds
+  - source: set_22.complete
+    target: tool_17.trigger
+    type: triggers
+  - source: loop_1.out_lean_stmt
+    target: tool_17.in_lean_stmt
+    type: binds
+  - source: tool_15.out_citation
+    target: tool_17.in_citation
+    type: binds
+  - source: tool_17.complete
+    target: set_23.trigger
+    type: triggers
+  - source: tool_17.out_proof
+    target: set_23.in_proof
+    type: binds
+  - source: set_23.complete
+    target: tool_18.trigger
+    type: triggers
+  - source: set_23.out_check_code
+    target: tool_18.in_check_code
+    type: binds
+  - source: tool_18.complete
+    target: tool_19.trigger
+    type: triggers
+  - source: tool_19.complete
+    target: tool_20.trigger
+    type: triggers
+  - source: tool_18.out_proof_ok
+    target: tool_20.in_proof_ok
+    type: binds
+  - source: set_21.complete
+    target: set_24.trigger
+    type: triggers
+  - source: tool_20.complete
+    target: set_24.trigger
+    type: triggers
+  - source: set_24.complete
+    target: loop_2.trigger
+    type: triggers
+  - source: set_19.out_proof_ok_lc
+    target: loop_2.in_proof_ok_lc
+    type: binds
+  - source: tool_20.out_proof_ok_lc
+    target: loop_2.in_proof_ok_lc
+    type: binds
+  - source: set_24.out_tries
+    target: loop_2.in_tries
+    type: binds
+  - source: loop_1.out_lean_stmt
+    target: loop_2.in_lean_stmt
+    type: binds
+  - source: set_15.out_tactics
+    target: loop_2.in_tactics
+    type: binds
+  - source: set_22.out_tactics
+    target: loop_2.in_tactics
+    type: binds
+  - source: loop_1.out_lean_feedback
+    target: loop_2.in_lean_feedback
+    type: binds
+  - source: tool_19.out_lean_feedback
+    target: loop_2.in_lean_feedback
+    type: binds
+  - source: set_14.out_proof
+    target: loop_2.in_proof
+    type: binds
+  - source: tool_17.out_proof
+    target: loop_2.in_proof
+    type: binds
+  - source: loop_1.out_check_code
+    target: loop_2.in_check_code
+    type: binds
+  - source: set_23.out_check_code
+    target: loop_2.in_check_code
+    type: binds
+  - source: tool_18.out_proof_ok
+    target: loop_2.in_proof_ok
+    type: binds
+  - source: wf_entry.out_max_tries
+    target: loop_2.in_max_tries
+    type: binds
+  - source: loop_2.exit
+    target: eval_12.trigger
+    type: triggers
+  - source: loop_2.out_proof_ok_lc
+    target: eval_12.in_proof_ok_lc
+    type: binds
+  - source: eval_12.pass
+    target: set_30.trigger
+    type: triggers
+  - source: eval_12.fail
+    target: set_31.trigger
+    type: triggers
+  - source: set_18.complete
+    target: tool_31.trigger
+    type: triggers
+  - source: set_30.complete
+    target: tool_31.trigger
+    type: triggers
+  - source: set_31.complete
+    target: tool_31.trigger
+    type: triggers
+  - source: eval_7.fail
+    target: tool_31.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_31.in_problem
+    type: binds
+  - source: loop_1.out_lean_stmt
+    target: tool_31.in_lean_stmt
+    type: binds
+  - source: gen_4.out_faithful
+    target: tool_31.in_faithful
+    type: binds
+  - source: set_12.out_faithful
+    target: tool_31.in_faithful
+    type: binds
+  - source: set_14.out_proof
+    target: tool_31.in_proof
+    type: binds
+  - source: loop_2.out_proof
+    target: tool_31.in_proof
+    type: binds
+  - source: set_31.out_proof
+    target: tool_31.in_proof
+    type: binds
+  - source: set_18.out_badge
+    target: tool_31.in_badge
+    type: binds
+  - source: set_30.out_badge
+    target: tool_31.in_badge
+    type: binds
+  - source: set_17.out_badge
+    target: tool_31.in_badge
+    type: binds
+  - source: set_13.out_badge
+    target: tool_31.in_badge
+    type: binds
+  - source: set_16.out_citation
+    target: tool_31.in_citation
+    type: binds
+  - source: set_21.out_citation
+    target: tool_31.in_citation
+    type: binds
+  - source: tool_15.out_citation
+    target: tool_31.in_citation
+    type: binds
+  - source: tool_31.complete
+    target: tool_32.trigger
+    type: triggers
+  - source: wf_entry.out_log_dir
+    target: tool_32.in_log_dir
+    type: binds
+  - source: tool_31.out_result
+    target: tool_32.in_result
+    type: binds
+  - source: tool_31.out_result
+    target: wf_exit.in_result
+    type: binds
+  - source: tool_32.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_4.fail
+    target: gen_7.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_7.in_problem
+    type: binds
+  - source: wf_entry.out_thinking_note
+    target: gen_7.in_thinking_note
+    type: binds
+  - source: gen_7.complete
+    target: tool_33.trigger
+    type: triggers
+  - source: gen_7.out_steps_text
+    target: tool_33.in_steps_text
+    type: binds
+  - source: tool_33.complete
+    target: tool_34.trigger
+    type: triggers
+  - source: tool_33.out_steps_text
+    target: tool_34.in_steps_text
+    type: binds
+  - source: tool_34.complete
+    target: eval_13.trigger
+    type: triggers
+  - source: tool_34.out_n_steps
+    target: eval_13.in_n_steps
+    type: binds
+  - source: eval_13.pass
+    target: tool_35.trigger
+    type: triggers
+  - source: wf_entry.out_log_dir
+    target: tool_35.in_log_dir
+    type: binds
+  - source: tool_33.out_steps_text
+    target: tool_35.in_steps_text
+    type: binds
+  - source: tool_35.complete
+    target: set_32.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: set_32.in_problem
+    type: binds
+  - source: tool_33.out_steps_text
+    target: set_32.in_steps_text
+    type: binds
+  - source: set_32.out_result
+    target: wf_exit.in_result
+    type: binds
+  - source: set_32.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_13.fail
+    target: set_33.trigger
+    type: triggers
+  - source: set_33.complete
+    target: set_34.trigger
+    type: triggers
+  - source: set_34.complete
+    target: set_35.trigger
+    type: triggers
+  - source: set_35.complete
+    target: loop_3.trigger
+    type: triggers
+  - source: tool_33.out_steps_text
+    target: loop_3.in_steps_text
+    type: binds
+  - source: set_33.out_i
+    target: loop_3.in_i
+    type: binds
+  - source: set_34.out_running_expression
+    target: loop_3.in_running_expression
+    type: binds
+  - source: tool_3.out_backend_lc
+    target: loop_3.in_backend_lc
+    type: binds
+  - source: wf_entry.out_log_dir
+    target: loop_3.in_log_dir
+    type: binds
+  - source: set_35.out_trace
+    target: loop_3.in_trace
+    type: binds
+  - source: tool_34.out_n_steps
+    target: loop_3.in_n_steps
+    type: binds
+  - source: loop_3.exit
+    target: tool_40.trigger
+    type: triggers
+  - source: wf_entry.out_log_dir
+    target: tool_40.in_log_dir
+    type: binds
+  - source: loop_3.out_trace
+    target: tool_40.in_trace
+    type: binds
+  - source: tool_40.complete
+    target: gen_8.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_8.in_problem
+    type: binds
+  - source: loop_3.out_trace
+    target: gen_8.in_trace
+    type: binds
+  - source: wf_entry.out_thinking_note
+    target: gen_8.in_thinking_note
+    type: binds
+  - source: gen_8.complete
+    target: tool_41.trigger
+    type: triggers
+  - source: gen_8.out_result
+    target: tool_41.in_result
+    type: binds
+  - source: tool_41.complete
+    target: tool_42.trigger
+    type: triggers
+  - source: wf_entry.out_pid
+    target: tool_42.in_pid
+    type: binds
+  - source: loop_3.out_running_expression
+    target: tool_42.in_running_expression
+    type: binds
+  - source: tool_41.out_result
+    target: tool_42.in_result
+    type: binds
+  - source: tool_42.complete
+    target: eval_15.trigger
+    type: triggers
+  - source: tool_41.out_result
+    target: eval_15.in_result
+    type: binds
+  - source: eval_15.pass
+    target: set_39.trigger
+    type: triggers
+  - source: loop_3.out_trace
+    target: set_39.in_trace
+    type: binds
+  - source: set_39.out_result
+    target: wf_exit.in_result
+    type: binds
+  - source: set_39.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_41.out_result
+    target: wf_exit.in_result
+    type: binds
+  - source: eval_15.fail
+    target: wf_exit.trigger
+    type: triggers

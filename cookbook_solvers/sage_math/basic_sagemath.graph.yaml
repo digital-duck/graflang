@@ -1,0 +1,797 @@
+version: 1.0-graph
+workflow:
+  name: sage_solver
+  inputs:
+    - name: problem
+      type: TEXT
+      default: what is the Galois group of x^5 - x - 1 over the rationals?
+    - name: log_dir
+      type: TEXT
+      default: cookbook/75_sage_math/logs-spl
+  outputs:
+    - name: explanation
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_log_dir
+  - id: tool_1
+    type: SOLVE
+    config:
+      expression: isinstance(1, Integer)
+      tool: isinstance
+    ports:
+      - trigger
+      - complete
+      - out_tool_1
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_1'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_tool_1
+  - id: solve_1
+    type: SOLVE
+    config:
+      expression: version()
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_sage_banner
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: now_iso
+      backend: kernel
+      arguments: []
+      code: |
+        import datetime
+
+        def now_iso() -> str:
+            """NOW() — current UTC datetime as ISO-8601 string: 'YYYY-MM-DDTHH:MM:SS'."""
+            return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+        _spl_result = now_iso()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_run_ts
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: replace
+      backend: kernel
+      arguments:
+        - '@run_ts'
+        - ''':'''
+        - ''''''
+      code: |
+        def replace(value: str, old: str, new: str) -> str:
+            """REPLACE(value, old, new) — replace all occurrences of old with new."""
+            return str(value).replace(str(old), str(new))
+        _spl_result = replace(run_ts, ':', '')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+        - old
+        - new
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_run_ts
+      - out_run_ts
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: f'{@in_log_dir}/chain_trace-{@in_run_ts}.md'
+    ports:
+      - trigger
+      - complete
+      - in_log_dir
+      - in_run_ts
+      - out_log_file
+  - id: solve_2
+    type: SOLVE
+    config:
+      expression: str(var('x y z'))
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - out__xyz
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: parse_math_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Convert this math problem into Sage notation.
+        Reply with exactly one line in this format (no other text):
+          <expression>|<operation>
+
+        Rules:
+        - operation must be exactly one of: galois, conic, rank, factor
+        - Use ^ for powers and * for multiplication (Sage notation)
+        - galois: expression is a polynomial in x over the rationals
+        - factor: expression is a polynomial in x over the rationals
+        - conic:  expression is a homogeneous quadratic in x, y, z moved
+          to the "= 0" form (e.g. "x^2 + y^2 = 3*z^2" becomes "x^2 + y^2 - 3*z^2")
+        - rank:   expression is the 5-element Weierstrass coefficient list
+          [a1, a2, a3, a4, a6] of the elliptic curve
+          y^2 + a1*x*y + a3*y = x^3 + a2*x^2 + a4*x + a6
+
+        Examples:
+          "Galois group of x to the fifth minus x minus 1"        →  x^5 - x - 1|galois
+          "factor x^4 - 1 over the rationals"                     →  x^4 - 1|factor
+          "does x^2 + y^2 = 3*z^2 have a rational solution?"      →  x^2 + y^2 - 3*z^2|conic
+          "rank of the curve y^2 + y = x^3 - x^2 - 10*x - 20"     →  [0, -1, 1, -10, -20]|rank
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_parsed
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@parsed'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(parsed)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_parsed
+      - out_parsed
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: split_part
+      backend: kernel
+      arguments:
+        - '@parsed'
+        - '''|'''
+        - '''1'''
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+
+        def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+            """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+            The part comes back whitespace-trimmed by default: delimited protocol
+            lines ('a | b') are padded for readability and virtually every caller
+            wants the bare field (list_get behaves the same way). Pass trim='false'
+            to keep the raw part, padding included.
+            """
+            parts = str(value).split(str(delimiter))
+            idx = int(part) - 1
+            if not 0 <= idx < len(parts):
+                return ''
+            raw = parts[idx]
+            if str(trim).strip().lower() in {'false', '0', 'no'}:
+                return raw
+            return raw.strip()
+        _spl_result = split_part(parsed, '|', '1')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+        - delimiter
+        - part
+        - trim
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_parsed
+      - out_expression
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: split_part
+      backend: kernel
+      arguments:
+        - '@parsed'
+        - '''|'''
+        - '''2'''
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+
+        def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+            """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+            The part comes back whitespace-trimmed by default: delimited protocol
+            lines ('a | b') are padded for readability and virtually every caller
+            wants the bare field (list_get behaves the same way). Pass trim='false'
+            to keep the raw part, padding included.
+            """
+            parts = str(value).split(str(delimiter))
+            idx = int(part) - 1
+            if not 0 <= idx < len(parts):
+                return ''
+            raw = parts[idx]
+            if str(trim).strip().lower() in {'false', '0', 'no'}:
+                return raw
+            return raw.strip()
+        _spl_result = split_part(parsed, '|', '2')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+        - delimiter
+        - part
+        - trim
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_parsed
+      - out_operation
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - '@log_file'
+        - f'# Sage Solver — chain trace\n\n**Engine:** {@sage_banner}\n\n## Step 1 — LLM parse\n**Problem:** {@problem}\n**Parsed:** {@parsed}\n**Expression:** {@expression}\n**Operation:** {@operation}\n'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(log_file, f'# Sage Solver — chain trace\n\n**Engine:** {sage_banner}\n\n## Step 1 — LLM parse\n**Problem:** {problem}\n**Parsed:** {parsed}\n**Expression:** {expression}\n**Operation:** {operation}\n')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_file
+      - in_sage_banner
+      - in_problem
+      - in_parsed
+      - in_expression
+      - in_operation
+      - out_write_file
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@operation'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(operation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_operation
+      - out_operation_lc
+  - id: solve_3
+    type: SOLVE
+    config:
+      expression: str(__import__('time').perf_counter())
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - out__t0
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_operation_lc == ''galois'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_operation_lc
+  - id: solve_4
+    type: SOLVE
+    config:
+      expression: str(QQ['x'](@in_expression).galois_group())
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_expression
+      - out_sage_result
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_operation_lc == ''factor'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_operation_lc
+  - id: solve_5
+    type: SOLVE
+    config:
+      expression: str(factor(QQ['x'](@in_expression)))
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_expression
+      - out_sage_result
+  - id: eval_3
+    type: EVALUATE
+    config:
+      condition: '@in_operation_lc == ''conic'''
+      branch: 3
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_operation_lc
+  - id: solve_6
+    type: SOLVE
+    config:
+      expression: str(Conic(QQ['x,y,z'](@in_expression)).has_rational_point(point=True))
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_expression
+      - out_sage_result
+  - id: eval_4
+    type: EVALUATE
+    config:
+      condition: '@in_operation_lc == ''rank'''
+      branch: 4
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_operation_lc
+  - id: solve_7
+    type: SOLVE
+    config:
+      expression: str(EllipticCurve(@in_expression).rank())
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_expression
+      - out_sage_result
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''unsupported_operation'''
+    ports:
+      - trigger
+      - complete
+      - out_sage_result
+  - id: solve_8
+    type: SOLVE
+    config:
+      expression: '''%.3fs''%(__import__(''time'').perf_counter()-float(''@in__t0''))'
+      type: TEXT
+    ports:
+      - trigger
+      - complete
+      - in__t0
+      - out_elapsed
+  - id: assert_2
+    type: ASSERT
+    config:
+      condition: len(str(@_spl_solve_result))>0
+    ports:
+      - trigger
+      - pass
+      - fail
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - '@log_file'
+        - f'## Step 2 — Sage computation\n**Operation:** {@operation_lc}\n**Result:** {@sage_result}\n**Elapsed:** {@elapsed}\n'
+        - '''a'''
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(log_file, f'## Step 2 — Sage computation\n**Operation:** {operation_lc}\n**Result:** {sage_result}\n**Elapsed:** {elapsed}\n', 'a')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_file
+      - in_operation_lc
+      - in_sage_result
+      - in_elapsed
+      - out_write_file
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: explain_solution
+      params:
+        - problem
+        - sage_result
+      prompt_inline: |-
+        A student asked: "{{in_problem}}"
+
+        The SageMath computer algebra system computed: {{in_sage_result}}
+
+        Write a clear, friendly explanation in less than 5 sentences that:
+        1. Restates what the problem is asking in plain English
+        2. States the exact answer from the computation above
+        3. Briefly explains the key concept (Galois group, rational point,
+           rank, or factorization) at an advanced-undergraduate level
+        Do not re-derive the answer — trust the Sage result above as exact.
+      arguments:
+        - '@problem'
+        - '@sage_result'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_sage_result
+      - out_explanation
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - '@log_file'
+        - 'f''## Step 3 — LLM explanation\n{@explanation}\n\n---\n*status: complete*\n'''
+        - '''a'''
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(log_file, f'## Step 3 — LLM explanation\n{explanation}\n\n---\n*status: complete*\n', 'a')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_log_file
+      - in_explanation
+      - out_write_file
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_explanation
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_1.out_tool_1
+    target: assert_1.in_tool_1
+    type: binds
+  - source: assert_1.pass
+    target: solve_1.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: solve_1.trigger
+    type: triggers
+  - source: solve_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_2.out_run_ts
+    target: tool_3.in_run_ts
+    type: binds
+  - source: tool_3.complete
+    target: set_1.trigger
+    type: triggers
+  - source: wf_entry.out_log_dir
+    target: set_1.in_log_dir
+    type: binds
+  - source: tool_3.out_run_ts
+    target: set_1.in_run_ts
+    type: binds
+  - source: set_1.complete
+    target: solve_2.trigger
+    type: triggers
+  - source: solve_2.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: gen_1.out_parsed
+    target: tool_4.in_parsed
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_parsed
+    target: tool_5.in_parsed
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_parsed
+    target: tool_6.in_parsed
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: set_1.out_log_file
+    target: tool_7.in_log_file
+    type: binds
+  - source: solve_1.out_sage_banner
+    target: tool_7.in_sage_banner
+    type: binds
+  - source: wf_entry.out_problem
+    target: tool_7.in_problem
+    type: binds
+  - source: tool_4.out_parsed
+    target: tool_7.in_parsed
+    type: binds
+  - source: tool_5.out_expression
+    target: tool_7.in_expression
+    type: binds
+  - source: tool_6.out_operation
+    target: tool_7.in_operation
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_6.out_operation
+    target: tool_8.in_operation
+    type: binds
+  - source: tool_8.complete
+    target: solve_3.trigger
+    type: triggers
+  - source: solve_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_8.out_operation_lc
+    target: eval_1.in_operation_lc
+    type: binds
+  - source: eval_1.pass
+    target: solve_4.trigger
+    type: triggers
+  - source: tool_5.out_expression
+    target: solve_4.in_expression
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_8.out_operation_lc
+    target: eval_2.in_operation_lc
+    type: binds
+  - source: eval_2.pass
+    target: solve_5.trigger
+    type: triggers
+  - source: tool_5.out_expression
+    target: solve_5.in_expression
+    type: binds
+  - source: eval_2.fail
+    target: eval_3.trigger
+    type: triggers
+  - source: tool_8.out_operation_lc
+    target: eval_3.in_operation_lc
+    type: binds
+  - source: eval_3.pass
+    target: solve_6.trigger
+    type: triggers
+  - source: tool_5.out_expression
+    target: solve_6.in_expression
+    type: binds
+  - source: eval_3.fail
+    target: eval_4.trigger
+    type: triggers
+  - source: tool_8.out_operation_lc
+    target: eval_4.in_operation_lc
+    type: binds
+  - source: eval_4.pass
+    target: solve_7.trigger
+    type: triggers
+  - source: tool_5.out_expression
+    target: solve_7.in_expression
+    type: binds
+  - source: eval_4.fail
+    target: set_2.trigger
+    type: triggers
+  - source: solve_4.complete
+    target: solve_8.trigger
+    type: triggers
+  - source: solve_5.complete
+    target: solve_8.trigger
+    type: triggers
+  - source: solve_6.complete
+    target: solve_8.trigger
+    type: triggers
+  - source: solve_7.complete
+    target: solve_8.trigger
+    type: triggers
+  - source: set_2.complete
+    target: solve_8.trigger
+    type: triggers
+  - source: solve_3.out__t0
+    target: solve_8.in__t0
+    type: binds
+  - source: solve_8.complete
+    target: assert_2.trigger
+    type: triggers
+  - source: assert_2.pass
+    target: tool_9.trigger
+    type: triggers
+  - source: assert_2.fail
+    target: tool_9.trigger
+    type: triggers
+  - source: set_1.out_log_file
+    target: tool_9.in_log_file
+    type: binds
+  - source: tool_8.out_operation_lc
+    target: tool_9.in_operation_lc
+    type: binds
+  - source: solve_4.out_sage_result
+    target: tool_9.in_sage_result
+    type: binds
+  - source: solve_5.out_sage_result
+    target: tool_9.in_sage_result
+    type: binds
+  - source: solve_6.out_sage_result
+    target: tool_9.in_sage_result
+    type: binds
+  - source: solve_7.out_sage_result
+    target: tool_9.in_sage_result
+    type: binds
+  - source: set_2.out_sage_result
+    target: tool_9.in_sage_result
+    type: binds
+  - source: solve_8.out_elapsed
+    target: tool_9.in_elapsed
+    type: binds
+  - source: tool_9.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_2.in_problem
+    type: binds
+  - source: solve_4.out_sage_result
+    target: gen_2.in_sage_result
+    type: binds
+  - source: solve_5.out_sage_result
+    target: gen_2.in_sage_result
+    type: binds
+  - source: solve_6.out_sage_result
+    target: gen_2.in_sage_result
+    type: binds
+  - source: solve_7.out_sage_result
+    target: gen_2.in_sage_result
+    type: binds
+  - source: set_2.out_sage_result
+    target: gen_2.in_sage_result
+    type: binds
+  - source: gen_2.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: set_1.out_log_file
+    target: tool_10.in_log_file
+    type: binds
+  - source: gen_2.out_explanation
+    target: tool_10.in_explanation
+    type: binds
+  - source: gen_2.out_explanation
+    target: wf_exit.in_explanation
+    type: binds
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers

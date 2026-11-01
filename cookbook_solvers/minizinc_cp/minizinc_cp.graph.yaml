@@ -1,0 +1,749 @@
+version: 1.0-graph
+workflow:
+  name: minizinc_cp
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_scheduling_problem
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _PROBLEM = {'problem_name': '7-Day Nurse Scheduling', 'description': 'Schedule 8 nurses (N1–N8; N1 and N2 are senior) across 7 days and 3 shifts. Hard constraints: (1) Morning shift needs ≥2 nurses, at least one senior (N1 or N2). (2) Afternoon shift needs ≥2 nurses. (3) Night shift needs ≥1 nurse. (4) No nurse works more than 5 days per week. (5) A nurse who works Night on day D cannot work Morning on day D+1 (rest rule). Soft preferences: N3 prefers mornings, N7 avoids nights, N8 prefers consecutive days off. Objective: maximize preference satisfaction score subject to all hard constraints.', 'n_nurses': 8, 'n_days': 7, 'n_shifts': 3, 'senior_nurses': [0, 1], 'min_morning': 2, 'min_afternoon': 2, 'min_night': 1, 'max_work_days': 5, 'preferences': [(2, 0, 3), (6, 2, -3), (7, 3, 2)]}
+
+        def get_scheduling_problem() -> str:
+            return json.dumps(_PROBLEM)
+        _spl_result = get_scheduling_problem()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(problem_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_problem_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: solve_with_minizinc
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        import textwrap
+
+        NURSES = ['N1_senior', 'N2_senior', 'N3', 'N4', 'N5', 'N6', 'N7', 'N8']
+
+        DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+        OFF = 3
+
+        _MZN_MODEL = textwrap.dedent('    % Nurse scheduling: 8 nurses, 7 days, 3 shifts + off\n    % Hard: coverage, rest between night→morning, max work days\n    % Soft: maximize preference score\n\n    int: n_nurses = {n_nurses};\n    int: n_days   = {n_days};\n    int: n_shifts = 3;   % 0=Morning 1=Afternoon 2=Night\n    int: OFF      = 3;\n\n    array[1..n_nurses, 1..n_days] of var 0..3: sched;\n\n    % Shift coverage minimums\n    constraint forall(d in 1..n_days) (\n        sum(n in 1..n_nurses)(sched[n,d] == 0) >= {min_morning} /\\\n        sum(n in 1..n_nurses)(sched[n,d] == 1) >= {min_afternoon} /\\\n        sum(n in 1..n_nurses)(sched[n,d] == 2) >= {min_night}\n    );\n\n    % At least one senior (N1 or N2) on morning\n    constraint forall(d in 1..n_days) (\n        sched[1,d] == 0 \\/ sched[2,d] == 0\n    );\n\n    % Max 5 work days per week\n    constraint forall(n in 1..n_nurses) (\n        sum(d in 1..n_days)(sched[n,d] != OFF) <= {max_work_days}\n    );\n\n    % Night→Morning rest: no night on day d and morning on day d+1\n    constraint forall(n in 1..n_nurses, d in 1..n_days-1) (\n        not (sched[n,d] == 2 /\\ sched[n,d+1] == 0)\n    );\n\n    % Preference scores\n    var int: pref_score =\n        sum(d in 1..n_days)(sched[3,d] == 0) * 3       % N3 likes morning\n      - sum(d in 1..n_days)(sched[7,d] == 2) * 3       % N7 dislikes night\n      + sum(d in 1..n_days)(sched[8,d] == OFF) * 2;   % N8 likes days off\n\n    solve maximize pref_score;\n\n    output ["sched=", show(sched), "\\npref=", show(pref_score)];\n')
+
+        def solve_with_minizinc(problem_json: str) -> str:
+            """Solve nurse scheduling via MiniZinc Python interface.
+
+            Tries CP-SAT (via OR-Tools) backend first, then Gecode.
+            Falls back to a Python constraint solver if MiniZinc binary absent.
+            """
+            try:
+                import minizinc
+            except ImportError:
+                return _python_cp_fallback(json.loads(problem_json), note='minizinc not installed — pip install minizinc + binary from minizinc.org')
+            p = json.loads(problem_json)
+            if minizinc.default_driver is None:
+                return _python_cp_fallback(p, note='MiniZinc binary not found — install from https://www.minizinc.org/software.html')
+            mzn_src = _MZN_MODEL.format(**p)
+            try:
+                model = minizinc.Model()
+                model.add_string(mzn_src)
+                for solver_tag in ('com.google.ortools.sat', 'org.gecode.gecode'):
+                    try:
+                        solver = minizinc.Solver.lookup(solver_tag)
+                        inst = minizinc.Instance(solver, model)
+                        result = inst.solve(timeout=None)
+                        if result.status in (minizinc.Status.SATISFIED, minizinc.Status.OPTIMAL_SOLUTION):
+                            sched_flat = result['sched']
+                            pref = result['pref_score']
+                            schedule = _parse_mzn_schedule(sched_flat, p)
+                            violations = _count_violations(schedule, p)
+                            return json.dumps({'status': 'OK', 'backend': solver_tag.split('.')[-1], 'violations': violations, 'pref_score': pref, 'schedule': schedule, 'n_nurses': p['n_nurses'], 'n_days': p['n_days']})
+                    except Exception:
+                        continue
+                return _python_cp_fallback(p, note='No MiniZinc solver backend found (tried CP-SAT, Gecode)')
+            except Exception as e:
+                return _python_cp_fallback(p, note=f'MiniZinc error: {e}')
+
+        def _parse_mzn_schedule(sched_flat, p: dict) -> list:
+            """Convert flat MiniZinc array to nurse×day schedule."""
+            n_nurses = p['n_nurses']
+            n_days = p['n_days']
+            shift_labels = ['M', 'A', 'N', 'Off']
+            schedule = []
+            for n in range(n_nurses):
+                row = {'nurse': NURSES[n], 'days': {}}
+                for d in range(n_days):
+                    val = sched_flat[n][d] if isinstance(sched_flat[0], list) else sched_flat[n * n_days + d]
+                    row['days'][DAYS[d]] = shift_labels[val]
+                schedule.append(row)
+            return schedule
+
+        def _python_cp_fallback(p: dict, note: str='') -> str:
+            """Python-only CP solver using backtracking (demonstrates same constraints)."""
+            n_nurses = p['n_nurses']
+            n_days = p['n_days']
+            min_m, min_a, min_n = (p['min_morning'], p['min_afternoon'], p['min_night'])
+            max_work = p['max_work_days']
+            seniors = p['senior_nurses']
+            shift_names = ['M', 'A', 'N', 'Off']
+            import random as rnd
+            rng = rnd.Random(42)
+            sched = [[OFF] * n_days for _ in range(n_nurses)]
+            for d in range(n_days):
+                morning_candidates = list(range(n_nurses))
+                rng.shuffle(morning_candidates)
+                morning_assigned = []
+                for n in seniors:
+                    if n in morning_candidates and len(morning_assigned) < min_m:
+                        prev_shift = sched[n][d - 1] if d > 0 else -1
+                        if prev_shift != 2:
+                            sched[n][d] = 0
+                            morning_assigned.append(n)
+                for n in morning_candidates:
+                    if n not in morning_assigned and len(morning_assigned) < min_m:
+                        prev_shift = sched[n][d - 1] if d > 0 else -1
+                        if prev_shift != 2 and sum((sched[n][dd] != OFF for dd in range(d))) < max_work:
+                            sched[n][d] = 0
+                            morning_assigned.append(n)
+                afternoon_assigned = []
+                for n in morning_candidates:
+                    if n not in morning_assigned and len(afternoon_assigned) < min_a:
+                        if sum((sched[n][dd] != OFF for dd in range(d))) < max_work:
+                            sched[n][d] = 1
+                            afternoon_assigned.append(n)
+                night_assigned = []
+                for n in morning_candidates:
+                    if n not in morning_assigned and n not in afternoon_assigned and (len(night_assigned) < min_n):
+                        if sum((sched[n][dd] != OFF for dd in range(d))) < max_work:
+                            sched[n][d] = 2
+                            night_assigned.append(n)
+            schedule = []
+            for n in range(n_nurses):
+                row = {'nurse': NURSES[n], 'days': {DAYS[d]: shift_names[sched[n][d]] for d in range(n_days)}}
+                schedule.append(row)
+            violations = _count_violations(schedule, p)
+            pref = _score_preferences(sched, p)
+            return json.dumps({'status': 'OK', 'backend': 'python_backtracking_fallback', 'note': note or 'MiniZinc unavailable; Python CP fallback used', 'violations': violations, 'pref_score': pref, 'schedule': schedule, 'n_nurses': n_nurses, 'n_days': n_days})
+
+        def _count_violations(schedule: list, p: dict) -> dict:
+            """Count hard constraint violations in a schedule."""
+            n_days = p['n_days']
+            violations = {'night_morning': 0, 'coverage_shortage': 0, 'overwork': 0}
+            for d in range(n_days):
+                counts = {'M': 0, 'A': 0, 'N': 0}
+                for row in schedule:
+                    shift = row['days'].get(DAYS[d], 'Off')
+                    if shift in counts:
+                        counts[shift] += 1
+                if counts['M'] < p['min_morning']:
+                    violations['coverage_shortage'] += 1
+                if counts['A'] < p['min_afternoon']:
+                    violations['coverage_shortage'] += 1
+                if counts['N'] < p['min_night']:
+                    violations['coverage_shortage'] += 1
+            for row in schedule:
+                work_days = sum((1 for d in DAYS if row['days'].get(d, 'Off') != 'Off'))
+                if work_days > p['max_work_days']:
+                    violations['overwork'] += 1
+                for d_idx in range(n_days - 1):
+                    if row['days'].get(DAYS[d_idx]) == 'N' and row['days'].get(DAYS[d_idx + 1]) == 'M':
+                        violations['night_morning'] += 1
+            return violations
+
+        def _score_preferences(sched: list, p: dict) -> int:
+            score = 0
+            for row in p.get('preferences', []):
+                n_idx, shift, pts = row
+                for d in range(p['n_days']):
+                    if sched[n_idx][d] == shift:
+                        score += pts
+            return score
+        _spl_result = solve_with_minizinc(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: schedule_hard_constraints_met
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def schedule_hard_constraints_met(result_json: str) -> bool:
+            """ASSERT: no night→morning violations and no coverage shortages."""
+            try:
+                d = json.loads(result_json)
+                if d.get('status') != 'OK':
+                    return False
+                v = d.get('violations', {})
+                return v.get('night_morning', 1) == 0 and v.get('coverage_shortage', 1) == 0
+            except Exception:
+                return False
+        _spl_result = schedule_hard_constraints_met(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_schedule_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+        def format_schedule_report(result_json: str) -> str:
+            try:
+                d = json.loads(result_json)
+                v = d.get('violations', {})
+                backend = d.get('backend', '?')
+                note = d.get('note', '')
+                lines = [f"## CP Schedule Report — {d.get('problem_name', 'Nurse Scheduling')}", '', f'**Backend:** MiniZinc → {backend}  ', f"**Preference score:** {d.get('pref_score', '?')}  ", f"**Night→Morning violations:** {v.get('night_morning', '?')}  ", f"**Coverage shortages:** {v.get('coverage_shortage', '?')}  ", f"**Overwork violations:** {v.get('overwork', '?')}  "]
+                if note:
+                    lines += ['', f'> {note}']
+                lines += ['', '### Weekly Schedule', '', '| Nurse | Mon | Tue | Wed | Thu | Fri | Sat | Sun | Days |', '|---|---|---|---|---|---|---|---|---|']
+                for row in d.get('schedule', []):
+                    days = row.get('days', {})
+                    work_count = sum((1 for d_name in DAYS if days.get(d_name, 'Off') != 'Off'))
+                    cells = ' | '.join((days.get(day, 'Off') for day in DAYS))
+                    lines.append(f"| {row['nurse']} | {cells} | {work_count} |")
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_schedule_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_cp_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''violations'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'violations')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_violations
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''pref_score'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'pref_score')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_pref_score
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_cp_result_prompt
+      params:
+        - cp_report
+        - problem_description
+      prompt_inline: |-
+        You are a constraint programming expert explaining MiniZinc results.
+
+        PROBLEM:
+        {{in_problem_description}}
+
+        MINIZINC CP RESULT:
+        {{in_cp_report}}
+
+        Explain (≤200 words):
+        1. What is constraint propagation, and how does it differ from LP relaxation?
+           (CP reduces domain sizes by forward-checking; LP uses continuous relaxation)
+        2. Why did the LLM schedule violate the night→morning constraint?
+           Is this a "reasoning failure" or a "search complexity" failure?
+        3. MiniZinc separates the model from the solver backend. What are two advantages
+           of this for organizations with evolving solver licensing?
+        4. How would you extend this model to a monthly roster with 30+ nurses?
+           What makes CP scale well here vs. MILP-based scheduling?
+      arguments:
+        - '@cp_report'
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_cp_report
+      - in_problem_description
+      - out_explanation
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@cp_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(cp_report: str, explanation: str) -> str:
+            return f'=== MiniZinc CP — Nurse Scheduling (r126) | solver=ON ===\n\n{cp_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(cp_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - cp_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_cp_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: nurse_schedule_prompt
+      params:
+        - problem_description
+      prompt_inline: |-
+        You are a hospital scheduling coordinator building next week's nurse roster.
+
+        SCHEDULING PROBLEM:
+        {{in_problem_description}}
+
+        Without a solver, build a 7-day schedule for 8 nurses (N1–N8) across 3 shifts:
+        - Morning (06:00–14:00): needs 2 nurses minimum (1 must be senior: N1/N2)
+        - Afternoon (14:00–22:00): needs 2 nurses minimum
+        - Night (22:00–06:00): needs 1 nurse minimum
+
+        Hard rules:
+        - No nurse works more than 5 days/week
+        - A nurse who works Night on day D cannot work Morning on day D+1 (rest rule)
+        - At least one senior (N1 or N2) on each morning shift
+
+        Soft preferences (try to satisfy):
+        - N3 prefers mornings; N7 prefers no nights; N8 prefers consecutive days off
+
+        Output a 7-day table: rows = nurses (N1–N8), columns = days (Mon–Sun),
+        cells = M/A/N/Off. Then check your schedule against all hard rules.
+      arguments:
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_problem_description
+      - out_llm_schedule
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: check_llm_schedule_violations
+      backend: kernel
+      arguments:
+        - '@llm_schedule'
+      code: |
+        import json
+
+        def check_llm_schedule_violations(llm_schedule: str) -> str:
+            """Parse LLM-generated text schedule and count constraint violations.
+
+            Best-effort: looks for N/M pattern strings in the LLM output.
+            Returns JSON with estimated violations.
+            """
+            night_morning = 0
+            lines = llm_schedule.split('\n')
+            for line in lines:
+                if 'N' in line and 'M' in line:
+                    tokens = line.upper().split()
+                    for i in range(len(tokens) - 1):
+                        if tokens[i] in ('N', 'NIGHT') and tokens[i + 1] in ('M', 'MORNING'):
+                            night_morning += 1
+            return json.dumps({'estimated_night_morning_violations': night_morning, 'note': 'Heuristic scan — exact count requires structured LLM output'})
+        _spl_result = check_llm_schedule_violations(llm_schedule)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_schedule
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_schedule
+      - out_violation_json
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_schedule'
+        - '@violation_json'
+      code: |
+        import json
+
+        def format_report_solver_off(llm_schedule: str, violation_json: str) -> str:
+            try:
+                v = json.loads(violation_json)
+                viol_note = f"Estimated night→morning violations: {v.get('estimated_night_morning_violations', '?')}"
+            except Exception:
+                viol_note = ''
+            return f'=== MiniZinc CP — Nurse Scheduling (r126) | solver=OFF ===\n\n── LLM Schedule ─────────────────────────────────────────────\n{llm_schedule}\n\n── Constraint Check ─────────────────────────────────────────\n{viol_note}\n\nNote: LLM "soft reasoning" often misses hard constraint interactions.\nRun --param use_solver=true for MiniZinc CP with guaranteed constraint satisfaction.'
+        _spl_result = format_report_solver_off(llm_schedule, violation_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_schedule
+        - violation_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_schedule
+      - in_violation_json
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_4.in_problem_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_8.in_result_json
+    type: binds
+  - source: tool_8.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_cp_report
+    target: gen_1.in_cp_report
+    type: binds
+  - source: tool_2.out_problem_description
+    target: gen_1.in_problem_description
+    type: binds
+  - source: gen_1.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_6.out_cp_report
+    target: tool_9.in_cp_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_9.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_problem_description
+    target: gen_2.in_problem_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: gen_2.out_llm_schedule
+    target: tool_10.in_llm_schedule
+    type: binds
+  - source: tool_10.complete
+    target: tool_11.trigger
+    type: triggers
+  - source: gen_2.out_llm_schedule
+    target: tool_11.in_llm_schedule
+    type: binds
+  - source: tool_10.out_violation_json
+    target: tool_11.in_violation_json
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_11.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_11.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

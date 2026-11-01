@@ -1,0 +1,32 @@
+=== Nonlinear Optimization (scipy.optimize / pricing) ===
+
+── Problem Specification ────────────────────────────────────
+[Mock LLM response from mock for prompt: Formulate the following nonlinear pricing problem as a JSON specification.
+
+A company sells a product with a power demand curve:
+  D(price) = 10000 * price^(-1.5)
+
+Economics:
+  Unit cost:   $8
+  Fixed cost:  $200 per period
+  Price range: [$6, $150]
+  Min demand:  0 units (0 = unconstrained)
+
+Object...]
+
+── Solver Result (solver=ON, method=SLSQP) ──────────────
+{"success": false, "error": "No module named 'scipy'"}
+
+── Verification ─────────────────────────────────────────────
+{"verdict": "ERROR", "notes": "Expecting value: line 1 column 2 (char 1)"}
+
+── Business Interpretation ──────────────────────────────────
+[Mock LLM response from mock for prompt: Interpret this nonlinear optimization result for a business decision-maker.
+
+Problem type: pricing
+Problem specification: [Mock LLM response from mock for prompt: Formulate the following nonlinear pricing problem as a JSON specification.
+
+A company sells a product with a power demand curve:
+  D(pric...]
+
+LLM calls: 2

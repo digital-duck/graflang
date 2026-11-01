@@ -1,0 +1,955 @@
+version: 1.0-graph
+workflow:
+  name: production_sustainability
+  inputs:
+    - name: problem
+      type: TEXT
+      default: 'A factory produces standard product A and green product B. A: $10 profit, 3 kg CO₂, uses 2 hr labor and 3 kg material. B: $6 profit, 1 kg CO₂, uses 1 hr labor and 2 kg material. Available: 20 labor-hours, 30 kg material. Find production plans that maximize profit and minimize carbon footprint.'
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: n_points
+      type: TEXT
+      default: '10'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_use_solver
+      - out_n_points
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_profit_str
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_status
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: extract_production_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Extract the production problem data from the text below into JSON.
+
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "products": [
+            {{"name": "A", "profit": 10.0, "carbon": 3.0, "labor": 2.0, "material": 3.0}},
+            {{"name": "B", "profit": 6.0,  "carbon": 1.0, "labor": 1.0, "material": 2.0}}
+          ],
+          "resources": {{"labor": 20.0, "material": 30.0}}
+        }}
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: sweep_pareto_scalarization
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@n_points'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def sweep_pareto_scalarization(problem_json: str, n_points: int=10) -> str:
+            """
+            Weighted-sum scalarization: maximize λ·profit_norm - (1-λ)·carbon_norm
+            Sweep λ from 0.0 to 1.0 in n_points steps.
+
+            Anchor values (B3):
+              max_profit = 100  (x=10, y=0)
+              max_carbon  = 30  (x=10, y=0)
+              min_carbon  = 15  (x=0,  y=15)
+
+            Normalization: profit_norm = profit/100, carbon_norm = carbon/30
+
+            Returns:
+              {"status": "OK", "n_points": int,
+               "pareto_front": [{"profit": float, "carbon": float, "x": float, "y": float}]}
+            """
+            n_points = int(n_points)
+            import pulp
+            MAX_PROFIT = 100.0
+            MAX_CARBON = 30.0
+            try:
+                data = json.loads(_strip_fences(problem_json))
+                products = data['products']
+                resources = data['resources']
+                labor_cap = resources['labor']
+                material_cap = resources['material']
+                pA = products[0]
+                pB = products[1]
+                raw_points: list[dict] = []
+                n = max(int(n_points), 2)
+                lambdas = [i / (n - 1) for i in range(n)]
+                for lam in lambdas:
+                    prob = pulp.LpProblem('pareto_step', pulp.LpMaximize)
+                    x = pulp.LpVariable('x', lowBound=0)
+                    y = pulp.LpVariable('y', lowBound=0)
+                    profit = pA['profit'] * x + pB['profit'] * y
+                    carbon = pA['carbon'] * x + pB['carbon'] * y
+                    profit_norm = profit / MAX_PROFIT
+                    carbon_norm = carbon / MAX_CARBON
+                    prob += lam * profit_norm - (1 - lam) * carbon_norm
+                    prob += pA['labor'] * x + pB['labor'] * y <= labor_cap
+                    prob += pA['material'] * x + pB['material'] * y <= material_cap
+                    solver = pulp.PULP_CBC_CMD(msg=False)
+                    prob.solve(solver)
+                    if pulp.LpStatus[prob.status] == 'Optimal':
+                        xv_raw = pulp.value(x)
+                        xv = max(0.0, xv_raw if isinstance(xv_raw, float) else 0.0)
+                        yv_raw = pulp.value(y)
+                        yv = max(0.0, yv_raw if isinstance(yv_raw, float) else 0.0)
+                        p = round(pA['profit'] * xv + pB['profit'] * yv, 4)
+                        c = round(pA['carbon'] * xv + pB['carbon'] * yv, 4)
+                        raw_points.append({'profit': p, 'carbon': c, 'x': round(xv, 4), 'y': round(yv, 4)})
+
+                def dominates(q: dict, p: dict) -> bool:
+                    return q['profit'] >= p['profit'] and q['carbon'] <= p['carbon'] and (q['profit'] > p['profit'] or q['carbon'] < p['carbon'])
+                pareto: list[dict] = []
+                for p in raw_points:
+                    if not any((dominates(q, p) for q in raw_points if q is not p)):
+                        key = (round(p['profit'], 2), round(p['carbon'], 2))
+                        if not any(((round(q['profit'], 2), round(q['carbon'], 2)) == key for q in pareto)):
+                            pareto.append(p)
+                pareto.sort(key=lambda p: -p['profit'])
+                return json.dumps({'status': 'OK', 'n_points': len(pareto), 'pareto_front': pareto})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e), 'n_points': 0, 'pareto_front': []})
+        _spl_result = sweep_pareto_scalarization(problem_json, n_points)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - n_points
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_n_points
+      - out_front_json
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: is_pareto_feasible
+      backend: kernel
+      arguments:
+        - '@front_json'
+      code: |
+        import json
+
+        def is_pareto_feasible(front_json: str) -> bool:
+            """ASSERT gate: True when status==OK and at least 2 Pareto points exist."""
+            try:
+                data = json.loads(front_json)
+                return data.get('status') == 'OK' and data.get('n_points', 0) >= 2
+            except Exception:
+                return False
+        _spl_result = is_pareto_feasible(front_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - front_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_tool_3
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_3'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_front_json
+      - in_tool_3
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: format_pareto_table
+      backend: kernel
+      arguments:
+        - '@front_json'
+      code: |
+        import json
+
+        def format_pareto_table(front_json: str) -> str:
+            """Format Pareto front as a markdown table."""
+            try:
+                data = json.loads(front_json)
+                front = data.get('pareto_front', [])
+                if not front:
+                    return '(no Pareto points)'
+                header = '| Profit ($) | Carbon (kg) | Product A (units) | Product B (units) |'
+                sep = '|---|---|---|---|'
+                rows = [header, sep]
+                for pt in front:
+                    rows.append(f"| {pt['profit']:.1f} | {pt['carbon']:.1f} | {pt['x']:.2f} | {pt['y']:.2f} |")
+                return '\n'.join(rows)
+            except Exception as e:
+                return f'(table error: {e})'
+        _spl_result = format_pareto_table(front_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - front_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_front_table
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: interpret_pareto_front
+      params:
+        - problem
+        - front_table
+      prompt_inline: |-
+        You are a sustainability consultant. Interpret the Pareto front below for a factory manager.
+
+        Problem: {{in_problem}}
+
+        Pareto front (profit vs. carbon tradeoff):
+        {{in_front_table}}
+
+        Your interpretation should:
+        1. Explain the profit-carbon tradeoff in plain language — why maximizing profit increases emissions.
+        2. Recommend 2-3 concrete operating points from the table (e.g. balanced, profit-leaning, green-leaning).
+        3. Note the sustainability angle: how much profit is sacrificed to achieve a meaningful carbon reduction?
+        4. Suggest which point a sustainability-conscious manager should choose, and why.
+
+        Be practical and concrete. The audience is a factory manager, not a mathematician.
+      arguments:
+        - '@problem'
+        - '@front_table'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_front_table
+      - out_interpretation
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@front_json'
+        - '''n_points'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(front_json, 'n_points')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_profit_str
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@problem_json'
+        - '@profit_str'
+        - '@front_table'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_on(problem: str, problem_json: str, n_points: str, front_table: str, interpretation: str, llm_calls: str) -> str:
+            return f'=== Production Sustainability (solver=ON / PuLP Pareto Sweep) ===\n\nProblem:\n{problem}\n\nExtracted Problem Data (JSON):\n{problem_json}\n\nPareto Front ({n_points} non-dominated points):\n{front_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_on(problem, problem_json, profit_str, front_table, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - problem_json
+        - n_points
+        - front_table
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_problem_json
+      - in_profit_str
+      - in_front_table
+      - in_interpretation
+      - in_llm_calls
+      - out_report
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: extract_production_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Extract the production problem data from the text below into JSON.
+
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "products": [
+            {{"name": "A", "profit": 10.0, "carbon": 3.0, "labor": 2.0, "material": 3.0}},
+            {{"name": "B", "profit": 6.0,  "carbon": 1.0, "labor": 1.0, "material": 2.0}}
+          ],
+          "resources": {{"labor": 20.0, "material": 30.0}}
+        }}
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_7
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: propose_solution
+      params:
+        - problem
+        - problem_json
+      prompt_inline: |-
+        You are a production planner. Choose a production plan (x units of Product A, y units of Product B)
+        that balances profit and carbon footprint.
+
+        Problem: {{in_problem}}
+
+        Parsed problem data (JSON): {{in_problem_json}}
+
+        Constraints:
+          2x + y ≤ 20   (labor hours)
+          3x + 2y ≤ 30  (kg material)
+          x ≥ 0, y ≥ 0
+
+        Objectives:
+          Maximize profit = 10x + 6y
+          Minimize carbon = 3x + y
+
+        Choose (x, y) and explain your reasoning. Then output your answer as JSON:
+        {{
+          "x": <float>,
+          "y": <float>,
+          "profit": <float>,
+          "carbon": <float>,
+          "reasoning": "<one sentence>"
+        }}
+
+        Show calculations. Verify your constraints before answering.
+      arguments:
+        - '@problem'
+        - '@problem_json'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_problem_json
+      - out_solution_text
+  - id: set_8
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_5
+    type: GENERATE
+    config:
+      function: extract_solution_json
+      params:
+        - problem
+        - solution_text
+      prompt_inline: |-
+        Extract the production plan from the analysis below into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "x": <float>,
+          "y": <float>,
+          "profit": <float>,
+          "carbon": <float>,
+          "reasoning": "<str>"
+        }}
+
+        Problem: {{in_problem}}
+        Analysis: {{in_solution_text}}
+      arguments:
+        - '@problem'
+        - '@solution_text'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_solution_text
+      - out_solution_json
+  - id: set_9
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: verify_production_off
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@solution_json'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def verify_production_off(problem_json: str, solution_json: str) -> str:
+            """
+            Verify LLM-proposed (x, y) against the B3 constraints and claimed objectives.
+            Checks: feasibility, profit arithmetic, carbon arithmetic.
+            Returns {"verdict": "PASS"/"FAIL", "notes": str}
+            """
+            TOLS = {'arith': 0.5}
+            try:
+                prob = json.loads(_strip_fences(problem_json))
+                sol = json.loads(_strip_fences(solution_json))
+                products = prob['products']
+                resources = prob['resources']
+                pA = products[0]
+                pB = products[1]
+                x = float(sol.get('x', 0))
+                y = float(sol.get('y', 0))
+                claimed_profit = float(sol.get('profit', 0))
+                claimed_carbon = float(sol.get('carbon', 0))
+                notes: list[str] = []
+                ok = True
+                labor_used = pA['labor'] * x + pB['labor'] * y
+                material_used = pA['material'] * x + pB['material'] * y
+                if labor_used > resources['labor'] + 1e-06:
+                    notes.append(f"labor violated: {labor_used:.2f} > {resources['labor']}")
+                    ok = False
+                if material_used > resources['material'] + 1e-06:
+                    notes.append(f"material violated: {material_used:.2f} > {resources['material']}")
+                    ok = False
+                if x < -1e-06 or y < -1e-06:
+                    notes.append(f'non-negativity violated: x={x}, y={y}')
+                    ok = False
+                actual_profit = pA['profit'] * x + pB['profit'] * y
+                actual_carbon = pA['carbon'] * x + pB['carbon'] * y
+                if abs(actual_profit - claimed_profit) > TOLS['arith']:
+                    notes.append(f'profit mismatch: computed={actual_profit:.2f}, claimed={claimed_profit:.2f}')
+                    ok = False
+                if abs(actual_carbon - claimed_carbon) > TOLS['arith']:
+                    notes.append(f'carbon mismatch: computed={actual_carbon:.2f}, claimed={claimed_carbon:.2f}')
+                    ok = False
+                return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'x': x, 'y': y, 'actual_profit': round(actual_profit, 2), 'actual_carbon': round(actual_carbon, 2), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+            except Exception as e:
+                return json.dumps({'verdict': 'FAIL', 'notes': f'parse error: {e}'})
+        _spl_result = verify_production_off(problem_json, solution_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_solution_json
+      - out_verify_result
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''verdict'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(verify_result, 'verdict')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_verify_status
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@solution_json'
+        - '''profit'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(solution_json, 'profit')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_solution_json
+      - out_profit_str
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@problem_json'
+        - '@solution_text'
+        - '@solution_json'
+        - '@verify_result'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_off(problem: str, problem_json: str, solution_text: str, solution_json: str, verify_result: str, llm_calls: str) -> str:
+            return f'=== Production Sustainability (solver=OFF / LLM heuristic) ===\n\nProblem:\n{problem}\n\nExtracted Problem Data (JSON):\n{problem_json}\n\nLLM Proposed Solution:\n{solution_text}\n\nExtracted Solution (JSON):\n{solution_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_off(problem, problem_json, solution_text, solution_json, verify_result, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - problem_json
+        - solution_text
+        - solution_json
+        - verify_result
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_problem_json
+      - in_solution_text
+      - in_solution_json
+      - in_verify_result
+      - in_llm_calls
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_1.in_use_solver
+    type: binds
+  - source: tool_1.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_4.out_llm_calls
+    target: set_5.in_llm_calls
+    type: binds
+  - source: set_5.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: wf_entry.out_n_points
+    target: tool_2.in_n_points
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: tool_3.in_front_json
+    type: binds
+  - source: tool_3.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: assert_1.in_front_json
+    type: binds
+  - source: tool_3.out_tool_3
+    target: assert_1.in_tool_3
+    type: binds
+  - source: assert_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: tool_4.in_front_json
+    type: binds
+  - source: tool_4.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_2.in_problem
+    type: binds
+  - source: tool_4.out_front_table
+    target: gen_2.in_front_table
+    type: binds
+  - source: gen_2.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_5.out_llm_calls
+    target: set_6.in_llm_calls
+    type: binds
+  - source: set_6.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: tool_5.in_front_json
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_6.in_problem
+    type: binds
+  - source: gen_1.out_problem_json
+    target: tool_6.in_problem_json
+    type: binds
+  - source: tool_5.out_profit_str
+    target: tool_6.in_profit_str
+    type: binds
+  - source: tool_4.out_front_table
+    target: tool_6.in_front_table
+    type: binds
+  - source: gen_2.out_interpretation
+    target: tool_6.in_interpretation
+    type: binds
+  - source: set_6.out_llm_calls
+    target: tool_6.in_llm_calls
+    type: binds
+  - source: eval_1.fail
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_3.in_problem
+    type: binds
+  - source: gen_3.complete
+    target: set_7.trigger
+    type: triggers
+  - source: set_4.out_llm_calls
+    target: set_7.in_llm_calls
+    type: binds
+  - source: set_7.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_4.in_problem
+    type: binds
+  - source: gen_3.out_problem_json
+    target: gen_4.in_problem_json
+    type: binds
+  - source: gen_4.complete
+    target: set_8.trigger
+    type: triggers
+  - source: set_7.out_llm_calls
+    target: set_8.in_llm_calls
+    type: binds
+  - source: set_8.complete
+    target: gen_5.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_5.in_problem
+    type: binds
+  - source: gen_4.out_solution_text
+    target: gen_5.in_solution_text
+    type: binds
+  - source: gen_5.complete
+    target: set_9.trigger
+    type: triggers
+  - source: set_8.out_llm_calls
+    target: set_9.in_llm_calls
+    type: binds
+  - source: set_9.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: gen_3.out_problem_json
+    target: tool_7.in_problem_json
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_7.in_solution_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_7.out_verify_result
+    target: tool_8.in_verify_result
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: gen_5.out_solution_json
+    target: tool_9.in_solution_json
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_10.in_problem
+    type: binds
+  - source: gen_3.out_problem_json
+    target: tool_10.in_problem_json
+    type: binds
+  - source: gen_4.out_solution_text
+    target: tool_10.in_solution_text
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_10.in_solution_json
+    type: binds
+  - source: tool_7.out_verify_result
+    target: tool_10.in_verify_result
+    type: binds
+  - source: set_9.out_llm_calls
+    target: tool_10.in_llm_calls
+    type: binds
+  - source: tool_6.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_6.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers

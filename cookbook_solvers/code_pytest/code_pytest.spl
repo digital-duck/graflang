@@ -1,0 +1,345 @@
+-- ============================================================
+-- Recipe 79: Code Generation + Pytest Verification
+--
+-- Upgrades recipe 50 (code_pipeline) by replacing the LLM-as-tester
+-- step with a REAL pytest execution. This closes a critical gap:
+--
+--   Recipe 50: "test" = LLM reviews code against spec and guesses [PASSED]/[FAILED]
+--              → probabilistic evaluation; can be fooled by plausible-looking code
+--
+--   Recipe 79: "test" = pytest executes test cases and counts pass/fail
+--              → ASSERT gates on the actual exit code; cannot be fooled
+--
+-- The key design choice that makes the ASSERT meaningful:
+--   - LLM generates code from the spec        (probabilistic, from intent)
+--   - LLM generates tests ALSO from the spec  (probabilistic, independent of code)
+--   - pytest executes code against tests       (deterministic, formal verdict)
+--
+-- Writing tests from spec, not from code, ensures independence.
+-- A test written by reading the code under test is circular.
+-- A test written from the spec is an independent correctness oracle.
+--
+-- This pattern is inexpressible in a pure-LLM pipeline:
+--   LangChain / PDL have no concept of ASSERT-on-subprocess-exit-code.
+--   In SPL it is: ASSERT all_tests_passed(@pytest_result)
+--
+-- Requires: pytest (pip install pytest) — stdlib only, no extras needed
+-- Run:
+--   spl3 run cookbook/79_code_pytest/code_pytest.spl \
+--       --llm claude_cli \
+--       --param spec="Write a Python function merge_sorted(a, b) that merges two sorted lists into one sorted list."
+-- ============================================================
+
+-- ── Deterministic layer: pytest execution tools ──────────────
+
+CREATE TOOL_API run_pytest(code TEXT, tests TEXT)
+RETURNS TEXT AS PYTHON $$
+def run_pytest(code: str, tests: str) -> str:
+    """Execute LLM-generated code against LLM-generated tests. Returns JSON.
+
+    Both code and tests are written to a temp directory that is removed
+    after the subprocess exits — no filesystem side effects.
+    Returns {"passed": N, "failed": M, "returncode": R, "output": "..."}
+    """
+    import json, re, subprocess, tempfile, os
+
+    # Strip markdown fences the LLM occasionally emits
+    def _strip(src: str) -> str:
+        src = re.sub(r'^```(?:python)?\s*\n?', '', src.strip(), flags=re.IGNORECASE)
+        return re.sub(r'\n?```\s*$', '', src)
+    code  = _strip(code)
+    tests = _strip(tests)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "solution.py"), "w") as f:
+            f.write(code)
+        test_src = "from solution import *\n\n" + tests
+        with open(os.path.join(tmpdir, "test_solution.py"), "w") as f:
+            f.write(test_src)
+
+        proc = subprocess.run(
+            ["python", "-m", "pytest", "test_solution.py",
+             "-v", "--tb=short", "--no-header", "-q"],
+            capture_output=True, text=True, cwd=tmpdir,
+        )
+        out = proc.stdout + proc.stderr
+        passed = failed = 0
+        for line in out.splitlines():
+            pm = re.search(r"(\d+) passed", line)
+            fm = re.search(r"(\d+) failed", line)
+            if pm: passed = int(pm.group(1))
+            if fm: failed = int(fm.group(1))
+
+        return json.dumps({
+            "passed": passed,
+            "failed": failed,
+            "returncode": proc.returncode,
+            "output": out[-3000:],
+        })
+$$;
+
+CREATE TOOL_API all_tests_passed(pytest_json TEXT)
+RETURNS TEXT AS PYTHON $$
+def all_tests_passed(pytest_json: str) -> bool:
+    """ASSERT gate: True only when pytest exits 0 and at least one test passed."""
+    import json
+    try:
+        d = json.loads(pytest_json)
+        return (d.get("returncode", 1) == 0
+                and d.get("failed", 1) == 0
+                and d.get("passed", 0) > 0)
+    except Exception:
+        return False
+$$;
+
+CREATE TOOL_API get_pytest_output(pytest_json TEXT)
+RETURNS TEXT AS PYTHON $$
+def get_pytest_output(pytest_json: str) -> str:
+    import json
+    try:
+        return json.loads(pytest_json).get("output", pytest_json)
+    except Exception:
+        return pytest_json
+$$;
+
+CREATE TOOL_API get_pytest_status(pytest_json TEXT)
+RETURNS TEXT AS PYTHON $$
+def get_pytest_status(pytest_json: str) -> str:
+    """Return 'passed' or 'failed' — clean string for EVALUATE branching."""
+    import json
+    try:
+        d = json.loads(pytest_json)
+        if d.get("returncode", 1) == 0 and d.get("failed", 1) == 0 and d.get("passed", 0) > 0:
+            return "passed"
+        return "failed"
+    except Exception:
+        return "failed"
+$$;
+
+CREATE TOOL_API get_pytest_summary(pytest_json TEXT)
+RETURNS TEXT AS PYTHON $$
+def get_pytest_summary(pytest_json: str) -> str:
+    import json
+    try:
+        d = json.loads(pytest_json)
+        return f"{d.get('passed',0)} passed, {d.get('failed',0)} failed (exit {d.get('returncode',1)})"
+    except Exception:
+        return "unknown"
+$$;
+
+CREATE TOOL_API format_report(spec TEXT, code TEXT, tests TEXT,
+                              pytest_json TEXT, explanation TEXT)
+RETURNS TEXT AS PYTHON $$
+def format_report(spec: str, code: str, tests: str,
+                  pytest_json: str, explanation: str) -> str:
+    import json, re
+    def _strip_fences(src: str) -> str:
+        src = re.sub(r'^```(?:python)?\s*\n?', '', src.strip(), flags=re.IGNORECASE)
+        return re.sub(r'\n?```\s*$', '', src)
+    code  = _strip_fences(code)
+    tests = _strip_fences(tests)
+    try:
+        d = json.loads(pytest_json)
+        summary = f"{d.get('passed',0)} passed / {d.get('failed',0)} failed"
+        status  = "VERIFIED" if d.get("returncode", 1) == 0 else "UNVERIFIED"
+    except Exception:
+        summary, status = "unknown", "UNVERIFIED"
+
+    return "\n".join([
+        "# Code Generation Report",
+        "",
+        f"**Status:** `{status}` — {summary}",
+        "",
+        f"**Spec:** {spec.strip()}",
+        "",
+        "## Generated Code",
+        "",
+        "```python",
+        code.strip(),
+        "```",
+        "",
+        "## Generated Tests (from spec, independent of code)",
+        "",
+        "```python",
+        tests.strip(),
+        "```",
+        "",
+        "## Pytest Output",
+        "",
+        "```",
+        d.get("output", "").strip() if isinstance(d, dict) else pytest_json,
+        "```",
+        "",
+        "## Explanation",
+        "",
+        explanation.strip(),
+    ])
+$$;
+
+-- ── Probabilistic layer: LLM prompt templates ────────────────
+
+CREATE FUNCTION write_code(spec TEXT)
+RETURNS TEXT AS $$
+You are a Python expert. Write a Python module that satisfies this specification:
+
+{spec}
+
+Rules:
+- Output ONLY raw Python code — no markdown fences, no commentary, no docstrings
+- No import statements for third-party libraries; use only Python stdlib
+- Define all required functions at module level so they can be imported directly
+- Prioritise correctness and simplicity over cleverness
+$$;
+
+CREATE FUNCTION write_tests(spec TEXT)
+RETURNS TEXT AS $$
+You are a Python testing expert. Write pytest test cases for this specification:
+
+{spec}
+
+Rules:
+- Write tests based ONLY on the specification — do NOT try to read or infer the implementation
+- Assume the functions can be imported from a module called `solution`
+- Do NOT add the `from solution import *` line — it will be added automatically
+- Cover the happy path, edge cases, and boundary conditions described in the spec
+- Keep each test function short and focused on one assertion
+- Output ONLY raw Python code — no markdown fences, no import statements, no commentary
+$$;
+
+CREATE FUNCTION repair_code(spec TEXT, code TEXT, test_output TEXT)
+RETURNS TEXT AS $$
+This Python code failed one or more pytest tests.
+
+Specification:
+{spec}
+
+Current code:
+{code}
+
+Pytest failure output:
+{test_output}
+
+Fix the code so all tests pass. Common causes:
+- Off-by-one error
+- Missing edge case handling (empty input, single element, duplicates)
+- Wrong return type
+- Incorrect algorithm logic
+
+Output ONLY the corrected Python code — no markdown fences, no commentary.
+$$;
+
+CREATE FUNCTION explain_solution(spec TEXT, code TEXT, pytest_json TEXT)
+RETURNS TEXT AS $$
+You are a software engineer. Explain this verified solution to a reader
+who is familiar with Python but not with the specific problem.
+
+Specification: {spec}
+
+Final code:
+{code}
+
+Test result summary: {pytest_json}
+
+In 3-5 sentences: explain the algorithm, highlight any edge cases handled,
+and confirm what the pytest result proves. Write plain English, no code blocks.
+$$;
+
+-- ── Sub-workflows: wrap each GENERATE so CALL PARALLEL can fan them out ──
+-- write_code and write_tests are both derived from @spec only (independent
+-- of each other), so there's no data dependency forcing them to run in
+-- sequence — dispatch both concurrently instead of paying for two
+-- sequential LLM round-trips.
+
+WORKFLOW gen_code
+  INPUT @spec TEXT
+  OUTPUT @code TEXT
+DO
+  GENERATE write_code(@spec) INTO @code;
+  RETURN @code
+END
+
+WORKFLOW gen_tests
+  INPUT @spec TEXT
+  OUTPUT @tests TEXT
+DO
+  GENERATE write_tests(@spec) INTO @tests;
+  RETURN @tests
+END
+
+-- ── WORKFLOW ─────────────────────────────────────────────────
+
+WORKFLOW code_pytest
+  INPUT @spec TEXT := "Write a Python function merge_sorted(a, b) that merges two sorted lists into one sorted list without using sorted() or list.sort(). Both input lists contain integers and are already sorted ascending. The function must run in O(n+m) time."
+  INPUT @max_tries INTEGER := 3
+  INPUT @out_dir TEXT := "./cookbook/79_code_pytest/output"
+  OUTPUT @report TEXT
+DO
+  -- 0. Timing + run-id
+  CALL time_monotonic() INTO @t_start;
+  CALL time_now() INTO @ts_safe;
+  LOGGING f"[code_pytest] start  run_id={@ts_safe}  max_tries={@max_tries}" LEVEL INFO
+
+  -- ── Stage 1: LLM generates code AND tests independently from spec ──
+  -- Both are derived from the spec, not from each other, so they run
+  -- concurrently via CALL PARALLEL instead of two sequential round-trips.
+  -- This independence is what makes the ASSERT gate meaningful.
+  LOGGING "[code_pytest] Stage 1 — LLM generating code and tests from spec (parallel)" LEVEL INFO
+  CALL PARALLEL
+    gen_code(@spec)  INTO @code,
+    gen_tests(@spec) INTO @tests
+  END
+  LOGGING "[code_pytest] code and tests generated (independent of each other)" LEVEL INFO
+
+  -- ── Stage 2: pytest executes; WHILE repairs on failure ─────────────
+  LOGGING "[code_pytest] Stage 2 — pytest execution + repair loop" LEVEL INFO
+  @tries  := 0;
+  @status := "init";
+
+  WHILE @tries < @max_tries DO
+    CALL run_pytest(@code, @tests) INTO @pytest_result;
+    CALL get_pytest_status(@pytest_result) INTO @run_status;
+    CALL get_pytest_summary(@pytest_result) INTO @summary;
+    @tries := @tries + 1;
+    LOGGING f"[code_pytest] attempt {@tries}: {@summary}" LEVEL INFO
+
+    EVALUATE @run_status
+      WHEN = "passed" THEN
+        @tries := @max_tries;                   -- all tests passed: exit loop
+      ELSE
+        CALL get_pytest_output(@pytest_result) INTO @failure_output;
+        LOGGING f"[code_pytest] repair {@tries} — feeding failure to LLM" LEVEL INFO
+        GENERATE repair_code(@spec, @code, @failure_output) INTO @code;
+    END;
+  END;
+
+  -- ── Stage 3: formal correctness gate ──────────────────────────────
+  -- ASSERT is the deterministic boundary. Execution only continues when
+  -- pytest confirms zero failures. This is a machine-readable proof that
+  -- the code satisfies the independently-written test specification.
+  CALL get_pytest_summary(@pytest_result) INTO @final_summary;
+  LOGGING f"[code_pytest] Stage 3 — ASSERT gate ({@final_summary})" LEVEL INFO
+  ASSERT all_tests_passed(@pytest_result);
+  LOGGING "[code_pytest] ASSERT passed — all tests green" LEVEL INFO
+
+  -- ── Stage 4: LLM explains the verified result ─────────────────────
+  LOGGING "[code_pytest] Stage 4 — LLM explaining verified solution" LEVEL INFO
+  GENERATE explain_solution(@spec, @code, @pytest_result) INTO @explanation;
+
+  CALL format_report(@spec, @code, @tests, @pytest_result, @explanation) INTO @report;
+
+  -- Write report to output file
+  CALL write_file(f"{@out_dir}/code_pytest_{@ts_safe}.md", @report) INTO @out_path;
+  CALL time_elapsed(@t_start) INTO @elapsed;
+  LOGGING f"[code_pytest] done — report → {@out_path}  ({@elapsed}s, attempts={@tries})" LEVEL INFO
+
+  RETURN @report WITH status = "complete";
+
+EXCEPTION
+  WHEN ToolFailed THEN
+    CALL get_pytest_output(@pytest_result) INTO @failure_output;
+    @report := "Code did not pass all tests after " + @tries + " attempts.\n\n" + @failure_output;
+    CALL write_file(f"{@out_dir}/code_pytest_{@ts_safe}.md", @report) INTO @out_path;
+    CALL time_elapsed(@t_start) INTO @elapsed;
+    LOGGING f"[code_pytest] tests_failed — report → {@out_path}  ({@elapsed}s)" LEVEL INFO
+    RETURN @report WITH status = "tests_failed";
+END;

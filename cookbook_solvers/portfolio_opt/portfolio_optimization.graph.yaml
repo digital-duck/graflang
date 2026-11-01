@@ -1,0 +1,1734 @@
+version: 1.0-graph
+workflow:
+  name: portfolio_optimization
+  inputs:
+    - name: tickers
+      type: TEXT
+      default: AAPL,MSFT,GOOGL,AMZN,NVDA
+    - name: capital
+      type: TEXT
+      default: '10000'
+    - name: period
+      type: TEXT
+      default: 1y
+    - name: target_return
+      type: TEXT
+      default: '0.12'
+    - name: max_weight
+      type: TEXT
+      default: '0.20'
+    - name: adapter
+      type: TEXT
+      default: claude_cli
+    - name: model
+      type: TEXT
+      default: ''
+    - name: log_dir
+      type: TEXT
+      default: ./logs
+    - name: algorithm
+      type: TEXT
+      default: markowitz
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_tickers
+      - out_capital
+      - out_period
+      - out_target_return
+      - out_max_weight
+      - out_adapter
+      - out_model
+      - out_log_dir
+      - out_algorithm
+      - out_use_solver
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_sharpe_str
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_status
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_optimization_json
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_allocation_json
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: fetch_stock_data
+      backend: kernel
+      arguments:
+        - '@tickers'
+        - '@period'
+      code: |
+        import json
+
+        from datetime import datetime, timedelta
+
+        def fetch_stock_data(tickers_str: str, period: str='1y', trading_days_per_year: int=252, min_data_fraction: float=0.8) -> str:
+            """
+            Fetch historical adjusted-close prices for a comma-separated list of tickers.
+
+            Args:
+                tickers_str:           Comma-separated ticker symbols (e.g. "AAPL,MSFT,GOOG").
+                period:                Look-back window — "1mo","3mo","6mo","1y","2y","3y" (default "1y").
+                trading_days_per_year: Used to annualize daily mean returns and covariance
+                                       (default 252 = NYSE/NASDAQ trading days; use 261 for a
+                                       broader market or 250 for a conservative estimate).
+                                       Must be in [200, 300].
+                min_data_fraction:     Fraction of trading days a ticker must have data for to be
+                                       included; tickers below this threshold are dropped
+                                       (default 0.8 = 80%; use 1.0 to require complete data).
+                                       Must be in (0.0, 1.0].
+
+            Returns JSON: {"tickers": [...], "annual_returns": {...}, "cov_matrix": [[...]], "period": "..."}
+            """
+            if not 200 <= trading_days_per_year <= 300:
+                return json.dumps({'error': f'trading_days_per_year {trading_days_per_year} out of range [200, 300]'})
+            if not 0.0 < min_data_fraction <= 1.0:
+                return json.dumps({'error': f'min_data_fraction {min_data_fraction} out of range (0.0, 1.0]'})
+            try:
+                import yfinance as yf
+                tickers = [t.strip().upper() for t in tickers_str.split(',') if t.strip()]
+                if not tickers:
+                    return json.dumps({'error': 'no tickers provided'})
+                end = datetime.today()
+                period_map = {'1mo': 30, '3mo': 90, '6mo': 180, '1y': 365, '2y': 730, '3y': 1095}
+                days = period_map.get(period, 365)
+                start = end - timedelta(days=days)
+                raw = yf.download(tickers, start=start.strftime('%Y-%m-%d'), end=end.strftime('%Y-%m-%d'), auto_adjust=True, progress=False)
+                if raw is None or raw.empty:
+                    return json.dumps({'error': 'no price data returned'})
+                prices = raw['Close']
+                if not hasattr(prices, 'columns'):
+                    prices = prices.to_frame(name=tickers[0])
+                min_count = int(min_data_fraction * len(prices))
+                prices = prices.loc[:, prices.count() >= min_count]
+                valid_tickers = list(prices.columns)
+                daily_ret = prices.pct_change().dropna()
+                annual_returns = (daily_ret.mean() * trading_days_per_year).to_dict()
+                cov_matrix = (daily_ret.cov() * trading_days_per_year).values.tolist()
+                return json.dumps({'tickers': valid_tickers, 'annual_returns': {k: round(v, 6) for k, v in annual_returns.items()}, 'cov_matrix': [[round(v, 8) for v in row] for row in cov_matrix], 'period': period, 'trading_days': len(daily_ret)})
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+        _spl_result = fetch_stock_data(tickers, period)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - tickers_str
+        - period
+        - trading_days_per_year
+        - min_data_fraction
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - in_period
+      - out_market_data_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_algorithm == ''auto'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_algorithm
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: suggest_algorithm
+      params:
+        - tickers
+        - market_data_json
+        - target_return
+      prompt_inline: |-
+        You are a quantitative portfolio analyst. Select the best optimization algorithm for this portfolio.
+
+        Tickers: {{in_tickers}}
+        Target annual return: {{in_target_return}}
+        Market data (returns + covariance): {{in_market_data_json}}
+
+        Available algorithms:
+          markowitz   — Classic mean-variance QP. Best when history is long (>2yr) and N>=10.
+          min_variance— Ignore return target, minimize risk only. Best when μ estimates are noisy.
+          max_sharpe  — Maximize return per unit risk. Best for single optimal portfolio.
+          risk_parity — Equal risk contribution. Best for multi-asset, defensive mandates.
+          hrp         — Hierarchical Risk Parity. Best for small N (<10) or short history (<1yr).
+          cvar        — Minimize tail loss. Best when downside protection matters most.
+
+        Consider: number of tickers, data period length, return spread across assets, correlation structure.
+        Return ONLY the algorithm name, exactly as listed above (e.g. "hrp").
+      arguments:
+        - '@tickers'
+        - '@market_data_json'
+        - '@target_return'
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - in_market_data_json
+      - in_target_return
+      - out_algorithm
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: set_7
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_algorithm'
+    ports:
+      - trigger
+      - complete
+      - in_algorithm
+      - out_algorithm
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: optimize_by_algorithm
+      backend: kernel
+      arguments:
+        - '@market_data_json'
+        - '@algorithm'
+        - '@target_return'
+        - '@max_weight'
+      code: |
+        import json
+
+        def _portfolio_result(tickers, w, mu, Sigma, algorithm, risk_free_rate=0.05, status='OPTIMAL', solver_log=''):
+            import numpy as np
+            w = np.maximum(w, 0)
+            w = w / w.sum()
+            exp_ret = float(mu @ w)
+            vol = float(np.sqrt(w @ Sigma @ w))
+            sharpe = (exp_ret - risk_free_rate) / vol if vol > 0 else 0.0
+            weights_dict = {t: round(float(w[i]), 6) for i, t in enumerate(tickers) if abs(w[i]) > 0.0001}
+            return {'status': status, 'algorithm': algorithm, 'weights': weights_dict, 'expected_return': round(exp_ret, 4), 'annual_volatility': round(vol, 4), 'sharpe_ratio': round(sharpe, 4), 'solver_log': solver_log}
+
+        def _opt_min_variance(tickers, mu, Sigma, max_weight, min_weight):
+            """Minimize wᵀΣw with no return target — most robust to μ estimation error."""
+            import cvxpy as cp
+            n = len(tickers)
+            w = cp.Variable(n)
+            prob = cp.Problem(cp.Minimize(cp.quad_form(w, Sigma)), [cp.sum(w) == 1, w >= min_weight, w <= max_weight])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate'):
+                return (None, prob.status)
+            return (w.value, f'CLARABEL min-variance; obj={prob.value:.6f}')
+
+        def _opt_max_sharpe(tickers, mu, Sigma, max_weight, min_weight, risk_free_rate=0.05):
+            """Charnes-Cooper transform: maximize (μᵀw − Rf) / √(wᵀΣw)."""
+            import cvxpy as cp
+            import numpy as np
+            excess = mu - risk_free_rate
+            if np.all(excess <= 0):
+                return (None, 'INFEASIBLE_NO_EXCESS_RETURN')
+            n = len(tickers)
+            y = cp.Variable(n)
+            t = cp.Variable()
+            prob = cp.Problem(cp.Minimize(cp.quad_form(y, Sigma)), [excess @ y == 1, cp.sum(y) == t, y >= min_weight * t, y <= max_weight * t, t >= 0])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate') or t.value is None or t.value < 1e-08:
+                return (None, prob.status)
+            w = y.value / t.value
+            return (w, f'CLARABEL Charnes-Cooper; obj={prob.value:.6f}')
+
+        def _opt_risk_parity(tickers, mu, Sigma, max_weight):
+            """Equal Risk Contribution: each asset contributes 1/N of total portfolio risk."""
+            import numpy as np
+            from scipy.optimize import minimize
+            n = len(tickers)
+
+            def objective(w):
+                w = np.maximum(w, 1e-10)
+                port_var = w @ Sigma @ w
+                marginal = Sigma @ w
+                contrib = w * marginal / port_var
+                target = 1.0 / n
+                return float(np.sum((contrib - target) ** 2))
+            result = minimize(objective, x0=np.ones(n) / n, method='SLSQP', bounds=[(0.0, max_weight)] * n, constraints={'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}, options={'maxiter': 2000, 'ftol': 1e-12})
+            if not result.success:
+                return (None, f'scipy SLSQP: {result.message}')
+            return (result.x, f'scipy SLSQP risk-parity; obj={result.fun:.8f}')
+
+        def _opt_hrp(tickers, mu, Sigma, max_weight):
+            """Hierarchical Risk Parity: cluster-based allocation, no matrix inversion."""
+            import numpy as np
+            from scipy.cluster.hierarchy import linkage
+            from scipy.spatial.distance import squareform
+            n = len(tickers)
+            std = np.sqrt(np.diag(Sigma))
+            corr = Sigma / np.outer(std, std)
+            corr = np.clip(corr, -1.0, 1.0)
+            np.fill_diagonal(corr, 1.0)
+            dist = np.sqrt(np.clip(0.5 * (1.0 - corr), 0, None))
+            np.fill_diagonal(dist, 0.0)
+            link = linkage(squareform(dist), method='single')
+
+            def _leaf_order(link, n):
+                items = [[i] for i in range(n)]
+                for row in link:
+                    i, j = (int(row[0]), int(row[1]))
+                    items.append(items[i] + items[j])
+                return items[-1]
+            sort_ix = _leaf_order(link, n)
+
+            def _cluster_var(ix_list):
+                cov_slice = Sigma[np.ix_(ix_list, ix_list)]
+                inv_d = 1.0 / np.diag(cov_slice)
+                w_ = inv_d / inv_d.sum()
+                return float(w_ @ cov_slice @ w_)
+            weights = {i: 1.0 for i in range(n)}
+            clusters = [sort_ix]
+            while clusters:
+                next_lvl = []
+                for c in clusters:
+                    if len(c) < 2:
+                        continue
+                    mid = len(c) // 2
+                    left, right = (c[:mid], c[mid:])
+                    v_l, v_r = (_cluster_var(left), _cluster_var(right))
+                    alpha = 1.0 - v_l / (v_l + v_r)
+                    for i in left:
+                        weights[i] *= alpha
+                    for i in right:
+                        weights[i] *= 1.0 - alpha
+                    next_lvl += [left, right]
+                clusters = next_lvl
+            w = np.array([weights[i] for i in range(n)])
+            w = np.minimum(w, max_weight)
+            w /= w.sum()
+            return (w, 'scipy HRP single-linkage')
+
+        def _opt_cvar(tickers, mu, Sigma, max_weight, min_weight, target_return, alpha=0.05, n_scenarios=1000):
+            """CVaR minimization: minimize expected loss in worst α% of scenarios."""
+            import cvxpy as cp
+            import numpy as np
+            np.random.seed(42)
+            n = len(tickers)
+            L = np.linalg.cholesky(Sigma + 1e-08 * np.eye(n))
+            scenarios = mu + (L @ np.random.randn(n, n_scenarios)).T
+            T = n_scenarios
+            w = cp.Variable(n)
+            beta = cp.Variable()
+            losses = -scenarios @ w
+            cvar = beta + 1.0 / (alpha * T) * cp.sum(cp.pos(losses - beta))
+            prob = cp.Problem(cp.Minimize(cvar), [cp.sum(w) == 1, w >= min_weight, w <= max_weight, mu @ w >= target_return])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate') or w.value is None:
+                return (None, prob.status)
+            return (w.value, f'CLARABEL CVaR α={alpha}; obj={prob.value:.6f}')
+
+        def optimize_by_algorithm(market_data_json: str, algorithm: str='markowitz', target_return: float=0.1, max_weight: float=0.25, min_weight: float=0.0, risk_free_rate: float=0.05) -> str:
+            """
+            Unified dispatcher for all portfolio optimization algorithms.
+
+            algorithm choices:
+              markowitz   — Minimize variance subject to return target (default)
+              min_variance— Minimize variance with no return constraint; robust to noisy μ
+              max_sharpe  — Maximize Sharpe ratio via Charnes-Cooper transform
+              risk_parity — Equal risk contribution from each asset (no μ needed)
+              hrp         — Hierarchical Risk Parity; best for small N or short history
+              cvar        — Minimize Conditional Value at Risk (tail-loss focus)
+            """
+            target_return = float(target_return)
+            max_weight = float(max_weight)
+            min_weight = float(min_weight)
+            risk_free_rate = float(risk_free_rate)
+            try:
+                import numpy as np
+                data = json.loads(market_data_json)
+                if 'error' in data:
+                    return json.dumps({'status': 'DATA_ERROR', 'algorithm': algorithm, 'error': data['error']})
+                tickers = data['tickers']
+                n = len(tickers)
+                if n < 5:
+                    return json.dumps({'status': 'INFEASIBLE', 'algorithm': algorithm, 'weights': {}, 'expected_return': None, 'annual_volatility': None, 'sharpe_ratio': None, 'solver_log': f'requires >= 5 tickers; got {n}'})
+                mu = np.array([data['annual_returns'][t] for t in tickers])
+                Sigma = np.array(data['cov_matrix'])
+                alg = algorithm.lower().strip()
+                valid_algorithms = ('markowitz', 'min_variance', 'max_sharpe', 'risk_parity', 'hrp', 'cvar')
+                if alg not in valid_algorithms:
+                    return json.dumps({'status': 'INPUT_ERROR', 'algorithm': alg, 'error': f"unknown algorithm '{alg}'; valid: {', '.join(valid_algorithms)}"})
+                if alg == 'markowitz':
+                    w, log = _markowitz_qp(mu, Sigma, max_weight, min_weight, target_return)
+                elif alg == 'min_variance':
+                    w, log = _opt_min_variance(tickers, mu, Sigma, max_weight, min_weight)
+                elif alg == 'max_sharpe':
+                    w, log = _opt_max_sharpe(tickers, mu, Sigma, max_weight, min_weight, risk_free_rate)
+                elif alg == 'risk_parity':
+                    w, log = _opt_risk_parity(tickers, mu, Sigma, max_weight)
+                elif alg == 'hrp':
+                    w, log = _opt_hrp(tickers, mu, Sigma, max_weight)
+                else:
+                    w, log = _opt_cvar(tickers, mu, Sigma, max_weight, min_weight, target_return)
+                if w is None:
+                    return json.dumps({'status': str(log).upper() if log else 'INFEASIBLE', 'algorithm': alg, 'weights': {}, 'expected_return': None, 'annual_volatility': None, 'sharpe_ratio': None, 'solver_log': str(log)})
+                return json.dumps(_portfolio_result(tickers, w, mu, Sigma, alg, risk_free_rate=risk_free_rate, solver_log=str(log)))
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'algorithm': algorithm, 'error': str(e)})
+
+        def _markowitz_qp(mu, Sigma, max_weight, min_weight, target_return):
+            """Core Markowitz QP shared by optimize_portfolio and optimize_by_algorithm."""
+            import cvxpy as cp
+            n = len(mu)
+            w = cp.Variable(n)
+            prob = cp.Problem(cp.Minimize(cp.quad_form(w, Sigma)), [cp.sum(w) == 1, w >= min_weight, w <= max_weight, mu @ w >= target_return])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate'):
+                return (None, prob.status)
+            return (w.value, f'CLARABEL Markowitz; obj={prob.value:.6f}')
+        _spl_result = optimize_by_algorithm(market_data_json, algorithm, target_return, max_weight)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - market_data_json
+        - algorithm
+        - target_return
+        - max_weight
+        - min_weight
+        - risk_free_rate
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_market_data_json
+      - in_algorithm
+      - in_target_return
+      - in_max_weight
+      - out_optimization_json
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@optimization_json'
+        - '''status'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(optimization_json, 'status')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_optimization_json
+      - out_opt_status
+  - id: eval_3
+    type: EVALUATE
+    config:
+      condition: '@in_opt_status == ''OPTIMAL'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_opt_status
+  - id: set_8
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''OPTIMAL'''
+    ports:
+      - trigger
+      - complete
+      - out_opt_status
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: suggest_relaxed_target
+      params:
+        - target_return
+        - market_data_json
+      prompt_inline: |-
+        The portfolio optimization was infeasible with target_return={{in_target_return}}.
+        Given these historical returns: {{in_market_data_json}}
+        Suggest an achievable target return.
+        Return ONLY a decimal number, e.g. 0.08
+      arguments:
+        - '@target_return'
+        - '@market_data_json'
+    ports:
+      - trigger
+      - complete
+      - in_target_return
+      - in_market_data_json
+      - out_relaxed_target
+  - id: set_9
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: optimize_by_algorithm
+      backend: kernel
+      arguments:
+        - '@market_data_json'
+        - '@algorithm'
+        - '@relaxed_target'
+        - '@max_weight'
+      code: |
+        import json
+
+        def _portfolio_result(tickers, w, mu, Sigma, algorithm, risk_free_rate=0.05, status='OPTIMAL', solver_log=''):
+            import numpy as np
+            w = np.maximum(w, 0)
+            w = w / w.sum()
+            exp_ret = float(mu @ w)
+            vol = float(np.sqrt(w @ Sigma @ w))
+            sharpe = (exp_ret - risk_free_rate) / vol if vol > 0 else 0.0
+            weights_dict = {t: round(float(w[i]), 6) for i, t in enumerate(tickers) if abs(w[i]) > 0.0001}
+            return {'status': status, 'algorithm': algorithm, 'weights': weights_dict, 'expected_return': round(exp_ret, 4), 'annual_volatility': round(vol, 4), 'sharpe_ratio': round(sharpe, 4), 'solver_log': solver_log}
+
+        def _opt_min_variance(tickers, mu, Sigma, max_weight, min_weight):
+            """Minimize wᵀΣw with no return target — most robust to μ estimation error."""
+            import cvxpy as cp
+            n = len(tickers)
+            w = cp.Variable(n)
+            prob = cp.Problem(cp.Minimize(cp.quad_form(w, Sigma)), [cp.sum(w) == 1, w >= min_weight, w <= max_weight])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate'):
+                return (None, prob.status)
+            return (w.value, f'CLARABEL min-variance; obj={prob.value:.6f}')
+
+        def _opt_max_sharpe(tickers, mu, Sigma, max_weight, min_weight, risk_free_rate=0.05):
+            """Charnes-Cooper transform: maximize (μᵀw − Rf) / √(wᵀΣw)."""
+            import cvxpy as cp
+            import numpy as np
+            excess = mu - risk_free_rate
+            if np.all(excess <= 0):
+                return (None, 'INFEASIBLE_NO_EXCESS_RETURN')
+            n = len(tickers)
+            y = cp.Variable(n)
+            t = cp.Variable()
+            prob = cp.Problem(cp.Minimize(cp.quad_form(y, Sigma)), [excess @ y == 1, cp.sum(y) == t, y >= min_weight * t, y <= max_weight * t, t >= 0])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate') or t.value is None or t.value < 1e-08:
+                return (None, prob.status)
+            w = y.value / t.value
+            return (w, f'CLARABEL Charnes-Cooper; obj={prob.value:.6f}')
+
+        def _opt_risk_parity(tickers, mu, Sigma, max_weight):
+            """Equal Risk Contribution: each asset contributes 1/N of total portfolio risk."""
+            import numpy as np
+            from scipy.optimize import minimize
+            n = len(tickers)
+
+            def objective(w):
+                w = np.maximum(w, 1e-10)
+                port_var = w @ Sigma @ w
+                marginal = Sigma @ w
+                contrib = w * marginal / port_var
+                target = 1.0 / n
+                return float(np.sum((contrib - target) ** 2))
+            result = minimize(objective, x0=np.ones(n) / n, method='SLSQP', bounds=[(0.0, max_weight)] * n, constraints={'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}, options={'maxiter': 2000, 'ftol': 1e-12})
+            if not result.success:
+                return (None, f'scipy SLSQP: {result.message}')
+            return (result.x, f'scipy SLSQP risk-parity; obj={result.fun:.8f}')
+
+        def _opt_hrp(tickers, mu, Sigma, max_weight):
+            """Hierarchical Risk Parity: cluster-based allocation, no matrix inversion."""
+            import numpy as np
+            from scipy.cluster.hierarchy import linkage
+            from scipy.spatial.distance import squareform
+            n = len(tickers)
+            std = np.sqrt(np.diag(Sigma))
+            corr = Sigma / np.outer(std, std)
+            corr = np.clip(corr, -1.0, 1.0)
+            np.fill_diagonal(corr, 1.0)
+            dist = np.sqrt(np.clip(0.5 * (1.0 - corr), 0, None))
+            np.fill_diagonal(dist, 0.0)
+            link = linkage(squareform(dist), method='single')
+
+            def _leaf_order(link, n):
+                items = [[i] for i in range(n)]
+                for row in link:
+                    i, j = (int(row[0]), int(row[1]))
+                    items.append(items[i] + items[j])
+                return items[-1]
+            sort_ix = _leaf_order(link, n)
+
+            def _cluster_var(ix_list):
+                cov_slice = Sigma[np.ix_(ix_list, ix_list)]
+                inv_d = 1.0 / np.diag(cov_slice)
+                w_ = inv_d / inv_d.sum()
+                return float(w_ @ cov_slice @ w_)
+            weights = {i: 1.0 for i in range(n)}
+            clusters = [sort_ix]
+            while clusters:
+                next_lvl = []
+                for c in clusters:
+                    if len(c) < 2:
+                        continue
+                    mid = len(c) // 2
+                    left, right = (c[:mid], c[mid:])
+                    v_l, v_r = (_cluster_var(left), _cluster_var(right))
+                    alpha = 1.0 - v_l / (v_l + v_r)
+                    for i in left:
+                        weights[i] *= alpha
+                    for i in right:
+                        weights[i] *= 1.0 - alpha
+                    next_lvl += [left, right]
+                clusters = next_lvl
+            w = np.array([weights[i] for i in range(n)])
+            w = np.minimum(w, max_weight)
+            w /= w.sum()
+            return (w, 'scipy HRP single-linkage')
+
+        def _opt_cvar(tickers, mu, Sigma, max_weight, min_weight, target_return, alpha=0.05, n_scenarios=1000):
+            """CVaR minimization: minimize expected loss in worst α% of scenarios."""
+            import cvxpy as cp
+            import numpy as np
+            np.random.seed(42)
+            n = len(tickers)
+            L = np.linalg.cholesky(Sigma + 1e-08 * np.eye(n))
+            scenarios = mu + (L @ np.random.randn(n, n_scenarios)).T
+            T = n_scenarios
+            w = cp.Variable(n)
+            beta = cp.Variable()
+            losses = -scenarios @ w
+            cvar = beta + 1.0 / (alpha * T) * cp.sum(cp.pos(losses - beta))
+            prob = cp.Problem(cp.Minimize(cvar), [cp.sum(w) == 1, w >= min_weight, w <= max_weight, mu @ w >= target_return])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate') or w.value is None:
+                return (None, prob.status)
+            return (w.value, f'CLARABEL CVaR α={alpha}; obj={prob.value:.6f}')
+
+        def optimize_by_algorithm(market_data_json: str, algorithm: str='markowitz', target_return: float=0.1, max_weight: float=0.25, min_weight: float=0.0, risk_free_rate: float=0.05) -> str:
+            """
+            Unified dispatcher for all portfolio optimization algorithms.
+
+            algorithm choices:
+              markowitz   — Minimize variance subject to return target (default)
+              min_variance— Minimize variance with no return constraint; robust to noisy μ
+              max_sharpe  — Maximize Sharpe ratio via Charnes-Cooper transform
+              risk_parity — Equal risk contribution from each asset (no μ needed)
+              hrp         — Hierarchical Risk Parity; best for small N or short history
+              cvar        — Minimize Conditional Value at Risk (tail-loss focus)
+            """
+            target_return = float(target_return)
+            max_weight = float(max_weight)
+            min_weight = float(min_weight)
+            risk_free_rate = float(risk_free_rate)
+            try:
+                import numpy as np
+                data = json.loads(market_data_json)
+                if 'error' in data:
+                    return json.dumps({'status': 'DATA_ERROR', 'algorithm': algorithm, 'error': data['error']})
+                tickers = data['tickers']
+                n = len(tickers)
+                if n < 5:
+                    return json.dumps({'status': 'INFEASIBLE', 'algorithm': algorithm, 'weights': {}, 'expected_return': None, 'annual_volatility': None, 'sharpe_ratio': None, 'solver_log': f'requires >= 5 tickers; got {n}'})
+                mu = np.array([data['annual_returns'][t] for t in tickers])
+                Sigma = np.array(data['cov_matrix'])
+                alg = algorithm.lower().strip()
+                valid_algorithms = ('markowitz', 'min_variance', 'max_sharpe', 'risk_parity', 'hrp', 'cvar')
+                if alg not in valid_algorithms:
+                    return json.dumps({'status': 'INPUT_ERROR', 'algorithm': alg, 'error': f"unknown algorithm '{alg}'; valid: {', '.join(valid_algorithms)}"})
+                if alg == 'markowitz':
+                    w, log = _markowitz_qp(mu, Sigma, max_weight, min_weight, target_return)
+                elif alg == 'min_variance':
+                    w, log = _opt_min_variance(tickers, mu, Sigma, max_weight, min_weight)
+                elif alg == 'max_sharpe':
+                    w, log = _opt_max_sharpe(tickers, mu, Sigma, max_weight, min_weight, risk_free_rate)
+                elif alg == 'risk_parity':
+                    w, log = _opt_risk_parity(tickers, mu, Sigma, max_weight)
+                elif alg == 'hrp':
+                    w, log = _opt_hrp(tickers, mu, Sigma, max_weight)
+                else:
+                    w, log = _opt_cvar(tickers, mu, Sigma, max_weight, min_weight, target_return)
+                if w is None:
+                    return json.dumps({'status': str(log).upper() if log else 'INFEASIBLE', 'algorithm': alg, 'weights': {}, 'expected_return': None, 'annual_volatility': None, 'sharpe_ratio': None, 'solver_log': str(log)})
+                return json.dumps(_portfolio_result(tickers, w, mu, Sigma, alg, risk_free_rate=risk_free_rate, solver_log=str(log)))
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'algorithm': algorithm, 'error': str(e)})
+
+        def _markowitz_qp(mu, Sigma, max_weight, min_weight, target_return):
+            """Core Markowitz QP shared by optimize_portfolio and optimize_by_algorithm."""
+            import cvxpy as cp
+            n = len(mu)
+            w = cp.Variable(n)
+            prob = cp.Problem(cp.Minimize(cp.quad_form(w, Sigma)), [cp.sum(w) == 1, w >= min_weight, w <= max_weight, mu @ w >= target_return])
+            prob.solve(solver=cp.CLARABEL, verbose=False)
+            if prob.status not in ('optimal', 'optimal_inaccurate'):
+                return (None, prob.status)
+            return (w.value, f'CLARABEL Markowitz; obj={prob.value:.6f}')
+        _spl_result = optimize_by_algorithm(market_data_json, algorithm, relaxed_target, max_weight)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - market_data_json
+        - algorithm
+        - target_return
+        - max_weight
+        - min_weight
+        - risk_free_rate
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_market_data_json
+      - in_algorithm
+      - in_relaxed_target
+      - in_max_weight
+      - out_optimization_json
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: is_optimized
+      backend: kernel
+      arguments:
+        - '@optimization_json'
+      code: |
+        import json
+
+        def is_optimized(optimization_json: str) -> bool:
+            """Return True when cvxpy status is OPTIMAL or optimal_inaccurate."""
+            import json
+            try:
+                data = json.loads(optimization_json)
+                return data.get('status', '') in ('OPTIMAL', 'optimal', 'optimal_inaccurate')
+            except Exception:
+                return 'OPTIMAL' in optimization_json or 'optimal' in optimization_json
+        _spl_result = is_optimized(optimization_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - optimization_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_optimization_json
+      - out_tool_6
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_6'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_optimization_json
+      - in_tool_6
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: allocate_capital
+      backend: kernel
+      arguments:
+        - '@optimization_json'
+        - '@capital'
+      code: |
+        import json
+
+        def allocate_capital(optimization_json: str, capital: float) -> str:
+            """
+            Convert optimal weights to dollar allocations for a given capital amount.
+            Returns JSON: {tickers: [{ticker, weight_pct, dollars, shares_approx}], total}
+            """
+            capital = float(capital)
+            try:
+                data = json.loads(optimization_json)
+                weights = data.get('weights', {})
+                if not weights:
+                    return json.dumps({'error': 'no weights in optimization result'})
+                allocations = []
+                for ticker, weight in sorted(weights.items(), key=lambda x: -x[1]):
+                    dollars = round(weight * capital, 2)
+                    allocations.append({'ticker': ticker, 'weight_pct': round(weight * 100, 2), 'dollars': dollars})
+                return json.dumps({'capital': capital, 'allocations': allocations, 'expected_annual_return': data.get('expected_return'), 'annual_volatility': data.get('annual_volatility'), 'sharpe_ratio': data.get('sharpe_ratio')})
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+        _spl_result = allocate_capital(optimization_json, capital)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - optimization_json
+        - capital
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_optimization_json
+      - in_capital
+      - out_allocation_json
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: interpret_portfolio
+      params:
+        - tickers
+        - period
+        - capital
+        - target_return
+        - max_weight
+        - optimization_json
+        - allocation_json
+      prompt_inline: |-
+        Interpret this portfolio optimization result for a personal investor.
+
+        Stocks considered: {{in_tickers}}
+        Historical period: {{in_period}}
+        Capital to invest: ${{in_capital}}
+        Target annual return: {{in_target_return}} (decimal, e.g. 0.12 = 12%)
+        Max single position: {{in_max_weight}} (decimal, e.g. 0.40 = 40%)
+
+        Optimization result (JSON): {{in_optimization_json}}
+        Capital allocation (JSON): {{in_allocation_json}}
+
+        Your interpretation should:
+        1. Summarise the recommended portfolio (which stocks and their % weights)
+        2. State expected annual return, volatility, and Sharpe ratio in plain terms
+        3. Explain any stocks excluded or at very low weight
+        4. Give one rebalancing tip (e.g. review quarterly)
+        5. Add disclaimer: past performance does not guarantee future results
+
+        Be friendly and practical — this is for personal use, not a formal report.
+      arguments:
+        - '@tickers'
+        - '@period'
+        - '@capital'
+        - '@target_return'
+        - '@max_weight'
+        - '@optimization_json'
+        - '@allocation_json'
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - in_period
+      - in_capital
+      - in_target_return
+      - in_max_weight
+      - in_optimization_json
+      - in_allocation_json
+      - out_interpretation
+  - id: set_10
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@optimization_json'
+        - '''sharpe_ratio'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(optimization_json, 'sharpe_ratio')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_optimization_json
+      - out_sharpe_str
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@tickers'
+        - '@period'
+        - '@capital'
+        - '@target_return'
+        - '@max_weight'
+        - '@market_data_json'
+        - '@optimization_json'
+        - '@allocation_json'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_on(tickers: str, period: str, capital: str, target_return: str, max_weight: str, market_data_json: str, optimization_json: str, allocation_json: str, interpretation: str, llm_calls: str) -> str:
+            return f'=== Portfolio Optimization (solver=ON / cvxpy Markowitz) ===\n\nTickers: {tickers}  |  Period: {period}  |  Capital: ${capital}\nTarget return: {target_return}  |  Max position: {max_weight}\n\nMarket Data:\n{market_data_json}\n\nOptimization Result:\n{optimization_json}\n\nCapital Allocation:\n{allocation_json}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_on(tickers, period, capital, target_return, max_weight, market_data_json, optimization_json, allocation_json, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - tickers
+        - period
+        - capital
+        - target_return
+        - max_weight
+        - market_data_json
+        - optimization_json
+        - allocation_json
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - in_period
+      - in_capital
+      - in_target_return
+      - in_max_weight
+      - in_market_data_json
+      - in_optimization_json
+      - in_allocation_json
+      - in_interpretation
+      - in_llm_calls
+      - out_report
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: suggest_allocation
+      params:
+        - tickers
+        - market_data_json
+        - capital
+        - target_return
+        - max_weight
+      prompt_inline: |-
+        You are a personal finance advisor. Suggest a stock portfolio allocation.
+
+        Stocks to consider: {{in_tickers}}
+        Historical data (annual returns and covariance): {{in_market_data_json}}
+        Capital to invest: ${{in_capital}}
+        Target annual return: at least {{in_target_return}} (e.g. 0.12 = 12%)
+        Max per stock: {{in_max_weight}} (e.g. 0.40 = 40%)
+
+        Steps:
+        1. Review each stock's historical annual return and volatility.
+        2. Rank stocks by risk-adjusted return (return / volatility).
+        3. Propose percentage weights that sum to 100%, each <= {{in_max_weight}}.
+        4. Estimate the blended expected return and risk level (low/medium/high).
+        5. Show dollar amounts for ${{in_capital}} capital.
+
+        Be concrete. Show your reasoning.
+      arguments:
+        - '@tickers'
+        - '@market_data_json'
+        - '@capital'
+        - '@target_return'
+        - '@max_weight'
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - in_market_data_json
+      - in_capital
+      - in_target_return
+      - in_max_weight
+      - out_llm_allocation
+  - id: set_11
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_5
+    type: GENERATE
+    config:
+      function: extract_weights_json
+      params:
+        - allocation_text
+      prompt_inline: |-
+        Extract the portfolio weights from this analysis into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "status": "OPTIMAL",
+          "weights": {{"TICKER1": 0.30, "TICKER2": 0.25, ...}},
+          "expected_return": 0.12,
+          "annual_volatility": 0.18,
+          "sharpe_ratio": 0.39
+        }}
+
+        All weights must be decimals (not percentages). They must sum to approximately 1.0.
+
+        Analysis: {{in_allocation_text}}
+      arguments:
+        - '@llm_allocation'
+    ports:
+      - trigger
+      - complete
+      - in_allocation_text
+      - out_optimization_json
+  - id: set_12
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: allocate_capital
+      backend: kernel
+      arguments:
+        - '@optimization_json'
+        - '@capital'
+      code: |
+        import json
+
+        def allocate_capital(optimization_json: str, capital: float) -> str:
+            """
+            Convert optimal weights to dollar allocations for a given capital amount.
+            Returns JSON: {tickers: [{ticker, weight_pct, dollars, shares_approx}], total}
+            """
+            capital = float(capital)
+            try:
+                data = json.loads(optimization_json)
+                weights = data.get('weights', {})
+                if not weights:
+                    return json.dumps({'error': 'no weights in optimization result'})
+                allocations = []
+                for ticker, weight in sorted(weights.items(), key=lambda x: -x[1]):
+                    dollars = round(weight * capital, 2)
+                    allocations.append({'ticker': ticker, 'weight_pct': round(weight * 100, 2), 'dollars': dollars})
+                return json.dumps({'capital': capital, 'allocations': allocations, 'expected_annual_return': data.get('expected_return'), 'annual_volatility': data.get('annual_volatility'), 'sharpe_ratio': data.get('sharpe_ratio')})
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+        _spl_result = allocate_capital(optimization_json, capital)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - optimization_json
+        - capital
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_optimization_json
+      - in_capital
+      - out_allocation_json
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: verify_portfolio
+      backend: kernel
+      arguments:
+        - '@optimization_json'
+      code: |
+        import json
+
+        def verify_portfolio(optimization_json: str, max_weight_limit: float=0.4, weight_sum_tol: float=0.02) -> str:
+            """
+            Back-substitution verifier for solver=OFF path.
+            Checks: weights sum ≈ 1, all weights in [0,1], return/volatility consistency.
+
+            Args:
+                optimization_json: JSON output from optimize_portfolio or an LLM-generated portfolio.
+                max_weight_limit:  Per-asset weight cap for the sanity check (default 0.40 = 40%).
+                                   Set to match the optimizer's max_weight when running ablation sweeps.
+                                   Must be in (0.0, 1.0].
+                weight_sum_tol:    Absolute tolerance for the weights-sum-to-1 check
+                                   (default 0.02; tighten to 0.001 for high-precision verification).
+                                   Must be in [0.0, 0.05].
+            """
+            if not 0.0 < max_weight_limit <= 1.0:
+                return json.dumps({'verdict': 'INPUT_ERROR', 'notes': f'max_weight_limit {max_weight_limit} out of range (0.0, 1.0]'})
+            if not 0.0 <= weight_sum_tol <= 0.05:
+                return json.dumps({'verdict': 'INPUT_ERROR', 'notes': f'weight_sum_tol {weight_sum_tol} out of range [0.0, 0.05]'})
+            try:
+                data = json.loads(optimization_json)
+                weights = data.get('weights', {})
+                notes: list[str] = []
+                ok = True
+                if not weights:
+                    return json.dumps({'verdict': 'UNPARSEABLE', 'notes': 'no weights found'})
+                weight_values = list(weights.values())
+                total = sum(weight_values)
+                if abs(total - 1.0) > weight_sum_tol:
+                    notes.append(f'weights sum to {total:.4f}, expected 1.0 ± {weight_sum_tol}')
+                    ok = False
+                negative = [t for t, w in weights.items() if w < -0.01]
+                if negative:
+                    notes.append(f'negative weights: {negative}')
+                    ok = False
+                over_limit = [t for t, w in weights.items() if w > max_weight_limit]
+                if over_limit:
+                    notes.append(f'weights exceed {max_weight_limit:.0%} limit: {over_limit}')
+                    ok = False
+                exp_ret = data.get('expected_return')
+                volatility = data.get('annual_volatility')
+                if exp_ret is not None and exp_ret < 0:
+                    notes.append(f'negative expected return: {exp_ret}')
+                    ok = False
+                if volatility is not None and volatility < 0:
+                    notes.append(f'negative volatility: {volatility}')
+                    ok = False
+                return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'weight_sum': round(total, 4), 'n_positions': len(weights), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+            except Exception as e:
+                return json.dumps({'verdict': 'UNPARSEABLE', 'notes': str(e)})
+        _spl_result = verify_portfolio(optimization_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - optimization_json
+        - max_weight_limit
+        - weight_sum_tol
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_optimization_json
+      - out_verify_result
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''verdict'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(verify_result, 'verdict')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_verify_status
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@optimization_json'
+        - '''sharpe_ratio'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(optimization_json, 'sharpe_ratio')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_optimization_json
+      - out_sharpe_str
+  - id: tool_14
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@tickers'
+        - '@period'
+        - '@capital'
+        - '@market_data_json'
+        - '@llm_allocation'
+        - '@optimization_json'
+        - '@allocation_json'
+        - '@verify_result'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_off(tickers: str, period: str, capital: str, market_data_json: str, llm_allocation: str, optimization_json: str, allocation_json: str, verify_result: str, llm_calls: str) -> str:
+            return f'=== Portfolio Optimization (solver=OFF / LLM heuristic) ===\n\nTickers: {tickers}  |  Period: {period}  |  Capital: ${capital}\n\nMarket Data:\n{market_data_json}\n\nLLM Allocation:\n{llm_allocation}\n\nExtracted Weights (JSON):\n{optimization_json}\n\nCapital Allocation:\n{allocation_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_off(tickers, period, capital, market_data_json, llm_allocation, optimization_json, allocation_json, verify_result, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - tickers
+        - period
+        - capital
+        - market_data_json
+        - llm_allocation
+        - optimization_json
+        - allocation_json
+        - verify_result
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_tickers
+      - in_period
+      - in_capital
+      - in_market_data_json
+      - in_llm_allocation
+      - in_optimization_json
+      - in_allocation_json
+      - in_verify_result
+      - in_llm_calls
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_tickers
+    target: tool_1.in_tickers
+    type: binds
+  - source: wf_entry.out_period
+    target: tool_1.in_period
+    type: binds
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_2.in_use_solver
+    type: binds
+  - source: tool_2.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_2.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: eval_2.trigger
+    type: triggers
+  - source: wf_entry.out_algorithm
+    target: eval_2.in_algorithm
+    type: binds
+  - source: eval_2.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_tickers
+    target: gen_1.in_tickers
+    type: binds
+  - source: tool_1.out_market_data_json
+    target: gen_1.in_market_data_json
+    type: binds
+  - source: wf_entry.out_target_return
+    target: gen_1.in_target_return
+    type: binds
+  - source: gen_1.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_5.out_llm_calls
+    target: set_6.in_llm_calls
+    type: binds
+  - source: eval_2.fail
+    target: set_7.trigger
+    type: triggers
+  - source: wf_entry.out_algorithm
+    target: set_7.in_algorithm
+    type: binds
+  - source: set_6.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: set_7.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_1.out_market_data_json
+    target: tool_3.in_market_data_json
+    type: binds
+  - source: gen_1.out_algorithm
+    target: tool_3.in_algorithm
+    type: binds
+  - source: set_7.out_algorithm
+    target: tool_3.in_algorithm
+    type: binds
+  - source: wf_entry.out_target_return
+    target: tool_3.in_target_return
+    type: binds
+  - source: wf_entry.out_max_weight
+    target: tool_3.in_max_weight
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_3.out_optimization_json
+    target: tool_4.in_optimization_json
+    type: binds
+  - source: tool_4.complete
+    target: eval_3.trigger
+    type: triggers
+  - source: tool_4.out_opt_status
+    target: eval_3.in_opt_status
+    type: binds
+  - source: eval_3.pass
+    target: set_8.trigger
+    type: triggers
+  - source: eval_3.fail
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_target_return
+    target: gen_2.in_target_return
+    type: binds
+  - source: tool_1.out_market_data_json
+    target: gen_2.in_market_data_json
+    type: binds
+  - source: gen_2.complete
+    target: set_9.trigger
+    type: triggers
+  - source: set_6.out_llm_calls
+    target: set_9.in_llm_calls
+    type: binds
+  - source: set_5.out_llm_calls
+    target: set_9.in_llm_calls
+    type: binds
+  - source: set_9.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_1.out_market_data_json
+    target: tool_5.in_market_data_json
+    type: binds
+  - source: gen_1.out_algorithm
+    target: tool_5.in_algorithm
+    type: binds
+  - source: set_7.out_algorithm
+    target: tool_5.in_algorithm
+    type: binds
+  - source: gen_2.out_relaxed_target
+    target: tool_5.in_relaxed_target
+    type: binds
+  - source: wf_entry.out_max_weight
+    target: tool_5.in_max_weight
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_5.out_optimization_json
+    target: tool_6.in_optimization_json
+    type: binds
+  - source: tool_6.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_5.out_optimization_json
+    target: assert_1.in_optimization_json
+    type: binds
+  - source: tool_6.out_tool_6
+    target: assert_1.in_tool_6
+    type: binds
+  - source: set_8.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: assert_1.pass
+    target: tool_7.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_3.out_optimization_json
+    target: tool_7.in_optimization_json
+    type: binds
+  - source: tool_5.out_optimization_json
+    target: tool_7.in_optimization_json
+    type: binds
+  - source: wf_entry.out_capital
+    target: tool_7.in_capital
+    type: binds
+  - source: tool_7.complete
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_tickers
+    target: gen_3.in_tickers
+    type: binds
+  - source: wf_entry.out_period
+    target: gen_3.in_period
+    type: binds
+  - source: wf_entry.out_capital
+    target: gen_3.in_capital
+    type: binds
+  - source: wf_entry.out_target_return
+    target: gen_3.in_target_return
+    type: binds
+  - source: wf_entry.out_max_weight
+    target: gen_3.in_max_weight
+    type: binds
+  - source: tool_3.out_optimization_json
+    target: gen_3.in_optimization_json
+    type: binds
+  - source: tool_5.out_optimization_json
+    target: gen_3.in_optimization_json
+    type: binds
+  - source: tool_7.out_allocation_json
+    target: gen_3.in_allocation_json
+    type: binds
+  - source: gen_3.complete
+    target: set_10.trigger
+    type: triggers
+  - source: set_6.out_llm_calls
+    target: set_10.in_llm_calls
+    type: binds
+  - source: set_5.out_llm_calls
+    target: set_10.in_llm_calls
+    type: binds
+  - source: set_9.out_llm_calls
+    target: set_10.in_llm_calls
+    type: binds
+  - source: set_10.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_3.out_optimization_json
+    target: tool_8.in_optimization_json
+    type: binds
+  - source: tool_5.out_optimization_json
+    target: tool_8.in_optimization_json
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: wf_entry.out_tickers
+    target: tool_9.in_tickers
+    type: binds
+  - source: wf_entry.out_period
+    target: tool_9.in_period
+    type: binds
+  - source: wf_entry.out_capital
+    target: tool_9.in_capital
+    type: binds
+  - source: wf_entry.out_target_return
+    target: tool_9.in_target_return
+    type: binds
+  - source: wf_entry.out_max_weight
+    target: tool_9.in_max_weight
+    type: binds
+  - source: tool_1.out_market_data_json
+    target: tool_9.in_market_data_json
+    type: binds
+  - source: tool_3.out_optimization_json
+    target: tool_9.in_optimization_json
+    type: binds
+  - source: tool_5.out_optimization_json
+    target: tool_9.in_optimization_json
+    type: binds
+  - source: tool_7.out_allocation_json
+    target: tool_9.in_allocation_json
+    type: binds
+  - source: gen_3.out_interpretation
+    target: tool_9.in_interpretation
+    type: binds
+  - source: set_10.out_llm_calls
+    target: tool_9.in_llm_calls
+    type: binds
+  - source: eval_1.fail
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_tickers
+    target: gen_4.in_tickers
+    type: binds
+  - source: tool_1.out_market_data_json
+    target: gen_4.in_market_data_json
+    type: binds
+  - source: wf_entry.out_capital
+    target: gen_4.in_capital
+    type: binds
+  - source: wf_entry.out_target_return
+    target: gen_4.in_target_return
+    type: binds
+  - source: wf_entry.out_max_weight
+    target: gen_4.in_max_weight
+    type: binds
+  - source: gen_4.complete
+    target: set_11.trigger
+    type: triggers
+  - source: set_5.out_llm_calls
+    target: set_11.in_llm_calls
+    type: binds
+  - source: set_11.complete
+    target: gen_5.trigger
+    type: triggers
+  - source: gen_4.out_llm_allocation
+    target: gen_5.in_allocation_text
+    type: binds
+  - source: gen_5.complete
+    target: set_12.trigger
+    type: triggers
+  - source: set_11.out_llm_calls
+    target: set_12.in_llm_calls
+    type: binds
+  - source: set_12.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: gen_5.out_optimization_json
+    target: tool_10.in_optimization_json
+    type: binds
+  - source: wf_entry.out_capital
+    target: tool_10.in_capital
+    type: binds
+  - source: tool_10.complete
+    target: tool_11.trigger
+    type: triggers
+  - source: gen_5.out_optimization_json
+    target: tool_11.in_optimization_json
+    type: binds
+  - source: tool_11.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: tool_11.out_verify_result
+    target: tool_12.in_verify_result
+    type: binds
+  - source: tool_12.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: gen_5.out_optimization_json
+    target: tool_13.in_optimization_json
+    type: binds
+  - source: tool_13.complete
+    target: tool_14.trigger
+    type: triggers
+  - source: wf_entry.out_tickers
+    target: tool_14.in_tickers
+    type: binds
+  - source: wf_entry.out_period
+    target: tool_14.in_period
+    type: binds
+  - source: wf_entry.out_capital
+    target: tool_14.in_capital
+    type: binds
+  - source: tool_1.out_market_data_json
+    target: tool_14.in_market_data_json
+    type: binds
+  - source: gen_4.out_llm_allocation
+    target: tool_14.in_llm_allocation
+    type: binds
+  - source: gen_5.out_optimization_json
+    target: tool_14.in_optimization_json
+    type: binds
+  - source: tool_10.out_allocation_json
+    target: tool_14.in_allocation_json
+    type: binds
+  - source: tool_11.out_verify_result
+    target: tool_14.in_verify_result
+    type: binds
+  - source: set_12.out_llm_calls
+    target: tool_14.in_llm_calls
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_14.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_14.complete
+    target: wf_exit.trigger
+    type: triggers

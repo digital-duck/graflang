@@ -1,0 +1,970 @@
+version: 1.0-graph
+workflow:
+  name: supply_sourcing
+  inputs:
+    - name: problem
+      type: TEXT
+      default: 'A manufacturer needs 1000 units from 3 suppliers. S1: $10/unit, 95% fill rate, capacity 400 units. S2: $7/unit, 80% fill rate, capacity 500 units. S3: $5/unit, 60% fill rate, capacity 400 units. Find allocations that minimize cost and maximize fill rate.'
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: n_points
+      type: TEXT
+      default: '8'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_use_solver
+      - out_n_points
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_fill_rate_str
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''N/A'''
+    ports:
+      - trigger
+      - complete
+      - out_verify_status
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_llm_calls
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: extract_sourcing_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Extract this supply sourcing problem into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "suppliers": [
+            {{"name": "S1", "cost": 10.0, "fill_rate": 0.95, "capacity": 400.0}},
+            {{"name": "S2", "cost": 7.0,  "fill_rate": 0.80, "capacity": 500.0}},
+            {{"name": "S3", "cost": 5.0,  "fill_rate": 0.60, "capacity": 400.0}}
+          ],
+          "demand": 1000.0
+        }}
+
+        Rules:
+        - cost is dollars per unit (numeric, not a string)
+        - fill_rate is a decimal in [0, 1] (e.g. 95% → 0.95)
+        - capacity is maximum units this supplier can provide
+        - demand is the total units required
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: sweep_pareto_front
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@n_points'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def sweep_pareto_front(problem_json: str, n_points: int=8) -> str:
+            """ε-constraint sweep: for each fill_rate threshold, minimize cost via PuLP.
+
+            Returns:
+                {"status": "OK", "n_points": int, "pareto_front":
+                    [{"cost": float, "fill_rate": float, "allocation": {name: amount}}]}
+
+            Dominated points are stripped before returning.
+            Requires: pip install pulp
+            """
+            n_points = int(n_points)
+            import pulp
+            try:
+                data = json.loads(_strip_fences(problem_json))
+            except Exception as e:
+                return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+            suppliers = data.get('suppliers', [])
+            demand = float(data.get('demand', 1000))
+            if not suppliers:
+                return json.dumps({'status': 'INVALID_INPUT', 'error': 'no suppliers'})
+            names = [s['name'] for s in suppliers]
+            costs = {s['name']: float(s['cost']) for s in suppliers}
+            fill_rates = {s['name']: float(s['fill_rate']) for s in suppliers}
+            capacities = {s['name']: float(s['capacity']) for s in suppliers}
+            sorted_by_cost = sorted(names, key=lambda n: costs[n])
+            remaining = demand
+            min_fill_units = 0.0
+            for n in sorted_by_cost:
+                alloc = min(remaining, capacities[n])
+                min_fill_units += alloc * fill_rates[n]
+                remaining -= alloc
+                if remaining <= 0:
+                    break
+            min_fill_rate = min_fill_units / demand
+            sorted_by_fill = sorted(names, key=lambda n: fill_rates[n], reverse=True)
+            remaining = demand
+            max_fill_units = 0.0
+            for n in sorted_by_fill:
+                alloc = min(remaining, capacities[n])
+                max_fill_units += alloc * fill_rates[n]
+                remaining -= alloc
+                if remaining <= 0:
+                    break
+            max_fill_rate = max_fill_units / demand
+            n_pts = max(2, int(n_points))
+            step = (max_fill_rate - min_fill_rate) / max(n_pts - 1, 1)
+            thresholds = [min_fill_rate + i * step for i in range(n_pts)]
+            raw_points = []
+            for threshold in thresholds:
+                prob = pulp.LpProblem('supply_cost_min', pulp.LpMinimize)
+                x = {n: pulp.LpVariable(f'x_{n}', lowBound=0, upBound=capacities[n]) for n in names}
+                prob += pulp.lpSum((costs[n] * x[n] for n in names))
+                prob += pulp.lpSum((x[n] for n in names)) == demand
+                prob += pulp.lpSum((fill_rates[n] * x[n] for n in names)) >= threshold * demand
+                status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
+                if pulp.LpStatus[status] not in ('Optimal',):
+                    continue
+                allocation = {n: round(float(pulp.value(x[n]) or 0.0), 2) for n in names}
+                total_cost = sum((costs[n] * allocation[n] for n in names))
+                blended_fill = sum((fill_rates[n] * allocation[n] for n in names)) / demand
+                raw_points.append({'cost': round(total_cost, 2), 'fill_rate': round(blended_fill, 6), 'allocation': allocation})
+            if not raw_points:
+                return json.dumps({'status': 'INFEASIBLE', 'n_points': 0, 'pareto_front': []})
+
+            def is_dominated(p, candidates):
+                for q in candidates:
+                    if q is p:
+                        continue
+                    if q['cost'] <= p['cost'] and q['fill_rate'] >= p['fill_rate']:
+                        if q['cost'] < p['cost'] or q['fill_rate'] > p['fill_rate']:
+                            return True
+                return False
+            pareto = [p for p in raw_points if not is_dominated(p, raw_points)]
+            pareto.sort(key=lambda p: p['cost'])
+            return json.dumps({'status': 'OK', 'n_points': len(pareto), 'pareto_front': pareto})
+        _spl_result = sweep_pareto_front(problem_json, n_points)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - n_points
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_n_points
+      - out_front_json
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: is_pareto_feasible
+      backend: kernel
+      arguments:
+        - '@front_json'
+      code: |
+        import json
+
+        def is_pareto_feasible(front_json: str) -> bool:
+            """ASSERT gate: True if front has status==OK and n_points >= 2."""
+            try:
+                data = json.loads(front_json)
+                return data.get('status') == 'OK' and int(data.get('n_points', 0)) >= 2
+            except Exception:
+                return False
+        _spl_result = is_pareto_feasible(front_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - front_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_tool_3
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_3'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_front_json
+      - in_tool_3
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: format_pareto_table
+      backend: kernel
+      arguments:
+        - '@front_json'
+      code: |
+        import json
+
+        def format_pareto_table(front_json: str) -> str:
+            """Format Pareto front as a markdown table: Cost ($) | Fill rate (%) | Allocation."""
+            try:
+                data = json.loads(front_json)
+                points = data.get('pareto_front', [])
+                if not points:
+                    return 'No Pareto-optimal points found.'
+                sample_alloc = points[0].get('allocation', {})
+                supplier_names = sorted(sample_alloc.keys())
+                alloc_header = '  |  '.join(supplier_names)
+                lines = [f'| Cost ($) | Fill rate (%) | {alloc_header} |', '|---|---|' + '|'.join(['---'] * len(supplier_names)) + '|']
+                for pt in points:
+                    cost = f"{pt['cost']:,.2f}"
+                    fill = f"{pt['fill_rate'] * 100:.1f}"
+                    alloc_vals = '  |  '.join((str(int(pt['allocation'].get(n, 0))) for n in supplier_names))
+                    lines.append(f'| {cost} | {fill} | {alloc_vals} |')
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'Could not format Pareto table: {e}'
+        _spl_result = format_pareto_table(front_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - front_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_front_table
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: interpret_pareto_front
+      params:
+        - problem
+        - front_table
+      prompt_inline: |-
+        Interpret this supply sourcing Pareto front for a supply chain manager.
+
+        Problem: {{in_problem}}
+
+        Pareto front (cost vs. fill rate):
+        {{in_front_table}}
+
+        Your interpretation should:
+        1. Explain the cost/fill-rate tradeoff in plain language.
+        2. Recommend 2-3 concrete operating points with reasoning:
+           - a low-cost anchor (acceptable fill rate)
+           - a balanced midpoint
+           - a high-fill anchor (for critical supply scenarios)
+        3. Identify which suppliers dominate each recommended point.
+        4. One-sentence practical takeaway for procurement.
+
+        Be concise and actionable.
+      arguments:
+        - '@problem'
+        - '@front_table'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_front_table
+      - out_interpretation
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@front_json'
+        - '''n_points'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(front_json, 'n_points')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_front_json
+      - out_fill_rate_str
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@fill_rate_str'
+        - '@front_table'
+        - '@interpretation'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_on(problem: str, n_points: str, front_table: str, interpretation: str, llm_calls: str) -> str:
+            return f'=== Supply Sourcing (solver=ON / PuLP ε-constraint) ===\n\nProblem:\n{problem}\n\nPareto Front ({n_points} points):\n{front_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_on(problem, fill_rate_str, front_table, interpretation, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - n_points
+        - front_table
+        - interpretation
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_fill_rate_str
+      - in_front_table
+      - in_interpretation
+      - in_llm_calls
+      - out_report
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: extract_sourcing_problem
+      params:
+        - problem
+      prompt_inline: |-
+        Extract this supply sourcing problem into JSON.
+        Return ONLY a JSON object — no markdown, no prose:
+        {{
+          "suppliers": [
+            {{"name": "S1", "cost": 10.0, "fill_rate": 0.95, "capacity": 400.0}},
+            {{"name": "S2", "cost": 7.0,  "fill_rate": 0.80, "capacity": 500.0}},
+            {{"name": "S3", "cost": 5.0,  "fill_rate": 0.60, "capacity": 400.0}}
+          ],
+          "demand": 1000.0
+        }}
+
+        Rules:
+        - cost is dollars per unit (numeric, not a string)
+        - fill_rate is a decimal in [0, 1] (e.g. 95% → 0.95)
+        - capacity is maximum units this supplier can provide
+        - demand is the total units required
+
+        Problem: {{in_problem}}
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_problem_json
+  - id: set_7
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: propose_allocation
+      params:
+        - problem
+        - problem_json
+      prompt_inline: |-
+        You are a supply chain analyst. Propose a single allocation across these suppliers.
+
+        Problem: {{in_problem}}
+        Supplier data (JSON): {{in_problem_json}}
+
+        Steps:
+        1. List each supplier's cost, fill rate, and capacity.
+        2. Choose an allocation strategy (e.g. fill cheapest first, or balance cost and fill rate).
+        3. Assign units to each supplier so that the total equals the demand.
+        4. Respect each supplier's capacity limit.
+        5. Compute the total cost and the blended fill rate.
+
+        Return your answer as a JSON object:
+        {{
+          "cost": <total cost as a number>,
+          "fill_rate": <blended fill rate as a decimal, e.g. 0.735>,
+          "allocation": {{"S1": <units>, "S2": <units>, "S3": <units>}},
+          "reasoning": "<one sentence explaining the strategy>"
+        }}
+
+        Return ONLY the JSON — no markdown, no prose.
+      arguments:
+        - '@problem'
+        - '@problem_json'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_problem_json
+      - out_allocation_text
+  - id: set_8
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: gen_5
+    type: GENERATE
+    config:
+      function: extract_solution_json
+      params:
+        - problem
+        - allocation_text
+      prompt_inline: |-
+        Extract the sourcing allocation from this text into JSON.
+        Return ONLY a JSON object — no markdown:
+        {{
+          "cost": <total cost as a number>,
+          "fill_rate": <blended fill rate as a decimal>,
+          "allocation": {{"S1": <units>, "S2": <units>, "S3": <units>}},
+          "reasoning": "<strategy summary>"
+        }}
+
+        Problem: {{in_problem}}
+        Allocation text:
+        {{in_allocation_text}}
+      arguments:
+        - '@problem'
+        - '@allocation_text'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_allocation_text
+      - out_solution_json
+  - id: set_9
+    type: CONTEXT
+    config:
+      action: set
+      expression: '@in_llm_calls + 1'
+    ports:
+      - trigger
+      - complete
+      - in_llm_calls
+      - out_llm_calls
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: verify_sourcing_off
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '@solution_json'
+      code: |
+        import json
+
+        from spl.stdlib import strip_fences as _strip_fences
+
+        def verify_sourcing_off(problem_json: str, solution_json: str) -> str:
+            """Verify LLM-proposed allocation arithmetic.
+
+            Checks:
+            - demand balance: sum(allocation) == demand (±1)
+            - capacity: each allocation <= supplier capacity
+            - cost: recompute from allocation and compare to claimed
+            - fill_rate: recompute and compare to claimed
+
+            Returns {"verdict": "PASS"/"FAIL", "notes": str}
+            """
+            try:
+                problem = json.loads(_strip_fences(problem_json))
+                sol = json.loads(_strip_fences(solution_json))
+            except Exception as e:
+                return json.dumps({'verdict': 'FAIL', 'notes': f'parse error: {e}'})
+            suppliers = {s['name']: s for s in problem.get('suppliers', [])}
+            demand = float(problem.get('demand', 1000))
+            allocation = sol.get('allocation', {})
+            notes = []
+            ok = True
+            total_alloc = sum((float(v) for v in allocation.values()))
+            if abs(total_alloc - demand) > 1.0:
+                notes.append(f'demand balance: allocated {total_alloc:.1f} vs demanded {demand:.1f}')
+                ok = False
+            for name, amount in allocation.items():
+                amount = float(amount)
+                if name in suppliers:
+                    cap = float(suppliers[name]['capacity'])
+                    if amount > cap + 0.5:
+                        notes.append(f'{name}: allocated {amount:.1f} exceeds capacity {cap:.1f}')
+                        ok = False
+            recomputed_cost = sum((float(suppliers[n]['cost']) * float(v) for n, v in allocation.items() if n in suppliers))
+            claimed_cost = sol.get('cost')
+            if claimed_cost is not None:
+                if abs(float(claimed_cost) - recomputed_cost) > 10.0:
+                    notes.append(f'cost mismatch: claimed={float(claimed_cost):.2f}, recomputed={recomputed_cost:.2f}')
+                    ok = False
+            recomputed_fill = sum((float(suppliers[n]['fill_rate']) * float(v) for n, v in allocation.items() if n in suppliers)) / demand
+            claimed_fill = sol.get('fill_rate')
+            if claimed_fill is not None:
+                if abs(float(claimed_fill) - recomputed_fill) > 0.02:
+                    notes.append(f'fill_rate mismatch: claimed={float(claimed_fill):.4f}, recomputed={recomputed_fill:.4f}')
+                    ok = False
+            return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'recomputed_cost': round(recomputed_cost, 2), 'recomputed_fill_rate': round(recomputed_fill, 4), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+        _spl_result = verify_sourcing_off(problem_json, solution_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+        - solution_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - in_solution_json
+      - out_verify_result
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@verify_result'
+        - '''verdict'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(verify_result, 'verdict')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_verify_result
+      - out_verify_status
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@solution_json'
+        - '''fill_rate'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(solution_json, 'fill_rate')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_solution_json
+      - out_fill_rate_str
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@allocation_text'
+        - '@solution_json'
+        - '@verify_result'
+        - '@llm_calls'
+      code: |
+        def format_report_solver_off(problem: str, allocation_text: str, solution_json: str, verify_result: str, llm_calls: str) -> str:
+            return f'=== Supply Sourcing (solver=OFF / LLM heuristic) ===\n\nProblem:\n{problem}\n\nLLM Allocation:\n{allocation_text}\n\nExtracted Solution (JSON):\n{solution_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+        _spl_result = format_report_solver_off(problem, allocation_text, solution_json, verify_result, llm_calls)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - allocation_text
+        - solution_json
+        - verify_result
+        - llm_calls
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_allocation_text
+      - in_solution_json
+      - in_verify_result
+      - in_llm_calls
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: set_1.trigger
+    type: triggers
+  - source: set_1.complete
+    target: set_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_1.in_use_solver
+    type: binds
+  - source: tool_1.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_4.out_llm_calls
+    target: set_5.in_llm_calls
+    type: binds
+  - source: set_5.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: gen_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: wf_entry.out_n_points
+    target: tool_2.in_n_points
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: tool_3.in_front_json
+    type: binds
+  - source: tool_3.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: assert_1.in_front_json
+    type: binds
+  - source: tool_3.out_tool_3
+    target: assert_1.in_tool_3
+    type: binds
+  - source: assert_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: tool_4.in_front_json
+    type: binds
+  - source: tool_4.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_2.in_problem
+    type: binds
+  - source: tool_4.out_front_table
+    target: gen_2.in_front_table
+    type: binds
+  - source: gen_2.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_5.out_llm_calls
+    target: set_6.in_llm_calls
+    type: binds
+  - source: set_6.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_2.out_front_json
+    target: tool_5.in_front_json
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_6.in_problem
+    type: binds
+  - source: tool_5.out_fill_rate_str
+    target: tool_6.in_fill_rate_str
+    type: binds
+  - source: tool_4.out_front_table
+    target: tool_6.in_front_table
+    type: binds
+  - source: gen_2.out_interpretation
+    target: tool_6.in_interpretation
+    type: binds
+  - source: set_6.out_llm_calls
+    target: tool_6.in_llm_calls
+    type: binds
+  - source: eval_1.fail
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_3.in_problem
+    type: binds
+  - source: gen_3.complete
+    target: set_7.trigger
+    type: triggers
+  - source: set_4.out_llm_calls
+    target: set_7.in_llm_calls
+    type: binds
+  - source: set_7.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_4.in_problem
+    type: binds
+  - source: gen_3.out_problem_json
+    target: gen_4.in_problem_json
+    type: binds
+  - source: gen_4.complete
+    target: set_8.trigger
+    type: triggers
+  - source: set_7.out_llm_calls
+    target: set_8.in_llm_calls
+    type: binds
+  - source: set_8.complete
+    target: gen_5.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_5.in_problem
+    type: binds
+  - source: gen_4.out_allocation_text
+    target: gen_5.in_allocation_text
+    type: binds
+  - source: gen_5.complete
+    target: set_9.trigger
+    type: triggers
+  - source: set_8.out_llm_calls
+    target: set_9.in_llm_calls
+    type: binds
+  - source: set_9.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: gen_3.out_problem_json
+    target: tool_7.in_problem_json
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_7.in_solution_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_7.out_verify_result
+    target: tool_8.in_verify_result
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: gen_5.out_solution_json
+    target: tool_9.in_solution_json
+    type: binds
+  - source: tool_9.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_10.in_problem
+    type: binds
+  - source: gen_4.out_allocation_text
+    target: tool_10.in_allocation_text
+    type: binds
+  - source: gen_5.out_solution_json
+    target: tool_10.in_solution_json
+    type: binds
+  - source: tool_7.out_verify_result
+    target: tool_10.in_verify_result
+    type: binds
+  - source: set_9.out_llm_calls
+    target: tool_10.in_llm_calls
+    type: binds
+  - source: tool_6.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_6.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers

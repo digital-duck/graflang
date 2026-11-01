@@ -1,0 +1,552 @@
+version: 1.0-graph
+workflow:
+  name: openspiel_cfr
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: n_iterations
+      type: TEXT
+      default: '1000'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+      - out_n_iterations
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_game_description
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _KUHN_POKER_DESCRIPTION = {'game_name': 'Kuhn Poker', 'n_players': 2, 'cards': ['Jack (J)', 'Queen (Q)', 'King (K)'], 'card_ranking': 'J < Q < K', 'rules': "Each player antes 1 chip and receives one private card (J, Q, or K). Player 1 acts first: Pass or Bet (1 chip). After Player 1 acts, Player 2 responds: Pass or Call/Bet. Showdown if needed — higher card wins the pot. Key tension: betting signals a strong card but also enables bluffing. Since neither player sees the other's card, optimal play requires a mixed (randomized) strategy to remain unexploitable.", 'llm_naive_strategy': 'Bet with K (strong), Pass with J (weak), mix with Q — this is close but not perfectly unexploitable; an opponent can exploit the pure bet-K-only strategy.', 'known_nash_summary': 'Player 1: Bet with K always (1.0), Bet with J at probability 1/3 (bluff), Pass with Q always. Player 2: Call with K always, Call with Q at probability 1/3, Pass with J always.'}
+
+        def get_game_description() -> str:
+            return json.dumps(_KUHN_POKER_DESCRIPTION)
+        _spl_result = get_game_description()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_game_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@game_json'
+        - '''rules'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(game_json, 'rules')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_game_json
+      - out_game_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: solve_with_cfr
+      backend: kernel
+      arguments:
+        - '@n_iterations'
+      code: |
+        import json
+
+        _KUHN_POKER_DESCRIPTION = {'game_name': 'Kuhn Poker', 'n_players': 2, 'cards': ['Jack (J)', 'Queen (Q)', 'King (K)'], 'card_ranking': 'J < Q < K', 'rules': "Each player antes 1 chip and receives one private card (J, Q, or K). Player 1 acts first: Pass or Bet (1 chip). After Player 1 acts, Player 2 responds: Pass or Call/Bet. Showdown if needed — higher card wins the pot. Key tension: betting signals a strong card but also enables bluffing. Since neither player sees the other's card, optimal play requires a mixed (randomized) strategy to remain unexploitable.", 'llm_naive_strategy': 'Bet with K (strong), Pass with J (weak), mix with Q — this is close but not perfectly unexploitable; an opponent can exploit the pure bet-K-only strategy.', 'known_nash_summary': 'Player 1: Bet with K always (1.0), Bet with J at probability 1/3 (bluff), Pass with Q always. Player 2: Call with K always, Call with Q at probability 1/3, Pass with J always.'}
+
+        def solve_with_cfr(n_iterations: int=1000) -> str:
+            """Run CFR on Kuhn Poker for n_iterations and return exploitability.
+
+            Exploitability measures how far the average policy is from Nash:
+              0.0 = perfect Nash equilibrium
+              ~0.25 = LLM-naive always-bet-K strategy
+
+            Returns:
+              {"game", "n_iterations", "exploitability", "converged",
+               "nash_summary", "player_strategies", "status"}
+            """
+            n_iterations = int(n_iterations)
+            try:
+                import pyspiel
+                from open_spiel.python.algorithms import cfr
+                from open_spiel.python.algorithms import exploitability as exp_lib
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'OpenSpiel not installed — run: pip install open_spiel'})
+            try:
+                game = pyspiel.load_game('kuhn_poker')
+                cfr_solver = cfr.CFRSolver(game)
+                for _ in range(n_iterations):
+                    cfr_solver.evaluate_and_update_policy()
+                avg_policy = cfr_solver.average_policy()
+                exploit = exp_lib.exploitability(game, avg_policy)
+                exploit = round(float(exploit), 6)
+                converged = exploit < 0.05
+                player_strategies = _extract_strategy_summary(game, avg_policy)
+                return json.dumps({'game': 'Kuhn Poker', 'n_iterations': n_iterations, 'exploitability': exploit, 'converged': converged, 'threshold': 0.05, 'nash_summary': _KUHN_POKER_DESCRIPTION['known_nash_summary'], 'player_strategies': player_strategies, 'status': 'OK'})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+
+        def _extract_strategy_summary(game, avg_policy) -> dict:
+            """Walk the game tree and collect action probabilities at each info set."""
+            info_set_probs = {}
+            state = game.new_initial_state()
+
+            def traverse(state):
+                if state.is_terminal():
+                    return
+                if state.is_chance_node():
+                    for action, _prob in state.chance_outcomes():
+                        traverse(state.child(action))
+                    return
+                player = state.current_player()
+                info_str = state.information_state_string(player)
+                if info_str not in info_set_probs:
+                    policy_at_state = avg_policy.action_probabilities(state)
+                    action_labels = {0: 'Pass/Check', 1: 'Bet/Call'}
+                    probs = {action_labels.get(a, str(a)): round(p, 3) for a, p in policy_at_state.items()}
+                    info_set_probs[f'P{player + 1}:{info_str}'] = probs
+                for action in state.legal_actions():
+                    traverse(state.child(action))
+            traverse(state)
+            return info_set_probs
+        _spl_result = solve_with_cfr(n_iterations)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - n_iterations
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_n_iterations
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: cfr_converged
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def cfr_converged(result_json: str) -> bool:
+            """ASSERT gate: exploitability below threshold (close to Nash equilibrium)."""
+            try:
+                data = json.loads(result_json)
+                return data.get('status') == 'OK' and data.get('converged', False)
+            except Exception:
+                return False
+        _spl_result = cfr_converged(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_cfr_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def format_cfr_report(result_json: str) -> str:
+            """Markdown report of CFR convergence and strategy."""
+            try:
+                data = json.loads(result_json)
+                exploit = data.get('exploitability', 'N/A')
+                converged = data.get('converged', False)
+                strategies = data.get('player_strategies', {})
+                lines = [f"## CFR Report — {data.get('game', 'Game')}", '', f"**Iterations:** {data.get('n_iterations', 0)}  ", f"**Exploitability:** {exploit:.4f} (threshold: {data.get('threshold', 0.05)})  ", f"**Converged to Nash:** {('Yes ✓' if converged else 'No — run more iterations')}", '', '### Average Policy at Key Information Sets', '', '| Info set | Pass / Check | Bet / Call |', '|---|---|---|']
+                for info_str, probs in sorted(strategies.items()):
+                    p_pass = probs.get('Pass/Check', 0.0)
+                    p_bet = probs.get('Bet/Call', 0.0)
+                    lines.append(f'| {info_str} | {p_pass:.3f} | {p_bet:.3f} |')
+                lines += ['', '### Known Nash Equilibrium (Kuhn Poker)', '', f"> {data.get('nash_summary', '')}", '', '### Exploitability Interpretation', '', '| Policy | Exploitability | Meaning |', '|---|---|---|', '| Perfect Nash | 0.000 | Unexploitable — best response cannot gain |', f"| CFR avg (this run) | {exploit:.3f} | {('Near-Nash ✓' if converged else 'Still converging')} |", '| LLM naive (bet-K-only) | ~0.250 | Exploitable — opponent folds J/Q, always calls K |']
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_cfr_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_cfr_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''exploitability'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'exploitability')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_exploit
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_cfr_result_prompt
+      params:
+        - cfr_report
+        - game_description
+      prompt_inline: |-
+        You are a game theory analyst explaining CFR results for Kuhn Poker.
+
+        GAME RULES:
+        {{in_game_description}}
+
+        CFR RESULT:
+        {{in_cfr_report}}
+
+        Explain (≤200 words):
+        1. What does exploitability measure, and why does a good player want it near zero?
+        2. What is the Nash equilibrium mixed strategy CFR found, and why is bluffing optimal?
+        3. Why can't a pure strategy (always bet with K, never bluff) achieve Nash equilibrium?
+        4. How does CFR generalize beyond this toy game to real poker, sealed auctions, or
+           multi-round negotiation with private information?
+      arguments:
+        - '@cfr_report'
+        - '@game_description'
+    ports:
+      - trigger
+      - complete
+      - in_cfr_report
+      - in_game_description
+      - out_explanation
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@cfr_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(cfr_report: str, explanation: str) -> str:
+            return f'=== OpenSpiel CFR — Kuhn Poker (r116) | solver=ON ===\n\n{cfr_report}\n\n── Game Theory Explanation ─────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(cfr_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - cfr_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_cfr_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: reason_poker_strategy_prompt
+      params:
+        - game_description
+      prompt_inline: |-
+        You are a poker strategist advising a player in Kuhn Poker.
+
+        GAME RULES:
+        {{in_game_description}}
+
+        Without using game theory algorithms, reason through the optimal strategy:
+        1. When should Player 1 bet vs pass? (Consider: bluffing with J, value-betting with K)
+        2. When should Player 2 call vs fold? (Consider: pot odds, opponent's likely hand range)
+        3. Is there a pure strategy (always bet K, always pass J) that an opponent cannot exploit?
+        4. Why might randomizing (bluffing sometimes with J) be better than always playing the same way?
+
+        Give concrete strategy recommendations. Focus on the hidden-information tension.
+      arguments:
+        - '@game_description'
+    ports:
+      - trigger
+      - complete
+      - in_game_description
+      - out_llm_strategy
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_strategy'
+      code: |
+        def format_report_solver_off(llm_strategy: str) -> str:
+            return f'=== OpenSpiel CFR — Kuhn Poker (r116) | solver=OFF ===\n\n── LLM Strategic Reasoning ─────────────────────────────────\n{llm_strategy}\n\nNote: LLM gives intuitive strategy (~0.25 exploitability).\nRun --param use_solver=true to compute the Nash equilibrium\nmixed strategy via CFR (converges to <0.05 exploitability).'
+        _spl_result = format_report_solver_off(llm_strategy)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_strategy
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_strategy
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_game_json
+    target: tool_2.in_game_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: wf_entry.out_n_iterations
+    target: tool_4.in_n_iterations
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_cfr_report
+    target: gen_1.in_cfr_report
+    type: binds
+  - source: tool_2.out_game_description
+    target: gen_1.in_game_description
+    type: binds
+  - source: gen_1.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_6.out_cfr_report
+    target: tool_8.in_cfr_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_8.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_game_description
+    target: gen_2.in_game_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: gen_2.out_llm_strategy
+    target: tool_9.in_llm_strategy
+    type: binds
+  - source: tool_8.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_8.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

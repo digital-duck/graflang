@@ -1,0 +1,615 @@
+version: 1.0-graph
+workflow:
+  name: optuna_blackbox
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_default_problem
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        import math
+
+        def _ltv_objective(price: float, discount_pct: float, trial_days: int) -> float:
+            """Simulate customer lifetime value.
+
+            This is a non-convex, non-analytic function with multiple local optima.
+            Represents a simplified churn + conversion model — no gradient available.
+            """
+            trial_factor = 1.0 - math.exp(-trial_days / 10.0)
+            price_factor = math.exp(-0.015 * (price - 30))
+            conversion = 0.35 * trial_factor * price_factor
+            conversion = max(0.01, min(0.7, conversion))
+            monthly_revenue = price * (1 - discount_pct / 100) * (1 - 0.08 * (discount_pct > 20))
+            monthly_churn = 0.04 + 0.003 * max(0, price - 50) + 0.002 * max(0, discount_pct - 25)
+            monthly_churn = min(monthly_churn, 0.25)
+            ltv = conversion * (monthly_revenue / monthly_churn) * 0.85
+            return round(ltv, 2)
+
+        _DEFAULT_STRATEGY_PROBLEM = {'problem_name': 'SaaS Pricing Strategy Optimization', 'description': 'Find the optimal combination of monthly_price ($30–$120), annual_discount_pct (0%–40%), and trial_days (3–30) to maximize customer lifetime value (LTV). The LTV model is a black box: it depends on a churn model and conversion funnel with no closed-form gradient.', 'parameters': [{'name': 'monthly_price', 'type': 'float', 'low': 30, 'high': 120}, {'name': 'annual_discount_pct', 'type': 'float', 'low': 0, 'high': 40}, {'name': 'trial_days', 'type': 'int', 'low': 3, 'high': 30}], 'objective': 'maximize LTV (customer lifetime value in $)', 'n_trials': 50, 'naive_baseline': {'monthly_price': 50, 'annual_discount_pct': 20, 'trial_days': 14, 'ltv': None}}
+
+        def get_default_problem() -> str:
+            """Return default pricing strategy optimization problem JSON."""
+            p = dict(_DEFAULT_STRATEGY_PROBLEM)
+            nb = dict(p['naive_baseline'])
+            nb['ltv'] = _ltv_objective(nb['monthly_price'], nb['annual_discount_pct'], nb['trial_days'])
+            p['naive_baseline'] = nb
+            return json.dumps(p)
+        _spl_result = get_default_problem()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_problem_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(problem_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_problem_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: run_optuna_study
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        import math
+
+        def _ltv_objective(price: float, discount_pct: float, trial_days: int) -> float:
+            """Simulate customer lifetime value.
+
+            This is a non-convex, non-analytic function with multiple local optima.
+            Represents a simplified churn + conversion model — no gradient available.
+            """
+            trial_factor = 1.0 - math.exp(-trial_days / 10.0)
+            price_factor = math.exp(-0.015 * (price - 30))
+            conversion = 0.35 * trial_factor * price_factor
+            conversion = max(0.01, min(0.7, conversion))
+            monthly_revenue = price * (1 - discount_pct / 100) * (1 - 0.08 * (discount_pct > 20))
+            monthly_churn = 0.04 + 0.003 * max(0, price - 50) + 0.002 * max(0, discount_pct - 25)
+            monthly_churn = min(monthly_churn, 0.25)
+            ltv = conversion * (monthly_revenue / monthly_churn) * 0.85
+            return round(ltv, 2)
+
+        def run_optuna_study(problem_json: str) -> str:
+            """Run an Optuna TPE study to find optimal strategy parameters.
+
+            Returns:
+              {"problem_name": str, "best_params": {...}, "best_value": float,
+               "naive_value": float, "improvement_pct": float, "n_trials": int,
+               "top_trials": [{params, value}], "status": "OK"|"ERROR"}
+            """
+            try:
+                import optuna
+                optuna.logging.set_verbosity(optuna.logging.WARNING)
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'optuna not installed — run: pip install optuna'})
+            try:
+                problem = json.loads(problem_json)
+                n_trials = problem.get('n_trials', 50)
+                nb = problem['naive_baseline']
+                naive_ltv = nb.get('ltv') or _ltv_objective(nb['monthly_price'], nb['annual_discount_pct'], nb['trial_days'])
+                param_defs = {p['name']: p for p in problem['parameters']}
+
+                def objective(trial):
+                    price = trial.suggest_float('monthly_price', param_defs['monthly_price']['low'], param_defs['monthly_price']['high'])
+                    discount = trial.suggest_float('annual_discount_pct', param_defs['annual_discount_pct']['low'], param_defs['annual_discount_pct']['high'])
+                    trial_d = trial.suggest_int('trial_days', param_defs['trial_days']['low'], param_defs['trial_days']['high'])
+                    return _ltv_objective(price, discount, trial_d)
+                study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+                study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+                best = study.best_trial
+                improvement = round((best.value - naive_ltv) / naive_ltv * 100, 1)
+                top5 = sorted(study.trials, key=lambda t: t.value or 0, reverse=True)[:5]
+                top_trials = [{'params': t.params, 'ltv': round(t.value or 0, 2)} for t in top5]
+                return json.dumps({'problem_name': problem.get('problem_name', 'Problem'), 'best_params': best.params, 'best_value': round(best.value, 2), 'naive_params': {'monthly_price': nb['monthly_price'], 'annual_discount_pct': nb['annual_discount_pct'], 'trial_days': nb['trial_days']}, 'naive_value': round(naive_ltv, 2), 'improvement_pct': improvement, 'n_trials': n_trials, 'top_trials': top_trials, 'status': 'OK'})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+        _spl_result = run_optuna_study(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: optimization_improved
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def optimization_improved(result_json: str) -> bool:
+            """ASSERT gate: Optuna found a result better than the naive baseline."""
+            try:
+                data = json.loads(result_json)
+                return data.get('status') == 'OK' and data.get('improvement_pct', 0) > 0
+            except Exception:
+                return False
+        _spl_result = optimization_improved(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_optuna_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def format_optuna_report(result_json: str) -> str:
+            """Markdown report of Optuna study results."""
+            try:
+                data = json.loads(result_json)
+                bp = data.get('best_params', {})
+                np_ = data.get('naive_params', {})
+                lines = [f"## Optuna Black-Box Optimization — {data.get('problem_name', 'Problem')}", '', f"**Trials:** {data.get('n_trials', '?')}  ", f"**Best LTV:** ${data.get('best_value', '?')}/customer  ", f"**Naive LTV:** ${data.get('naive_value', '?')}/customer  ", f"**Improvement:** +{data.get('improvement_pct', '?')}%", '', '| Parameter | Naive (LLM guess) | Optuna Best |', '|---|---|---|', f"| monthly_price | ${np_.get('monthly_price', '?')} | ${round(bp.get('monthly_price', 0), 1)} |", f"| annual_discount_pct | {np_.get('annual_discount_pct', '?')}% | {round(bp.get('annual_discount_pct', 0), 1)}% |", f"| trial_days | {np_.get('trial_days', '?')} days | {bp.get('trial_days', '?')} days |", '', '### Top 5 Trials', '', '| Rank | Price | Discount | Trial Days | LTV |', '|---|---|---|---|---|']
+                for i, t in enumerate(data.get('top_trials', []), 1):
+                    p = t['params']
+                    lines.append(f"| {i} | ${round(p.get('monthly_price', 0), 1)} | {round(p.get('annual_discount_pct', 0), 1)}% | {p.get('trial_days', '?')} days | ${t['ltv']} |")
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_optuna_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_optuna_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''improvement_pct'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'improvement_pct')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_improvement
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''best_value'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'best_value')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_best_ltv
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_optuna_result_prompt
+      params:
+        - optuna_report
+        - problem_description
+      prompt_inline: |-
+        You are a growth analytics consultant. Optuna just completed a 50-trial TPE optimization.
+
+        PROBLEM:
+        {{in_problem_description}}
+
+        OPTUNA RESULT:
+        {{in_optuna_report}}
+
+        Explain (≤150 words):
+        1. What did Optuna find and how does it compare to the naive guess?
+        2. Why is price lower in the optimal solution than the naive guess? (hint: conversion)
+        3. Why is trial shorter in the optimal — doesn't longer trial hurt conversion?
+        4. What does "non-convex objective" mean here — why can't gradient descent find this?
+        5. In what business situations would you use Optuna vs an analytical pricing model?
+      arguments:
+        - '@optuna_report'
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_optuna_report
+      - in_problem_description
+      - out_explanation
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@optuna_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(optuna_report: str, explanation: str) -> str:
+            return f'=== Optuna Black-Box Optimization (r112) | solver=ON ===\n\n{optuna_report}\n\n── Analytics Explanation ───────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(optuna_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - optuna_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_optuna_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: guess_strategy_prompt
+      params:
+        - problem_description
+      prompt_inline: |-
+        You are a SaaS growth advisor helping a company optimize its pricing strategy.
+
+        OPTIMIZATION PROBLEM:
+        {{in_problem_description}}
+
+        The company's pricing strategy has three tunable parameters:
+        - monthly_price: the base subscription price ($30–$120/month)
+        - annual_discount_pct: percentage discount for annual plans (0%–40%)
+        - trial_days: length of free trial period (3–30 days)
+
+        The objective is to maximize customer lifetime value (LTV), which depends on:
+        - Conversion rate: how many trial users become paying customers
+        - Monthly revenue: effective revenue per customer after discount
+        - Churn rate: percentage of customers who cancel each month
+
+        Without running an experiment, recommend specific values for all three parameters.
+        Explain the reasoning behind each choice. Be specific with numbers.
+      arguments:
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_problem_description
+      - out_llm_guess
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_guess'
+      code: |
+        def format_report_solver_off(llm_guess: str) -> str:
+            return f'=== Optuna Black-Box Optimization (r112) | solver=OFF ===\n\n── LLM Heuristic Strategy ──────────────────────────────────\n{llm_guess}\n\nNote: LLM guesses from intuition without exploring the search space.\nRun --param use_solver=true to let Optuna TPE find the optimum in 50 trials.'
+        _spl_result = format_report_solver_off(llm_guess)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_guess
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_guess
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_4.in_problem_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_8.in_result_json
+    type: binds
+  - source: tool_8.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_optuna_report
+    target: gen_1.in_optuna_report
+    type: binds
+  - source: tool_2.out_problem_description
+    target: gen_1.in_problem_description
+    type: binds
+  - source: gen_1.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_6.out_optuna_report
+    target: tool_9.in_optuna_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_9.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_problem_description
+    target: gen_2.in_problem_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: gen_2.out_llm_guess
+    target: tool_10.in_llm_guess
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

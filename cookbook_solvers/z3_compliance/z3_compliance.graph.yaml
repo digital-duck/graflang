@@ -1,0 +1,718 @@
+version: 1.0-graph
+workflow:
+  name: z3_compliance
+  inputs:
+    - name: policy_text
+      type: TEXT
+      default: ''
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_policy_text
+      - out_use_solver
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: is_empty_policy
+      backend: kernel
+      arguments:
+        - '@policy_text'
+      code: |
+        def is_empty_policy(policy_text: str) -> str:
+            """Return 'true' if no custom policy was provided (empty string), 'false' otherwise."""
+            return 'true' if not policy_text.strip() else 'false'
+        _spl_result = is_empty_policy(policy_text)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_text
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_text
+      - out_use_default
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_subject == ''true'''
+      semantic: true
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_subject
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: get_default_policy
+      backend: kernel
+      arguments: []
+      code: |
+        import json
+
+        _DEFAULT_LOAN_POLICY = {'policy': 'QuickLoan Eligibility Policy v2.1', 'variables': [{'name': 'age', 'type': 'int', 'range': [0, 120]}, {'name': 'income', 'type': 'int', 'range': [0, 1000000]}, {'name': 'credit_score', 'type': 'int', 'range': [300, 850]}, {'name': 'months_employed', 'type': 'int', 'range': [0, 600]}, {'name': 'has_collateral', 'type': 'bool'}, {'name': 'self_employed', 'type': 'bool'}], 'rules': [{'id': 'R1', 'desc': 'Must be 18+', 'op': 'gte', 'var': 'age', 'value': 18}, {'id': 'R2', 'desc': 'Income >= $30K or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'income', 'value': 30000}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}, {'id': 'R3', 'desc': 'Self-employed requires income >= $50K', 'op': 'implies', 'condition': {'op': 'eq', 'var': 'self_employed', 'value': True}, 'then': {'op': 'gte', 'var': 'income', 'value': 50000}}, {'id': 'R4', 'desc': 'Credit >= 650 or (credit >= 600 and income >= $80K)', 'op': 'or', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 650}, {'op': 'and', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 600}, {'op': 'gte', 'var': 'income', 'value': 80000}]}]}, {'id': 'R5', 'desc': 'Employed 12+ months or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'months_employed', 'value': 12}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}], 'query': 'find_qualifying_profile'}
+
+        def get_default_policy() -> str:
+            """Return the hardcoded QuickLoan policy JSON (demo / fallback)."""
+            return json.dumps(_DEFAULT_LOAN_POLICY)
+        _spl_result = get_default_policy()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_policy_json
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_subject == ''false'''
+      semantic: true
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_subject
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: extract_policy_prompt
+      params:
+        - policy_text
+      prompt_inline: |-
+        You are a compliance engineer. Convert the natural-language policy below into a structured JSON object matching this schema exactly. Output JSON only — no explanation, no markdown fences.
+
+        SCHEMA:
+        {
+          "policy": "<policy name string>",
+          "variables": [
+            {"name": "<var_name>", "type": "int", "range": [<min>, <max>]},
+            {"name": "<var_name>", "type": "bool"}
+          ],
+          "rules": [
+            {"id": "R1", "desc": "<human description>", <op structure>}
+          ],
+          "query": "find_qualifying_profile"
+        }
+
+        SUPPORTED OPS:
+        - Comparison:  {"op": "gte"|"lte"|"eq"|"neq", "var": "<name>", "value": <number|bool>}
+        - Logical:     {"op": "and"|"or", "args": [<rule>, ...]}
+        - Negation:    {"op": "not", "arg": <rule>}
+        - Implication: {"op": "implies", "condition": <rule>, "then": <rule>}
+
+        EXAMPLE:
+        Policy text: "users must be 18+, have a verified email or phone, and premium members may skip the phone check."
+        Output:
+        {
+          "policy": "User Eligibility Policy",
+          "variables": [
+            {"name": "age", "type": "int", "range": [0, 120]},
+            {"name": "email_verified", "type": "bool"},
+            {"name": "phone_verified", "type": "bool"},
+            {"name": "premium_member", "type": "bool"}
+          ],
+          "rules": [
+            {"id": "R1", "desc": "Age >= 18", "op": "gte", "var": "age", "value": 18},
+            {"id": "R2", "desc": "Email verified or phone verified", "op": "or", "args": [
+              {"op": "eq", "var": "email_verified", "value": true},
+              {"op": "eq", "var": "phone_verified", "value": true}
+            ]},
+            {"id": "R3", "desc": "Non-premium members must verify phone", "op": "implies",
+              "condition": {"op": "eq", "var": "premium_member", "value": false},
+              "then":      {"op": "eq", "var": "phone_verified", "value": true}}
+          ],
+          "query": "find_qualifying_profile"
+        }
+
+        NOW CONVERT:
+        Policy text: {{in_policy_text}}
+      arguments:
+        - '@policy_text'
+    ports:
+      - trigger
+      - complete
+      - in_policy_text
+      - out_policy_json_raw
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: parse_policy_json
+      backend: kernel
+      arguments:
+        - '@policy_json_raw'
+      code: |
+        import json
+
+        _DEFAULT_LOAN_POLICY = {'policy': 'QuickLoan Eligibility Policy v2.1', 'variables': [{'name': 'age', 'type': 'int', 'range': [0, 120]}, {'name': 'income', 'type': 'int', 'range': [0, 1000000]}, {'name': 'credit_score', 'type': 'int', 'range': [300, 850]}, {'name': 'months_employed', 'type': 'int', 'range': [0, 600]}, {'name': 'has_collateral', 'type': 'bool'}, {'name': 'self_employed', 'type': 'bool'}], 'rules': [{'id': 'R1', 'desc': 'Must be 18+', 'op': 'gte', 'var': 'age', 'value': 18}, {'id': 'R2', 'desc': 'Income >= $30K or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'income', 'value': 30000}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}, {'id': 'R3', 'desc': 'Self-employed requires income >= $50K', 'op': 'implies', 'condition': {'op': 'eq', 'var': 'self_employed', 'value': True}, 'then': {'op': 'gte', 'var': 'income', 'value': 50000}}, {'id': 'R4', 'desc': 'Credit >= 650 or (credit >= 600 and income >= $80K)', 'op': 'or', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 650}, {'op': 'and', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 600}, {'op': 'gte', 'var': 'income', 'value': 80000}]}]}, {'id': 'R5', 'desc': 'Employed 12+ months or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'months_employed', 'value': 12}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}], 'query': 'find_qualifying_profile'}
+
+        def parse_policy_json(json_str: str) -> str:
+            """Validate and clean LLM-extracted policy JSON; fall back to default on failure.
+
+            Strips markdown code fences, parses JSON, checks minimal schema, then
+            returns the cleaned JSON string. Falls back to _DEFAULT_LOAN_POLICY if
+            the LLM output cannot be parsed or is missing required fields.
+            """
+            import re
+            text = json_str.strip()
+            m = re.search('```(?:json)?\\s*([\\s\\S]*?)```', text)
+            if m:
+                text = m.group(1).strip()
+            try:
+                policy = json.loads(text)
+                if 'variables' not in policy or 'rules' not in policy:
+                    raise ValueError('missing required fields')
+                if 'query' not in policy:
+                    policy['query'] = 'find_qualifying_profile'
+                return json.dumps(policy)
+            except Exception:
+                return json.dumps(_DEFAULT_LOAN_POLICY)
+        _spl_result = parse_policy_json(policy_json_raw)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_json_raw
+      - out_policy_json
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_3
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: check_z3_eligibility
+      backend: kernel
+      arguments:
+        - '@policy_json'
+      code: |
+        import json
+
+        def _build_constraint(rule: dict, z3_vars: dict):
+            """Recursively translate a rule dict into a Z3 expression."""
+            from z3 import And, Or, Not, Implies
+            op = rule['op']
+            if op == 'gte':
+                return z3_vars[rule['var']] >= rule['value']
+            if op == 'lte':
+                return z3_vars[rule['var']] <= rule['value']
+            if op == 'eq':
+                return z3_vars[rule['var']] == rule['value']
+            if op == 'neq':
+                return z3_vars[rule['var']] != rule['value']
+            if op == 'and':
+                return And(*[_build_constraint(a, z3_vars) for a in rule['args']])
+            if op == 'or':
+                return Or(*[_build_constraint(a, z3_vars) for a in rule['args']])
+            if op == 'not':
+                return Not(_build_constraint(rule['arg'], z3_vars))
+            if op == 'implies':
+                return Implies(_build_constraint(rule['condition'], z3_vars), _build_constraint(rule['then'], z3_vars))
+            raise ValueError(f'Unknown op: {op}')
+
+        def check_z3_eligibility(policy_json: str) -> str:
+            """Run Z3 on the policy and return SAT/UNSAT + a qualifying profile (if SAT).
+
+            Returns:
+              {"status": "SAT"|"UNSAT"|"UNKNOWN", "qualifying_profile": {...},
+               "n_rules": int, "verdict": str}
+            """
+            try:
+                from z3 import Int, Bool, Solver, sat, unsat
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'z3-solver not installed — run: pip install z3-solver'})
+            policy = json.loads(policy_json)
+            z3_vars: dict = {}
+            for v in policy['variables']:
+                if v['type'] == 'int':
+                    z3_vars[v['name']] = Int(v['name'])
+                elif v['type'] == 'bool':
+                    z3_vars[v['name']] = Bool(v['name'])
+            s = Solver()
+            for v in policy['variables']:
+                if v['type'] == 'int' and 'range' in v:
+                    z3_vars[v['name']] = z3_vars[v['name']]
+                    s.add(z3_vars[v['name']] >= v['range'][0])
+                    s.add(z3_vars[v['name']] <= v['range'][1])
+            for rule in policy['rules']:
+                s.add(_build_constraint(rule, z3_vars))
+            result = s.check()
+            if result == sat:
+                m = s.model()
+                profile: dict = {}
+                for v in policy['variables']:
+                    val = m[z3_vars[v['name']]]
+                    if val is None:
+                        continue
+                    if v['type'] == 'bool':
+                        profile[v['name']] = bool(val)
+                    else:
+                        try:
+                            profile[v['name']] = int(str(val))
+                        except Exception:
+                            profile[v['name']] = str(val)
+                return json.dumps({'status': 'SAT', 'verdict': 'Policy is satisfiable — a qualifying customer profile exists', 'qualifying_profile': profile, 'n_rules': len(policy['rules'])})
+            if result == unsat:
+                return json.dumps({'status': 'UNSAT', 'verdict': 'Policy is UNSATISFIABLE — no customer can ever qualify (contradictory rules)', 'qualifying_profile': {}, 'n_rules': len(policy['rules'])})
+            return json.dumps({'status': 'UNKNOWN', 'verdict': 'Z3 could not determine satisfiability', 'n_rules': len(policy['rules'])})
+        _spl_result = check_z3_eligibility(policy_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - policy_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_policy_json
+      - out_z3_result
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: is_satisfiable
+      backend: kernel
+      arguments:
+        - '@z3_result'
+      code: |
+        import json
+
+        def is_satisfiable(result_json: str) -> bool:
+            """ASSERT gate: policy is SAT (eligibility rules are consistent)."""
+            try:
+                return json.loads(result_json).get('status') == 'SAT'
+            except Exception:
+                return False
+        _spl_result = is_satisfiable(z3_result)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_z3_result
+      - out_tool_6
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_6'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_z3_result
+      - in_tool_6
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: format_z3_report
+      backend: kernel
+      arguments:
+        - '@z3_result'
+        - '@policy_json'
+      code: |
+        import json
+
+        def format_z3_report(result_json: str, policy_json: str) -> str:
+            """Markdown report of Z3 eligibility check."""
+            try:
+                res = json.loads(result_json)
+                policy = json.loads(policy_json)
+                lines = [f"## Z3 Eligibility Check — {policy.get('policy', 'Policy')}", '', f"**Status:** {res['status']}  ", f"**Verdict:** {res['verdict']}", f"**Rules checked:** {res.get('n_rules', '?')}", '']
+                if res['status'] == 'SAT' and res.get('qualifying_profile'):
+                    lines += ['### Qualifying Profile Found by Z3', '']
+                    lines += ['| Variable | Value |', '|---|---|']
+                    for k, v in res['qualifying_profile'].items():
+                        lines.append(f'| {k} | {v} |')
+                elif res['status'] == 'UNSAT':
+                    lines += ['### Contradiction Detected', '', 'Z3 proved that no assignment of input variables can satisfy all rules simultaneously.', 'This indicates a logical contradiction in the policy — review the rules for conflicting requirements.']
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_z3_report(z3_result, policy_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+        - policy_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_z3_result
+      - in_policy_json
+      - out_solver_report
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@z3_result'
+        - '''status'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(z3_result, 'status')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_z3_result
+      - out_sat_status
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: explain_z3_result_prompt
+      params:
+        - z3_report
+        - policy_text
+      prompt_inline: |-
+        You are a compliance analyst. Z3 (an SMT theorem prover) just verified this loan eligibility policy.
+
+        POLICY:
+        {{in_policy_text}}
+
+        Z3 RESULT:
+        {{in_z3_report}}
+
+        Explain the result in plain English for a business audience (≤150 words):
+        1. What did Z3 find?
+        2. What does this mean for the business? (e.g. are the rules consistent? contradictory?)
+        3. If Z3 found a qualifying profile, what is notable about it?
+        4. What would be the risk of relying on manual rule-tracing (solver=OFF) instead?
+      arguments:
+        - '@solver_report'
+        - '@policy_text'
+    ports:
+      - trigger
+      - complete
+      - in_z3_report
+      - in_policy_text
+      - out_explanation
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@solver_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(solver_report: str, explanation: str) -> str:
+            return f'=== Z3 Compliance Checker (r102) | solver=ON ===\n\n{solver_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(solver_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - solver_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solver_report
+      - in_explanation
+      - out_report
+  - id: eval_4
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_3
+    type: GENERATE
+    config:
+      function: interpret_policy_prompt
+      params:
+        - policy_text
+      prompt_inline: |-
+        You are a compliance analyst reviewing a loan eligibility policy.
+
+        POLICY TEXT:
+        {{in_policy_text}}
+
+        The policy has the following eligibility rules:
+        R1: Applicant must be 18 or older
+        R2: Annual income >= $30,000 OR has collateral
+        R3: If self-employed, then annual income >= $50,000
+        R4: Credit score >= 650 OR (credit score >= 600 AND income >= $80,000)
+        R5: Employed for >= 12 months OR has collateral
+
+        Task: Manually trace through the rules and determine:
+        1. Is this policy satisfiable — does a qualifying customer profile exist?
+        2. If yes, give ONE example of a customer who would qualify (specify all variable values).
+        3. Are there any hidden interactions between rules that could trap a customer?
+        4. What is the most restrictive edge case?
+
+        Be specific with numbers. Do not use Z3 or any solver — reason manually.
+      arguments:
+        - '@policy_text'
+    ports:
+      - trigger
+      - complete
+      - in_policy_text
+      - out_llm_analysis
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_analysis'
+      code: |
+        def format_report_solver_off(llm_analysis: str) -> str:
+            return f'=== Z3 Compliance Checker (r102) | solver=OFF ===\n\n── LLM Manual Rule Analysis ────────────────────────────────\n{llm_analysis}\n\nNote: solver=OFF relies on LLM sequential rule tracing. Run with --param use_solver=true\nto verify with Z3 (finds hidden rule interactions the LLM misses).'
+        _spl_result = format_report_solver_off(llm_analysis)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_analysis
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_analysis
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_policy_text
+    target: tool_1.in_policy_text
+    type: binds
+  - source: tool_1.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_1.out_use_default
+    target: eval_1.in_subject
+    type: binds
+  - source: eval_1.pass
+    target: tool_2.trigger
+    type: triggers
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_1.out_use_default
+    target: eval_2.in_subject
+    type: binds
+  - source: eval_2.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_policy_text
+    target: gen_1.in_policy_text
+    type: binds
+  - source: gen_1.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: gen_1.out_policy_json_raw
+    target: tool_3.in_policy_json_raw
+    type: binds
+  - source: tool_2.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: tool_4.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_4.in_use_solver
+    type: binds
+  - source: tool_4.complete
+    target: eval_3.trigger
+    type: triggers
+  - source: tool_4.out_use_solver
+    target: eval_3.in_use_solver
+    type: binds
+  - source: eval_3.pass
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_2.out_policy_json
+    target: tool_5.in_policy_json
+    type: binds
+  - source: tool_3.out_policy_json
+    target: tool_5.in_policy_json
+    type: binds
+  - source: tool_5.complete
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: tool_6.in_z3_result
+    type: binds
+  - source: tool_6.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: assert_1.in_z3_result
+    type: binds
+  - source: tool_6.out_tool_6
+    target: assert_1.in_tool_6
+    type: binds
+  - source: assert_1.pass
+    target: tool_7.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: tool_7.in_z3_result
+    type: binds
+  - source: tool_2.out_policy_json
+    target: tool_7.in_policy_json
+    type: binds
+  - source: tool_3.out_policy_json
+    target: tool_7.in_policy_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_5.out_z3_result
+    target: tool_8.in_z3_result
+    type: binds
+  - source: tool_8.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_7.out_solver_report
+    target: gen_2.in_z3_report
+    type: binds
+  - source: wf_entry.out_policy_text
+    target: gen_2.in_policy_text
+    type: binds
+  - source: gen_2.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_7.out_solver_report
+    target: tool_9.in_solver_report
+    type: binds
+  - source: gen_2.out_explanation
+    target: tool_9.in_explanation
+    type: binds
+  - source: eval_3.fail
+    target: eval_4.trigger
+    type: triggers
+  - source: tool_4.out_use_solver
+    target: eval_4.in_use_solver
+    type: binds
+  - source: eval_4.pass
+    target: gen_3.trigger
+    type: triggers
+  - source: wf_entry.out_policy_text
+    target: gen_3.in_policy_text
+    type: binds
+  - source: gen_3.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: gen_3.out_llm_analysis
+    target: tool_10.in_llm_analysis
+    type: binds
+  - source: tool_9.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_9.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_4.fail
+    target: wf_exit.trigger
+    type: triggers

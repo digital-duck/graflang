@@ -1,0 +1,1270 @@
+version: 1.0-graph
+workflow:
+  name: text2sql_quality
+  inputs:
+    - name: question
+      type: TEXT
+      default: What is the average order amount for customers in the Enterprise segment?
+    - name: ground_truth_sql
+      type: TEXT
+      default: SELECT AVG(o.amount) FROM orders o JOIN customers c ON o.customer_id = c.id WHERE c.segment = 'Enterprise'
+    - name: stat_sql_a
+      type: TEXT
+      default: SELECT AVG(o.amount) FROM orders o JOIN customers c ON o.customer_id = c.id WHERE c.segment = 'Enterprise'
+    - name: stat_sql_b
+      type: TEXT
+      default: SELECT SUM(o.amount) * 1.0 / COUNT(*) FROM orders o JOIN customers c ON o.customer_id = c.id WHERE c.segment = 'Enterprise'
+    - name: enable_solver
+      type: TEXT
+      default: 'true'
+    - name: max_tries
+      type: INTEGER
+      default: 3
+    - name: out_dir
+      type: TEXT
+      default: ./cookbook/94_data_eng_text2spl/output
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_question
+      - out_ground_truth_sql
+      - out_stat_sql_a
+      - out_stat_sql_b
+      - out_enable_solver
+      - out_max_tries
+      - out_out_dir
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_start
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: time_now
+      backend: kernel
+      arguments: []
+      code: |
+        import datetime
+
+        def time_now() -> str:
+            """TIME_NOW() — current local time as a filesystem-safe string:
+            YYYY-MM-DD_HH-MM-SS."""
+            return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        _spl_result = time_now()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_ts_safe
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@enable_solver'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(enable_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_enable_solver
+      - out_solver_mode
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: schema_description
+      backend: kernel
+      arguments: []
+      code: |
+        def schema_description() -> str:
+            """Human-readable schema + sample rows, shown to the LLM (and to the
+            unaided baseline arm) so it can write/reason about SQL without ever
+            seeing the live database connection."""
+            return (
+                "Table: customers(id INTEGER, name TEXT, segment TEXT)\n"
+                "Rows:\n"
+                "  1, Acme Corp,     Enterprise\n"
+                "  2, Globex Inc,    Enterprise\n"
+                "  3, Initech,       SMB\n"
+                "  4, Umbrella LLC,  SMB\n"
+                "  5, Wayne Retail,  Consumer\n"
+                "\n"
+                "Table: orders(id INTEGER, customer_id INTEGER, amount REAL, order_date TEXT)\n"
+                "Rows:\n"
+                "  1, 1, 5000.00, 2026-01-10\n"
+                "  2, 1, 7000.00, 2026-02-14\n"
+                "  3, 2, 6000.00, 2026-02-20\n"
+                "  4, 3,  800.00, 2026-01-15\n"
+                "  5, 4, 1200.00, 2026-03-01\n"
+                "  6, 5,  150.00, 2026-01-05\n"
+                "  7, 5,  250.00, 2026-03-12\n"
+            )
+        _spl_result = schema_description()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - out_schema
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode == 'yes')
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solver_mode
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''yes'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''no'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''no'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: solve_directly
+      params:
+        - schema
+        - question
+      prompt_inline: |-
+        A colleague asked this data question: "{{in_question}}"
+
+        There is no SQL execution or data-quality checker backing you up this
+        time — read the schema and rows below and work out the answer
+        yourself, in your head.
+
+        {{in_schema}}
+
+        Write a clear walkthrough in under 8 sentences that:
+        1. Restates the question
+        2. Shows which rows you are using and how you aggregate them
+        3. Gives the final answer plainly
+
+        End your response with a line in EXACTLY this format (no extra words):
+        Final answer: <value>
+      arguments:
+        - '@schema'
+        - '@question'
+    ports:
+      - trigger
+      - complete
+      - in_schema
+      - in_question
+      - out_report
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@report'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_report
+      - out_report
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_tries
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''init'''
+    ports:
+      - trigger
+      - complete
+      - out_status
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_sql
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_solution
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: latest(@in_tries, @tries) < @in_max_tries
+      outputs:
+        tries:
+          from:
+            - set_7.out_tries
+            - set_8.out_tries
+            - set_9.out_tries
+        sql:
+          from:
+            - gen_2.out_sql
+            - gen_3.out_sql
+        solution:
+          from:
+            - tool_6.out_solution
+            - tool_9.out_solution
+        status:
+          from:
+            - tool_7.out_status
+            - tool_10.out_status
+        error_info:
+          from: tool_8.out_error_info
+      subgraph:
+        nodes:
+          - id: eval_3
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''OK'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: set_7
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_max_tries'
+            ports:
+              - trigger
+              - complete
+              - in_max_tries
+              - out_tries
+          - id: eval_4
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''init'''
+              branch: 2
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: gen_2
+            type: GENERATE
+            config:
+              function: formulate_sql
+              params:
+                - schema
+                - question
+              prompt_inline: |-
+                You are a data engineer. Given this schema, write a single SQL SELECT
+                statement (SQLite dialect) that answers the question.
+
+                {{in_schema}}
+
+                Question: {{in_question}}
+
+                Output ONLY the raw SQL statement — no markdown fences, no commentary,
+                no trailing semicolon required but allowed.
+              arguments:
+                - '@schema'
+                - '@question'
+            ports:
+              - trigger
+              - complete
+              - in_schema
+              - in_question
+              - out_sql
+          - id: tool_6
+            type: SOLVE
+            config:
+              tool: run_quality_gated_sql
+              backend: kernel
+              arguments:
+                - '@sql'
+                - '@ground_truth_sql'
+                - '@stat_sql_a'
+                - '@stat_sql_b'
+              code: |
+                def run_quality_gated_sql(sql: str, ground_truth_sql: str, stat_sql_a: str, stat_sql_b: str) -> str:
+                    """Execute the LLM's SQL against a freshly-seeded in-memory SQLite
+                    database, then run three independent data-quality gates that a
+                    data-governance team would demand before trusting the number:
+
+                      1. Referential integrity: every orders.customer_id exists in
+                         customers.id (checked against the seeded data itself).
+                      2. Non-empty result: the LLM's query must return at least one row.
+                      3. Two-independent-ways agreement: `stat_sql_a` and `stat_sql_b`
+                         are two structurally different SQL formulations of the SAME
+                         statistic (e.g. AVG(x) vs SUM(x)/COUNT(x)) — both are executed
+                         against the seeded data and must agree within 1e-6.
+
+                    Also row-diffs the LLM's result set against `ground_truth_sql`
+                    (an independently-authored query over the same seeded data),
+                    order-insensitive, tolerant of float rounding.
+                    """
+                    import json
+                    import re
+                    import sqlite3
+
+                    def strip_fences(s):
+                        s = re.sub(r'^```(?:sql)?\s*\n?', '', s.strip(), flags=re.IGNORECASE)
+                        return re.sub(r'\n?```\s*;?\s*$', '', s).rstrip(';').strip()
+
+                    conn = sqlite3.connect(":memory:")
+                    cur = conn.cursor()
+                    cur.execute("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, segment TEXT)")
+                    cur.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, amount REAL, order_date TEXT)")
+                    customers = [
+                        (1, "Acme Corp", "Enterprise"), (2, "Globex Inc", "Enterprise"),
+                        (3, "Initech", "SMB"), (4, "Umbrella LLC", "SMB"), (5, "Wayne Retail", "Consumer"),
+                    ]
+                    orders = [
+                        (1, 1, 5000.00, "2026-01-10"), (2, 1, 7000.00, "2026-02-14"),
+                        (3, 2, 6000.00, "2026-02-20"), (4, 3, 800.00, "2026-01-15"),
+                        (5, 4, 1200.00, "2026-03-01"), (6, 5, 150.00, "2026-01-05"),
+                        (7, 5, 250.00, "2026-03-12"),
+                    ]
+                    cur.executemany("INSERT INTO customers VALUES (?,?,?)", customers)
+                    cur.executemany("INSERT INTO orders VALUES (?,?,?,?)", orders)
+                    conn.commit()
+
+                    try:
+                        # Gate 1: referential integrity
+                        cur.execute(
+                            "SELECT COUNT(*) FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE c.id IS NULL"
+                        )
+                        orphan_count = cur.fetchone()[0]
+                        referential_ok = (orphan_count == 0)
+
+                        # Gate 3: same statistic, two independent SQL formulations
+                        cur.execute(strip_fences(stat_sql_a))
+                        val_a = cur.fetchone()[0]
+                        cur.execute(strip_fences(stat_sql_b))
+                        val_b = cur.fetchone()[0]
+                        two_way_ok = (val_a is not None and val_b is not None and abs(float(val_a) - float(val_b)) < 1e-6)
+
+                        if not referential_ok or not two_way_ok:
+                            reasons = []
+                            if not referential_ok:
+                                reasons.append(f"referential integrity violated: {orphan_count} orphan order(s)")
+                            if not two_way_ok:
+                                reasons.append(f"two-way stat mismatch: {val_a} != {val_b}")
+                            return json.dumps({"status": "Error", "error": "; ".join(reasons),
+                                               "referential_ok": referential_ok, "two_way_ok": two_way_ok})
+
+                        # Execute the LLM''s SQL
+                        clean_sql = strip_fences(sql)
+                        try:
+                            cur.execute(clean_sql)
+                            cols = [d[0] for d in cur.description] if cur.description else []
+                            rows_llm = cur.fetchall()
+                        except sqlite3.Error as e:
+                            return json.dumps({"status": "Error", "error": f"SQL error: {e}",
+                                               "referential_ok": referential_ok, "two_way_ok": two_way_ok})
+
+                        # Gate 2: non-empty result
+                        if len(rows_llm) == 0:
+                            return json.dumps({"status": "Error", "error": "query returned zero rows",
+                                               "referential_ok": referential_ok, "two_way_ok": two_way_ok})
+
+                        # Row diff against independently-authored ground truth
+                        cur.execute(strip_fences(ground_truth_sql))
+                        rows_truth = cur.fetchall()
+
+                        def normalize(rows):
+                            out = []
+                            for row in rows:
+                                norm = tuple(round(v, 2) if isinstance(v, float) else v for v in row)
+                                out.append(norm)
+                            return sorted(out, key=lambda t: [str(x) for x in t])
+
+                        row_match = normalize(rows_llm) == normalize(rows_truth)
+
+                        return json.dumps({
+                            "status": "OK",
+                            "answer": len(rows_llm),
+                            "columns": cols,
+                            "rows_llm": rows_llm,
+                            "rows_truth": rows_truth,
+                            "row_match": row_match,
+                            "referential_ok": referential_ok,
+                            "two_way_ok": two_way_ok,
+                            "stat_a": val_a, "stat_b": val_b,
+                        }, default=str)
+                    finally:
+                        conn.close()
+                _spl_result = run_quality_gated_sql(sql, ground_truth_sql, stat_sql_a, stat_sql_b)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - sql
+                - ground_truth_sql
+                - stat_sql_a
+                - stat_sql_b
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_sql
+              - in_ground_truth_sql
+              - in_stat_sql_a
+              - in_stat_sql_b
+              - out_solution
+          - id: tool_7
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_8
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: tool_8
+            type: SOLVE
+            config:
+              tool: result_error
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_error(result_json: str) -> str:
+                    """RESULT_ERROR(result_json) — extract the 'error' field from a SOLVER
+                    result JSON dict (falls back to 'status', then 'unknown error')."""
+                    try:
+                        d = json.loads(result_json)
+                        return d.get('error', d.get('status', 'unknown error'))
+                    except Exception:
+                        return result_json
+                _spl_result = result_error(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_error_info
+          - id: gen_3
+            type: GENERATE
+            config:
+              function: repair_sql
+              params:
+                - schema
+                - question
+                - sql
+                - error_info
+              prompt_inline: |-
+                This SQL query failed a data-quality or execution check.
+
+                {{in_schema}}
+
+                Question: {{in_question}}
+
+                Previous SQL:
+                {{in_sql}}
+
+                Error:
+                {{in_error_info}}
+
+                Fix the SQL. Common causes:
+                - Wrong JOIN condition or missing JOIN entirely
+                - Aggregating over the wrong GROUP BY column, or missing it
+                - WHERE clause filtering out all rows (check exact segment/name spelling)
+                - Selecting the wrong column
+
+                Output ONLY the corrected raw SQL statement — no markdown fences, no commentary.
+              arguments:
+                - '@schema'
+                - '@question'
+                - '@sql'
+                - '@error_info'
+            ports:
+              - trigger
+              - complete
+              - in_schema
+              - in_question
+              - in_sql
+              - in_error_info
+              - out_sql
+          - id: tool_9
+            type: SOLVE
+            config:
+              tool: run_quality_gated_sql
+              backend: kernel
+              arguments:
+                - '@sql'
+                - '@ground_truth_sql'
+                - '@stat_sql_a'
+                - '@stat_sql_b'
+              code: |
+                def run_quality_gated_sql(sql: str, ground_truth_sql: str, stat_sql_a: str, stat_sql_b: str) -> str:
+                    """Execute the LLM's SQL against a freshly-seeded in-memory SQLite
+                    database, then run three independent data-quality gates that a
+                    data-governance team would demand before trusting the number:
+
+                      1. Referential integrity: every orders.customer_id exists in
+                         customers.id (checked against the seeded data itself).
+                      2. Non-empty result: the LLM's query must return at least one row.
+                      3. Two-independent-ways agreement: `stat_sql_a` and `stat_sql_b`
+                         are two structurally different SQL formulations of the SAME
+                         statistic (e.g. AVG(x) vs SUM(x)/COUNT(x)) — both are executed
+                         against the seeded data and must agree within 1e-6.
+
+                    Also row-diffs the LLM's result set against `ground_truth_sql`
+                    (an independently-authored query over the same seeded data),
+                    order-insensitive, tolerant of float rounding.
+                    """
+                    import json
+                    import re
+                    import sqlite3
+
+                    def strip_fences(s):
+                        s = re.sub(r'^```(?:sql)?\s*\n?', '', s.strip(), flags=re.IGNORECASE)
+                        return re.sub(r'\n?```\s*;?\s*$', '', s).rstrip(';').strip()
+
+                    conn = sqlite3.connect(":memory:")
+                    cur = conn.cursor()
+                    cur.execute("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, segment TEXT)")
+                    cur.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, amount REAL, order_date TEXT)")
+                    customers = [
+                        (1, "Acme Corp", "Enterprise"), (2, "Globex Inc", "Enterprise"),
+                        (3, "Initech", "SMB"), (4, "Umbrella LLC", "SMB"), (5, "Wayne Retail", "Consumer"),
+                    ]
+                    orders = [
+                        (1, 1, 5000.00, "2026-01-10"), (2, 1, 7000.00, "2026-02-14"),
+                        (3, 2, 6000.00, "2026-02-20"), (4, 3, 800.00, "2026-01-15"),
+                        (5, 4, 1200.00, "2026-03-01"), (6, 5, 150.00, "2026-01-05"),
+                        (7, 5, 250.00, "2026-03-12"),
+                    ]
+                    cur.executemany("INSERT INTO customers VALUES (?,?,?)", customers)
+                    cur.executemany("INSERT INTO orders VALUES (?,?,?,?)", orders)
+                    conn.commit()
+
+                    try:
+                        # Gate 1: referential integrity
+                        cur.execute(
+                            "SELECT COUNT(*) FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE c.id IS NULL"
+                        )
+                        orphan_count = cur.fetchone()[0]
+                        referential_ok = (orphan_count == 0)
+
+                        # Gate 3: same statistic, two independent SQL formulations
+                        cur.execute(strip_fences(stat_sql_a))
+                        val_a = cur.fetchone()[0]
+                        cur.execute(strip_fences(stat_sql_b))
+                        val_b = cur.fetchone()[0]
+                        two_way_ok = (val_a is not None and val_b is not None and abs(float(val_a) - float(val_b)) < 1e-6)
+
+                        if not referential_ok or not two_way_ok:
+                            reasons = []
+                            if not referential_ok:
+                                reasons.append(f"referential integrity violated: {orphan_count} orphan order(s)")
+                            if not two_way_ok:
+                                reasons.append(f"two-way stat mismatch: {val_a} != {val_b}")
+                            return json.dumps({"status": "Error", "error": "; ".join(reasons),
+                                               "referential_ok": referential_ok, "two_way_ok": two_way_ok})
+
+                        # Execute the LLM''s SQL
+                        clean_sql = strip_fences(sql)
+                        try:
+                            cur.execute(clean_sql)
+                            cols = [d[0] for d in cur.description] if cur.description else []
+                            rows_llm = cur.fetchall()
+                        except sqlite3.Error as e:
+                            return json.dumps({"status": "Error", "error": f"SQL error: {e}",
+                                               "referential_ok": referential_ok, "two_way_ok": two_way_ok})
+
+                        # Gate 2: non-empty result
+                        if len(rows_llm) == 0:
+                            return json.dumps({"status": "Error", "error": "query returned zero rows",
+                                               "referential_ok": referential_ok, "two_way_ok": two_way_ok})
+
+                        # Row diff against independently-authored ground truth
+                        cur.execute(strip_fences(ground_truth_sql))
+                        rows_truth = cur.fetchall()
+
+                        def normalize(rows):
+                            out = []
+                            for row in rows:
+                                norm = tuple(round(v, 2) if isinstance(v, float) else v for v in row)
+                                out.append(norm)
+                            return sorted(out, key=lambda t: [str(x) for x in t])
+
+                        row_match = normalize(rows_llm) == normalize(rows_truth)
+
+                        return json.dumps({
+                            "status": "OK",
+                            "answer": len(rows_llm),
+                            "columns": cols,
+                            "rows_llm": rows_llm,
+                            "rows_truth": rows_truth,
+                            "row_match": row_match,
+                            "referential_ok": referential_ok,
+                            "two_way_ok": two_way_ok,
+                            "stat_a": val_a, "stat_b": val_b,
+                        }, default=str)
+                    finally:
+                        conn.close()
+                _spl_result = run_quality_gated_sql(sql, ground_truth_sql, stat_sql_a, stat_sql_b)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - sql
+                - ground_truth_sql
+                - stat_sql_a
+                - stat_sql_b
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_sql
+              - in_ground_truth_sql
+              - in_stat_sql_a
+              - in_stat_sql_b
+              - out_solution
+          - id: tool_10
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_9
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+        edges:
+          - source: eval_3.pass
+            target: set_7.trigger
+            type: triggers
+          - source: eval_3.fail
+            target: eval_4.trigger
+            type: triggers
+          - source: eval_4.pass
+            target: gen_2.trigger
+            type: triggers
+          - source: gen_2.complete
+            target: tool_6.trigger
+            type: triggers
+          - source: gen_2.out_sql
+            target: tool_6.in_sql
+            type: binds
+          - source: tool_6.complete
+            target: tool_7.trigger
+            type: triggers
+          - source: tool_6.out_solution
+            target: tool_7.in_solution
+            type: binds
+          - source: tool_7.complete
+            target: set_8.trigger
+            type: triggers
+          - source: eval_4.fail
+            target: tool_8.trigger
+            type: triggers
+          - source: tool_8.complete
+            target: gen_3.trigger
+            type: triggers
+          - source: tool_8.out_error_info
+            target: gen_3.in_error_info
+            type: binds
+          - source: gen_3.complete
+            target: tool_9.trigger
+            type: triggers
+          - source: gen_3.out_sql
+            target: tool_9.in_sql
+            type: binds
+          - source: tool_9.complete
+            target: tool_10.trigger
+            type: triggers
+          - source: tool_9.out_solution
+            target: tool_10.in_solution
+            type: binds
+          - source: tool_10.complete
+            target: set_9.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_status
+      - in_max_tries
+      - in_schema
+      - in_question
+      - in_ground_truth_sql
+      - in_stat_sql_a
+      - in_stat_sql_b
+      - in_tries
+      - in_solution
+      - in_sql
+      - out_tries
+      - out_sql
+      - out_solution
+      - out_status
+      - out_error_info
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: result_ok
+      backend: kernel
+      arguments:
+        - '@solution'
+      code: |
+        import json
+
+        def result_ok(result_json: str) -> bool:
+            """RESULT_OK(result_json) — ASSERT gate: True only when result_json's
+            'status' field is exactly "OK"."""
+            try:
+                return json.loads(result_json).get('status') == 'OK'
+            except Exception:
+                return False
+        _spl_result = result_ok(solution)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_solution
+      - out_tool_11
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_11'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solution
+      - in_tool_11
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: classify_roundtrip
+      backend: kernel
+      arguments:
+        - '@solution'
+      code: |
+        def classify_roundtrip(result_json: str) -> str:
+            """Round-trip check: does the LLM's SQL result set row-diff-match
+            (order-insensitive, float-tolerant) an independently-authored
+            ground-truth query over the same seeded data?
+
+            Returns 'match' / 'mismatch' / 'unverifiable'.
+            """
+            import json
+            try:
+                d = json.loads(result_json)
+            except Exception:
+                return "unverifiable"
+            if "row_match" not in d:
+                return "unverifiable"
+            return "match" if d["row_match"] else "mismatch"
+        _spl_result = classify_roundtrip(solution)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solution
+      - out_roundtrip
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: interpret_sql_result
+      params:
+        - question
+        - solution_json
+      prompt_inline: |-
+        You are a data engineer. Interpret this VERIFIED, quality-gated SQL
+        result for a general audience.
+
+        Question: {{in_question}}
+
+        Verified result (JSON — referential integrity confirmed, the same
+        statistic independently recomputed two structurally different ways
+        and confirmed to agree, and the result set row-diffed against an
+        independently-authored ground-truth query — trust it completely, do
+        not re-derive it):
+        {{in_solution_json}}
+
+        Provide a concise interpretation (under 100 words):
+        1. Restate what the question asks
+        2. State the answer, referencing the exact rows/values from the JSON
+        3. One sentence on why the two-independent-ways and referential-
+           integrity checks matter for trusting this number in production
+
+        End your response with a line in EXACTLY this format (no extra words):
+        Final answer: verified
+      arguments:
+        - '@question'
+        - '@solution'
+    ports:
+      - trigger
+      - complete
+      - in_question
+      - in_solution_json
+      - out_narrative
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: format_report
+      backend: kernel
+      arguments:
+        - '@question'
+        - '@sql'
+        - '@solution'
+        - '@narrative'
+        - '@roundtrip'
+      code: |
+        def format_report(problem: str, sql: str, solution_json: str,
+                          narrative: str, roundtrip: str) -> str:
+            import json
+            try:
+                sol = json.loads(solution_json)
+            except Exception:
+                sol = {}
+            lines = [
+                "# Text-to-SQL with Data-Quality Gates Report",
+                "",
+                f"**Question:** {problem.strip()}",
+                "",
+                f"**Verifier status:** `{sol.get('status', 'Unknown')}`",
+                f"**Rows returned:** `{sol.get('answer', '?')}`",
+                f"**Referential integrity:** `{sol.get('referential_ok', '?')}`",
+                f"**Two-independent-ways stat agreement:** `{sol.get('two_way_ok', '?')}` "
+                f"(AVG={sol.get('stat_a', '?')}, SUM/COUNT={sol.get('stat_b', '?')})",
+                f"**Row-level round-trip vs ground truth:** `{roundtrip}`",
+                "",
+                "## Interpretation", "", narrative.strip(),
+                "", "## Generated SQL (LLM)", "",
+                "```sql", sql.strip(), "```",
+            ]
+            return "\n".join(lines)
+        _spl_result = format_report(question, sql, solution, narrative, roundtrip)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - sql
+        - solution_json
+        - narrative
+        - roundtrip
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_question
+      - in_sql
+      - in_solution
+      - in_narrative
+      - in_roundtrip
+      - out_report
+  - id: tool_14
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@out_dir}/text2sql_{@ts_safe}.md'
+        - '@report'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{out_dir}/text2sql_{ts_safe}.md', report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_out_dir
+      - in_ts_safe
+      - in_report
+      - out_out_path
+  - id: tool_15
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_start'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_start)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_start
+      - out_elapsed
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_enable_solver
+    target: tool_3.in_enable_solver
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_4.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_solver_mode
+    target: eval_1.in_solver_mode
+    type: binds
+  - source: eval_1.pass
+    target: set_1.trigger
+    type: triggers
+  - source: eval_1.fail
+    target: set_2.trigger
+    type: triggers
+  - source: set_1.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_1.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: set_2.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_4.out_schema
+    target: gen_1.in_schema
+    type: binds
+  - source: wf_entry.out_question
+    target: gen_1.in_question
+    type: binds
+  - source: gen_1.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: gen_1.out_report
+    target: tool_5.in_report
+    type: binds
+  - source: tool_5.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_5.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: set_4.out_status
+    target: loop_1.in_status
+    type: binds
+  - source: wf_entry.out_max_tries
+    target: loop_1.in_max_tries
+    type: binds
+  - source: tool_4.out_schema
+    target: loop_1.in_schema
+    type: binds
+  - source: wf_entry.out_question
+    target: loop_1.in_question
+    type: binds
+  - source: wf_entry.out_ground_truth_sql
+    target: loop_1.in_ground_truth_sql
+    type: binds
+  - source: wf_entry.out_stat_sql_a
+    target: loop_1.in_stat_sql_a
+    type: binds
+  - source: wf_entry.out_stat_sql_b
+    target: loop_1.in_stat_sql_b
+    type: binds
+  - source: set_3.out_tries
+    target: loop_1.in_tries
+    type: binds
+  - source: set_6.out_solution
+    target: loop_1.in_solution
+    type: binds
+  - source: set_5.out_sql
+    target: loop_1.in_sql
+    type: binds
+  - source: loop_1.exit
+    target: tool_11.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: tool_11.in_solution
+    type: binds
+  - source: tool_11.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: assert_1.in_solution
+    type: binds
+  - source: tool_11.out_tool_11
+    target: assert_1.in_tool_11
+    type: binds
+  - source: assert_1.pass
+    target: tool_12.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_12.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: tool_12.in_solution
+    type: binds
+  - source: tool_12.complete
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_question
+    target: gen_4.in_question
+    type: binds
+  - source: loop_1.out_solution
+    target: gen_4.in_solution_json
+    type: binds
+  - source: gen_4.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: wf_entry.out_question
+    target: tool_13.in_question
+    type: binds
+  - source: loop_1.out_sql
+    target: tool_13.in_sql
+    type: binds
+  - source: loop_1.out_solution
+    target: tool_13.in_solution
+    type: binds
+  - source: gen_4.out_narrative
+    target: tool_13.in_narrative
+    type: binds
+  - source: tool_12.out_roundtrip
+    target: tool_13.in_roundtrip
+    type: binds
+  - source: tool_13.complete
+    target: tool_14.trigger
+    type: triggers
+  - source: wf_entry.out_out_dir
+    target: tool_14.in_out_dir
+    type: binds
+  - source: tool_2.out_ts_safe
+    target: tool_14.in_ts_safe
+    type: binds
+  - source: tool_13.out_report
+    target: tool_14.in_report
+    type: binds
+  - source: tool_14.complete
+    target: tool_15.trigger
+    type: triggers
+  - source: tool_1.out_t_start
+    target: tool_15.in_t_start
+    type: binds
+  - source: tool_13.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_15.complete
+    target: wf_exit.trigger
+    type: triggers

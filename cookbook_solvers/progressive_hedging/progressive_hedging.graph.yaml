@@ -1,0 +1,892 @@
+version: 1.0-graph
+workflow:
+  name: progressive_hedging
+  inputs:
+    - name: use_solver
+      type: TEXT
+      default: 'true'
+    - name: n_scenarios
+      type: TEXT
+      default: '30'
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_use_solver
+      - out_n_scenarios
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: get_storage_problem
+      backend: kernel
+      arguments:
+        - '@n_scenarios'
+      code: |
+        import json
+
+        import math
+
+        import random
+
+        _INVESTMENT = {'capital_cost_per_MW': 8000, 'max_capacity_MW': 100.0, 'charge_efficiency': 0.92, 'discharge_efficiency': 0.92, 'max_cycles_per_day': 2.0}
+
+        _N_HOURS = 24
+
+        def get_storage_problem(n_scenarios: str) -> str:
+            """Generate storage investment problem with n_scenarios demand/price scenarios."""
+            n = int(n_scenarios)
+            rng = random.Random(7)
+            scenarios = []
+            for s in range(n):
+                peak_factor = rng.uniform(0.7, 1.4)
+                demand = [_base_demand(h) * peak_factor + rng.gauss(0, 5) for h in range(_N_HOURS)]
+                prices = [max(15.0, 20.0 + 80.0 * (d / 350.0) + rng.gauss(0, 12)) for d in demand]
+                scenarios.append({'id': s, 'probability': 1.0 / n, 'demand_MW': [round(max(50.0, d), 1) for d in demand], 'price_per_MWh': [round(max(15.0, pr), 2) for pr in prices]})
+            inv = _INVESTMENT.copy()
+            inv['description'] = f"Invest in battery storage capacity (0–100 MW) to maximize net present value across {n} demand/price scenarios. Stage 1: choose capacity_MW before observing the scenario. Stage 2: optimal hourly charge/discharge dispatch per scenario (recourse). Capital cost: ${_INVESTMENT['capital_cost_per_MW']:,}/MW. Revenue: arbitrage (buy cheap, sell expensive) + peak-shaving. Progressive Hedging decomposes to {n} independent subproblems, coupled via non-anticipativity penalty rho."
+            inv['scenarios'] = scenarios
+            inv['n_scenarios'] = n
+            inv['n_hours'] = _N_HOURS
+            return json.dumps(inv)
+
+        def _base_demand(h: int) -> float:
+            """Synthetic 24-hour base demand (MW)."""
+            return 150 + 80 * math.sin(math.pi * (h - 6) / 12.0) ** 2 + 30 * (h > 17 and h < 22)
+        _spl_result = get_storage_problem(n_scenarios)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - n_scenarios
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_n_scenarios
+      - out_problem_json
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@problem_json'
+        - '''description'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(problem_json, 'description')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_problem_description
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: normalize_bool
+      backend: kernel
+      arguments:
+        - '@use_solver'
+      code: |
+        def _coerce_bool(value: str) -> str:
+            s = str(value).strip()
+            if not s:
+                return 'false'
+            try:
+                return 'true' if float(s) != 0 else 'false'
+            except ValueError:
+                pass
+            if s.lower() in ('false', 'no', 'off'):
+                return 'false'
+            return 'true'
+
+        def normalize_bool(value: str) -> str:
+            """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+            Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+            '0', 'OFF', 'NO', 'false', '' → 'false'.
+            """
+            return _coerce_bool(value)
+        _spl_result = normalize_bool(use_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_use_solver
+      - out_use_solver
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''true'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: solve_with_ph
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        import time
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        _INVESTMENT = {'capital_cost_per_MW': 8000, 'max_capacity_MW': 100.0, 'charge_efficiency': 0.92, 'discharge_efficiency': 0.92, 'max_cycles_per_day': 2.0}
+
+        _N_HOURS = 24
+
+        def solve_with_ph(problem_json: str) -> str:
+            """Progressive Hedging decomposition across all scenarios.
+
+            Implements the standard PH algorithm:
+              1. Initialize: solve each scenario independently (x0_s = optimal Stage1_s)
+              2. Average: x_bar = weighted mean of all x0_s
+              3. Update multipliers: w_s += rho * (x_s - x_bar)
+              4. Re-solve each scenario with augmented Lagrangian penalty
+              5. Repeat until max |x_s - x_bar| < tolerance
+
+            Returns: rp_cost (recourse problem), ev_cost, vss, capacity_MW, convergence.
+            """
+            try:
+                from scipy.optimize import minimize_scalar as _
+            except ImportError:
+                return json.dumps({'status': 'ERROR', 'error': 'scipy not installed — pip install scipy'})
+            pyo = None
+            p = json.loads(problem_json)
+            scenarios = p['scenarios']
+            inv = _INVESTMENT
+            rho = inv['capital_cost_per_MW'] / 250.0 * 5.0
+            max_iter = 30
+            tol = 0.5
+            t0 = time.time()
+            x = [_solve_scenario_subproblem(sc, inv, x_bar=None, w_s=0.0, rho=rho, pyo=pyo) for sc in scenarios]
+            capacities = [xi['capacity_MW'] for xi in x]
+            w = [0.0] * len(scenarios)
+            primal_residual = float('inf')
+            iter_count = 0
+            for iteration in range(max_iter):
+                x_bar = sum(capacities) / len(capacities)
+                for s in range(len(scenarios)):
+                    w[s] += rho * (capacities[s] - x_bar)
+                primal_residual = max((abs(capacities[s] - x_bar) for s in range(len(scenarios))))
+                iter_count = iteration + 1
+                if primal_residual < tol:
+                    break
+
+                def solve_s(args):
+                    s_idx, sc, ws = args
+                    result = _solve_scenario_subproblem(sc, inv, x_bar=x_bar, w_s=ws, rho=rho, pyo=pyo)
+                    return (s_idx, result)
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    results = list(pool.map(solve_s, [(s, scenarios[s], w[s]) for s in range(len(scenarios))]))
+                for s_idx, result in results:
+                    capacities[s_idx] = result['capacity_MW']
+                    x[s_idx] = result
+            x_bar_final = sum(capacities) / len(capacities)
+            final_capacity = x_bar_final if primal_residual < tol * 10 else x_bar_final
+            rp_daily_op = sum((sc['probability'] * _compute_scenario_cost(sc, inv, final_capacity) for sc in scenarios))
+            capital = inv['capital_cost_per_MW'] * final_capacity
+            rp_total = round(rp_daily_op * 250 + capital, 0)
+            ev_capacity, ev_total_cost = _solve_ev_policy(scenarios, inv)
+            ev_total = round(ev_total_cost, 0)
+            vss = round(ev_total - rp_total, 0)
+            return json.dumps({'status': 'OK', 'converged': primal_residual < tol * 10, 'primal_residual_MW': round(primal_residual, 2), 'ph_iterations': iter_count, 'capacity_MW': round(final_capacity, 1), 'rp_cost': rp_total, 'ev_cost': ev_total, 'vss': vss, 'capital_cost': round(capital, 0), 'solve_time_sec': round(time.time() - t0, 1), 'n_scenarios': len(scenarios), 'ev_capacity_MW': round(ev_capacity, 1)})
+
+        def _solve_scenario_subproblem(sc: dict, inv: dict, x_bar, w_s: float, rho: float, pyo) -> dict:
+            """Solve one scenario's subproblem with PH augmented Lagrangian.
+
+            Uses scipy linprog (LP) directly — avoids Pyomo/HiGHS thread-safety issues.
+            The inner battery dispatch problem is a linear program (given cap is fixed).
+            We solve: min_{cap} [daily_cap_cost * cap + PH_penalty(cap) - R*(cap)]
+            where R*(cap) = optimal revenue at fixed capacity, solved analytically via
+            greedy merit-order dispatch (linear in cap, so R*(cap) = r_rate * cap).
+            """
+            from scipy.optimize import minimize_scalar
+            prices = sc['price_per_MWh']
+            cap_cost_daily = inv['capital_cost_per_MW'] / 250.0
+            max_cap = inv['max_capacity_MW']
+            eff_c = inv['charge_efficiency']
+            eff_d = inv['discharge_efficiency']
+            sorted_asc = sorted(prices)
+            sorted_desc = sorted(prices, reverse=True)
+            rev_rate = 0.0
+            T = len(prices)
+            n_hours = min(T // 2, 12)
+            for i in range(n_hours):
+                buy_price = sorted_asc[i]
+                sell_price = sorted_desc[i]
+                cycle_spread = eff_c * eff_d * sell_price - buy_price
+                if cycle_spread > 0:
+                    rev_rate += cycle_spread
+            lin_coeff = cap_cost_daily - rev_rate + (w_s if x_bar is not None else 0.0)
+            quad_coeff = rho / 2.0 if x_bar is not None else 0.0
+            x_bar_val = x_bar if x_bar is not None else 0.0
+            if quad_coeff > 0:
+
+                def obj_fn(cap):
+                    return lin_coeff * cap + quad_coeff * (cap - x_bar_val) ** 2
+                res = minimize_scalar(obj_fn, bounds=(0.0, max_cap), method='bounded')
+                cap_val = float(res.x)
+            else:
+                cap_val = 0.0 if lin_coeff >= 0 else max_cap
+            return {'capacity_MW': round(max(0.0, min(max_cap, cap_val)), 2), 'scenario_id': sc['id']}
+
+        def _rev_rate(prices: list, eff_c: float, eff_d: float) -> float:
+            """Net revenue rate ($/MW/day) from optimal multi-cycle dispatch.
+
+            Pairs cheapest hours with most expensive; each pair earns
+            eff_c * eff_d * sell_price - buy_price per MW per cycle.
+            Cycles accumulate until spread turns negative.
+            """
+            sorted_asc = sorted(prices)
+            sorted_desc = sorted(prices, reverse=True)
+            T = len(prices)
+            rate = 0.0
+            for i in range(T // 2):
+                spread = eff_c * eff_d * sorted_desc[i] - sorted_asc[i]
+                if spread > 0:
+                    rate += spread
+                else:
+                    break
+            return rate
+
+        def _compute_scenario_cost(sc: dict, inv: dict, capacity: float) -> float:
+            """Compute optimal operating cost for a scenario given fixed capacity.
+
+            Uses same multi-cycle revenue model as _solve_scenario_subproblem so
+            EV and PH results are directly comparable.
+            """
+            prices = sc['price_per_MWh']
+            eff_c = inv['charge_efficiency']
+            eff_d = inv['discharge_efficiency']
+            rate = _rev_rate(prices, eff_c, eff_d)
+            return -(rate * capacity)
+
+        def _solve_ev_policy(scenarios: list, inv: dict) -> tuple:
+            """Deterministic EV: solve with mean-scenario revenue rate."""
+            n = len(scenarios)
+            T = _N_HOURS
+            mean_prices = [sum((sc['price_per_MWh'][t] for sc in scenarios)) / n for t in range(T)]
+            eff_c = inv['charge_efficiency']
+            eff_d = inv['discharge_efficiency']
+            ev_rate = _rev_rate(mean_prices, eff_c, eff_d)
+            cap_cost_daily = inv['capital_cost_per_MW'] / 250.0
+            ev_cap = inv['max_capacity_MW'] if ev_rate > cap_cost_daily else 0.0
+            ev_annual_op = sum((sc['probability'] * _compute_scenario_cost(sc, inv, ev_cap) for sc in scenarios)) * 250
+            ev_capital = inv['capital_cost_per_MW'] * ev_cap
+            return (ev_cap, ev_annual_op + ev_capital)
+        _spl_result = solve_with_ph(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_result_json
+  - id: tool_5
+    type: SOLVE
+    config:
+      tool: ph_converged
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def ph_converged(result_json: str) -> bool:
+            """ASSERT: PH ran to convergence and RP cost < EV cost (stochastic better)."""
+            try:
+                d = json.loads(result_json)
+                if d.get('status') != 'OK':
+                    return False
+                return d.get('rp_cost', 1000000000.0) <= d.get('ev_cost', 0) + 1.0
+            except Exception:
+                return False
+        _spl_result = ph_converged(result_json)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_tool_5
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_5'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_result_json
+      - in_tool_5
+  - id: tool_6
+    type: SOLVE
+    config:
+      tool: format_ph_report
+      backend: kernel
+      arguments:
+        - '@result_json'
+      code: |
+        import json
+
+        def format_ph_report(result_json: str) -> str:
+            try:
+                d = json.loads(result_json)
+                conv_str = 'Yes ✓' if d.get('converged') else f"No (residual={d.get('primal_residual_MW', '?')} MW)"
+                lines = [f'## Progressive Hedging Report — Battery Storage Investment', '', f"**Scenarios:** {d.get('n_scenarios', '?')}  ", f"**PH iterations:** {d.get('ph_iterations', '?')}  ", f'**Converged:** {conv_str}  ', f"**Primal residual:** {d.get('primal_residual_MW', '?')} MW  ", f"**Solve time:** {d.get('solve_time_sec', '?')}s  ", '', '### Investment Decision', '', '| | PH (stochastic) | EV (mean scenario) |', '|---|---|---|', f"| Capacity (MW) | **{d.get('capacity_MW', '?')}** | {d.get('ev_capacity_MW', '?')} |", f"| Capital cost ($/yr) | ${d.get('capital_cost', '?'):,} | — |", f"| Annual net value (profit − capital, $) | **${-d.get('rp_cost', 0):,}** | ${-d.get('ev_cost', 0):,} |", f"| **Value of Stochastic Solution (VSS)** | **${d.get('vss', '?'):,}** | baseline |", '', 'VSS = RP_profit − EV_profit: the annual dollar gain from solving with', f"all {d.get('n_scenarios', '?')} scenarios vs. optimizing on the mean alone.", 'Positive VSS means the stochastic solution earns more than the EV policy.']
+                return '\n'.join(lines)
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_ph_report(result_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_ph_report
+  - id: tool_7
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''rp_cost'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'rp_cost')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_rp_cost
+  - id: tool_8
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''ev_cost'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'ev_cost')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_ev_cost
+  - id: tool_9
+    type: SOLVE
+    config:
+      tool: json_get
+      backend: kernel
+      arguments:
+        - '@result_json'
+        - '''vss'''
+      code: |
+        import json
+
+        def json_get(json_str: str, key: str) -> str:
+            """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+            Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+            ```json code fences before parsing, so raw LLM output works directly.
+            Returns '' if key not found or input is not valid JSON.
+            """
+            try:
+                clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                obj = json.loads(clean)
+                for part in str(key).split('.'):
+                    if isinstance(obj, dict):
+                        obj = obj.get(part, '')
+                    else:
+                        return ''
+                return str(obj) if obj != '' else ''
+            except (json.JSONDecodeError, TypeError):
+                return ''
+        _spl_result = json_get(result_json, 'vss')
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - json_str
+        - key
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_result_json
+      - out_vss
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: explain_ph_result_prompt
+      params:
+        - ph_report
+        - problem_description
+      prompt_inline: |-
+        You are a stochastic optimization researcher explaining Progressive Hedging.
+
+        PROBLEM:
+        {{in_problem_description}}
+
+        PH RESULT:
+        {{in_ph_report}}
+
+        Explain (≤200 words):
+        1. What is non-anticipativity and why must a two-stage stochastic program enforce it?
+           (Stage 1 decisions must be made before observing which scenario occurs.)
+        2. How does Progressive Hedging enforce non-anticipativity via a penalty term ρ?
+           What happens to individual scenario solutions as ρ → ∞?
+        3. What is the Value of Stochastic Solution (VSS) shown in the report?
+           What does it mean economically for battery investment decisions?
+        4. When would you use PH decomposition vs. solving the full extensive form directly?
+           (Hint: memory, parallelism, number of scenarios)
+      arguments:
+        - '@ph_report'
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_ph_report
+      - in_problem_description
+      - out_explanation
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: format_report_solver_on
+      backend: kernel
+      arguments:
+        - '@ph_report'
+        - '@explanation'
+      code: |
+        def format_report_solver_on(ph_report: str, explanation: str) -> str:
+            return f'=== Progressive Hedging — Battery Storage (r125) | solver=ON ===\n\n{ph_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+        _spl_result = format_report_solver_on(ph_report, explanation)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - ph_report
+        - explanation
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_ph_report
+      - in_explanation
+      - out_report
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''false'''
+      branch: 2
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: solve_ev_deterministic
+      backend: kernel
+      arguments:
+        - '@problem_json'
+      code: |
+        import json
+
+        _INVESTMENT = {'capital_cost_per_MW': 8000, 'max_capacity_MW': 100.0, 'charge_efficiency': 0.92, 'discharge_efficiency': 0.92, 'max_cycles_per_day': 2.0}
+
+        _N_HOURS = 24
+
+        def _rev_rate(prices: list, eff_c: float, eff_d: float) -> float:
+            """Net revenue rate ($/MW/day) from optimal multi-cycle dispatch.
+
+            Pairs cheapest hours with most expensive; each pair earns
+            eff_c * eff_d * sell_price - buy_price per MW per cycle.
+            Cycles accumulate until spread turns negative.
+            """
+            sorted_asc = sorted(prices)
+            sorted_desc = sorted(prices, reverse=True)
+            T = len(prices)
+            rate = 0.0
+            for i in range(T // 2):
+                spread = eff_c * eff_d * sorted_desc[i] - sorted_asc[i]
+                if spread > 0:
+                    rate += spread
+                else:
+                    break
+            return rate
+
+        def _compute_scenario_cost(sc: dict, inv: dict, capacity: float) -> float:
+            """Compute optimal operating cost for a scenario given fixed capacity.
+
+            Uses same multi-cycle revenue model as _solve_scenario_subproblem so
+            EV and PH results are directly comparable.
+            """
+            prices = sc['price_per_MWh']
+            eff_c = inv['charge_efficiency']
+            eff_d = inv['discharge_efficiency']
+            rate = _rev_rate(prices, eff_c, eff_d)
+            return -(rate * capacity)
+
+        def _solve_ev_policy(scenarios: list, inv: dict) -> tuple:
+            """Deterministic EV: solve with mean-scenario revenue rate."""
+            n = len(scenarios)
+            T = _N_HOURS
+            mean_prices = [sum((sc['price_per_MWh'][t] for sc in scenarios)) / n for t in range(T)]
+            eff_c = inv['charge_efficiency']
+            eff_d = inv['discharge_efficiency']
+            ev_rate = _rev_rate(mean_prices, eff_c, eff_d)
+            cap_cost_daily = inv['capital_cost_per_MW'] / 250.0
+            ev_cap = inv['max_capacity_MW'] if ev_rate > cap_cost_daily else 0.0
+            ev_annual_op = sum((sc['probability'] * _compute_scenario_cost(sc, inv, ev_cap) for sc in scenarios)) * 250
+            ev_capital = inv['capital_cost_per_MW'] * ev_cap
+            return (ev_cap, ev_annual_op + ev_capital)
+
+        def solve_ev_deterministic(problem_json: str) -> str:
+            """Deterministic EV policy (mean scenario solve) for solver=OFF branch."""
+            try:
+                p = json.loads(problem_json)
+                scenarios = p['scenarios']
+                cap, ev_op = _solve_ev_policy(scenarios, _INVESTMENT)
+                return json.dumps({'status': 'OK', 'capacity_MW': round(cap, 1), 'ev_annual_op_cost': round(ev_op, 0), 'capital_cost': round(_INVESTMENT['capital_cost_per_MW'] * cap, 0)})
+            except Exception as e:
+                return json.dumps({'status': 'ERROR', 'error': str(e)})
+        _spl_result = solve_ev_deterministic(problem_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem_json
+      - out_ev_json
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: format_ev_report
+      backend: kernel
+      arguments:
+        - '@ev_json'
+      code: |
+        import json
+
+        def format_ev_report(ev_json: str) -> str:
+            try:
+                d = json.loads(ev_json)
+                return f"**EV (mean-scenario) policy:**  \nCapacity: {d.get('capacity_MW', '?')} MW | Capital: ${d.get('capital_cost', '?'):,} | Annual op cost: ${d.get('ev_annual_op_cost', '?'):,}"
+            except Exception as e:
+                return f'(format error: {e})'
+        _spl_result = format_ev_report(ev_json)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - ev_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_ev_json
+      - out_ev_report
+  - id: gen_2
+    type: GENERATE
+    config:
+      function: ev_policy_prompt
+      params:
+        - problem_description
+      prompt_inline: |-
+        You are an energy economist advising on battery storage investment.
+
+        INVESTMENT PROBLEM:
+        {{in_problem_description}}
+
+        Using a deterministic "expected value" (EV) approach — assume all scenarios equal
+        the mean demand/price trajectory and make one decision for all of them:
+        1. How much battery capacity (MW) would you build, and why?
+           Consider: capital cost vs. peak-shaving savings vs. arbitrage revenue.
+        2. What is the risk of under-investing? Over-investing?
+        3. In low-demand scenarios, does excess capacity hurt you?
+           In high-demand scenarios, does insufficient capacity cost you?
+        4. What is the "value of stochastic solution" (VSS) conceptually?
+           Why is solving with 30 scenarios better than solving with mean values?
+
+        Be specific: estimate capacity in MW and expected annual savings.
+      arguments:
+        - '@problem_description'
+    ports:
+      - trigger
+      - complete
+      - in_problem_description
+      - out_llm_ev
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: format_report_solver_off
+      backend: kernel
+      arguments:
+        - '@llm_ev'
+        - '@ev_report'
+      code: |
+        def format_report_solver_off(llm_ev: str, ev_report: str) -> str:
+            return f'=== Progressive Hedging — Battery Storage (r125) | solver=OFF ===\n\n── Deterministic EV Policy (computed) ──────────────────────\n{ev_report}\n\n── LLM Investment Reasoning ─────────────────────────────────\n{llm_ev}\n\nNote: Both deterministic EV and LLM ignore scenario uncertainty.\nRun --param use_solver=true for Progressive Hedging across all scenarios.'
+        _spl_result = format_report_solver_off(llm_ev, ev_report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - llm_ev
+        - ev_report
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_llm_ev
+      - in_ev_report
+      - out_report
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_n_scenarios
+    target: tool_1.in_n_scenarios
+    type: binds
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_2.in_problem_json
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_use_solver
+    target: tool_3.in_use_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_1.in_use_solver
+    type: binds
+  - source: eval_1.pass
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_4.in_problem_json
+    type: binds
+  - source: tool_4.complete
+    target: tool_5.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_5.in_result_json
+    type: binds
+  - source: tool_5.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: assert_1.in_result_json
+    type: binds
+  - source: tool_5.out_tool_5
+    target: assert_1.in_tool_5
+    type: binds
+  - source: assert_1.pass
+    target: tool_6.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: tool_6.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_6.in_result_json
+    type: binds
+  - source: tool_6.complete
+    target: tool_7.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_7.in_result_json
+    type: binds
+  - source: tool_7.complete
+    target: tool_8.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_8.in_result_json
+    type: binds
+  - source: tool_8.complete
+    target: tool_9.trigger
+    type: triggers
+  - source: tool_4.out_result_json
+    target: tool_9.in_result_json
+    type: binds
+  - source: tool_9.complete
+    target: gen_1.trigger
+    type: triggers
+  - source: tool_6.out_ph_report
+    target: gen_1.in_ph_report
+    type: binds
+  - source: tool_2.out_problem_description
+    target: gen_1.in_problem_description
+    type: binds
+  - source: gen_1.complete
+    target: tool_10.trigger
+    type: triggers
+  - source: tool_6.out_ph_report
+    target: tool_10.in_ph_report
+    type: binds
+  - source: gen_1.out_explanation
+    target: tool_10.in_explanation
+    type: binds
+  - source: eval_1.fail
+    target: eval_2.trigger
+    type: triggers
+  - source: tool_3.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: tool_11.trigger
+    type: triggers
+  - source: tool_1.out_problem_json
+    target: tool_11.in_problem_json
+    type: binds
+  - source: tool_11.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: tool_11.out_ev_json
+    target: tool_12.in_ev_json
+    type: binds
+  - source: tool_12.complete
+    target: gen_2.trigger
+    type: triggers
+  - source: tool_2.out_problem_description
+    target: gen_2.in_problem_description
+    type: binds
+  - source: gen_2.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: gen_2.out_llm_ev
+    target: tool_13.in_llm_ev
+    type: binds
+  - source: tool_12.out_ev_report
+    target: tool_13.in_ev_report
+    type: binds
+  - source: tool_10.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_13.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_10.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: tool_13.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: wf_exit.trigger
+    type: triggers

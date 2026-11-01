@@ -1,0 +1,489 @@
+version: 1.0-graph
+workflow:
+  name: compliance_check
+  inputs:
+    - name: pii_map
+      type: TEXT
+      default: '{"entities": []}'
+    - name: destination
+      type: TEXT
+      default: external_api
+    - name: engine
+      type: TEXT
+      default: stdlib
+    - name: rules_file
+      type: TEXT
+      default: ''
+  outputs:
+    - name: verdict
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_pii_map
+      - out_destination
+      - out_engine
+      - out_rules_file
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: normalize_engine
+      backend: kernel
+      arguments:
+        - '@engine'
+      code: |
+        def normalize_engine(engine: str) -> str:
+            """The engine name, lower-cased and trimmed: stdlib | sympy | z3. An unknown name is reported by the check as an
+            error (there is no silent fallback; the LLM-only ablation is `use_solver=false`, not an engine)."""
+            return str(engine).strip().lower() or 'stdlib'
+        _spl_result = normalize_engine(engine)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - engine
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_engine
+      - out_engine
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: load_rules
+      backend: kernel
+      arguments:
+        - '@rules_file'
+      code: |
+        import json
+
+        from pathlib import Path
+
+        DATA_TYPES = ('ssn', 'ccn', 'email', 'phone', 'address', 'name', 'dob', 'other')
+
+        KNOWN_FACTS = tuple((f'has_{t}' for t in DATA_TYPES)) + ('has_pii', 'is_masked', 'is_external')
+
+        RULES_FILE = Path.home() / '.graflang' / 'solvers' / 'pii_compliance' / 'rules.json'
+
+        def expr_variables(expr: dict) -> set:
+            """Names of the variables an expression uses."""
+            if 'var' in expr:
+                return {expr['var']}
+            if 'const' in expr:
+                return set()
+            if 'not' in expr:
+                return expr_variables(expr['not'])
+            for key in ('and', 'or', 'implies'):
+                if key in expr:
+                    return set().union(*[expr_variables(e) for e in expr[key]])
+            raise ValueError(f'unknown expression: {expr!r}')
+
+        def validate_rules(rules: dict) -> list:
+            """The rules as a list, after checking the ids are unique and every variable is declared."""
+            out = rules.get('rules')
+            if not isinstance(out, list) or not out:
+                raise ValueError('rules must be a non-empty list')
+            declared, seen = (set(rules.get('variables', [])), set())
+            for rule in out:
+                if not rule.get('id') or 'expr' not in rule:
+                    raise ValueError(f'every rule needs an id and an expr: {rule!r}')
+                if rule['id'] in seen:
+                    raise ValueError(f"duplicate rule id {rule['id']!r}")
+                seen.add(rule['id'])
+                unknown = expr_variables(rule['expr']) - declared
+                if unknown:
+                    raise ValueError(f"rule {rule['id']} uses undeclared variables {sorted(unknown)}")
+            return out
+
+        def load_rules_file(path: str='') -> dict:
+            """The rules in a JSON file (default: rules.json next to this file), checked. Raises ValueError with the reason."""
+            target = Path(str(path).strip()) if str(path).strip() else RULES_FILE
+            try:
+                rules = json.loads(target.read_text(encoding='utf-8'))
+            except OSError as e:
+                raise ValueError(f'cannot read rules file {target}: {e.strerror or e}') from None
+            except ValueError as e:
+                raise ValueError(f'rules file {target} is not valid JSON: {e}') from None
+            validate_rules(rules)
+            unknown = sorted(set(rules.get('variables', [])) - set(KNOWN_FACTS))
+            if unknown:
+                raise ValueError(f'rules file {target} uses variables that are not facts: {unknown}; known facts: {list(KNOWN_FACTS)}')
+            return rules
+
+        def load_rules(rules_file: str) -> str:
+            """The rules from a JSON file as JSON text ("" means the default rules.json). A bad file gives {"error": ...},
+            which the check reports, so a mistake in your rules is shown instead of silently falling back to the defaults."""
+            try:
+                return json.dumps(load_rules_file(rules_file))
+            except ValueError as e:
+                return json.dumps({'error': str(e)})
+        _spl_result = load_rules(rules_file)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - rules_file
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_rules_file
+      - out_rules
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: check_compliance
+      backend: kernel
+      arguments:
+        - '@pii_map'
+        - '@destination'
+        - '@engine'
+        - '@rules'
+      code: |
+        import json
+
+        import re
+
+        from pathlib import Path
+
+        EXTERNAL_DESTINATIONS = ('external_api', 'third_party_vendor')
+
+        ENGINES = ('stdlib', 'sympy', 'z3')
+
+        DATA_TYPES = ('ssn', 'ccn', 'email', 'phone', 'address', 'name', 'dob', 'other')
+
+        TYPE_ALIASES = {'credit_card': 'ccn', 'card': 'ccn', 'social_security': 'ssn', 'date_of_birth': 'dob'}
+
+        KNOWN_FACTS = tuple((f'has_{t}' for t in DATA_TYPES)) + ('has_pii', 'is_masked', 'is_external')
+
+        RULES_FILE = Path.home() / '.graflang' / 'solvers' / 'pii_compliance' / 'rules.json'
+
+        def expr_variables(expr: dict) -> set:
+            """Names of the variables an expression uses."""
+            if 'var' in expr:
+                return {expr['var']}
+            if 'const' in expr:
+                return set()
+            if 'not' in expr:
+                return expr_variables(expr['not'])
+            for key in ('and', 'or', 'implies'):
+                if key in expr:
+                    return set().union(*[expr_variables(e) for e in expr[key]])
+            raise ValueError(f'unknown expression: {expr!r}')
+
+        def eval_expr(expr: dict, facts: dict) -> bool:
+            """Evaluate an expression under a complete assignment (the stdlib engine)."""
+            if 'var' in expr:
+                return bool(facts[expr['var']])
+            if 'const' in expr:
+                return bool(expr['const'])
+            if 'not' in expr:
+                return not eval_expr(expr['not'], facts)
+            if 'and' in expr:
+                return all((eval_expr(e, facts) for e in expr['and']))
+            if 'or' in expr:
+                return any((eval_expr(e, facts) for e in expr['or']))
+            if 'implies' in expr:
+                a, b = expr['implies']
+                return not eval_expr(a, facts) or eval_expr(b, facts)
+            raise ValueError(f'unknown expression: {expr!r}')
+
+        def validate_rules(rules: dict) -> list:
+            """The rules as a list, after checking the ids are unique and every variable is declared."""
+            out = rules.get('rules')
+            if not isinstance(out, list) or not out:
+                raise ValueError('rules must be a non-empty list')
+            declared, seen = (set(rules.get('variables', [])), set())
+            for rule in out:
+                if not rule.get('id') or 'expr' not in rule:
+                    raise ValueError(f'every rule needs an id and an expr: {rule!r}')
+                if rule['id'] in seen:
+                    raise ValueError(f"duplicate rule id {rule['id']!r}")
+                seen.add(rule['id'])
+                unknown = expr_variables(rule['expr']) - declared
+                if unknown:
+                    raise ValueError(f"rule {rule['id']} uses undeclared variables {sorted(unknown)}")
+            return out
+
+        def load_rules_file(path: str='') -> dict:
+            """The rules in a JSON file (default: rules.json next to this file), checked. Raises ValueError with the reason."""
+            target = Path(str(path).strip()) if str(path).strip() else RULES_FILE
+            try:
+                rules = json.loads(target.read_text(encoding='utf-8'))
+            except OSError as e:
+                raise ValueError(f'cannot read rules file {target}: {e.strerror or e}') from None
+            except ValueError as e:
+                raise ValueError(f'rules file {target} is not valid JSON: {e}') from None
+            validate_rules(rules)
+            unknown = sorted(set(rules.get('variables', [])) - set(KNOWN_FACTS))
+            if unknown:
+                raise ValueError(f'rules file {target} uses variables that are not facts: {unknown}; known facts: {list(KNOWN_FACTS)}')
+            return rules
+
+        DEFAULT_RULES = load_rules_file()
+
+        def engine_available(engine: str) -> tuple:
+            """(True, "") or (False, why)."""
+            if engine == 'stdlib':
+                return (True, '')
+            try:
+                if engine == 'sympy':
+                    import sympy
+                elif engine == 'z3':
+                    import z3
+                else:
+                    return (False, f'unknown engine {engine!r}; choose from {list(ENGINES)}')
+            except ImportError:
+                package = 'sympy' if engine == 'sympy' else 'z3-solver'
+                return (False, f'{engine} engine needs {package}: pip install {package}')
+            return (True, '')
+
+        def _sympy_expr(expr: dict, syms: dict):
+            from sympy import And, Not, Or, Implies, true, false
+            if 'var' in expr:
+                return syms[expr['var']]
+            if 'const' in expr:
+                return true if expr['const'] else false
+            if 'not' in expr:
+                return Not(_sympy_expr(expr['not'], syms))
+            if 'and' in expr:
+                return And(*[_sympy_expr(e, syms) for e in expr['and']])
+            if 'or' in expr:
+                return Or(*[_sympy_expr(e, syms) for e in expr['or']])
+            a, b = expr['implies']
+            return Implies(_sympy_expr(a, syms), _sympy_expr(b, syms))
+
+        def _z3_expr(expr: dict, bools: dict):
+            import z3
+            if 'var' in expr:
+                return bools[expr['var']]
+            if 'const' in expr:
+                return z3.BoolVal(bool(expr['const']))
+            if 'not' in expr:
+                return z3.Not(_z3_expr(expr['not'], bools))
+            if 'and' in expr:
+                return z3.And(*[_z3_expr(e, bools) for e in expr['and']])
+            if 'or' in expr:
+                return z3.Or(*[_z3_expr(e, bools) for e in expr['or']])
+            a, b = expr['implies']
+            return z3.Implies(_z3_expr(a, bools), _z3_expr(b, bools))
+
+        def _check_stdlib(facts: dict, rules: list) -> dict:
+            return {'violated': [r['id'] for r in rules if not eval_expr(r['expr'], facts)]}
+
+        def _check_sympy(facts: dict, rules: list) -> dict:
+            from sympy import And, Not, Symbol
+            from sympy.logic.inference import satisfiable
+            syms = {name: Symbol(name) for name in facts}
+            fact_formula = And(*[syms[n] if v else Not(syms[n]) for n, v in facts.items()])
+            violated = [r['id'] for r in rules if not satisfiable(And(fact_formula, _sympy_expr(r['expr'], syms)))]
+            return {'violated': violated}
+
+        def _check_z3(facts: dict, rules: list) -> dict:
+            import z3
+            bools = {name: z3.Bool(name) for name in facts}
+            solver = z3.Solver()
+            for name, value in facts.items():
+                solver.add(bools[name] == z3.BoolVal(bool(value)))
+            violated = []
+            for r in rules:
+                solver.push()
+                solver.add(_z3_expr(r['expr'], bools))
+                if solver.check() == z3.unsat:
+                    violated.append(r['id'])
+                solver.pop()
+            core = []
+            if violated:
+                tracked = z3.Solver()
+                for name, value in facts.items():
+                    tracked.add(bools[name] == z3.BoolVal(bool(value)))
+                for r in rules:
+                    tracked.assert_and_track(_z3_expr(r['expr'], bools), z3.Bool(f"rule_{r['id']}"))
+                if tracked.check() == z3.unsat:
+                    core = sorted((str(c)[len('rule_'):] for c in tracked.unsat_core()))
+            return {'violated': violated, 'core': core}
+
+        _CHECKERS = {'stdlib': _check_stdlib, 'sympy': _check_sympy, 'z3': _check_z3}
+
+        def check(facts: dict, rules: dict, engine: str='stdlib') -> dict:
+            """Do the facts satisfy every rule? {"status": "OK", "compliant": bool, "violated": [rule ids], ...}."""
+            ok, why = engine_available(engine)
+            if not ok:
+                return {'status': 'ERROR', 'engine': engine, 'error': why}
+            try:
+                rule_list = validate_rules(rules)
+                missing = set(rules.get('variables', [])) - set(facts)
+                if missing:
+                    raise ValueError(f'facts are missing {sorted(missing)}')
+                found = _CHECKERS[engine]({k: bool(facts[k]) for k in rules['variables']}, rule_list)
+            except (ValueError, KeyError) as e:
+                return {'status': 'ERROR', 'engine': engine, 'error': str(e)}
+            return {'status': 'OK', 'engine': engine, 'compliant': not found['violated'], **found}
+
+        def parse_pii_map_text(raw: str) -> dict:
+            """The PII map from LLM output (code fences allowed). Unreadable output gives {"entities": [], "parse_error": ...}
+            so the caller can fail closed instead of treating a broken reply as 'no PII'."""
+            text = str(raw).strip()
+            fenced = re.search('```(?:json)?\\s*([\\s\\S]*?)```', text)
+            if fenced:
+                text = fenced.group(1).strip()
+            try:
+                data = json.loads(text)
+                if isinstance(data, dict) and data.get('parse_error'):
+                    return {'entities': [], 'parse_error': str(data['parse_error'])}
+                entities = data['entities']
+                if not isinstance(entities, list) or not all((isinstance(e, dict) and 'type' in e for e in entities)):
+                    raise ValueError('entities must be a list of objects with a type')
+                return {'entities': [{'type': str(e['type']).upper(), 'masked': bool(e.get('masked', False))} for e in entities]}
+            except (ValueError, KeyError, TypeError) as e:
+                return {'entities': [], 'parse_error': f'{type(e).__name__}: {e}'}
+
+        def derive_facts_from(pii_map: dict, destination: str, external_destinations=EXTERNAL_DESTINATIONS) -> dict:
+            """Boolean facts from the PII map and the destination (see KNOWN_FACTS)."""
+            entities = pii_map.get('entities', [])
+            kinds = {TYPE_ALIASES.get(str(e['type']).lower(), str(e['type']).lower()) for e in entities}
+            facts = {f'has_{t}': t in kinds for t in DATA_TYPES}
+            facts['has_pii'] = bool(entities)
+            facts['is_masked'] = all((e.get('masked', False) for e in entities))
+            facts['is_external'] = str(destination).strip().lower() in {d.lower() for d in external_destinations}
+            return facts
+
+        def check_pii_map(pii_map: dict, destination: str, engine: str='stdlib', rules: 'dict | None'=None) -> dict:
+            """Facts from the PII map and destination, then `check`. A map that could not be read is NOT compliant."""
+            if pii_map.get('parse_error'):
+                return {'status': 'OK', 'engine': engine, 'compliant': False, 'violated': ['UNREADABLE_PII_MAP'], 'error': pii_map['parse_error'], 'facts': {}}
+            rules = rules or DEFAULT_RULES
+            facts = derive_facts_from(pii_map, destination, rules.get('external_destinations', EXTERNAL_DESTINATIONS))
+            result = check(facts, rules, engine)
+            result['facts'] = facts
+            return result
+
+        def normalize_engine(engine: str) -> str:
+            """The engine name, lower-cased and trimmed: stdlib | sympy | z3. An unknown name is reported by the check as an
+            error (there is no silent fallback; the LLM-only ablation is `use_solver=false`, not an engine)."""
+            return str(engine).strip().lower() or 'stdlib'
+
+        def check_compliance(pii_map_json: str, destination: str, engine: str, rules_json: str='') -> str:
+            """Check a PII map against the rules with the chosen engine. Returns JSON:
+            {"status": "OK"|"ERROR", "engine", "compliant", "violated": [rule ids], "facts": {...}}."""
+            try:
+                rules = json.loads(rules_json) if str(rules_json).strip() else None
+                if isinstance(rules, dict) and rules.get('error'):
+                    return json.dumps({'status': 'ERROR', 'error': rules['error']})
+                result = check_pii_map(parse_pii_map_text(pii_map_json), destination, normalize_engine(engine), rules)
+            except (ValueError, TypeError) as e:
+                result = {'status': 'ERROR', 'error': f'{type(e).__name__}: {e}'}
+            return json.dumps(result)
+        _spl_result = check_compliance(pii_map, destination, engine, rules)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - pii_map_json
+        - destination
+        - engine
+        - rules_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_pii_map
+      - in_destination
+      - in_engine
+      - in_rules
+      - out_verdict
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: check_succeeded
+      backend: kernel
+      arguments:
+        - '@verdict'
+      code: |
+        import json
+
+        def check_succeeded(result_json: str) -> bool:
+            """ASSERT gate: the engine ran (a violation is a result, not a failure; an engine error is a failure)."""
+            try:
+                return json.loads(result_json).get('status') == 'OK'
+            except (ValueError, AttributeError):
+                return False
+        _spl_result = check_succeeded(verdict)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_verdict
+      - out_tool_4
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_4'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_verdict
+      - in_tool_4
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_verdict
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: wf_entry.out_engine
+    target: tool_1.in_engine
+    type: binds
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: wf_entry.out_rules_file
+    target: tool_2.in_rules_file
+    type: binds
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_pii_map
+    target: tool_3.in_pii_map
+    type: binds
+  - source: wf_entry.out_destination
+    target: tool_3.in_destination
+    type: binds
+  - source: tool_1.out_engine
+    target: tool_3.in_engine
+    type: binds
+  - source: tool_2.out_rules
+    target: tool_3.in_rules
+    type: binds
+  - source: tool_3.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: tool_3.out_verdict
+    target: tool_4.in_verdict
+    type: binds
+  - source: tool_4.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: tool_3.out_verdict
+    target: assert_1.in_verdict
+    type: binds
+  - source: tool_4.out_tool_4
+    target: assert_1.in_tool_4
+    type: binds
+  - source: tool_3.out_verdict
+    target: wf_exit.in_verdict
+    type: binds
+  - source: assert_1.pass
+    target: wf_exit.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: wf_exit.trigger
+    type: triggers

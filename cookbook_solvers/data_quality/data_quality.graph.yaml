@@ -1,0 +1,545 @@
+version: 1.0-graph
+workflow:
+  name: data_quality
+  inputs:
+  - name: data_description
+    type: TEXT
+    default: 'Sales transactions dataset: 500 rows, columns transaction_id, amount,
+      customer_id, region, date. Data imported from POS systems across 4 regions over
+      the past 6 months.'
+  - name: data_csv
+    type: TEXT
+    default: demo
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  outputs:
+  - name: report
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_data_description
+  - out_data_csv
+  - out_use_solver
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: get_default_suite
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_SUITE = {'suite_name': 'SalesTransactions_v1', 'expectations': [{'type': 'expect_column_to_exist', 'column': 'transaction_id'}, {'type': 'expect_column_to_exist', 'column': 'amount'}, {'type': 'expect_column_to_exist', 'column': 'customer_id'}, {'type': 'expect_column_to_exist', 'column': 'region'}, {'type': 'expect_column_values_to_be_unique', 'column': 'transaction_id'}, {'type': 'expect_column_values_to_not_be_null', 'column': 'transaction_id'}, {'type': 'expect_column_values_to_not_be_null', 'column': 'customer_id'}, {'type': 'expect_column_values_to_not_be_null', 'column': 'amount'}, {'type': 'expect_column_values_to_be_between', 'column': 'amount', 'min_value': 0.01, 'max_value': 10000}, {'type': 'expect_column_values_to_be_in_set', 'column': 'region', 'value_set': ['North', 'South', 'East', 'West']}]}
+
+      def get_default_suite() -> str:
+          """Return the default expectation suite JSON."""
+          return json.dumps(_DEFAULT_SUITE)
+      _spl_result = get_default_suite()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - out_suite_json
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_use_solver
+  - out_use_solver
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: '@in_use_solver == ''true'''
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_use_solver
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: run_expectations
+    backend: kernel
+    arguments:
+    - '@suite_json'
+    - '@data_csv'
+    code: |
+      import json
+
+      from io import StringIO
+
+      def _run_expectation(df, exp: dict) -> dict:
+          """Execute a single expectation against a DataFrame. Returns result dict."""
+          import pandas as pd
+          col = exp.get('column')
+          etype = exp['type']
+          rows = len(df)
+          if etype == 'expect_column_to_exist':
+              passed = col in df.columns
+              return {'type': etype, 'column': col, 'passed': passed, 'n_failed': 0 if passed else rows, 'message': '' if passed else f"Column '{col}' not found"}
+          if col not in df.columns:
+              return {'type': etype, 'column': col, 'passed': False, 'n_failed': rows, 'message': f"Column '{col}' not found"}
+          series = df[col]
+          if etype == 'expect_column_values_to_not_be_null':
+              mask = series.isna()
+              n_fail = int(mask.sum())
+              samples = series[mask].index[:5].tolist()
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'sample_rows': samples}
+          if etype == 'expect_column_values_to_be_between':
+              mn, mx = (exp.get('min_value'), exp.get('max_value'))
+              mask = pd.Series([False] * rows, index=df.index)
+              if mn is not None:
+                  mask = mask | (series < mn)
+              if mx is not None:
+                  mask = mask | (series > mx)
+              n_fail = int(mask.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'min_value': mn, 'max_value': mx, 'sample_values': series[mask].head(5).tolist()}
+          if etype == 'expect_column_values_to_be_in_set':
+              allowed = set(exp.get('value_set', []))
+              mask = ~series.isin(allowed) & series.notna()
+              n_fail = int(mask.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'value_set': list(allowed), 'unexpected_values': list(series[mask].unique()[:5])}
+          if etype == 'expect_column_values_to_be_unique':
+              dupes = series.duplicated()
+              n_fail = int(dupes.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'sample_dupes': series[dupes].head(5).tolist()}
+          if etype == 'expect_column_values_to_match_regex':
+              pattern = exp.get('regex', '.*')
+              mask = ~series.astype(str).str.match(pattern, na=False)
+              n_fail = int(mask.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'regex': pattern, 'sample_failures': series[mask].head(5).tolist()}
+          return {'type': etype, 'column': col, 'passed': False, 'n_failed': 0, 'message': f'Unknown expectation type: {etype}'}
+
+      def _make_demo_dataframe():
+          """Create a synthetic sales dataset with embedded quality issues."""
+          import pandas as pd
+          import numpy as np
+          rng = np.random.default_rng(42)
+          n = 500
+          df = pd.DataFrame({'transaction_id': [f'TXN{i:05d}' for i in range(n)], 'amount': rng.uniform(1, 9000, n).round(2), 'customer_id': [f'CUST{rng.integers(1, 200):04d}' for _ in range(n)], 'region': rng.choice(['North', 'South', 'East', 'West'], n), 'date': pd.date_range('2024-01-01', periods=n, freq='h').astype(str)})
+          neg_idx = rng.choice(n, size=12, replace=False)
+          df.loc[neg_idx, 'amount'] = rng.uniform(-500, -1, 12).round(2)
+          null_idx = rng.choice(n, size=8, replace=False)
+          df.loc[null_idx, 'customer_id'] = None
+          dupe_idx = rng.choice(n, size=5, replace=False)
+          df.loc[dupe_idx, 'transaction_id'] = 'TXN99999'
+          region_idx = rng.choice(n, size=3, replace=False)
+          df.loc[region_idx, 'region'] = 'Unknown'
+          return df
+
+      def run_expectations(suite_json: str, data_csv: str) -> str:
+          """Run an expectation suite against a CSV-encoded DataFrame.
+
+          Returns:
+            {"suite_name": str, "n_rows": int, "n_expectations": int,
+             "n_passed": int, "n_failed": int, "status": "PASS"|"FAIL",
+             "results": [{type, column, passed, n_failed, ...}]}
+          """
+          try:
+              import pandas as pd
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'pandas not installed'})
+          try:
+              suite = json.loads(suite_json)
+              if data_csv.strip() == '' or data_csv.strip() == 'demo':
+                  df = _make_demo_dataframe()
+              else:
+                  df = pd.read_csv(StringIO(data_csv))
+              results = [_run_expectation(df, exp) for exp in suite['expectations']]
+              n_passed = sum((1 for r in results if r['passed']))
+              n_failed = len(results) - n_passed
+              return json.dumps({'suite_name': suite.get('suite_name', 'unnamed'), 'n_rows': len(df), 'n_expectations': len(results), 'n_passed': n_passed, 'n_failed': n_failed, 'status': 'PASS' if n_failed == 0 else 'FAIL', 'results': results})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = run_expectations(suite_json, data_csv)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - suite_json
+    - data_csv
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_suite_json
+  - in_data_csv
+  - out_result_json
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: format_quality_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_quality_report(result_json: str) -> str:
+          """Markdown report of expectation validation results."""
+          try:
+              data = json.loads(result_json)
+              results = data.get('results', [])
+              lines = [f"## Data Quality Report — {data.get('suite_name', 'Suite')}", '', f"**Dataset:** {data.get('n_rows', '?')} rows  ", f"**Expectations:** {data.get('n_expectations', '?')} total  ", f"**Passed:** {data.get('n_passed', '?')}  ", f"**Failed:** {data.get('n_failed', '?')}  ", f"**Status:** {('✓ PASS' if data.get('status') == 'PASS' else '✗ FAIL')}", '', '| Expectation | Column | Status | Failures |', '|---|---|---|---|']
+              for r in results:
+                  status = 'PASS' if r['passed'] else f"FAIL ({r.get('n_failed', '?')} rows, {r.get('pct_failed', '?')}%)"
+                  details = ''
+                  if not r['passed']:
+                      if 'unexpected_values' in r:
+                          details = f" values={r['unexpected_values'][:3]}"
+                      elif 'sample_values' in r:
+                          details = f" samples={r['sample_values'][:3]}"
+                  lines.append(f"| {r['type']} | {r.get('column', '—')} | {status}{details} | |")
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_quality_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_result_json
+  - out_quality_report
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - '''n_failed'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_failed')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_result_json
+  - out_n_failed
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - '''n_rows'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_rows')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_result_json
+  - out_n_rows
+- id: gen_1
+  type: GENERATE
+  config:
+    function: explain_failures_prompt
+    params:
+    - quality_report
+    - data_description
+    prompt_inline: |-
+      You are a data quality analyst. The automated expectation engine just validated a sales dataset.
+
+      DATA DESCRIPTION:
+      {{in_data_description}}
+
+      VALIDATION REPORT:
+      {{in_quality_report}}
+
+      Explain the findings in plain English (≤150 words):
+      1. What quality issues were found?
+      2. What is the likely business cause of each issue?
+      3. Which issue is most urgent to fix?
+      4. How would each issue affect downstream analysis if left uncorrected?
+    arguments:
+    - '@quality_report'
+    - '@data_description'
+  ports:
+  - trigger
+  - complete
+  - in_quality_report
+  - in_data_description
+  - out_explanation
+- id: tool_7
+  type: SOLVE
+  config:
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@quality_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(quality_report: str, explanation: str) -> str:
+          return f'=== Data Quality Validator (r103) | solver=ON ===\n\n{quality_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(quality_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - quality_report
+    - explanation
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_quality_report
+  - in_explanation
+  - out_report
+- id: eval_2
+  type: EVALUATE
+  config:
+    condition: '@in_use_solver == ''false'''
+    branch: 2
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_use_solver
+- id: gen_2
+  type: GENERATE
+  config:
+    function: inspect_data_prompt
+    params:
+    - data_description
+    prompt_inline: |-
+      You are a data quality analyst reviewing a sales transaction dataset.
+
+      DATASET DESCRIPTION:
+      {{in_data_description}}
+
+      The dataset has columns: transaction_id, amount, customer_id, region, date.
+      Expected rules:
+      - transaction_id: unique, not null
+      - amount: not null, must be > 0 and <= $10,000
+      - customer_id: not null
+      - region: one of [North, South, East, West]
+
+      Examine the description and report:
+      1. Which data quality rules appear to be satisfied?
+      2. Which rules might be violated, and why?
+      3. Estimate how many rows might have quality issues.
+      4. What action do you recommend for each issue found?
+
+      Be specific. Work from the description — do not assume the data is clean.
+    arguments:
+    - '@data_description'
+  ports:
+  - trigger
+  - complete
+  - in_data_description
+  - out_llm_analysis
+- id: tool_8
+  type: SOLVE
+  config:
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_analysis'
+    code: |
+      def format_report_solver_off(llm_analysis: str) -> str:
+          return f'=== Data Quality Validator (r103) | solver=OFF ===\n\n── LLM Sample-Based Analysis ───────────────────────────────\n{llm_analysis}\n\nNote: LLM inspects the description only — run with --param use_solver=true\nto validate all rows with the expectation engine.'
+      _spl_result = format_report_solver_off(llm_analysis)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_analysis
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_llm_analysis
+  - out_report
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: wf_entry.out_use_solver
+  target: tool_2.in_use_solver
+  type: binds
+- source: tool_2.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_2.out_use_solver
+  target: eval_1.in_use_solver
+  type: binds
+- source: eval_1.pass
+  target: tool_3.trigger
+  type: triggers
+- source: tool_1.out_suite_json
+  target: tool_3.in_suite_json
+  type: binds
+- source: wf_entry.out_data_csv
+  target: tool_3.in_data_csv
+  type: binds
+- source: tool_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: tool_3.out_result_json
+  target: tool_4.in_result_json
+  type: binds
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_3.out_result_json
+  target: tool_5.in_result_json
+  type: binds
+- source: tool_5.complete
+  target: tool_6.trigger
+  type: triggers
+- source: tool_3.out_result_json
+  target: tool_6.in_result_json
+  type: binds
+- source: tool_6.complete
+  target: gen_1.trigger
+  type: triggers
+- source: tool_4.out_quality_report
+  target: gen_1.in_quality_report
+  type: binds
+- source: wf_entry.out_data_description
+  target: gen_1.in_data_description
+  type: binds
+- source: gen_1.complete
+  target: tool_7.trigger
+  type: triggers
+- source: tool_4.out_quality_report
+  target: tool_7.in_quality_report
+  type: binds
+- source: gen_1.out_explanation
+  target: tool_7.in_explanation
+  type: binds
+- source: eval_1.fail
+  target: eval_2.trigger
+  type: triggers
+- source: tool_2.out_use_solver
+  target: eval_2.in_use_solver
+  type: binds
+- source: eval_2.pass
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_data_description
+  target: gen_2.in_data_description
+  type: binds
+- source: gen_2.complete
+  target: tool_8.trigger
+  type: triggers
+- source: gen_2.out_llm_analysis
+  target: tool_8.in_llm_analysis
+  type: binds
+- source: tool_7.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: tool_8.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: tool_7.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: tool_8.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: eval_2.fail
+  target: wf_exit.trigger
+  type: triggers

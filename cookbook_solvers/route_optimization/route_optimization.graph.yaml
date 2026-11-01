@@ -1,0 +1,1037 @@
+version: 1.0-graph
+workflow:
+  name: route_optimization
+  inputs:
+    - name: problem
+      type: TEXT
+      default: 'A delivery driver starts and ends at the depot (location 0) and must visit 5 customer locations (1-5). The distance matrix in miles is: [[0,29,20,21,16,31],[29,0,15,29,28,40],[20,15,0,15,14,25],[21,29,15,0,4,12],[16,28,14,4,0,16],[31,40,25,12,16,0]] (row/col order = depot,1,2,3,4,5). Find the shortest round-trip route visiting every location exactly once.'
+    - name: enable_solver
+      type: TEXT
+      default: 'true'
+    - name: max_tries
+      type: INTEGER
+      default: 3
+    - name: out_dir
+      type: TEXT
+      default: ./cookbook/87_route_optimization/output
+  outputs:
+    - name: report
+      type: TEXT
+nodes:
+  - id: wf_entry
+    type: INPUT
+    ports:
+      - entry
+      - out_problem
+      - out_enable_solver
+      - out_max_tries
+      - out_out_dir
+  - id: tool_1
+    type: SOLVE
+    config:
+      tool: time_monotonic
+      backend: kernel
+      arguments: []
+      code: |
+        def time_monotonic() -> str:
+            """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+            Pair with time_elapsed() to measure elapsed wall-clock time."""
+            import time as _time
+            return str(_time.monotonic())
+        _spl_result = time_monotonic()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_t_start
+  - id: tool_2
+    type: SOLVE
+    config:
+      tool: time_now
+      backend: kernel
+      arguments: []
+      code: |
+        import datetime
+
+        def time_now() -> str:
+            """TIME_NOW() — current local time as a filesystem-safe string:
+            YYYY-MM-DD_HH-MM-SS."""
+            return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        _spl_result = time_now()
+      result: _spl_result
+      out_type: TEXT
+      tool_params: []
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - out_ts_safe
+  - id: tool_3
+    type: SOLVE
+    config:
+      tool: lower
+      backend: kernel
+      arguments:
+        - '@enable_solver'
+      code: |
+        def lower(value: str) -> str:
+            """LOWER(value) — convert to lowercase."""
+            return str(value).lower()
+        _spl_result = lower(enable_solver)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_enable_solver
+      - out_solver_mode
+  - id: eval_1
+    type: EVALUATE
+    config:
+      condition: (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode == 'yes')
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solver_mode
+  - id: set_1
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''yes'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: set_2
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''no'''
+    ports:
+      - trigger
+      - complete
+      - out_use_solver
+  - id: eval_2
+    type: EVALUATE
+    config:
+      condition: '@in_use_solver == ''no'''
+      branch: 1
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_use_solver
+  - id: gen_1
+    type: GENERATE
+    config:
+      function: solve_directly
+      params:
+        - problem
+      prompt_inline: |-
+        A dispatcher asked this routing question: "{{in_problem}}"
+
+        There is no routing solver backing you up this time — plan the route
+        yourself, from scratch, in plain English.
+
+        Write a clear walkthrough in under 8 sentences that:
+        1. Restates the problem
+        2. Proposes a route, showing your reasoning (which stop to visit next
+           and why)
+        3. Gives the total distance of your proposed route plainly
+
+        End your response with a line in EXACTLY this format (no extra words,
+        number only):
+        Final answer: <total distance>
+      arguments:
+        - '@problem'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - out_report
+  - id: tool_4
+    type: SOLVE
+    config:
+      tool: trim
+      backend: kernel
+      arguments:
+        - '@report'
+      code: |
+        def trim(value: str) -> str:
+            """TRIM(value) — remove leading and trailing whitespace."""
+            return str(value).strip()
+        _spl_result = trim(report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - value
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_report
+      - out_report
+  - id: set_3
+    type: CONTEXT
+    config:
+      action: set
+      expression: '0'
+    ports:
+      - trigger
+      - complete
+      - out_tries
+  - id: set_4
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''init'''
+    ports:
+      - trigger
+      - complete
+      - out_status
+  - id: set_5
+    type: CONTEXT
+    config:
+      action: set
+      expression: ''''''
+    ports:
+      - trigger
+      - complete
+      - out_code
+  - id: set_6
+    type: CONTEXT
+    config:
+      action: set
+      expression: '''{}'''
+    ports:
+      - trigger
+      - complete
+      - out_solution
+  - id: loop_1
+    type: LOOP
+    config:
+      condition: latest(@in_tries, @tries) < @in_max_tries
+      outputs:
+        tries:
+          from:
+            - set_7.out_tries
+            - set_8.out_tries
+            - set_9.out_tries
+        code:
+          from:
+            - gen_2.out_code
+            - gen_3.out_code
+        solution:
+          from:
+            - tool_5.out_solution
+            - tool_8.out_solution
+        status:
+          from:
+            - tool_6.out_status
+            - tool_9.out_status
+        error_info:
+          from: tool_7.out_error_info
+      subgraph:
+        nodes:
+          - id: eval_3
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''Optimal'''
+              branch: 1
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: set_7
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_max_tries'
+            ports:
+              - trigger
+              - complete
+              - in_max_tries
+              - out_tries
+          - id: eval_4
+            type: EVALUATE
+            config:
+              condition: '@in_status == ''init'''
+              branch: 2
+            ports:
+              - trigger
+              - pass
+              - fail
+              - in_status
+          - id: gen_2
+            type: GENERATE
+            config:
+              function: formulate_routing_code
+              params:
+                - problem
+              prompt_inline: |-
+                You are an operations-research expert. Convert this vehicle-routing
+                problem into runnable Python code using Google OR-Tools' routing solver.
+
+                Rules:
+                - `pywrapcp` and `routing_enums_pb2` are already imported and in scope —
+                  do NOT add import statements
+                - Build the distance matrix from the problem exactly as given, node 0 is
+                  always the depot (start/end point) unless stated otherwise
+                - Use pywrapcp.RoutingIndexManager(n, num_vehicles, depot), then
+                  pywrapcp.RoutingModel(manager), register a transit callback returning
+                  distance_matrix[from_node][to_node], call
+                  routing.SetArcCostEvaluatorOfAllVehicles(...), set search parameters
+                  with PATH_CHEAPEST_ARC first-solution strategy and GUIDED_LOCAL_SEARCH
+                  metaheuristic with a short time limit (e.g. 2 seconds), then
+                  routing.SolveWithParameters(search_parameters)
+                - If a solution is found, walk it with routing.Start/IsEnd/NextVar to
+                  build the route (list of node indices, ending back at the depot) and
+                  sum routing.GetArcCostForVehicle(...) for the total distance
+                - Store the result EXACTLY as:
+                    _result = {"status": "Optimal", "route": [0, ...node indices..., 0],
+                               "answer": <total_distance_as_number>}
+                    (or {"status": "NoSolution"} if solution is None)
+                - Output ONLY raw Python code — no markdown fences, no commentary
+
+                Problem: {{in_problem}}
+              arguments:
+                - '@problem'
+            ports:
+              - trigger
+              - complete
+              - in_problem
+              - out_code
+          - id: tool_5
+            type: SOLVE
+            config:
+              tool: run_ortools
+              backend: kernel
+              arguments:
+                - '@code'
+              code: |
+                def run_ortools(code: str) -> str:
+                    """Execute LLM-generated OR-Tools routing code and return a JSON
+                    result dict. The LLM writes the code; this function is the
+                    deterministic oracle. `pywrapcp` and `routing_enums_pb2` are already
+                    in scope. The code must set:
+                        _result = {"status": "Optimal", "route": [0, 4, 3, ...],
+                                   "answer": <total_distance>, ...extra fields...}
+                        _result = {"status": "NoSolution"}
+                    On any error returns {"status": "Error", "error": "<msg>"}.
+                    """
+                    import json
+                    import re
+                    from ortools.constraint_solver import routing_enums_pb2, pywrapcp
+                    code = re.sub(r'^```(?:python)?\s*\n?', '', code.strip(), flags=re.IGNORECASE)
+                    code = re.sub(r'\n?```\s*$', '', code)
+                    namespace = {"pywrapcp": pywrapcp, "routing_enums_pb2": routing_enums_pb2}
+                    try:
+                        exec(code, namespace)
+                        result = namespace.get("_result")
+                        if result is None:
+                            return json.dumps({"status": "Error",
+                                               "error": "code did not set _result"})
+                        return json.dumps(result, default=str)
+                    except Exception as e:
+                        return json.dumps({"status": "Error", "error": str(e)})
+                _spl_result = run_ortools(code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_code
+              - out_solution
+          - id: tool_6
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_8
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+          - id: tool_7
+            type: SOLVE
+            config:
+              tool: result_error
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_error(result_json: str) -> str:
+                    """RESULT_ERROR(result_json) — extract the 'error' field from a SOLVER
+                    result JSON dict (falls back to 'status', then 'unknown error')."""
+                    try:
+                        d = json.loads(result_json)
+                        return d.get('error', d.get('status', 'unknown error'))
+                    except Exception:
+                        return result_json
+                _spl_result = result_error(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_error_info
+          - id: gen_3
+            type: GENERATE
+            config:
+              function: repair_routing_code
+              params:
+                - problem
+                - code
+                - error_info
+              prompt_inline: |-
+                This OR-Tools routing code produced an error.
+
+                Problem: {{in_problem}}
+
+                Previous code:
+                {{in_code}}
+
+                Error:
+                {{in_error_info}}
+
+                Fix the code. Common causes:
+                - Distance matrix dimensions don't match the number of locations
+                - Transit callback signature wrong (must take from_index, to_index and
+                  convert with manager.IndexToNode before indexing the matrix)
+                - Forgot to register the callback with RegisterTransitCallback before
+                  SetArcCostEvaluatorOfAllVehicles
+                - Missing or duplicate _result assignment
+
+                Output ONLY the corrected Python code — no markdown fences, no commentary.
+              arguments:
+                - '@problem'
+                - '@code'
+                - '@error_info'
+            ports:
+              - trigger
+              - complete
+              - in_problem
+              - in_code
+              - in_error_info
+              - out_code
+          - id: tool_8
+            type: SOLVE
+            config:
+              tool: run_ortools
+              backend: kernel
+              arguments:
+                - '@code'
+              code: |
+                def run_ortools(code: str) -> str:
+                    """Execute LLM-generated OR-Tools routing code and return a JSON
+                    result dict. The LLM writes the code; this function is the
+                    deterministic oracle. `pywrapcp` and `routing_enums_pb2` are already
+                    in scope. The code must set:
+                        _result = {"status": "Optimal", "route": [0, 4, 3, ...],
+                                   "answer": <total_distance>, ...extra fields...}
+                        _result = {"status": "NoSolution"}
+                    On any error returns {"status": "Error", "error": "<msg>"}.
+                    """
+                    import json
+                    import re
+                    from ortools.constraint_solver import routing_enums_pb2, pywrapcp
+                    code = re.sub(r'^```(?:python)?\s*\n?', '', code.strip(), flags=re.IGNORECASE)
+                    code = re.sub(r'\n?```\s*$', '', code)
+                    namespace = {"pywrapcp": pywrapcp, "routing_enums_pb2": routing_enums_pb2}
+                    try:
+                        exec(code, namespace)
+                        result = namespace.get("_result")
+                        if result is None:
+                            return json.dumps({"status": "Error",
+                                               "error": "code did not set _result"})
+                        return json.dumps(result, default=str)
+                    except Exception as e:
+                        return json.dumps({"status": "Error", "error": str(e)})
+                _spl_result = run_ortools(code)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - code
+              tool_returns: TEXT
+            ports:
+              - trigger
+              - complete
+              - in_code
+              - out_solution
+          - id: tool_9
+            type: SOLVE
+            config:
+              tool: result_status
+              backend: kernel
+              arguments:
+                - '@solution'
+              code: |
+                import json
+
+                def result_status(result_json: str) -> str:
+                    """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                    result JSON dict, or 'Error' if missing/unparseable."""
+                    try:
+                        return json.loads(result_json).get('status', 'Error')
+                    except Exception:
+                        return 'Error'
+                _spl_result = result_status(solution)
+              result: _spl_result
+              out_type: TEXT
+              tool_params:
+                - result_json
+              tool_returns: TEXT
+              tool_builtin: true
+            ports:
+              - trigger
+              - complete
+              - in_solution
+              - out_status
+          - id: set_9
+            type: CONTEXT
+            config:
+              action: set
+              expression: '@in_tries + 1'
+            ports:
+              - trigger
+              - complete
+              - in_tries
+              - out_tries
+        edges:
+          - source: eval_3.pass
+            target: set_7.trigger
+            type: triggers
+          - source: eval_3.fail
+            target: eval_4.trigger
+            type: triggers
+          - source: eval_4.pass
+            target: gen_2.trigger
+            type: triggers
+          - source: gen_2.complete
+            target: tool_5.trigger
+            type: triggers
+          - source: gen_2.out_code
+            target: tool_5.in_code
+            type: binds
+          - source: tool_5.complete
+            target: tool_6.trigger
+            type: triggers
+          - source: tool_5.out_solution
+            target: tool_6.in_solution
+            type: binds
+          - source: tool_6.complete
+            target: set_8.trigger
+            type: triggers
+          - source: eval_4.fail
+            target: tool_7.trigger
+            type: triggers
+          - source: tool_7.complete
+            target: gen_3.trigger
+            type: triggers
+          - source: tool_7.out_error_info
+            target: gen_3.in_error_info
+            type: binds
+          - source: gen_3.complete
+            target: tool_8.trigger
+            type: triggers
+          - source: gen_3.out_code
+            target: tool_8.in_code
+            type: binds
+          - source: tool_8.complete
+            target: tool_9.trigger
+            type: triggers
+          - source: tool_8.out_solution
+            target: tool_9.in_solution
+            type: binds
+          - source: tool_9.complete
+            target: set_9.trigger
+            type: triggers
+    ports:
+      - trigger
+      - loop
+      - exit
+      - in_status
+      - in_max_tries
+      - in_problem
+      - in_tries
+      - in_solution
+      - in_code
+      - out_tries
+      - out_code
+      - out_solution
+      - out_status
+      - out_error_info
+  - id: tool_10
+    type: SOLVE
+    config:
+      tool: is_optimal
+      backend: kernel
+      arguments:
+        - '@solution'
+      code: |
+        def is_optimal(result_json: str) -> bool:
+            """ASSERT gate: True only when OR-Tools found a feasible route."""
+            import json
+            try:
+                return json.loads(result_json).get("status") == "Optimal"
+            except Exception:
+                return False
+        _spl_result = is_optimal(solution)
+      result: _spl_result
+      out_type: BOOL
+      tool_params:
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_solution
+      - out_tool_10
+  - id: assert_1
+    type: ASSERT
+    config:
+      condition: '@in_tool_10'
+    ports:
+      - trigger
+      - pass
+      - fail
+      - in_solution
+      - in_tool_10
+  - id: gen_4
+    type: GENERATE
+    config:
+      function: interpret_routing_result
+      params:
+        - problem
+        - solution_json
+      prompt_inline: |-
+        You are a logistics expert. Interpret this VERIFIED routing result for a
+        dispatcher.
+
+        Problem: {{in_problem}}
+
+        Verified result (JSON, computed exactly by the OR-Tools routing solver —
+        trust it completely, do not re-derive it):
+        {{in_solution_json}}
+
+        Provide a concise interpretation (under 100 words):
+        1. Restate the routing question
+        2. State the route order and total distance, referencing the exact
+           values from the JSON
+        3. One sentence on why a solver (not hand-planning) is needed at this scale
+
+        End your response with a line in EXACTLY this format (no extra words,
+        number only):
+        Final answer: <total distance>
+      arguments:
+        - '@problem'
+        - '@solution'
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_solution_json
+      - out_narrative
+  - id: tool_11
+    type: SOLVE
+    config:
+      tool: classify_roundtrip
+      backend: kernel
+      arguments:
+        - '@narrative'
+        - '@solution'
+      code: |
+        def classify_roundtrip(narrative: str, result_json: str) -> str:
+            """Round-trip check: does the LLM's own 'Final answer: ...' line, in
+            its narration of the VERIFIED route, match the solver's computed
+            total distance? Catches the LLM restating a different (usually
+            worse) total than the one it was just given.
+
+            Returns 'match' / 'mismatch' / 'unverifiable'.
+            """
+            import re
+            import json
+            m = re.search(r'final answer\s*:?\s*(.+)', narrative, re.IGNORECASE)
+            if not m:
+                return "unverifiable"
+            llm_val = m.group(1).strip().rstrip('.').lower()
+            try:
+                truth = json.loads(result_json).get("answer")
+            except Exception:
+                return "unverifiable"
+            if truth is None:
+                return "unverifiable"
+
+            def _num(s):
+                try:
+                    return float(re.sub(r'[^0-9.\-]', '', str(s)))
+                except Exception:
+                    return None
+
+            ln, tn = _num(llm_val), _num(truth)
+            if ln is not None and tn is not None:
+                return "match" if abs(ln - tn) < 1e-6 else "mismatch"
+            truth_str = str(truth).strip().lower()
+            if truth_str in llm_val or llm_val in truth_str:
+                return "match"
+            return "mismatch"
+        _spl_result = classify_roundtrip(narrative, solution)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - narrative
+        - result_json
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_narrative
+      - in_solution
+      - out_roundtrip
+  - id: tool_12
+    type: SOLVE
+    config:
+      tool: format_report
+      backend: kernel
+      arguments:
+        - '@problem'
+        - '@code'
+        - '@solution'
+        - '@narrative'
+        - '@roundtrip'
+      code: |
+        def format_report(problem: str, code: str, solution_json: str,
+                          narrative: str, roundtrip: str) -> str:
+            import json
+            try:
+                sol = json.loads(solution_json)
+            except Exception:
+                sol = {}
+            lines = [
+                "# Route Optimization Report",
+                "",
+                f"**Problem:** {problem.strip()}",
+                "",
+                f"**OR-Tools status:** `{sol.get('status', 'Unknown')}`",
+                f"**Route (node indices):** `{sol.get('route', '?')}`",
+                f"**Total distance (ground truth):** `{sol.get('answer', '?')}`",
+                f"**Round-trip check:** `{roundtrip}`",
+                "",
+                "## Interpretation", "", narrative.strip(),
+                "", "## Solver Code (LLM-generated, OR-Tools)", "",
+                "```python", code.strip(), "```",
+            ]
+            return "\n".join(lines)
+        _spl_result = format_report(problem, code, solution, narrative, roundtrip)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - problem
+        - code
+        - solution_json
+        - narrative
+        - roundtrip
+      tool_returns: TEXT
+    ports:
+      - trigger
+      - complete
+      - in_problem
+      - in_code
+      - in_solution
+      - in_narrative
+      - in_roundtrip
+      - out_report
+  - id: tool_13
+    type: SOLVE
+    config:
+      tool: write_file
+      backend: kernel
+      arguments:
+        - f'{@out_dir}/route_optimization_{@ts_safe}.md'
+        - '@report'
+      code: |
+        import pathlib
+
+        def write_file(file_path: str, content: str, mode: str='w') -> str:
+            """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+            mode: 'w' (overwrite, default) or 'a' (append).
+            Creates parent directories automatically.
+            Returns the absolute path written.
+            """
+            p = pathlib.Path(str(file_path).strip())
+            p.parent.mkdir(parents=True, exist_ok=True)
+            m = str(mode).strip().lower()
+            if m not in ('w', 'a'):
+                m = 'w'
+            with p.open(m, encoding='utf-8') as fh:
+                fh.write(str(content))
+            return str(p.resolve())
+        _spl_result = write_file(f'{out_dir}/route_optimization_{ts_safe}.md', report)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - file_path
+        - content
+        - mode
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_out_dir
+      - in_ts_safe
+      - in_report
+      - out_out_path
+  - id: tool_14
+    type: SOLVE
+    config:
+      tool: time_elapsed
+      backend: kernel
+      arguments:
+        - '@t_start'
+      code: |
+        def time_elapsed(start_ts: str) -> str:
+            """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+            float string from time_monotonic())."""
+            import time as _time
+            try:
+                return f'{_time.monotonic() - float(start_ts):.1f}'
+            except Exception:
+                return '?'
+        _spl_result = time_elapsed(t_start)
+      result: _spl_result
+      out_type: TEXT
+      tool_params:
+        - start_ts
+      tool_returns: TEXT
+      tool_builtin: true
+    ports:
+      - trigger
+      - complete
+      - in_t_start
+      - out_elapsed
+  - id: wf_exit
+    type: OUTPUT
+    ports:
+      - trigger
+      - exit
+      - in_report
+edges:
+  - source: wf_entry.entry
+    target: tool_1.trigger
+    type: triggers
+  - source: tool_1.complete
+    target: tool_2.trigger
+    type: triggers
+  - source: tool_2.complete
+    target: tool_3.trigger
+    type: triggers
+  - source: wf_entry.out_enable_solver
+    target: tool_3.in_enable_solver
+    type: binds
+  - source: tool_3.complete
+    target: eval_1.trigger
+    type: triggers
+  - source: tool_3.out_solver_mode
+    target: eval_1.in_solver_mode
+    type: binds
+  - source: eval_1.pass
+    target: set_1.trigger
+    type: triggers
+  - source: eval_1.fail
+    target: set_2.trigger
+    type: triggers
+  - source: set_1.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_2.complete
+    target: eval_2.trigger
+    type: triggers
+  - source: set_1.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: set_2.out_use_solver
+    target: eval_2.in_use_solver
+    type: binds
+  - source: eval_2.pass
+    target: gen_1.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_1.in_problem
+    type: binds
+  - source: gen_1.complete
+    target: tool_4.trigger
+    type: triggers
+  - source: gen_1.out_report
+    target: tool_4.in_report
+    type: binds
+  - source: tool_4.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_4.complete
+    target: wf_exit.trigger
+    type: triggers
+  - source: eval_2.fail
+    target: set_3.trigger
+    type: triggers
+  - source: set_3.complete
+    target: set_4.trigger
+    type: triggers
+  - source: set_4.complete
+    target: set_5.trigger
+    type: triggers
+  - source: set_5.complete
+    target: set_6.trigger
+    type: triggers
+  - source: set_6.complete
+    target: loop_1.trigger
+    type: triggers
+  - source: set_4.out_status
+    target: loop_1.in_status
+    type: binds
+  - source: wf_entry.out_max_tries
+    target: loop_1.in_max_tries
+    type: binds
+  - source: wf_entry.out_problem
+    target: loop_1.in_problem
+    type: binds
+  - source: set_3.out_tries
+    target: loop_1.in_tries
+    type: binds
+  - source: set_6.out_solution
+    target: loop_1.in_solution
+    type: binds
+  - source: set_5.out_code
+    target: loop_1.in_code
+    type: binds
+  - source: loop_1.exit
+    target: tool_10.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: tool_10.in_solution
+    type: binds
+  - source: tool_10.complete
+    target: assert_1.trigger
+    type: triggers
+  - source: loop_1.out_solution
+    target: assert_1.in_solution
+    type: binds
+  - source: tool_10.out_tool_10
+    target: assert_1.in_tool_10
+    type: binds
+  - source: assert_1.pass
+    target: gen_4.trigger
+    type: triggers
+  - source: assert_1.fail
+    target: gen_4.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: gen_4.in_problem
+    type: binds
+  - source: loop_1.out_solution
+    target: gen_4.in_solution_json
+    type: binds
+  - source: gen_4.complete
+    target: tool_11.trigger
+    type: triggers
+  - source: gen_4.out_narrative
+    target: tool_11.in_narrative
+    type: binds
+  - source: loop_1.out_solution
+    target: tool_11.in_solution
+    type: binds
+  - source: tool_11.complete
+    target: tool_12.trigger
+    type: triggers
+  - source: wf_entry.out_problem
+    target: tool_12.in_problem
+    type: binds
+  - source: loop_1.out_code
+    target: tool_12.in_code
+    type: binds
+  - source: loop_1.out_solution
+    target: tool_12.in_solution
+    type: binds
+  - source: gen_4.out_narrative
+    target: tool_12.in_narrative
+    type: binds
+  - source: tool_11.out_roundtrip
+    target: tool_12.in_roundtrip
+    type: binds
+  - source: tool_12.complete
+    target: tool_13.trigger
+    type: triggers
+  - source: wf_entry.out_out_dir
+    target: tool_13.in_out_dir
+    type: binds
+  - source: tool_2.out_ts_safe
+    target: tool_13.in_ts_safe
+    type: binds
+  - source: tool_12.out_report
+    target: tool_13.in_report
+    type: binds
+  - source: tool_13.complete
+    target: tool_14.trigger
+    type: triggers
+  - source: tool_1.out_t_start
+    target: tool_14.in_t_start
+    type: binds
+  - source: tool_12.out_report
+    target: wf_exit.in_report
+    type: binds
+  - source: tool_14.complete
+    target: wf_exit.trigger
+    type: triggers
