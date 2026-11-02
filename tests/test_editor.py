@@ -122,7 +122,7 @@ def test_a_hand_edit_may_set_what_a_model_may_not(work):
     assert "calc" in ed.node_ids()                                                    # CODE_KEYS bind a MUTATE delta, not a person
 
 
-ALL = sorted(p for p in (Path(__file__).parent.parent / "cookbook").rglob("*.graph.yaml") if not any(f"\n{k}:" in p.read_text() for k in ("steps", "elaborate")))   # the editor takes the long form only
+ALL = sorted(p for p in (Path(__file__).parent.parent / "cookbook").rglob("*.graph.yaml") if not any(f"\n{k}:" in p.read_text() for k in ("steps", "expand", "elaborate")))   # the editor takes the long form only
 
 
 @pytest.mark.parametrize("path", ALL, ids=lambda p: p.parent.name)
@@ -150,9 +150,9 @@ def test_run_reports_a_failed_run_instead_of_raising(work):
     assert not res["ok"] and "topic" in res["error"]
 
 
-def test_a_file_with_an_elaborate_block_is_pointed_to_graf_expand():
-    with pytest.raises(EditError, match="elaborate"):
-        GraphEditor(Path(__file__).parent.parent / "cookbook" / "elaborate_demo" / "elaborate_demo.graph.yaml")
+def test_a_file_with_an_expand_block_is_pointed_to_graf_expand():
+    with pytest.raises(EditError, match="expand"):
+        GraphEditor(Path(__file__).parent.parent / "cookbook" / "expand_demo" / "expand_demo.graph.yaml")
 
 
 def test_clone_copies_the_saved_file_beside_it_and_leaves_the_original_alone(tmp_path):

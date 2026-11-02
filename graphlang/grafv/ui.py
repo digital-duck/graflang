@@ -4,18 +4,46 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from .. import workspace as ws
 from ..grafr.runtime import load_graph
+from . import attachments
 from .engines import render
 
 
+PICTURE_LAYOUT = "grid"          # the arrangement the picture starts on (the selector above it offers the others)
 CHAT_ERRORS = (RuntimeError, ValueError, ImportError, OSError)     # what a model call or a missing package raises (LLMUnavailable, LimitExceeded are RuntimeErrors)
+
+
+@dataclass
+class Message:
+    """What the chat box hands back: the text typed and the files attached (`attachments.unpack` reads it)."""
+    text: str
+    files: List = field(default_factory=list)
+
+
+def chat_box(key: str, placeholder: str, history: Optional[str] = None) -> Optional[Message]:
+    """A two-line message box. Under it one row: Send, Clear (empties the chat history `history`, default `key`) and Upload (a
+    popover with the file chooser). Ctrl+Enter sends too, and the box empties when sent. Returns the message in the run where
+    it was sent, else None. Widget keys: `{key}_text`, `{key}_files`, `{key}_send`, `{key}_clear`."""
+    with st.form(f"{key}_form", clear_on_submit=True, border=False):
+        text = st.text_area("Message", key=f"{key}_text", height=68, placeholder=placeholder, label_visibility="collapsed")
+        send_col, clear_col, upload_col = st.columns([1, 1, 1.3])
+        sent = send_col.form_submit_button("Send", key=f"{key}_send", type="primary")
+        cleared = clear_col.form_submit_button("Clear", key=f"{key}_clear", help="empty the chat above (the app and its files stay)")
+        with upload_col.popover("Upload", help="attach a screenshot or a document (text, markdown, YAML, JSON, CSV, code)"):
+            files = st.file_uploader("Attach files", key=f"{key}_files", accept_multiple_files=True, type=attachments.FILE_TYPES)
+    if cleared:
+        st.session_state[f"chat_{history or key}"] = []
+        st.rerun()
+    text = (text or "").strip()
+    return Message(text, list(files or [])) if sent and (text or files) else None
 
 
 def settings() -> dict:
@@ -48,7 +76,7 @@ def canvas_height() -> int:
 def _graph_html(graph_json: str) -> str:
     """The picture's page for a graph, made once per distinct graph (every click of the app reruns the script)."""
     with tempfile.TemporaryDirectory() as tmp:
-        path, _, _ = render(json.loads(graph_json), Path(tmp) / "view.html", "cytoscape")
+        path, _, _ = render(json.loads(graph_json), Path(tmp) / "view.html", "cytoscape", default_layout=PICTURE_LAYOUT)
         return path.read_text(encoding="utf-8")
 
 
@@ -82,10 +110,17 @@ def chat_history(scope: str) -> list:
     return st.session_state.setdefault(f"chat_{scope}", [])
 
 
+CHAT_HEIGHT = 380                 # pixels; a longer thread scrolls inside its box instead of pushing the page down
+
+
 def show_chat(scope: str) -> None:
-    for message in chat_history(scope):
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    messages = chat_history(scope)
+    if not messages:
+        return
+    with st.container(height=CHAT_HEIGHT, key=f"chat_box_{scope}", autoscroll=True):       # scrolls; follows the newest message
+        for message in messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
 
 def recipe_index(rebuild: bool = False):

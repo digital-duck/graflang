@@ -450,12 +450,12 @@ nodes:
       function: explain_z3_result_prompt
       params:
         - z3_report
-        - policy_text
+        - policy_json
       prompt_inline: |-
         You are a compliance analyst. Z3 (an SMT theorem prover) just verified this loan eligibility policy.
 
-        POLICY:
-        {{in_policy_text}}
+        POLICY (as Z3 checked it, JSON):
+        {{in_policy_json}}
 
         Z3 RESULT:
         {{in_z3_report}}
@@ -467,12 +467,12 @@ nodes:
         4. What would be the risk of relying on manual rule-tracing (solver=OFF) instead?
       arguments:
         - '@solver_report'
-        - '@policy_text'
+        - '@policy_json'
     ports:
       - trigger
       - complete
       - in_z3_report
-      - in_policy_text
+      - in_policy_json
       - out_explanation
   - id: tool_9
     type: SOLVE
@@ -671,9 +671,6 @@ edges:
   - source: tool_7.out_solver_report
     target: gen_2.in_z3_report
     type: binds
-  - source: wf_entry.out_policy_text
-    target: gen_2.in_policy_text
-    type: binds
   - source: gen_2.complete
     target: tool_9.trigger
     type: triggers
@@ -716,3 +713,9 @@ edges:
   - source: eval_4.fail
     target: wf_exit.trigger
     type: triggers
+  - source: tool_2.out_policy_json
+    target: gen_2.in_policy_json
+    type: binds
+  - source: tool_3.out_policy_json
+    target: gen_2.in_policy_json
+    type: binds

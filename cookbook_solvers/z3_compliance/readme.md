@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/102_z3_compliance` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 205 tokens in / 264 out in total); the explanation prompt shows an empty policy text, as in the SPL original. A run that completes does not show the answer is right: read the output before you rely on a recipe.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 205 tokens in / 264 out in total); the explanation prompt now gets the policy Z3 checked (the SPL original passed `policy_text`, which is empty for the default QuickLoan demo). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** Five loan eligibility rules interact in a way that traps a specific applicant profile: a self-employed applicant with income $40K–$49K is ineligible even with a 700 credit score — UNLESS they also have collateral. Z3 surfaces this hidden constraint in milliseconds. LLM traces rules linearly and misses the interaction.
 

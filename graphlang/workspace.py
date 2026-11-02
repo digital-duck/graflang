@@ -429,6 +429,17 @@ def mask(value: str) -> str:
     return "" if not value else ("•" * 8 + value[-4:] if len(value) > 8 else "•" * len(value))
 
 
+def long_form_in_place(path: Path) -> Path:
+    """Rewrite a compact `steps:` file of your own as its long `nodes:`/`edges:` form, same name (comments are not kept)."""
+    from .grafr.compact import expand, is_compact
+    path = Path(path)
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not is_compact(doc):
+        raise WorkspaceError(f"{path.name} is not in the compact `steps:` form")
+    path.write_text(yaml.safe_dump(expand(doc), sort_keys=False, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+    return path
+
+
 def long_form_copy(path: Path) -> Path:
     """The editor takes the long `nodes:`/`edges:` form. For a compact `steps:` file, write that form beside it as
     `<name>.long.graph.yaml` (comments are not kept: they belong to the short file, which stays as it is) and return it."""

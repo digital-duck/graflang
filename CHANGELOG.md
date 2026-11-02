@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- App, Edit page: a **Logs** tab beside Run shows a run readably (inputs, outputs, each node's result, time per node, model usage): text as formatted text, structured values as YAML. A run with a real model is now saved to `output/` beside the graph (as `graf run --save-nodes` does; a failed run keeps its reason in `run.json`), and the tab's *Run* picker lists those past runs, newest first, next to the latest one of the session. A saved app in the short `steps:` form is converted to the long form in place when opened on Edit (comments dropped). The first page is titled *Welcome to GraphLang* in the sidebar.
+
+- App: the chat thread is a fixed-height scrolling box that follows the newest message; under the message box one row holds **Send**, **Clear** (empties the chat history only) and **Upload** (a popover with the file chooser). Create's draft tabs are `readme.md` first, then **Workflow** (the picture, formerly *Picture*), then the other files; the readme is shown as formatted text. The picture starts on the **grid** arrangement (`Style.default_layout` in zinet; `graf vis` keeps its own default).
+
+- App, Create page: the message box is a two-line text area with an *Attach files* box and a Send button (Ctrl+Enter sends), on Create and on Edit (`ui.chat_box`), instead of the one-line chat input. *Allow app to call external programs* is on to begin with; *Most attempts per message* is a 1 to 10 slider that starts at 3. A name with a hyphen or a space (`Port-Outlook`) is saved with underscores and the page shows the result; a name that cannot be used (`1st app`) is shown as an error next to the field and named in the reply. Before, a hyphenated name was refused with only "give the app a name first".
+
+- `cookbook_solvers`: `portfolio_opt` defaults are target return 0.08 and weight cap 0.25 (SPL's 0.12 and 0.20 made the Markowitz and CVaR cases infeasible: five stocks under a 20% cap are forced to equal weights); `z3_compliance` gives its explanation the policy Z3 checked, not the empty `policy_text` of the default demo. A first draft of the paper is in `docs/paper/graflang-paper.draft.md`.
+
+- The `elaborate:` block is now **`expand:`** (the owner's choice of keyword). `grafr/elaborate.py` is `grafr/expand.py`, `cookbook/elaborate_demo` is `cookbook/expand_demo`, `tests/test_elaborate.py` is `tests/test_expand.py`. A file that still says `elaborate:` is read as before, so nothing breaks; `graf expand` prints the long form of either.
+
 - `graf validate` reports an error for a `GENERATE` prompt (inline or `prompt_ref`) that uses `{{in_x}}` when the node has no port `in_x`, or nothing feeds it. Found in four lifted solver recipes, where a port had been named after an SPL function parameter and the model got the prompt unfilled.
 
 - `backend: kernel` SOLVE nodes can run in another Jupyter kernel: `kernel_name` on the node, or `graf run --kernel-name NAME` for the nodes that name none (as SPL's `--kernel-name`), e.g. `sagemath`. One kernel per name is started per run. `cookbook_solvers/sage_math` is rewritten to use it and runs; `neurosymbolic`'s Sage rung runs under `--kernel-name sagemath`.

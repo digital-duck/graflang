@@ -81,6 +81,13 @@ class RunOutput:
             log_event(_log, "node.saved", node=node, port=port, file=str(path), chars=len(text))
         return paths
 
+    def save_error(self, message: str) -> Path:
+        """run.json with the reason a run failed, so the run shows up in a history of runs."""
+        self.dir.mkdir(parents=True, exist_ok=True)
+        path = self.dir / "run.json"
+        path.write_text(json.dumps({**self.meta, "error": message}, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        return path
+
     def save_summary(self, summary: Dict[str, Any]) -> Path:
         """summary.json: steps, per-node time, LLM calls, tokens and cost."""
         self.dir.mkdir(parents=True, exist_ok=True)

@@ -22,7 +22,7 @@ SPL.py's `cookbook-solver` recipes lifted to GraphLang with `spl3 util spl2graph
 | [`auto_planning`](auto_planning) | `093_auto_planning` | `auto_planning` | completed |
 | [`data_eng_text2spl`](data_eng_text2spl) | `094_data_eng_text2spl` | `text2sql_quality` | completed |
 | [`job_shop`](job_shop) | `098_job_shop` | `job_shop` | completed |
-| [`portfolio_opt`](portfolio_opt) | `099_portfolio_opt` | `portfolio_optimization`, `portfolio_comparison` (the SPL file has two workflows; each is its own graph) | completed (Markowitz/CVaR infeasible at the default target) |
+| [`portfolio_opt`](portfolio_opt) | `099_portfolio_opt` | `portfolio_optimization`, `portfolio_comparison` (the SPL file has two workflows; each is its own graph) | completed (defaults changed to target 0.08, cap 0.25: SPL's 0.12 and 0.20 made Markowitz and CVaR infeasible) |
 | [`supply_sourcing`](supply_sourcing) | `100_supply_sourcing` | `supply_sourcing` | completed |
 | [`production_sustainability`](production_sustainability) | `101_production_sustainability` | `production_sustainability` | completed |
 | [`z3_compliance`](z3_compliance) | `102_z3_compliance` | `z3_compliance` | completed |
@@ -66,7 +66,7 @@ Libraries installed into the `graf` conda env for the run (none were present bef
 | MiniZinc binary | `minizinc_cp` | not installed; the Python backtracking fallback answered |
 | SPL.py importable (`procedure_ref`) | `symbolic_math`, `neurosymbolic`, `code_pytest` | works |
 
-Things to know about the results: `portfolio_comparison` finds the Markowitz and CVaR cases infeasible at its default target return (0.12) and weight cap (0.2), as the SPL demo does; `z3_compliance`'s explanation prompt shows an empty policy text, as in the SPL original.
+Things to know about the results: `portfolio_comparison` defaults differ from SPL (see its readme); `z3_compliance`'s explanation prompt gets the policy Z3 checked, where the SPL original passed the empty `policy_text` of the default demo.
 
 ### What had to be fixed
 

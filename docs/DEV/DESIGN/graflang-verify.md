@@ -12,7 +12,7 @@ How to check, by hand and by test, every feature built so far (state of 2026-10-
 | 3 | [Core commands](#3-core-commands) |
 | 4 | [Validation rules](#4-validation-rules) |
 | 5 | [Node lifecycle and typed ports](#5-node-lifecycle-and-typed-ports) |
-| 6 | [Compact form, parts, elaboration](#6-compact-form-parts-elaboration) |
+| 6 | [Compact form, parts, the expand block](#6-compact-form-parts-the-expand-block) |
 | 7 | [Bindings, budgets, record and replay, checkpoint](#7-bindings-budgets-record-and-replay-checkpoint) |
 | 8 | [Concurrency, BATCH, RUN, SOLVE backends, containers](#8-concurrency-batch-run-solve-backends-containers) |
 | 9 | [Safety: GUARD, MUTATE, policies, PII](#9-safety-guard-mutate-policies-pii) |
@@ -69,7 +69,7 @@ Which file pins which feature:
 | Validation: race, deadlock, guards, typed ports | `test_topology` 29, `test_ports` 8 |
 | Lifecycle, retry, fallback, RECOVER | `test_lifecycle` 30 |
 | Compact form (including `loop`, `use`) | `test_compact` 26 |
-| Parts and elaboration | `test_parts` 14, `test_elaborate` 16 |
+| Parts and the expand block | `test_parts` 14, `test_expand` 16 |
 | Bindings, metering, budgets, cassettes, checkpoint | `test_bindings` 12, `test_metering` 10, `test_checkpoint` 5 |
 | Concurrency, JOIN, BATCH, RUN | `test_concurrency` 10, `test_batch` 7, `test_run_node` 13 |
 | SOLVE backends, subprocess, kernel, container | `test_solve_backends` 47, `test_solver_backend` 15, `test_solver_check_example` 4, `test_container` 19 (4 need Docker) |
@@ -107,7 +107,7 @@ Expected: every line `✓ Valid GraphLang workflow: <name>`.
 | `lifted_tool` | a Python tool as a kernel SOLVE |
 | `parts_demo` | one part used twice |
 | `code_parts` | `code_pipeline`'s first steps as parts: no `.spl`, no SPL.py |
-| `elaborate_demo` | a template applied to a graph |
+| `expand_demo` | a template applied to a graph |
 | `container_demo` | a program run inside Docker |
 | `pocketflow` | R1 acceptance samples |
 
@@ -144,10 +144,10 @@ Typed inputs: `graf run cookbook/your_book/your_book.graph.yaml --param subject=
 Other commands:
 
 ```bash
-graf expand cookbook/parts_demo/parts_demo.graph.yaml        # the long nodes/edges form (compact, parts, elaborate all expand)
+graf expand cookbook/parts_demo/parts_demo.graph.yaml        # the long nodes/edges form (compact, parts, expand all expand)
 graf compile cookbook/lifted_tool/lifted_tool.graph.yaml --lang spl     # SPL text with CREATE TOOL_API shout(...), printed
 graf compile cookbook/lifted_tool/lifted_tool.graph.yaml --lang spl --dry-run   # checks it compiles, writes nothing
-graf vis cookbook/elaborate_demo/elaborate_demo.graph.yaml --engine mermaid -o /tmp/verify/e.md --no-open
+graf vis cookbook/expand_demo/expand_demo.graph.yaml --engine mermaid -o /tmp/verify/e.md --no-open
 graf vis cookbook/parts_demo/parts_demo.graph.yaml --no-open # a cytoscape HTML in ~/.graflang/vis/, parts drawn as boxes
 ```
 
@@ -159,7 +159,7 @@ graf compile cookbook/lifted_tool/lifted_tool.graph.yaml --dry-run             #
 graf check cookbook/self_refine/self_refine.graph.yaml                          # No such command: check and export-spl were folded in
 ```
 
-Engines: `cytoscape` (default), `graphviz`, `pyvis`, `graphify`, `mermaid`. Open the HTML for a LOOP: its body appears as a box. In the parts and elaboration pictures each use of a part is a box labelled `first (polish)`.
+Engines: `cytoscape` (default), `graphviz`, `pyvis`, `graphify`, `mermaid`. Open the HTML for a LOOP: its body appears as a box. In the parts and expand pictures each use of a part is a box labelled `first (polish)`.
 
 Pinned by: `test_grafr_output`, `test_grafr_logging`, `test_grafv`, `test_export_spl`.
 
@@ -235,7 +235,7 @@ Everything else in the lifecycle is easier to see in tests: `pytest tests/test_l
 
 **[real LLM]** `pytest tests/test_lifecycle.py --mode llm -q` makes one real call asking for JSON that matches a schema.
 
-## 6. Compact form, parts, elaboration
+## 6. Compact form, parts, the expand block
 
 **Compact `steps:`** — `graf expand cookbook/parts_demo/parts_demo.graph.yaml | head -40` shows the long form. Kinds: generate, solve, assert, evaluate, guard, fork, join, output, use, loop, node.
 
@@ -275,12 +275,12 @@ The first use is told `formal tone`, the second the part's default `plain tone` 
 **Elaboration:**
 
 ```bash
-graf run cookbook/elaborate_demo/elaborate_demo.graph.yaml --workers 2 --no-output --no-log     # 4 calls
+graf run cookbook/expand_demo/expand_demo.graph.yaml --workers 2 --no-output --no-log     # 4 calls
 ```
 
-Expected: four explanations keyed `counting`, `probability`, `entropy`, `coding`; `entropy`'s should build on the two before it and `coding`'s on `entropy`'s (`pytest tests/test_elaborate.py` pins the exact prompt each concept receives). The same output with `--workers 1` and `--workers 4` is checked in section 8, by replay. Add an edge `coding -> probability` to `concepts.data.yaml` (a copy) and validation reports a cycle.
+Expected: four explanations keyed `counting`, `probability`, `entropy`, `coding`; `entropy`'s should build on the two before it and `coding`'s on `entropy`'s (`pytest tests/test_expand.py` pins the exact prompt each concept receives). The same output with `--workers 1` and `--workers 4` is checked in section 8, by replay. Add an edge `coding -> probability` to `concepts.data.yaml` (a copy) and validation reports a cycle.
 
-Pinned by: `test_compact`, `test_parts`, `test_elaborate`. **[real LLM]** one test each (`--mode llm`).
+Pinned by: `test_compact`, `test_parts`, `test_expand`. **[real LLM]** one test each (`--mode llm`).
 
 ## 7. Bindings, budgets, record and replay, checkpoint
 
@@ -320,7 +320,7 @@ A checkpoint belongs to one graph; resuming against an edited graph is refused. 
 **Concurrency:** `--workers N` runs nodes released together at the same time; results are applied in token order, so the output must not change. A live model words things differently every time, so record once and compare two replays:
 
 ```bash
-E=cookbook/elaborate_demo/elaborate_demo.graph.yaml
+E=cookbook/expand_demo/expand_demo.graph.yaml
 graf run $E --workers 1 --record /tmp/verify/e.jsonl --no-output --no-log          # 4 model calls, recorded
 graf run $E --workers 1 --replay /tmp/verify/e.jsonl --output-dir /tmp/verify/w1 --no-log   # no model
 graf run $E --workers 4 --replay /tmp/verify/e.jsonl --output-dir /tmp/verify/w4 --no-log   # no model
@@ -396,9 +396,9 @@ Check by hand:
 3. Add a config key with an invalid value, or remove a port an edge uses: **Problems** lists the error and **Save** is disabled.
 4. Fix it and press **Save**: comments such as `# Control flow` are kept in the file and only the edited line changes (`git diff cookbook/self_refine`). Revert with `git checkout cookbook/self_refine`.
 5. **Run tab:** fill `topic`, pick the adapter in the box (`claude_cli` makes real, billed calls; the other entry answers with placeholder text and is free), press Run: you see the step count, the output JSON and a table of nodes fired.
-6. Open a compact file (`parts_demo`) or an `elaborate:` file: the editor refuses with a message pointing to `graf expand`.
+6. Open a compact file (`parts_demo`) or an `expand:` file: the editor refuses with a message pointing to `graf expand`.
 
-Not in the editor, by decision: dragging edges on the canvas, and editing compact or `elaborate:` files. `pytest tests/test_editor.py -q` (38) always runs; `test_editor_app.py` (7) needs Streamlit.
+Not in the editor, by decision: dragging edges on the canvas, and editing compact or `expand:` files. `pytest tests/test_editor.py -q` (38) always runs; `test_editor_app.py` (7) needs Streamlit.
 
 ## 11. SPL interop and the PocketFlow corpus
 
@@ -445,7 +445,7 @@ Do **not** run `017_judge` from the PocketFlow set unattended: the lifter skips 
 | Container sandbox | verified against Docker Desktop; stub tests cover the rest | done; needs a running daemon and `python:3.12-slim` |
 | Kernel and plain subprocess confinement | files and network not confined; kernel inherits the environment | by design, pinned as KNOWN tests |
 | `max_cost_usd` | stops at the second call with `reports no cost` on `claude_cli` | by design; use `max_llm_calls` |
-| Editor | no drag-to-connect; compact and `elaborate:` files are edited as text | by decision |
+| Editor | no drag-to-connect; compact and `expand:` files are edited as text | by decision |
 | `mcp` and WASM executors | not built | out of scope for now |
 | `chain_of_thought` from PocketFlow (`014_thinking`) | the model declines the "reveal your reasoning" prompt | not a graflang fault |
 | `ts_verify` | needs Node 22.18+; 11 tests skip or pass accordingly | environment |
@@ -460,5 +460,5 @@ Do **not** run `017_judge` from the PocketFlow set unattended: the lifter skips 
 - `graf run` writes into the repo → results go to `<graph folder>/output/`; pass `--output-dir /tmp/...` or `--no-output`. `cookbook/*/output/` is ignored by git.
 - A cassette replay fails with `no recording` → the prompt or model changed; re-record with `--record` (small budget).
 - Logs: `~/.graflang/logs/<name>-<adapter>-<time>.log` and `.jsonl`; use `--log-level debug` for every node firing.
-- To see what a compact, parts or elaborate file becomes: `graf expand FILE`.
+- To see what a compact, parts or expand file becomes: `graf expand FILE`.
 - Design rules that every behaviour above rests on are in `graflang-semantics.md` (R1 to R14); the full feature list and the open items are in `graflang-design.md` (build status and Appendix B); user-level documentation is `docs/GUIDE/USER-GUIDE.md`.

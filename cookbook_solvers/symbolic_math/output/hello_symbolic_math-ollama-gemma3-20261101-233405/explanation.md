@@ -1,0 +1,1 @@
+Okay, let’s break down this integral! The student asked us to find the antiderivative of sine(x), which means we want to find a function whose derivative is sin(x).  The solution is -cos(x) + C. This comes from the standard rule that the derivative of cosine(x) is negative sine(x). Remember, “+C” represents an arbitrary constant of integration.

@@ -26,7 +26,7 @@ A real run calls a real model and is billed (or uses your `claude_cli` subscript
 | [`compliance_audit`](compliance_audit) | an LLM lists data types; deterministic rules and a Cedar guard decide the release | `claude_cli` | 1 if compliant at once, 3 if it must redact | ✅ |
 | [`lifted_tool`](lifted_tool) | a Python tool lifted from SPL into a `SOLVE` node that carries its own source | none: no model is called | 0 | ✅ |
 | [`pocketflow`](pocketflow) | acceptance samples lifted from SPL's PocketFlow set (`majority_vote`, `debate`, `text_transformer`) | `claude_cli` (or `--replay`) | 3 (`majority_vote`), 11 (`debate`), 0 (`text_transformer`) | ✅ |
-| [`elaborate_demo`](elaborate_demo) | one template (a part) applied to every node of a graph of things | `claude_cli` | 1 per concept (4) | ✅ |
+| [`expand_demo`](expand_demo) | one template (a part) applied to every node of a graph of things | `claude_cli` | 1 per concept (4) | ✅ |
 | [`container_demo`](container_demo) | a program run inside Docker (no network, read-only) | a running Docker daemon | 0 | ✅ |
 | [`stock_analysis`](stock_analysis) | `BATCH` over a list of tickers: Python (`SOLVE` kernel) fetches prices and computes metrics, the model comments on each and writes one outlook | `claude_cli`, `kernel` extra, network | 1 per ticker + 1 | not yet |
 

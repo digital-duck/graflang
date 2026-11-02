@@ -1,0 +1,7 @@
+{
+  "graph": "hello_symbolic_math",
+  "adapter": "ollama",
+  "model": "gemma3",
+  "params": {},
+  "started": "2026-11-01T23:32:08"
+}

@@ -5,6 +5,7 @@ disk until Save, nothing generated is executed, and code in an app (programs, `R
 """
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,6 +24,11 @@ def _draft():
 
 def _say(role: str, content: str) -> None:
     ui.chat_history("create").append({"role": role, "content": content})
+
+
+def _clean_name(raw: str) -> str:
+    """What a typed name becomes: lower case, spaces and hyphens as underscores, other characters dropped ("Port-Outlook" is `port_outlook`)."""
+    return re.sub(r"[^a-z0-9_]", "", re.sub(r"[\s-]+", "_", (raw or "").strip().lower()))
 
 
 def _name_ok(name: str) -> bool:
@@ -62,30 +68,35 @@ def create_page() -> None:
     ui.settings()
     draft = _draft()
     with st.sidebar:
-        st.markdown("### Describe your app")
-        ui.show_chat("create")
         with st.expander("Settings for this chat"):
-            name = st.text_input("App name", draft["name"] if draft else "", key="create_name", disabled=draft is not None,
-                                 help="lower-case letters, digits, underscores; it names the graph file")
-            allow_code = st.checkbox("Allow app to call external programs", key="create_allow_code",
+            typed = st.text_input("App name", draft["name"] if draft else "", key="create_name", disabled=draft is not None,
+                                  help="lower-case letters, digits, underscores, starting with a letter; it names the graph file. Hyphens and spaces become underscores.")
+            name = typed if draft else _clean_name(typed)
+            if typed and not draft:
+                if not _name_ok(name):
+                    st.error("A name starts with a letter and has letters, digits and underscores only.")
+                elif name != typed:
+                    st.caption(f"saved as `{name}`")
+            allow_code = st.checkbox("Allow app to call external programs", value=True, key="create_allow_code",
                                      help="Off: the model may only use nodes that run no program. On: it may add programs (SOLVE with code, RUN). They are not run when created, only when you run the app.")
-            rounds = st.slider("Most attempts per message", 1, 3, 3, key="create_rounds", help="each attempt is a real, billed model call")
+            rounds = st.slider("Most attempts per message", 1, 10, 3, key="create_rounds", help="each attempt is a real, billed model call")
             use_refs = st.checkbox("Show similar recipes to the model", value=True, key="create_use_refs",
                                    help="the best matches from your recipes (found like on the Browse page) go into the first request as examples")
+            st.caption(f"model: {ws.llm_spec(ui.settings())} (change it on the Settings page)")
+        st.markdown("### Chat history")
+        ui.show_chat("create")
         seed = st.session_state.get("create_seed")
         if seed and draft is None:
             st.caption(f"starting from `{seed}`")
             if st.button("Drop it", key="create_drop_seed"):
                 st.session_state.pop("create_seed", None)
                 st.rerun()
-        st.caption(f"model: {ws.llm_spec(ui.settings())} (change it on the Settings page)")
-        st.caption("📎 attach a screenshot or a document (text, markdown, YAML, JSON, CSV, code) with the + button")
-        value = st.chat_input("What should the app do?" if draft is None else "What should change?", key="create_input",
-                              accept_file="multiple", file_type=attachments.FILE_TYPES)
+        value = ui.chat_box("create", "What should the app do?" if draft is None else "What should change?")
     text, files = attachments.unpack(value)
     if (text or files) and draft is None and not _name_ok(str(name)):
         _say("user", text or "(see the attachment)")
-        _say("assistant", "Give the app a name first (under *Settings for this chat*: lower-case letters, digits, underscores), then send your message again.")
+        shown = f"`{typed}` is not a usable name" if typed else "The app has no name yet"
+        _say("assistant", f"{shown}. Give it one under *Settings for this chat* (letters, digits and underscores, starting with a letter; hyphens become underscores), then send your message again.")
         st.rerun()
     if text or files:
         found, notes = attachments.read(files)
@@ -118,16 +129,20 @@ def create_page() -> None:
         st.warning(warning)
     if created.ok:
         st.success("This app checks out: it validates and its dry run works.")
-    tabs = st.tabs(["Picture"] + list(draft["files"]))
-    with tabs[0]:
-        graph = ui.draft_graph(draft["name"], draft["files"])
-        if graph is None:
-            st.info("The graph does not load yet.")
-        else:
-            ui.show_graph(graph)
-    for tab, (rel, body) in zip(tabs[1:], draft["files"].items()):
+    # readme.md first, then the picture (called Workflow), then the other files
+    names = ["readme.md"] * ("readme.md" in draft["files"]) + ["Workflow"] + [r for r in draft["files"] if r != "readme.md"]
+    for tab, label in zip(st.tabs(names), names):
         with tab:
-            st.code(body, language=KINDS.get(Path(rel).suffix, "text"), line_numbers=True)
+            if label == "Workflow" and label not in draft["files"]:
+                graph = ui.draft_graph(draft["name"], draft["files"])
+                if graph is None:
+                    st.info("The graph does not load yet.")
+                else:
+                    ui.show_graph(graph)
+            elif label == "readme.md":
+                st.markdown(draft["files"][label])
+            else:
+                st.code(draft["files"][label], language=KINDS.get(Path(label).suffix, "text"), line_numbers=True)
 
     left, middle, right = st.columns(3)
     if left.button("Undo the last change", disabled=not draft["previous"], key="create_undo"):

@@ -1,0 +1,59 @@
+{
+  "steps": 9,
+  "mutations": 0,
+  "llm": {
+    "adapter": "ollama",
+    "calls": 2,
+    "input_tokens": 399,
+    "output_tokens": 123,
+    "cost_usd": 0.0,
+    "ms": 6129
+  },
+  "nodes": {
+    "gen_1": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3802
+    },
+    "gen_2": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2328
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 422
+    },
+    "tool_6": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 127
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 13
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 12
+    },
+    "tool_5": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 10
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 8
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

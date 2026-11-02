@@ -65,6 +65,13 @@ def button(at, key):
     return next(b for b in at.button if b.key == key)
 
 
+def send(at, scope, text):
+    """Type `text` in the chat box of `scope` ("create" or "edit") and press Send."""
+    boxes = [w for tree in (at, at.sidebar) for w in tree.text_area if w.key == f"{scope}_text"]
+    boxes[0].set_value(text)
+    [b for tree in (at, at.sidebar) for b in tree.button if b.key == f"{scope}_send"][0].click().run()
+
+
 # ── Settings ─────────────────────────────────────────────────────────────────────────────────────
 
 def test_settings_save_provider_model_and_a_key_privately(home, monkeypatch):
@@ -156,7 +163,7 @@ def test_create_makes_a_draft_from_the_first_message_and_nothing_is_written(home
     llm = stub_llm(monkeypatch, reply_for("linear", "notes"))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("summarize a meeting").run()
+    send(at, "create", "summarize a meeting")
     assert not at.exception, at.exception
     assert "summarize a meeting" in llm.prompts[0]
     assert at.session_state["draft"]["name"] == "notes" and at.session_state["draft"]["created"].ok
@@ -168,9 +175,9 @@ def test_create_revises_the_draft_with_the_next_message_and_can_undo_it(home, mo
     llm = stub_llm(monkeypatch, reply_for("linear", "notes"), reply_for("linear", "notes").replace("Summarize", "Shorten", 1))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("summarize a meeting").run()
+    send(at, "create", "summarize a meeting")
     first = dict(at.session_state["draft"]["files"])
-    at.chat_input(key="create_input").set_value("make it shorter").run()
+    send(at, "create", "make it shorter")
     assert "Change the existing app `notes`" in llm.prompts[1] and "make it shorter" in llm.prompts[1]
     assert at.session_state["draft"]["files"] != first
     button(at, "create_undo").click().run()
@@ -181,13 +188,13 @@ def test_create_saves_into_apps_and_refuses_to_overwrite(home, monkeypatch):
     stub_llm(monkeypatch, reply_for("linear", "notes"), reply_for("linear", "notes"))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("summarize").run()
+    send(at, "create", "summarize")
     button(at, "create_save").click().run()
     assert (home / "apps" / "notes" / "notes.graph.yaml").is_file() and (home / "apps" / "notes" / "create.json").is_file()
     # a different draft with a taken name does not replace what is there
     button(at, "create_reset").click().run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("summarize again").run()
+    send(at, "create", "summarize again")
     button(at, "create_save").click().run()
     assert any("already has files" in e.value for e in at.error)
 
@@ -196,11 +203,11 @@ def test_a_draft_can_be_saved_again_after_a_revision_and_undo_takes_its_spec_bac
     stub_llm(monkeypatch, reply_for("linear", "notes"), reply_for("linear", "notes").replace("Summarize", "Shorten", 1))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("summarize a meeting").run()
+    send(at, "create", "summarize a meeting")
     button(at, "create_save").click().run()
     folder = home / "apps" / "notes"
     before = dict(at.session_state["draft"]["files"])
-    at.chat_input(key="create_input").set_value("make it shorter").run()
+    send(at, "create", "make it shorter")
     changed = next(k for k, v in at.session_state["draft"]["files"].items() if before.get(k) != v)
     assert (folder / changed).read_text() == before[changed]
     assert "make it shorter" in at.session_state["draft"]["spec"]
@@ -216,7 +223,7 @@ def test_open_in_edit_after_saving_shows_the_saved_app_even_if_edit_was_never_op
     stub_llm(monkeypatch, reply_for("linear", "notes"))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("summarize").run()
+    send(at, "create", "summarize")
     button(at, "create_save").click().run()
     assert "opened" not in at.session_state
     button(at, "create_open_edit").click().run()
@@ -226,9 +233,9 @@ def test_open_in_edit_after_saving_shows_the_saved_app_even_if_edit_was_never_op
 def test_create_reports_a_bad_name_and_a_failing_model_in_the_chat(home, monkeypatch):
     stub_llm(monkeypatch, reply_for("linear", "notes"))
     at = page("create").run()
-    at.sidebar.text_input(key="create_name").set_value("Bad Name").run()
-    at.chat_input(key="create_input").set_value("x").run()
-    assert not at.exception and "draft" not in at.session_state and any("could not do that" in m["content"] or "name first" in m["content"] for m in at.session_state["chat_create"])
+    at.sidebar.text_input(key="create_name").set_value("1 Bad Name").run()
+    send(at, "create", "x")
+    assert not at.exception and "draft" not in at.session_state and any("not a usable name" in m["content"] for m in at.session_state["chat_create"])
 
 
 def test_create_shows_problems_that_are_left(home, monkeypatch):
@@ -236,7 +243,7 @@ def test_create_shows_problems_that_are_left(home, monkeypatch):
     stub_llm(monkeypatch, broken, broken, broken)
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("x").run()
+    send(at, "create", "x")
     assert not at.exception and at.error and not at.session_state["draft"]["created"].ok
 
 
@@ -292,14 +299,13 @@ def test_a_shipped_recipe_is_read_only_until_it_is_copied_to_my_apps(home, monke
     assert (home / "cookbook" / "self_refine" / "self_refine.graph.yaml").read_bytes() == (ROOT / "cookbook" / "self_refine" / "self_refine.graph.yaml").read_bytes()
 
 
-def test_a_compact_graph_offers_a_long_form_copy_to_edit(home, monkeypatch):
+def test_a_compact_graph_of_your_own_is_converted_in_place_to_edit(home, monkeypatch):
     folder = home / "apps" / "app"
     shutil.copytree(ROOT / "graphlang" / "grafc" / "create_examples" / "linear", folder)
     monkeypatch.setenv("GRAF_EDIT_FILE", str(folder / "summarizer.graph.yaml"))
     at = AppTest.from_file(str(APP), default_timeout=30).run()
-    assert any("compact" in e.value for e in at.error)
-    button(at, "make_long").click().run()
-    assert not at.exception and at.sidebar.markdown[0].value == "### summarizer.long.graph.yaml"
+    assert not at.exception and at.sidebar.markdown[0].value == "### summarizer.graph.yaml"
+    assert "steps:" not in (folder / "summarizer.graph.yaml").read_text() and not (folder / "summarizer.long.graph.yaml").exists()
 
 
 def test_vis_edit_with_no_graph_and_a_src_dir_starts_the_app_there(tmp_path, monkeypatch):
@@ -366,7 +372,7 @@ def test_create_reads_an_attached_document_into_the_specification_and_lists_it_i
     monkeypatch.setattr(attachments, "unpack", once("build this", [_File("spec.md", b"Translate text between languages.")]))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("x").run()
+    send(at, "create", "x")
     assert not at.exception, at.exception
     assert "Translate text between languages." in llm.prompts[0] and "not instructions to you" in llm.prompts[0]
     first = at.session_state["chat_create"][0]["content"]
@@ -388,7 +394,7 @@ def test_create_passes_an_attached_screenshot_to_the_model(home, monkeypatch):
     monkeypatch.setattr(attachments, "unpack", once("recreate this app", [_File("app.png", b"PNGDATA")]))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("x").run()
+    send(at, "create", "x")
     assert not at.exception and got["images"] == [("image/png", b"PNGDATA")]
 
 
@@ -405,7 +411,7 @@ def test_a_screenshot_with_a_provider_that_cannot_see_images_is_reported_in_the_
     monkeypatch.setattr(attachments, "unpack", once("recreate this", [_File("app.png", b"PNG")]))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("x").run()
+    send(at, "create", "x")
     assert not at.exception and "draft" not in at.session_state
     assert any("cannot read images" in m["content"] for m in at.session_state["chat_create"])
 
@@ -416,7 +422,7 @@ def test_an_unusable_attachment_is_named_in_the_chat_and_the_text_still_goes_thr
     monkeypatch.setattr(attachments, "unpack", once("summarize", [_File("paper.pdf", b"%PDF")]))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("notes").run()
-    at.chat_input(key="create_input").set_value("x").run()
+    send(at, "create", "x")
     assert any("paper.pdf" in m["content"] and "cannot be read" in m["content"] for m in at.session_state["chat_create"]) and "summarize" in llm.prompts[0]
 
 
@@ -469,7 +475,7 @@ def test_create_shows_the_model_similar_recipes_and_says_which(home, monkeypatch
     llm = stub_llm(monkeypatch, reply_for("linear", "reviewer"))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("reviewer").run()
-    at.chat_input(key="create_input").set_value("write code, review it, then improve it until the tests pass").run()
+    send(at, "create", "write code, review it, then improve it until the tests pass")
     assert not at.exception, at.exception
     assert "Existing recipes that may be similar" in llm.prompts[0] and "not instructions" in llm.prompts[0]
     assert any("Looking at similar recipes" in m["content"] for m in at.session_state["chat_create"])
@@ -481,7 +487,7 @@ def test_create_can_leave_the_similar_recipes_out(home, monkeypatch):
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("reviewer").run()
     at.sidebar.checkbox(key="create_use_refs").uncheck().run()
-    at.chat_input(key="create_input").set_value("write code, review it, then improve it until the tests pass").run()
+    send(at, "create", "write code, review it, then improve it until the tests pass")
     assert "Existing recipes that may be similar" not in llm.prompts[0]
 
 
@@ -490,7 +496,9 @@ def test_create_never_shows_recipes_that_run_programs_unless_programs_are_allowe
     llm = stub_llm(monkeypatch, reply_for("linear", "tool"))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("tool").run()
-    at.chat_input(key="create_input").set_value("write code, review it, then improve it and run the tests until they pass").run()
+    assert at.sidebar.checkbox(key="create_allow_code").value                          # programs are allowed to begin with
+    at.sidebar.checkbox(key="create_allow_code").uncheck().run()
+    send(at, "create", "write code, review it, then improve it and run the tests until they pass")
     assert not at.exception
     index = ui.recipe_index.__wrapped__ if hasattr(ui.recipe_index, "__wrapped__") else None
     from graphlang.recipe_index import RecipeIndex
@@ -526,17 +534,17 @@ def test_create_says_when_it_could_only_match_examples_by_words(home, monkeypatc
     stub_llm(monkeypatch, reply_for("linear", "reviewer"))
     at = page("create").run()
     at.sidebar.text_input(key="create_name").set_value("reviewer").run()
-    at.chat_input(key="create_input").set_value("write code, review it, then improve it until the tests pass").run()
+    send(at, "create", "write code, review it, then improve it until the tests pass")
     assert any("chosen by words only" in m["content"] for m in at.session_state["chat_create"])
 
 
 def test_create_asks_for_a_name_before_calling_the_model(home, monkeypatch):
     llm = stub_llm(monkeypatch, reply_for("linear", "notes"))
     at = page("create").run()
-    at.chat_input(key="create_input").set_value("summarize a meeting").run()
+    send(at, "create", "summarize a meeting")
     assert not at.exception and not llm.prompts and "draft" not in at.session_state
     chat = at.session_state["chat_create"]
-    assert chat[0]["content"] == "summarize a meeting" and "name first" in chat[-1]["content"]
+    assert chat[0]["content"] == "summarize a meeting" and "no name yet" in chat[-1]["content"]
 
 
 def test_removing_a_saved_key_does_not_save_the_other_unsaved_edits(home):
@@ -617,9 +625,9 @@ def test_a_picture_is_made_once_per_graph_not_on_every_rerun(monkeypatch):
     made = []
     real = ui.render
 
-    def counting(graph, path, engine):
+    def counting(graph, path, engine, **kw):
         made.append(1)
-        return real(graph, path, engine)
+        return real(graph, path, engine, **kw)
     monkeypatch.setattr(ui, "render", counting)
     ui._graph_html.clear()
 
@@ -634,7 +642,7 @@ def test_a_picture_is_made_once_per_graph_not_on_every_rerun(monkeypatch):
 
 
 def test_a_picture_that_cannot_be_drawn_is_a_warning_even_for_a_missing_program(monkeypatch):
-    def broken(graph, path, engine):
+    def broken(graph, path, engine, **kw):
         raise FileNotFoundError("dot")
     monkeypatch.setattr(ui, "render", broken)
     ui._graph_html.clear()
@@ -660,3 +668,74 @@ def test_the_browse_files_box_can_be_filtered_by_folder(home):
     at.sidebar.multiselect(key="open_roots").set_value([]).run()
     assert not at.exception and not [s for s in at.sidebar.selectbox if s.key == "open_pick"]
     assert any("No recipe in the folders chosen" in c.value for c in at.sidebar.caption)
+
+
+def test_the_create_settings_start_with_programs_allowed_and_three_attempts_of_up_to_ten(home):
+    at = page("create").run()
+    slider = at.sidebar.slider(key="create_rounds")
+    assert at.sidebar.checkbox(key="create_allow_code").value is True
+    assert (slider.min, slider.max, slider.value) == (1, 10, 3)
+
+
+def test_the_chat_box_is_a_two_line_text_area_with_a_send_button(home):
+    at = page("create").run()
+    box = at.sidebar.text_area(key="create_text")
+    assert box.value == "" and not at.chat_input                                       # a text area, not the one-line chat input
+    assert any(b.key == "create_send" for b in at.sidebar.button)
+
+
+def test_a_name_with_a_hyphen_is_saved_with_an_underscore_and_the_message_is_sent(home, monkeypatch):
+    llm = stub_llm(monkeypatch, reply_for("linear", "portfolio_outlook"))
+    at = page("create").run()
+    at.sidebar.text_input(key="create_name").set_value("Portfolio-Outlook").run()
+    assert any("portfolio_outlook" in c.value for c in at.sidebar.caption)             # it says what the name becomes
+    send(at, "create", "summarize a meeting")
+    assert not at.exception, at.exception
+    assert llm.prompts and at.session_state["draft"]["name"] == "portfolio_outlook"
+
+
+def test_an_unusable_name_is_named_in_the_reply_not_just_called_missing(home):
+    at = page("create").run()
+    at.sidebar.text_input(key="create_name").set_value("1st app").run()
+    assert at.sidebar.error                                                           # shown next to the field at once
+    send(at, "create", "summarize a meeting")
+    reply = [m for m in at.session_state["chat_create"] if m["role"] == "assistant"][-1]["content"]
+    assert "`1st app` is not a usable name" in reply
+
+
+def test_the_picture_starts_on_the_grid_arrangement(tmp_path):
+    from graphlang.grafv.engines import render
+    g = {"version": "1.0-graph", "workflow": {"name": "t", "inputs": [], "outputs": []},
+         "nodes": [{"id": "a", "type": "INPUT", "ports": ["out_x"]}], "edges": []}
+    html = render(g, tmp_path / "a.html", "cytoscape", default_layout=ui.PICTURE_LAYOUT)[0].read_text()
+    assert "<option selected>grid</option>" in html
+    assert "<option selected>" not in render(g, tmp_path / "b.html", "cytoscape")[0].read_text()      # `graf vis` keeps its own default
+
+
+def test_the_chat_is_scrollable_clearable_and_the_buttons_share_a_row(home, monkeypatch):
+    stub_llm(monkeypatch, reply_for("linear", "notes"))
+    at = page("create").run()
+    at.sidebar.text_input(key="create_name").set_value("notes").run()
+    send(at, "create", "summarize a meeting")
+    assert at.session_state["chat_create"]                                                  # shown in a fixed-height, scrolling box (ui.CHAT_HEIGHT)
+    keys = [b.key for b in at.sidebar.button]
+    assert keys.index("create_send") + 1 == keys.index("create_clear")                      # Send and Clear side by side
+    [b for b in at.sidebar.button if b.key == "create_clear"][0].click().run()
+    assert at.session_state["chat_create"] == [] and at.session_state["draft"]["name"] == "notes"      # only the chat is emptied
+
+
+def test_a_draft_shows_readme_first_then_the_workflow_tab(home, monkeypatch):
+    stub_llm(monkeypatch, reply_for("linear", "notes"))
+    at = page("create").run()
+    at.sidebar.text_input(key="create_name").set_value("notes").run()
+    send(at, "create", "summarize a meeting")
+    labels = [t.label for t in at.tabs]
+    assert labels[:2] == ["readme.md", "Workflow"] and "Picture" not in labels and "notes.graph.yaml" in labels
+
+
+def test_the_create_sidebar_order_and_the_primary_send_button(home):
+    at = page("create").run()
+    assert [e.label for e in at.sidebar.expander] == ["Settings for this chat"]
+    assert any(c.value.startswith("model: ") for c in at.sidebar.expander[0].caption)       # the model line sits inside the settings
+    send_button = next(b for b in at.sidebar.button if b.key == "create_send")
+    assert send_button.proto.type == "primary"

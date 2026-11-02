@@ -13,10 +13,10 @@ workflow:
       default: 1y
     - name: target_return
       type: TEXT
-      default: '0.12'
+      default: '0.08'
     - name: max_weight
       type: TEXT
-      default: '0.20'
+      default: '0.25'
     - name: adapter
       type: TEXT
       default: claude_cli

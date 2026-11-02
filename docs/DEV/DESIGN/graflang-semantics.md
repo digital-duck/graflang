@@ -40,7 +40,7 @@ A delta that adds any error to this list is rejected. The safety layer (`GUARD` 
 
 ## 3c. Elaboration
 
-An `elaborate:` block, like a part use, has no runtime semantics: it is rewritten into SUBGRAPH nodes, a FORK over the roots, a JOIN before each node with several predecessors, and a final JOIN that gathers results. The things' graph must be acyclic. Ordering exists only where the things' graph has an edge (ConceptBook question: a required order is an edge).
+An `expand:` block, like a part use, has no runtime semantics: it is rewritten into SUBGRAPH nodes, a FORK over the roots, a JOIN before each node with several predecessors, and a final JOIN that gathers results. The things' graph must be acyclic. Ordering exists only where the things' graph has an edge (ConceptBook question: a required order is an edge).
 
 ## 3b. Persistent self-revision in a LOOP
 

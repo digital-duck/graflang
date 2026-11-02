@@ -13,13 +13,14 @@ import os
 from pathlib import Path
 
 import streamlit as st
+import yaml
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from graphlang import workspace as ws
 from graphlang.grafr.runtime import SCHEMA_PATH, load_graph
-from graphlang.grafv import attachments, chat_ops, ui
+from graphlang.grafv import attachments, chat_ops, runs, ui
 from graphlang.grafv.editor import EditError, GraphEditor
 from graphlang.grafv.model import display_label
 
@@ -226,17 +227,61 @@ def run_tab(editor: GraphEditor) -> None:
     if st.button("Run", key="run_go", disabled=not acknowledged):
         with st.spinner("running"):
             name, _, model = adapter.partition(":")
-            st.session_state["run_result"] = editor.run({k: v for k, v in params.items() if v != ""}, adapter=name, model=model or None, max_calls=max_calls)
+            st.session_state["run_result"] = editor.run({k: v for k, v in params.items() if v != ""}, adapter=name, model=model or None, max_calls=max_calls, save=adapter != "mock")     # real runs are kept in output/; a dry run is not
+            st.session_state.pop("logs_pick", None)
     result = st.session_state.get("run_result")
     if not result:
         return
     if not result["ok"]:
         st.error(result["error"])
         return
-    st.success(f"{result['summary']['steps']} steps")
-    st.json(result["outputs"])
-    rows = [{"node": k, "fired": v["n"], "ms": v["ms"]} for k, v in result["summary"]["nodes"].items()]
-    st.dataframe(rows, hide_index=True)
+    st.success(f"{result['summary']['steps']} steps; the result is in the Logs tab")
+
+
+def show_result(value) -> None:
+    """Text is shown as text (markdown renders it); anything structured is shown as YAML, which reads better than JSON."""
+    if isinstance(value, str):
+        st.markdown(value)
+    else:
+        st.code(yaml.safe_dump(value, sort_keys=False, allow_unicode=True, default_flow_style=False), language="yaml")
+
+
+def logs_tab(editor: GraphEditor) -> None:
+    """The last run, made readable: inputs, outputs, what each node produced, the time per node and the model's usage."""
+    past = runs.run_folders(editor.path)
+    latest = st.session_state.get("run_result")
+    options = (["latest"] if latest else []) + [str(f) for f in past]
+    if not options:
+        st.caption("Nothing has run yet. Use the Run tab; real runs are kept in the `output/` folder beside the graph and listed here.")
+        return
+    pick = st.selectbox("Run", options, key="logs_pick", format_func=lambda o: "Latest run (this session)" if o == "latest" else runs.label(Path(o)),
+                        help="runs saved in the output folder beside this graph, newest first (dry runs are not saved)")
+    result = latest if pick == "latest" else runs.load_run(Path(pick))
+    if not result["ok"]:
+        st.error(result["error"])
+        return
+    summary = result["summary"] or {"steps": "?", "nodes": {}}
+    st.success(f"{summary['steps']} steps")
+    if result.get("inputs"):
+        with st.expander("Inputs"):
+            show_result(result["inputs"])
+    st.markdown("#### Output")
+    for name, value in (result["outputs"] or {}).items():
+        st.markdown(f"**{name}**")
+        show_result(value)
+    produced = result.get("values") or {}
+    if produced:
+        st.markdown("#### Step by step")
+        for node, ports in produced.items():
+            with st.expander(node):
+                for port, value in ports.items():
+                    st.caption(port)
+                    show_result(value)
+    st.markdown("#### Time per node")
+    st.dataframe([{"node": k, "fired": v["n"], "ms": v["ms"]} for k, v in summary["nodes"].items()], hide_index=True)
+    if summary.get("llm"):
+        with st.expander("Model usage"):
+            show_result(summary["llm"])
 
 
 def clone_box(editor: GraphEditor, original: str, dirty: bool) -> None:
@@ -306,8 +351,7 @@ def edit_chat(editor: GraphEditor, folder: Path, scope: str, staged: dict) -> No
     """Ask for a change in words: the model answers with operations, which go through the editor like the buttons do (all or none)."""
     st.markdown("### Ask for a change")
     ui.show_chat(scope)
-    st.caption("📎 attach a screenshot or a document (text, markdown, YAML, JSON, CSV, code) with the + button")
-    value = st.chat_input("e.g. make the critique stricter", key="edit_input", accept_file="multiple", file_type=attachments.FILE_TYPES)
+    value = ui.chat_box("edit", "e.g. make the critique stricter", history=scope)
     text, files = attachments.unpack(value)
     if not (text or files):
         return
@@ -369,6 +413,15 @@ def edit_page() -> None:
         try:
             st.session_state["editor"], st.session_state["file"] = GraphEditor(path), target
         except EditError as e:
+            if "compact" in str(e) and not ui.unsaved():        # a file of your own (the read-only branch returned above): convert it where it is
+                try:
+                    ws.long_form_in_place(path)
+                except (ws.WorkspaceError, OSError, ValueError) as err:
+                    st.error(str(err))
+                else:
+                    open_graph(str(path))
+                    st.session_state["flash"] = ("success", "the file was in the short `steps:` form; it is now in the long form the editor takes (same workflow, comments dropped)")
+                    st.rerun()
             st.error(str(e))
             if "compact" in str(e) and st.button("Make an editable long-form copy", key="make_long", disabled=ui.unsaved()):
                 try:
@@ -427,8 +480,8 @@ def edit_page() -> None:
     with left:
         picture(editor)
     with right:
-        tabs = st.tabs(["Source", "Node", "Add node", "Edges", "Problems", "Run"])
-        for tab, body in zip(tabs, (source_tab, node_tab, add_tab, edge_tab, problems_tab, run_tab)):
+        tabs = st.tabs(["Source", "Node", "Add node", "Edges", "Problems", "Run", "Logs"])
+        for tab, body in zip(tabs, (source_tab, node_tab, add_tab, edge_tab, problems_tab, run_tab, logs_tab)):
             with tab:
                 body(editor)
 

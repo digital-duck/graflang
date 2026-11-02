@@ -65,7 +65,7 @@ def test_one_entry_is_one_recipe_not_one_file(words_only):
     assert len(names) == len(set(names))
     audit = next(e for e in words_only.entries if e.folder.name == "compliance_audit")
     assert audit.graph.name == "compliance_audit.graph.yaml" and "compliance_audit_llm_only.graph.yaml" in audit.graphs
-    demo = next(e for e in words_only.entries if e.folder.name == "elaborate_demo")
+    demo = next(e for e in words_only.entries if e.folder.name == "expand_demo")
     assert "sub_graph/explain.graph.yaml" in demo.graphs and "subgraph" in demo.tags
     assert all(e.title and e.description for e in words_only.entries) and all(e.shipped for e in words_only.entries)
 

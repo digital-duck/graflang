@@ -1,0 +1,51 @@
+⚡ Loading graph: cookbook_solvers/z3_compliance/z3_compliance.graph.yaml
+✓ Graph loaded: z3_compliance
+  Nodes: 20
+  Edges: 50
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ EVALUATE eval_3 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ GENERATE gen_2 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': "=== Z3 Compliance Checker (r102) | solver=ON ===\n\n## Z3 
+Eligibility Check — QuickLoan Eligibility Policy v2.1\n\n**Status:** SAT  
+\n**Verdict:** Policy is satisfiable — a qualifying customer profile 
+exists\n**Rules checked:** 5\n\n### Qualifying Profile Found by Z3\n\n| Variable
+| Value |\n|---|---|\n| age | 18 |\n| income | 0 |\n| credit_score | 650 |\n| 
+months_employed | 0 |\n| has_collateral | True |\n| self_employed | False 
+|\n\n── Business Explanation ────────────────────────────────────\n**1. What Z3 
+found:** Z3 confirmed the five rules can all be satisfied at once. It produced a
+concrete applicant who passes every rule: age 18, income $0, credit score 650, 
+no months employed, has collateral, not self-employed.\n\n**2. Business 
+meaning:** The rules are consistent, not contradictory. At least one kind of 
+customer can qualify, so the policy isn't accidentally rejecting 
+everyone.\n\n**3. What's notable:** The sample applicant has zero income and 
+zero employment history. Collateral alone satisfies both the income rule (R2) 
+and the employment rule (R5). So the policy approves someone with no income at 
+all, as long as they have collateral and a 650 credit score. That is probably 
+worth a business review: no rule requires any ability to repay.\n\n**4. Risk of 
+manual tracing:** People checking rules by hand tend to test typical profiles 
+and miss edge cases like this one. They can also miss subtle contradictions 
+between rules when policies grow larger. Z3 checks the whole space of possible 
+applicants, so it finds gaps and conflicts that spot checks can't."}
+13 steps · 1 LLM calls, 551 tokens in / 268 out · slowest: gen_2 4.5s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/z3/res/z3_compliance-claude_cli-claude-sonnet-5-5-2
+0261101-202712
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/z3/log/z3_compliance-claude_cli-claude-sonnet-5-5-2
+0261101-202712.log

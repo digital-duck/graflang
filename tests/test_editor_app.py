@@ -29,6 +29,13 @@ def button(app, key):
     return next(b for b in app.button if b.key == key)
 
 
+def send(at, scope, text):
+    """Type `text` in the chat box of `scope` ("create" or "edit") and press Send."""
+    boxes = [w for tree in (at, at.sidebar) for w in tree.text_area if w.key == f"{scope}_text"]
+    boxes[0].set_value(text)
+    [b for tree in (at, at.sidebar) for b in tree.button if b.key == f"{scope}_send"][0].click().run()
+
+
 def pick(app, node):
     app.selectbox(key="node_pick").select(node).run()
 
@@ -87,7 +94,8 @@ def test_the_run_tab_runs_the_graph_as_it_is_with_the_mock(at):
     at.text_input(key="run_in_topic").set_value("ducks").run()
     button(at, "run_go").click().run()
     assert not at.exception and any("steps" in s.value for s in at.success)
-    assert any("essay" in str(j.value) for j in at.json)
+    assert any("essay" in m.value for m in at.markdown) or any("essay" in c.value for c in at.code)      # the Logs tab shows the result
+    assert "Logs" in [t.label for t in at.tabs] and not at.json
 
 
 def test_clone_makes_a_copy_and_edits_that_one_not_the_original(at):
@@ -133,7 +141,7 @@ def test_a_chat_request_changes_the_graph_and_a_prompt_file_but_only_save_writes
         {"op": "set_config", "node": "draft", "key": "llm", "value": "ollama:llama3"},
         {"op": "write_file", "path": "prompts/draft.md", "text": "Write ONE terse paragraph about {{in_topic}}."}]}))
     original_prompt = (at.file.parent / "prompts" / "draft.md").read_text()
-    at.chat_input(key="edit_input").set_value("make the draft terser").run()
+    send(at, "edit", "make the draft terser")
     assert not at.exception, at.exception
     assert "make the draft terser" in prompts[0] and "prompts/draft.md" in prompts[0]
     assert not button(at, "save").disabled and "ollama:llama3" not in at.file.read_text()           # a proposal, not a save
@@ -147,7 +155,7 @@ def test_a_chat_edit_can_be_undone_and_its_prompt_changes_discarded(at, monkeypa
     stub_chat(monkeypatch, json.dumps({"say": "ok", "ops": [
         {"op": "set_config", "node": "draft", "key": "llm", "value": "ollama:llama3"},
         {"op": "write_file", "path": "prompts/draft.md", "text": "NEW"}]}))
-    at.chat_input(key="edit_input").set_value("change things").run()
+    send(at, "edit", "change things")
     button(at, "undo").click().run()
     button(at, "discard_staged").click().run()
     assert button(at, "save").disabled and not at.session_state[f"staged_{at.session_state['file']}"]
@@ -156,14 +164,14 @@ def test_a_chat_edit_can_be_undone_and_its_prompt_changes_discarded(at, monkeypa
 def test_a_chat_reply_that_cannot_be_applied_changes_nothing_and_says_why(at, monkeypatch):
     stub_chat(monkeypatch, json.dumps({"say": "x", "ops": [
         {"op": "set_config", "node": "draft", "key": "llm", "value": "a:b"}, {"op": "remove_node", "id": "no_such_node"}]}))
-    at.chat_input(key="edit_input").set_value("do it").run()
+    send(at, "edit", "do it")
     assert not at.exception and button(at, "save").disabled
     assert any("could not apply" in m["content"] for m in at.session_state[f"chat_edit_{at.session_state['file']}"])
 
 
 def test_a_chat_reply_that_is_not_json_is_reported_not_crashed(at, monkeypatch):
     stub_chat(monkeypatch, "Sure, I will make it better!")
-    at.chat_input(key="edit_input").set_value("improve").run()
+    send(at, "edit", "improve")
     assert not at.exception and any("JSON" in m["content"] for m in at.session_state[f"chat_edit_{at.session_state['file']}"])
 
 
@@ -235,14 +243,14 @@ def test_a_typed_but_unapplied_source_can_be_reverted(at):
 
 def test_the_file_browser_lists_graphs_in_sub_folders_and_opens_one(tmp_path, monkeypatch):
     folder = tmp_path / "ed"
-    shutil.copytree(Path(__file__).parent.parent / "cookbook" / "elaborate_demo", folder, ignore=shutil.ignore_patterns("output"))
+    shutil.copytree(Path(__file__).parent.parent / "cookbook" / "expand_demo", folder, ignore=shutil.ignore_patterns("output"))
     monkeypatch.setenv("GRAF_EDIT_FILE", str(folder / "sub_graph" / "explain.graph.yaml"))
     app = AppTest.from_file(str(APP), default_timeout=30).run()
     assert not app.exception, app.exception
     assert app.sidebar.markdown[0].value == "### explain.graph.yaml"
     files = app.sidebar.selectbox(key="open_file")
-    assert "sub_graph/explain.graph.yaml" in files.options and any(o.endswith("elaborate_demo.graph.yaml") for o in files.options)
-    app.sidebar.selectbox(key="open_file").select(next(o for o in files.options if o.endswith("elaborate_demo.graph.yaml"))).run()
+    assert "sub_graph/explain.graph.yaml" in files.options and any(o.endswith("expand_demo.graph.yaml") for o in files.options)
+    app.sidebar.selectbox(key="open_file").select(next(o for o in files.options if o.endswith("expand_demo.graph.yaml"))).run()
     next(b for b in app.sidebar.button if b.key == "open_go").click().run()
     assert not app.exception
 
@@ -365,3 +373,30 @@ def test_two_nodes_with_the_same_label_are_told_apart_by_their_id():
                               {"id": "b", "type": "GENERATE", "config": {"function": "analyze"}},
                               {"id": "c", "type": "INPUT", "config": {}}]}
     assert module.node_labels(Fake()) == {"a": "analyze (a)", "b": "analyze (b)", "c": "c"}
+
+
+def test_a_real_run_is_saved_and_the_logs_tab_lists_past_runs(at, monkeypatch):
+    from graphlang.grafv import runs
+    from graphlang.grafv.editor import GraphEditor
+    editor = GraphEditor(at.file)
+    result = editor.run({"topic": "ducks"}, adapter="mock", save=True)             # `save` is what the Run tab passes for a real model
+    assert result["ok"]
+    [folder] = runs.run_folders(at.file)
+    loaded = runs.load_run(folder)
+    assert loaded["ok"] and loaded["inputs"] == {"topic": "ducks"} and loaded["outputs"] == result["outputs"]
+    assert loaded["summary"]["steps"] == result["summary"]["steps"] and loaded["values"]
+    assert "mock" in runs.label(folder)
+    at.run()
+    box = next(s for s in at.selectbox if s.key == "logs_pick")
+    assert len(box.options) == 1 and "mock" in box.options[0]
+    assert any("essay" in m.value for m in at.markdown) or any("essay" in c.value for c in at.code)
+
+
+def test_a_failed_saved_run_is_listed_with_its_reason(at):
+    from graphlang.grafv import runs
+    from graphlang.grafv.editor import GraphEditor
+    result = GraphEditor(at.file).run({"topic": "x"}, adapter="mock", max_steps=1, save=True)
+    assert not result["ok"]
+    [folder] = runs.run_folders(at.file)
+    loaded = runs.load_run(folder)
+    assert not loaded["ok"] and loaded["error"] and "failed" in runs.label(folder)

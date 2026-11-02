@@ -3,6 +3,8 @@
 Companion to `graflang-spec.md` (clean-room spec, written **before** looking at the code) and `graflang-req.md` (requirements).
 This document reviews the existing prototype at `~/projects/digital-duck/graflang` against that spec, lists strengths, weaknesses and gaps, and proposes enhancements.
 
+**Status, 2026-11-01.** Sections 1 to 9 are the review of 2026-10-30 and are kept as written (the numbers in them are from that day). Everything they ask for has since been built or decided: §5a says, gap by gap, what became of each; §10 is the build log; §14 describes the editor app and §15 the migration of the solver recipes, both done after the review. Appendix B is the current to-do list. The basic functionality of GraphLang is in place: write or generate a graph, validate it, run it with a real model under a budget, edit it in the app, and bring SPL recipes over with `spl2graph`.
+
 **Method and limits**
 - Read: `README.md`, `CLAUDE.md`, `CHANGELOG.md`, the IR schema, `grafr/runtime.py` (key parts), `nodes/generate.py`, `nodes/evaluate.py`, `nodes/__init__.py`, head of `solve_backend.py`, the `self_refine` cookbook graph, and the gap tracker `zinets/docs/graph-vision/claude/readme-design.md`.
 - Ran: `pytest` in conda env `graf` → **355 passed, 8 failed, 2 skipped** (25 s). Failures: 6 in `test_cedar_compiler.py`, 1 in `test_policy_slicer.py`, 1 in `test_experiment_end_to_end.py[spl]` (hardcoded absolute path, a portability bug; the hardcoded SPL.py paths in `experiments/` are since fixed via `SPL_PY_PATH`).
@@ -14,16 +16,16 @@ This document reviews the existing prototype at `~/projects/digital-duck/graflan
 
 | Area | State |
 |---|---|
-| Package | `graflang` (PyPI) / `graphlang` (import); CLI `graf run\|validate\|info\|check\|compile\|vis`; ~5.4k lines of Python |
-| Runtime `grafr` | Token-passing dataflow over a `networkx.MultiDiGraph`; node types GENERATE, EVALUATE, SOLVE, ASSERT, LOOP, FORK/JOIN, GUARD, MUTATE, CONTEXT, INPUT/OUTPUT |
+| Package | `graflang` (PyPI) / `graphlang` (import); CLI `graf run\|validate\|info\|expand\|describe\|create\|compile\|vis` (`vis --edit` opens the app); 1065 offline tests pass (7 known `grafc/cedar` failures) *(2026-11-01)* |
+| Runtime `grafr` | Token-passing dataflow over a `networkx.MultiDiGraph`; node types GENERATE, EVALUATE, SOLVE, ASSERT, LOOP, BATCH, FORK/JOIN, GUARD, MUTATE, CONTEXT, RUN, RECOVER, INPUT/OUTPUT (OBSERVE, QUERY, EMIT are still pass-through) |
 | Edges | Two types: `triggers` (control tokens between named ports) and `binds` (data, keyed by port name) |
-| LLM | `mock` plus adapters through shared `dd-llm` (`claude_cli`, `ollama`, `openai`, ...) |
-| Deterministic compute | `SOLVE` via `expression`, `procedure_ref` (SPL workflow), `backend: kernel` (persistent Python kernel) or `backend: subprocess` (any program, stdin JSON → stdout parser) |
-| Safety | Cedar (`cedarpy`) for GUARD/MUTATE, fail-closed; safe expression evaluator; MUTATE cannot add code-bearing keys (`CODE_KEYS`) |
-| Compiler `grafc` | Mostly stub; ~1,500-line hand-written Cedar compiler; Rust codegen stub |
-| Viz | `graf vis` via `zinet.vis` engines: cytoscape (default), graphviz, mermaid, ascii |
-| Cookbook | `code_pipeline`, `self_refine`, `your_book`, `compliance_audit`, `solver_check`, `ts_verify` |
-| Process | Gap tracker with 35 numbered items; ~30 test files |
+| LLM | `mock` (tests only) plus adapters through shared `dd-llm` (`claude_cli`, `ollama`, `openai`, ...); default `claude_cli` with `claude-sonnet-5-5` |
+| Deterministic compute | `SOLVE` via `expression`, `procedure_ref` (SPL workflow), `backend: kernel` (persistent Python kernel, any installed Jupyter kernel through `kernel_name` / `--kernel-name`, e.g. `sagemath`) or `backend: subprocess` (any program, optionally in a container); `RUN` for subprocess, python and http executors |
+| Safety | Cedar (`cedarpy`) for GUARD/MUTATE, fail-closed; safe expression evaluator (with f-strings); MUTATE cannot add code-bearing keys (`CODE_KEYS`); `graf validate` also rejects a prompt whose `{{in_x}}` nothing fills |
+| Compiler `grafc` | `graf compile --lang spl` works; Rust is a stub; the ~1,500-line hand-written Cedar compiler is left alone |
+| Viz and app | `graf vis` via `zinet.vis` engines; `graf vis --edit`, a Streamlit app with Welcome, Create, Edit, Browse, Import/Export and Settings pages (§14) |
+| Cookbook | `cookbook/` (`code_pipeline`, `self_refine`, `your_book`, `compliance_audit`, `solver_check`, `ts_verify`, `stock_analysis`, `pocketflow`, ...) and `cookbook_solvers/`, 47 solver recipes migrated from SPL.py (§15) |
+| Process | Gap tracker with 48 numbered items; 59 test files |
 
 ---
 
@@ -128,6 +130,29 @@ Priority: **P0** blocks the mission (SPL upgrade, practical orchestration), **P1
 | G16 | No checkpoint/resume or LLM record/replay for tests | P2 | new |
 | G17 | Four graph dialects (conceptbook / graph-code Duality / work-graph / graflang) | P2 | partly in zinet README |
 | G18 | Resource sandboxing for subprocess/kernel beyond timeout and memory (network, filesystem) not verified | P2 | new |
+
+### 5a. What became of each gap (2026-11-01)
+
+| ID | Status | Where |
+|---|---|---|
+| G1 SPL conversion | **Resolved.** `spl2graph` (in SPL.py) lifts 265 of 274 cookbook workflows; the 47 solver recipes were migrated and run with a real model | §10 R2, §15 |
+| G2 lifecycle | **Resolved** (`config.phases`) | E1, §10 R1 |
+| G3 typed ports | **Resolved** | E2, §10 R1 |
+| G4 parallelism | **Resolved**, opt-in (`--workers`, `BATCH`) | E5, §10 R3 |
+| G5 authoring | **Resolved**: compact `steps:` form, `graf expand`, and the app's Create page that writes a graph from a description | E3, §14 |
+| G6 executors | **Resolved** for subprocess, python and http (`RUN`); `mcp` and `wasm` are out for now | E4 |
+| G7 stub node types | **Partly.** `RECOVER` is real; `OBSERVE`, `QUERY` and `EMIT` are still pass-through | Appendix B |
+| G8 bindings | **Resolved** (`--bind`) | E6 |
+| G9 `grafc/cedar` | **Decided: leave it alone**; its 7 test failures stay known | §12 decision 3 |
+| G10 portability | **Resolved** | §10 R0 |
+| G11 data semantics | **Resolved**: written semantics, race and deadlock checks | `graflang-semantics.md` |
+| G12 overstated docs | **Resolved** | §10 |
+| G13 PII | **Resolved** (`has_pii`) | tracker #30 |
+| G14 MUTATE in LOOP | **Resolved** (`persist_mutations`) | tracker #32 |
+| G15 cost accounting | **Resolved** (run summary, `limits`) | §10 R4 |
+| G16 checkpoint and replay | **Resolved** | §10 R4 |
+| G17 four dialects | **Deferred** until graflang is stable | `graflang-dialects.md` §8 |
+| G18 sandboxing | **Partly.** Memory, environment and time limits, and an opt-in Docker container (verified); filesystem and network limits for kernel nodes are not enforced, no WASM sandbox | §10 R4 |
 
 ---
 
@@ -250,6 +275,8 @@ For orchestration upgrades over SPL, yes. The evidence is the working runtime, t
 
 ## 8. Revised Roadmap
 
+*All of R0 to R4 is done and part of R5 (§10 is the log).*
+
 **R0 — Clean base (≈1 week)**
 G10 portability, G12 README honesty, decide G9 (park `grafc/cedar`), get a clean-machine green suite.
 
@@ -321,6 +348,11 @@ Persistent MUTATE across loop iterations (G14), optional Rust/WASM packaging, zi
 - **Real LLM, not mock.** The `mock` adapter stays in the code and in this design, but from the start of the build, new tests, examples and acceptance runs use `claude_cli` with the default model `claude-sonnet-5-5` (`--llm claude_cli:claude-sonnet-5-5`). Keep calls small: short prompts, few cases per test.
 - **Status of R0 items:** G12 README honesty is done (interaction nets, "confluent" and Rust compilation removed; internal module names no longer shown); G10 hardcoded `/home/papagame/` paths are removed from code (recorded run outputs under `experiments/` keep them as history); decide G9 remains.
 - **Build status (R0 to R4 done; the editor, parts and elaboration done; R5 under way).** By phase, newest first. Run tests with the `graf` conda env (`~/anaconda3/envs/graf/bin/python -m pytest`); the only known failures are the 7 in `grafc/cedar` (left alone).
+  - **After the review, 2026-11-01.**
+    - *Editor app (§14):* six pages (Welcome, Create, Edit, Browse, Import/Export, Settings), `graf create` and `graf describe` on the command line, recipe search by meaning and words, three work-area roots (`apps`, `cookbook`, `solvers`), a security review with every finding fixed (`graflang-UI.md`).
+    - *Solver recipes (§15):* 47 SPL.py recipes migrated, run with `claude_cli` / `claude-sonnet-5-5`, and `cookbook_solvers/` kept as the reviewed copy.
+    - *Language and runtime:* f-strings in expressions; a `procedure_ref` into an `.spl` with several workflows runs the right one; `kernel_name` / `graf run --kernel-name` picks the Jupyter kernel of kernel SOLVE nodes (one kernel per name); `graf validate` errors on a prompt whose `{{in_x}}` has no port or no feeding edge.
+    - *`spl2graph` (in SPL.py):* ports and placeholders named after the variable passed in, tool types from the return annotation, `SOLVE` statements as kernel nodes with `--kernel-name`, `run_python` in the shared kernel, runtime counters, numeric comparisons of text results, a warning for each file the graph needs, one output file per `--workflow`.
   - **Later items (13.3).**
     - *Abstraction (item 1):* named subgraphs (`grafr/parts.py`). A workflow file listed under `resources.parts` is used as a `SUBGRAPH` node (compact `use`), checked against its interface (ports, types, defaults) and expanded in place; nesting works, a part using itself is refused; `graf vis` draws each use as a box. Example: `cookbook/parts_demo`.
     - *Elaboration (item 2):* `grafr/elaborate.py`. An `elaborate:` block applies a part to every node of a graph of things; edges become ordering (FORK at the roots, JOIN where edges meet) and optionally data (`pass`). The keyword `elaborate` is provisional (the owner's call). Example: `cookbook/elaborate_demo`. Not yet used to rewrite the two ConceptBook driver scripts.
@@ -369,7 +401,7 @@ Persistent MUTATE across loop iterations (G14), optional Rust/WASM packaging, zi
 | 5 | IDE target | Left to me: **Streamlit**, behind `graf vis` (read-only by default, `--edit` for the IDE; `graf ui` is a hidden alias) | See below |
 | 6 | zinet prerequisite | zinet is not released while graflang is developed, so both codebases may change together | M1–M4 no longer gate R1; change zinet in step with graflang, and take the `zinet` dependency as an editable install |
 
-**IDE (decision 5).** No new command. `graf vis` is the viewer and stays the one entry point; `graf ui` is a hidden alias for it, the same way `graf viz` already is. Plan: `graf vis <graph.yaml>` is read-only by default (today's view, plus click-to-inspect); `graf vis --edit <graph.yaml>` enables the IDE mode (update, add, connect and delete nodes, ports and edges), validated through `graf validate` before every write, with round-trip YAML so comments survive, as in graph-ide's writer. The edit mode reuses the `MUTATE` delta validation (schema, structure, `CODE_KEYS`), so a hand edit and a model edit pass the same checks. Streamlit over Vite because it needs no Node toolchain, matches the README roadmap, and the repo is Python-only; the current engines (cytoscape and others) remain for read-only output, and `--edit` opens the Streamlit app. If a richer canvas is needed later, embed the zinet cytoscape view.
+**IDE (decision 5).** No new command. `graf vis` is the viewer and stays the one entry point; `graf ui` is a hidden alias for it, the same way `graf viz` already is. Plan: `graf vis <graph.yaml>` is read-only by default (today's view, plus click-to-inspect); `graf vis --edit <graph.yaml>` enables the IDE mode (update, add, connect and delete nodes, ports and edges), validated through `graf validate` before every write, with round-trip YAML so comments survive, as in graph-ide's writer. The edit mode reuses the `MUTATE` delta validation (schema, structure, `CODE_KEYS`), so a hand edit and a model edit pass the same checks. Streamlit over Vite because it needs no Node toolchain, matches the README roadmap, and the repo is Python-only; the current engines (cytoscape and others) remain for read-only output, and `--edit` opens the Streamlit app. If a richer canvas is needed later, embed the zinet cytoscape view. *(Built; see §14.)*
 
 ---
 
@@ -416,6 +448,47 @@ Also adopted, already in the plan: typed ports (E2), error model (E1), real conc
 
 ---
 
+## 14. The Editor App (`graf vis --edit`)
+
+Decision 5 (§12) chose Streamlit behind `graf vis`. It is built, and it is the way most people will meet GraphLang: nobody has to write YAML.
+
+**Pages** (`graphlang/grafv/pages/`, ordered by the file number; `app.py` is only the navigation):
+
+| Page | What it does |
+|---|---|
+| Welcome | What GraphLang is, what each page offers, what the work area holds, the command line. `graf vis --edit FILE` opens straight on Edit |
+| Create | Describe an app in a chat; the model writes the graph, its prompts and a readme (`grafc/create.py`, same engine as `graf create`). The reply is checked like `graf validate` plus a dry run, problems go back to the model for another round, and nothing is written until **Save**. Later messages revise the draft; *Undo* steps back. Similar recipes from the work area go into the prompt as examples; attachments (documents as material to read, screenshots to a provider that takes images) are accepted |
+| Edit | The picture, and tabs: **Source** (the whole file as text in a code editor), Node, Edges, Problems, Run. Buttons or chat change the graph; every change is validated, keeps comments (ruamel round trip), can be undone, and is written atomically only on Save. Sidebar: Browse files (filterable by folder), Clone, Back |
+| Browse | Search the recipes by what they do, in your own words: meaning (dd-embed) plus BM25 words, one card per recipe, *Open* / *Use in Create* |
+| Import/Export | Zip a recipe out or in; import never overwrites, refuses unsafe paths and runs nothing |
+| Settings | Provider, model, embedding model, picture height, API keys (`~/.graflang/settings.json`, mode 0600); *Test* sends one real message |
+
+**Pieces.** `GraphEditor` (`editor.py`) is the one place that changes a file, by buttons and by chat alike. `chat_ops.py` turns the model's JSON list of operations into `GraphEditor` calls, all or none. `ui.py` holds the shared helpers, `attachments.py` reads uploads, `graphlang/workspace.py` is the work area (`~/.graflang/apps` writable; `cookbook` and `solvers` read-only; or `--src-dir`), `recipe_index.py` and `embedding.py` are the search. `graf describe` writes the specification of a graph or a recipe folder (`FILE.spec.md`, or an LLM-written one with `--llm`); its text is what `graf create --spec @FILE` takes, which closes the round trip graph to specification to graph.
+
+**Security decisions** (reviewed in `graflang-UI.md`): the app has no login and holds API keys, so it listens on `127.0.0.1` only (`--host` changes it, with a warning); generated code and external programs need the *Allow app to call external programs* switch; the Run tab lists the nodes that run programs and wants an acknowledgement; the model may not add code (the same `CODE_KEYS` rule as `MUTATE`); chat writes to prompt files are limited to `prompts/*.md|txt`; attached documents are marked as material, not instructions.
+
+**Tests.** Streamlit's `AppTest` drives the pages (`test_app_pages.py`, `test_editor_app.py`), the engine has its own tests (`test_editor*.py`, `test_chat_ops.py`, `test_workspace.py`, `test_describe.py`, `test_create.py`), and plain `pytest` stays offline.
+
+**Not in it, by decision:** drag-to-connect on the canvas (edges come from lists), editing compact `steps:` / `elaborate:` files other than as text, and a login.
+
+## 15. Migration of the Solver Recipes (SPL.py `cookbook-solver`)
+
+**What.** The 47 recipes (55 graphs) of SPL.py's `cookbook-solver` were lifted with `spl3 util spl2graph` and live in `cookbook_solvers/` (the app's `solvers` root). The rule that graflang does not depend on SPL.py held: the lift runs in SPL.py, graflang runs the graphs, and only `procedure_ref` needs SPL.py importable (`symbolic_math`, `neurosymbolic`, `code_pytest`).
+
+**Test.** Every graph was run once with `claude_cli` / `claude-sonnet-5-5`, solver on, under `--bind` limits (20 model calls, 500 steps, 800 s). All complete, including the two SageMath graphs (`sage_math`, `neurosymbolic` default rung, with the Sage kernel) and `lean_proof` (a Lean kernel check). `global_minlp` and `minizinc_cp` run their Python fallbacks (the binaries are not installed); Lean claims over `ℝ` need Mathlib, which is not installed (instructions are in `cookbook_solvers/README.md`). The output of each run is in the recipe's `output/` folder.
+
+**What the run found** (details and the per-recipe table are in `cookbook_solvers/README.md`):
+
+| In | Problem | Fix |
+|---|---|---|
+| graflang | f-strings, `procedure_ref` into a multi-workflow `.spl`, no choice of Jupyter kernel, a prompt placeholder nothing fills went unnoticed | f-strings; the right workflow; `kernel_name` / `--kernel-name`; the `graf validate` check |
+| `spl2graph` | ports named after function parameters (never fed inside a loop), tool types defaulting to TEXT, bare Sage statements, `run_python` as a subprocess, SPL runtime counters, text compared with numbers, files not copied | all fixed in SPL.py with tests; lifting again gives graphs equal to the hand-patched ones (the 12 graphs that needed fixes were run again and match) |
+| the graphs | a handful of recipe-specific fixes (a data path, a helper module path, the default dataset of `demand_forecast`) | kept by hand in `cookbook_solvers/`, which stays the reviewed copy |
+
+**Lesson.** A smoke test with the placeholder model proved little: recipes that "ran end to end" still had empty prompts or dead steps. A lifted recipe is checked by `graf validate` first, then by a run with a real model.
+
+---
+
 ## Appendix: How the Clean-Room Spec Held Up
 
 **Independent design choices that turned out to match the implementation:**
@@ -441,41 +514,92 @@ Also adopted, already in the plan: typed ports (E2), error model (E1), real conc
 
 ---
 
-## Appendix B: Open Items to Build Next (2026-10-30)
+## Appendix B: To-Do List (updated 2026-11-01)
 
-A snapshot after parts, elaboration, loop persistence, the container option and the editor Run tab. The owner's priorities are to be added under "Owner's take" below.
+The basic functionality is in place (see the status note at the top). This list replaces the one of 2026-10-30; what was on it and is done is marked done, so nothing is lost. Anything not listed here is not planned.
 
-### Ready to build (no decision needed)
+### Done since the list of 2026-10-30
 
-1. **Rewrite the ConceptBook driver scripts with elaboration.** `build_concept_book.spl` and `build_component.spl` as one template applied to two graphs (13.3 item 2). It tests whether `elaborate:` holds up on real work. Measure lines, errors caught by `graf validate`, and wall-clock time with `--workers`.
-2. **Loops as compact steps.** *Done 2026-10-30:* a `loop` step with its own `steps:` body (`grafr/compact.py`, user guide "Loops in the compact form").
-3. **Remaining SPL lifting cases.** *Done 2026-10-30:* a tool call in a `WHILE` condition is lifted; loop counters and assigned variables now work (they did not run before); the other 8 files are not lifter faults (see R2 above).
-4. **R1 acceptance corpus.** *Done 2026-10-30:* all 83 PocketFlow workflows lift and validate; three samples run (`cookbook/pocketflow`). Found and left open: `RETURN` inside a `WHILE` (see R1 above).
-5. **Real Docker test.** *Done 2026-10-30:* run against Docker Desktop; it found that a mount outside the home directory hangs, now guarded.
+- Owner's picks #2 to #4: loops as compact steps; the remaining SPL lifting cases; the R1 acceptance corpus (all 83 PocketFlow workflows lift and validate, three samples run). #5 real Docker test: done, with a guard for mounts outside the home directory.
+- The editor app (§14) and `graf create` / `graf describe`.
+- Migration and real-model run of the 47 solver recipes (§15), with the fixes in graflang and in `spl2graph`.
+- Language and runtime: f-strings, `kernel_name` / `--kernel-name`, the named-workflow `procedure_ref`, the unfed-prompt check in `graf validate`.
 
-### Needs an owner decision first
+### Owner decisions (answered 2026-11-01; the answers and what followed are under each item)
 
-6. **Elaboration keyword.** `elaborate` is provisional; 13.3 leaves `ELABORATE`, `EXPAND` or `INSTANTIATE` to the owner.
-7. **ConceptBook section order (13.4 Q1).** Is the sequential order deliberate (style consistency)? If so it must become an edge before elaboration runs sections in parallel.
-8. **13.4 Q2, Q3, Q5.** Declared independence, merge policies, and where the rule language lives.
-9. **`review_chapter` verdict.** Nothing reads it today; wiring it to a revision pass is small but changes the recipe's behaviour.
+1. **Elaboration keyword.** `elaborate` was provisional; 13.3 left `ELABORATE`, `EXPAND` or `INSTANTIATE` to the owner.
+
+[WEN] use "expand"
+
+*Done 2026-11-01:* the block is `expand:` (`grafr/expand.py`, `cookbook/expand_demo`, `tests/test_expand.py`); a file that says `elaborate:` is still read. Sections 13.3 and 10 above keep the old name as history.
+
+2. **ConceptBook section order (13.4 Q1).** If the sequential order is deliberate it must become an edge before elaboration runs sections in parallel.
+
+[WEN] deliberate
+
+*Recorded:* the section order is a real dependency, so each section must wait for the one before it (an edge, or `pass` in `expand:`); it is not a candidate for parallel sections. Nothing to build until the ConceptBook drivers are rewritten (item 9).
+
+3. **13.4 Q2, Q3, Q5.** Declared independence, merge policies, and where the rule language lives.
+
+[WEN] go with your suggestions
+
+*Adopted:* (Q2) declared independence waits until a real app needs it; the race check of S2 already catches an undeclared one. (Q3) the merge policy of a port with several writers stays "error" (a race is reported); `collect` is the one policy to add, when needed, and `JOIN` already bundles. (Q5) the rule language starts inside graflang's `graf validate` and moves to zinet when a second tool needs it.
+
+4. **`review_chapter` verdict.** Nothing reads it today; wiring it to a revision pass changes the recipe's behaviour.
+
+[WEN] yes
+
+*Already so in graflang:* `cookbook/your_book` reads the `review_chapter` verdict (`needs_revision` sends `REVISION_NEEDED` chapters to `revise_chapter`; the loop collects whichever wrote last). The ConceptBook driver scripts are your project and were not touched; the same wiring applies when they are rewritten (item 9).
+
+5. **`OBSERVE`, `QUERY`, `EMIT`.** Registered but pass-through. Build them when an app needs them, or remove them from the schema.
+
+[WEN] build when needed 
+
+*Noted:* they stay pass-through, and are listed as "not built" in the user guide.
+
+6. **Recipe-level questions in `cookbook_solvers/`:** `portfolio_comparison` finds Markowitz and CVaR infeasible at its default target return (as the SPL demo does); `z3_compliance` shows an empty policy text in its explanation prompt (as the SPL original does). Fix the defaults, or keep them faithful to SPL.
+
+[WEN] fix them as you see fit
+
+*Done 2026-11-01:* `portfolio_comparison` and `portfolio_optimization` default to target return 0.08 and weight cap 0.25 (five stocks under a 20% cap are forced to equal weights, so 12% was out of reach); a run gives OPTIMAL for all six algorithms. `z3_compliance` passes the checked policy (JSON) to the explanation prompt instead of the empty `policy_text` of the default demo; the run shows the explanation reading the rules. Both are noted in the recipe readmes.
+
+### Open, small, no decision needed
+
+7. **`RETURN` inside a `WHILE` body** was skipped by `spl2graph`, so `017_judge` did not stop on PASS (recorded runs carry a call budget).
+
+[WEN] ok
+
+*Done 2026-11-01 (SPL.py `spl2graph`):* a RETURN anywhere inside a WHILE (in a branch, a DO block, or a nested WHILE) sets a flag and a value; the loop condition adds `AND @flag = FALSE` (a comparison, because SPL's WHILE condition drops anything else after AND); after the loop an EVALUATE returns the value or goes on, and in a nested loop it returns from the outer loop in turn. `graph2spl` turns the graph back into valid SPL with the same meaning. `017_judge` now stops on PASS (4 model calls in the run, not 6). The round trip of a graph with such a RETURN is equivalent, not identical, so `self_refine` has its own test. The new `graf validate` check also shows that 10 older quickstart recipes using SPL's `WITH ... SELECT ... INTO` form are skipped by the lift and leave prompts unfilled: they were passing `graf validate` before, wrongly.
+
+8. **Environment, not code:** Mathlib for the Lean rung (`setup_lean.sh --with-mathlib`, ~5 GB; instructions in `cookbook_solvers/README.md`), and the Couenne/Bonmin and MiniZinc binaries that `global_minlp` and `minizinc_cp` fall back from.
+
+[WEN] later
+
+9. **Rewrite the ConceptBook driver scripts with elaboration** (13.3 item 2). Not scheduled by the owner; it is the real test of `elaborate:`.
+
+[WEN] later
+
+10. **Paper.** A first draft exists (below); the README roadmap line stays open until submission.
+
+[WEN] go ahead with draft
+
+*Draft written 2026-11-01:* `docs/paper/graflang-paper.draft.md`, from what exists (design, tests, the solver-recipe migration and the code_pipeline experiment). It claims nothing that was not measured; see the list of what is missing at its end.
 
 ### Later items (13.3, not started)
 
-10. Shared rule language in zinet (item 3).
-11. Provenance on deltas: origin, confidence and lineage, so Cedar can require human approval for an LLM-origin delta (item 4).
-12. Human nodes and durable runs, on top of checkpointing (item 5).
-13. Step debugger and a graph-level test harness, on top of replay (item 6).
+11. Shared rule language in zinet (item 3).
+12. Provenance on deltas: origin, confidence and lineage, so Cedar can require human approval for an LLM-origin delta (item 4).
+13. Human nodes and durable runs, on top of checkpointing (item 5).
+14. Step debugger and a graph-level test harness, on top of replay (item 6).
+15. Dialect mapping work (G17) for graph-code, work-graph and ConceptBook, after graflang is stable.
 
 ### Deliberately out for now
 
-14. The `mcp` and WASM executors, and a thin-adapter kit for new languages.
-15. Editor: drag-to-connect on the canvas; editing compact `steps:` and `elaborate:` files.
-16. A price table for `max_cost_usd` (adapters that report no cost make the budget fail loudly instead).
-17. The hand-written Cedar compiler (`grafc/cedar`): its 7 known test failures stay.
+16. The `mcp` and WASM executors, and a thin-adapter kit for new languages.
+17. Editor: drag-to-connect on the canvas; editing compact `steps:` and `elaborate:` files (they are edited as text); a login (the app is local-only by design).
+18. A price table for `max_cost_usd` (adapters that report no cost make the budget fail loudly instead).
+19. The hand-written Cedar compiler (`grafc/cedar`): its 7 known test failures stay. Filesystem and network limits for kernel nodes, and a WASM sandbox.
 
 ### Owner's take
 
-[WEN] implement #2 - #4 from "Ready to build" sub-section
-no action on all other items
-
+[WEN] (2026-10-30) implement #2 - #4 from "Ready to build" sub-section; no action on all other items. *Done.*

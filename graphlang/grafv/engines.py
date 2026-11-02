@@ -29,7 +29,7 @@ def _shape(kind: str) -> str:
     return "round-rectangle" if kind in _ROUND else "diamond" if kind in _DIAMOND else "hexagon" if kind in _HEXAGON else "rectangle"
 
 
-def graphlang_style(title: str = "workflow") -> vis.Style:
+def graphlang_style(title: str = "workflow", default_layout: "str | None" = None) -> vis.Style:
     """How the nodes and edges built by `model.build` are drawn."""
     return vis.Style(
         label=lambda n, d: d["label"], kind=lambda n, d: d["kind"], color=lambda n, d: d["color"],
@@ -37,7 +37,7 @@ def graphlang_style(title: str = "workflow") -> vis.Style:
         edge_label=lambda u, v, d: d["label"], edge_kind=lambda u, v, d: d["relation"],
         edge_dashed=lambda u, v, d: d["relation"] == "binds", edge_info=lambda u, v, d: f"{d['sport']} → {d['tport']}",
         edge_legend=(("control", False), ("data", True)), title=title, kind_colors=dict(TYPE_COLORS),
-        secondary_hidden=True, groups_collapsed=True,
+        secondary_hidden=True, groups_collapsed=True, default_layout=default_layout,
         show_kind=False)                       # the colour and the legend already say the type       # first view: the control flow, loops as one box
 
 
@@ -62,13 +62,13 @@ def hint(text: str) -> str:
     return text.replace("zinet[pyvis]", "graflang[vis]").replace("zinet[graphify]", "graflang[graphify]")
 
 
-def render(graph_data: Dict[str, Any], out: str | Path, engine: str = DEFAULT_ENGINE) -> Tuple[Path, str, int]:
+def render(graph_data: Dict[str, Any], out: str | Path, engine: str = DEFAULT_ENGINE, default_layout: "str | None" = None) -> Tuple[Path, str, int]:
     """Draw the workflow with `engine` into `out`. Returns (file, note, node count)."""
     G, note = build(graph_data)
     if not G.number_of_nodes():
         raise ValueError("nothing to draw: the workflow has no nodes")
     try:
-        path = vis.render(G, out, engine, graphlang_style(_title(G)), note)
+        path = vis.render(G, out, engine, graphlang_style(_title(G), default_layout), note)
     except RuntimeError as e:
         raise RuntimeError(hint(str(e))) from None
     return path, note, G.number_of_nodes()

@@ -12,7 +12,7 @@ import streamlit as st
 from graphlang import workspace as ws
 
 PAGES = Path(__file__).with_name("pages")
-LOOK = {"welcome": ("Welcome", ":material/home:"), "create": ("Create", ":material/auto_awesome:"), "edit": ("Edit", ":material/edit:"), "settings": ("Settings", ":material/settings:"),
+LOOK = {"welcome": ("Welcome to GraphLang", ":material/home:"), "create": ("Create", ":material/auto_awesome:"), "edit": ("Edit", ":material/edit:"), "settings": ("Settings", ":material/settings:"),
         "transfer": ("Import / Export", ":material/swap_vert:"), "browse": ("Browse", ":material/search:")}
 
 

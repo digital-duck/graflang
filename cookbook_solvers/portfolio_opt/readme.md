@@ -3,7 +3,7 @@
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/099_portfolio_opt` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > The SPL file holds two workflows, so there are two graphs: `portfolio_optimization.graph.yaml` and `portfolio_comparison.graph.yaml` (`--main`/`--workflow` are gone from the commands: the graph you run is the workflow).
 > Not ported: `readme-cvxpy-Markowitz.md`, `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): all 2 graphs completed (3 model calls, 1205 tokens in / 1226 out in total); `portfolio_optimization` fetched live prices with yfinance; `portfolio_comparison` found the Markowitz and CVaR cases infeasible at the default target return 0.12 and max weight 0.2 (as in the SPL demo). A run that completes does not show the answer is right: read the output before you rely on a recipe.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): all 2 graphs completed (3 model calls, 1205 tokens in / 1226 out in total); `portfolio_optimization` fetched live prices with yfinance; `portfolio_comparison` found the Markowitz and CVaR cases infeasible at SPL's defaults (target return 0.12, max weight 0.20: five stocks under a 20% cap are forced to equal weights, whose return was 9.2%), so the defaults here are 0.08 and 0.25, and a second run (2026-11-01) gives OPTIMAL for all six algorithms (expected returns 10.5% to 12.1%). HRP ignores the weight cap (30% in AAPL), as the algorithm does. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Personal use**: run monthly with fresh data for rebalancing signals.  
 **DODA**: same `.spl` spec runs on any adapter — ollama for exploration, claude_cli for production.
@@ -62,7 +62,7 @@ Sharpe ratio is the headline quality metric. Higher is better; >1.0 is good, >2.
 |---|---|---|
 | `min_tickers` | 5 | Hard floor enforced in solver; fewer stocks → insufficient diversification |
 | `max_weight` | 0.25 | No single stock >25%; with 5 stocks this fills 100% exactly |
-| `target_return` | 0.12 | 12% annual; if infeasible the LLM suggests a relaxed target |
+| `target_return` | 0.08 | 8% annual; if infeasible the LLM suggests a relaxed target. (SPL's default was 12% with a 20% cap, which is infeasible for the Markowitz and CVaR cases whenever the five stocks' mean return is below 12%: with five stocks a 20% cap forces equal weights.) |
 
 ### Run — Classic Markowitz
 
@@ -75,8 +75,8 @@ graf run cookbook_solvers/portfolio_opt/portfolio_optimization.graph.yaml \
   --param tickers="AAPL,MSFT,GOOGL,AMZN,NVDA,GDX,SILJ,WEAT,DBA,XLE" \
   --param capital=100000 \
   --param period=1y \
-  --param target_return=0.12 \
-  --param max_weight=0.20
+  --param target_return=0.08 \
+  --param max_weight=0.25
 
 # LLM calls: 1  Latency: 32535ms
 # Log:     ./logs/portfolio_opt-claude_cli-claude-sonnet-4-6-20260903-204126.md
@@ -90,8 +90,8 @@ graf run cookbook_solvers/portfolio_opt/portfolio_optimization.graph.yaml \
   --param tickers="AAPL,MSFT,GOOGL,AMZN,NVDA,GDX,SILJ,WEAT,DBA,XLE" \
   --param capital=100000 \
   --param period=1y \
-  --param target_return=0.12 \
-  --param max_weight=0.20
+  --param target_return=0.08 \
+  --param max_weight=0.25
 
 
 ```
@@ -246,8 +246,8 @@ graf run cookbook_solvers/portfolio_opt/portfolio_comparison.graph.yaml \
   --param tickers="AAPL,MSFT,GOOGL,AMZN,NVDA,GDX,SILJ,WEAT,DBA,XLE" \
   --param capital=100000 \
   --param period=1y \
-  --param target_return=0.12 \
-  --param max_weight=0.20
+  --param target_return=0.08 \
+  --param max_weight=0.25
 
 ```
 

@@ -56,8 +56,8 @@ class GraphEditor:
         if not isinstance(self.doc, dict) or "nodes" not in self.doc or "workflow" not in self.doc:
             if is_compact(self.doc):
                 raise EditError("this file uses the compact `steps:` form; edit the YAML text, or run `graf expand` to get the long form")
-            if isinstance(self.doc, dict) and "elaborate" in self.doc:
-                raise EditError("this file uses an `elaborate:` block; edit the YAML text, or run `graf expand` to get the long form")
+            if isinstance(self.doc, dict) and ("expand" in self.doc or "elaborate" in self.doc):
+                raise EditError("this file uses an `expand:` block; edit the YAML text, or run `graf expand` to get the long form")
             raise EditError("not a GraphLang workflow (needs workflow:, nodes: and edges:)")
         self.doc.setdefault("edges", [])
         self._undo: List[str] = []
@@ -106,21 +106,36 @@ class GraphEditor:
             return [f"cannot check the graph: {e}"], []
 
     def run(self, params: Dict[str, Any] | None = None, adapter: str = "mock", model: str | None = None, max_steps: int = 200,
-            max_calls: int | None = None) -> Dict[str, Any]:
+            max_calls: int | None = None, save: bool = False) -> Dict[str, Any]:
         """Run the graph as it is now (saved or not) and report {ok, outputs, error, summary}. Never raises for a failed run.
-        `max_calls` caps the model calls (a run that would make more fails with the reason); None is no cap, as for the mock."""
+        `max_calls` caps the model calls (a run that would make more fails with the reason); None is no cap, as for the mock.
+        With `save` the run is written to `output/` beside the graph, as `graf run` does (the Logs tab reads it back later)."""
+        from graphlang.grafr.output import RunOutput
         from graphlang.grafr.adapters import make_llm
         from graphlang.grafr.metering import MeteredLLM
         from graphlang.grafr.runtime import GraphLangRuntime
         errors, _ = self.problems()
         if errors:
             return {"ok": False, "outputs": None, "error": "fix these first: " + "; ".join(errors), "summary": None}
+        stem = self.path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
+        out = RunOutput(self.path.resolve().parent / "output", stem, adapter, model=model or "", params=params or {}, save_nodes=True) if save else None
         try:
-            rt = GraphLangRuntime(self.data(), llm=MeteredLLM(make_llm(adapter, model), max_calls=max_calls), max_steps=max_steps, verbose=False)
+            rt = GraphLangRuntime(self.data(), llm=MeteredLLM(make_llm(adapter, model), max_calls=max_calls), max_steps=max_steps, verbose=False,
+                                  node_output=out)
             outputs = rt.execute(params or {})
         except Exception as e:                                 # a run can fail in many ways; the editor shows the reason
+            if out:
+                out.save_error(f"{type(e).__name__}: {e}")
             return {"ok": False, "outputs": None, "error": f"{type(e).__name__}: {e}", "summary": None}
-        return {"ok": True, "outputs": outputs, "error": None, "summary": rt.summary()}
+        if out and outputs:
+            trees = {o["name"] for o in self.data()["workflow"].get("outputs", []) if str(o.get("type", "")).upper() == "FILES"}
+            out.save_result(outputs, trees)
+            out.save_summary(rt.summary())
+        values: Dict[str, Dict[str, Any]] = {}                 # what each node produced, in the order it was written (the Logs tab)
+        for (node, port), value in rt.values.items():
+            if port.startswith("out_"):
+                values.setdefault(node, {})[port] = value
+        return {"ok": True, "outputs": outputs, "error": None, "summary": rt.summary(), "values": values, "inputs": dict(params or {})}
 
     @property
     def changed(self) -> bool:

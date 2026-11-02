@@ -31,7 +31,7 @@ class GraphLangCompiler:
         self.rust_code: Dict = {}
     
     def load_graph(self):
-        """Load the workflow the way `graf run` and `graf validate` do: compact, parts and elaborate files are expanded and the
+        """Load the workflow the way `graf run` and `graf validate` do: compact, parts and expand files are expanded and the
         schema is checked."""
         self.graph_data = load_graph(self.graph_path)
 
