@@ -1,0 +1,63 @@
+⚡ Loading graph: cookbook_solvers/data_eng_text2spl/text2sql_quality.graph.yaml
+✓ Graph loaded: text2sql_quality
+  Nodes: 24
+  Edges: 60
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ EVALUATE eval_4 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_6 (#1)
+  ⚡ SOLVE tool_7 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ CONTEXT set_7 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ GENERATE gen_4 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ SOLVE tool_15 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': "# Text-to-SQL with Data-Quality Gates 
+Report\n\n**Question:** What is the average order amount for customers in the 
+Enterprise segment?\n\n**Verifier status:** `OK`\n**Rows returned:** 
+`1`\n**Referential integrity:** `True`\n**Two-independent-ways stat agreement:**
+`True` (AVG=6000.0, SUM/COUNT=6000.0)\n**Row-level round-trip vs ground truth:**
+`match`\n\n## Interpretation\n\n**Interpretation**\n\n1. **Question:** What is 
+the average order amount for customers in the Enterprise segment?\n\n2. 
+**Answer:** The verified result is a single row, `rows_llm: [[6000.0]]`, in the 
+column `avg_order_amount`. Enterprise customers' orders average **6,000.00**. 
+The independent ground-truth query returned the same `[[6000.0]]`, so 
+`row_match` is true.\n\n3. **Why the checks matter:** Referential integrity 
+(`referential_ok: true`) confirms the orders join correctly to real Enterprise 
+customers, with no orphaned or dropped records. The two-way check (`stat_a` and 
+`stat_b` both 6000.0) shows that two structurally different calculations agree, 
+so the number does not depend on one possibly flawed query.\n\nFinal answer: 
+verified\n\n## Generated SQL (LLM)\n\n```sql\nSELECT AVG(o.amount) AS 
+avg_order_amount\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nWHERE
+c.segment = 'Enterprise'\n```"}
+28 steps · 2 LLM calls, 466 tokens in / 215 out · slowest: gen_4 3.6s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/data_eng_text2spl/text2sql_quality/resu
+lt/text2sql_quality-claude_cli-claude-sonnet-5-5-20261101-180344
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/data_eng_text2spl/text2sql_quality/log/
+text2sql_quality-claude_cli-claude-sonnet-5-5-20261101-180343.log

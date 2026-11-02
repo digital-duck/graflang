@@ -1,0 +1,104 @@
+{
+  "steps": 18,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 672,
+    "output_tokens": 676,
+    "cost_usd": 0.0,
+    "ms": 19987
+  },
+  "nodes": {
+    "gen_1": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 19987
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 1406
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 466
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 47
+    },
+    "tool_7": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 24
+    },
+    "tool_6": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 21
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 19
+    },
+    "tool_5": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 14
+    },
+    "tool_12": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 9
+    },
+    "tool_8": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "tool_9": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 4
+    },
+    "tool_10": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_11": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "fork_1": {
+      "type": "FORK",
+      "n": 1,
+      "ms": 1
+    },
+    "join_1": {
+      "type": "JOIN",
+      "n": 1,
+      "ms": 0
+    },
+    "fork_2": {
+      "type": "FORK",
+      "n": 1,
+      "ms": 0
+    },
+    "join_2": {
+      "type": "JOIN",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

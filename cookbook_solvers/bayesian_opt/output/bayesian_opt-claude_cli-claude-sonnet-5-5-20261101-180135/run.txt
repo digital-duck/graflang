@@ -1,0 +1,58 @@
+⚡ Loading graph: cookbook_solvers/bayesian_opt/bayesian_opt.graph.yaml
+✓ Graph loaded: bayesian_opt
+  Nodes: 17
+  Edges: 38
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': "=== Bayesian Optimization (r113) | solver=ON ===\n\n## 
+Bayesian Optimization Report — Web Page Conversion Rate Optimizer\n\n**Budget:**
+25 experiment slots  \n**Best conversion rate (Bayesian):** 35.00%  \n**Best 
+conversion rate (random):** 35.00%  \n**True optimum:** 35.00%  \n**Improvement 
+over random:** +0.0%  \n**Trials to find best:** 14 / 25\n\n### Best Parameters 
+Found\n\n| Parameter | Value |\n|---|---|\n| headline_score | 1.000 |\n| 
+layout_score | 1.000 |\n| cta_placement | 0.727 |\n\n### Top 5 Trials\n\n| Rank 
+| headline | layout | cta | Conversion Rate |\n|---|---|---|---|---|\n| 1 | 1.0 
+| 1.0 | 0.727 | 35.00% |\n| 2 | 0.888 | 1.0 | 0.788 | 35.00% |\n| 3 | 1.0 | 
+0.841 | 0.758 | 35.00% |\n| 4 | 1.0 | 0.944 | 0.809 | 35.00% |\n| 5 | 0.924 | 
+0.92 | 0.693 | 35.00% |\n\n── Analyst Explanation 
+─────────────────────────────────────\n**Caveat first:** the report doesn't show
+Bayesian outperforming random. Both reach 35.00% (+0.0%). The best point (1.0, 
+1.0, 0.727) also differs from the stated optimum (0.75, 0.85, 0.60), yet scores 
+the same 35.00%. All top-5 trials tie, so the response surface looks flat or 
+capped near the top (or the output is rounded or clipped). The run can't 
+separate the two methods.\n\n1. **Why Bayesian might win:** the GP uses past 
+results to concentrate trials near good regions. Here, 14 trials to reach the 
+best suggests it did little better than chance on a plateau.\n\n2. **Expected 
+Improvement:** the GP predicts a mean and uncertainty at each untested point. EI
+is the expected amount by which a point beats the current best. It favors high 
+predicted values (exploit) and high uncertainty (explore), and the next trial 
+maximizes it.\n\n3. **Interior optima:** there are diminishing returns and 
+trade-offs. Over-personalization feels creepy, a bare layout loses information, 
+and a CTA that is too aggressive hurts trust. Extremes rarely win.\n\n4. 
+**Choosing:** use a GP for few trials (<~50), continuous low-dimensional spaces,
+and expensive evaluations. Use TPE for many parameters, categorical or 
+conditional spaces, and larger budgets."}
+13 steps · 1 LLM calls, 392 tokens in / 308 out · slowest: gen_1 7.0s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/bayesian_opt/bayesian_opt/result/bayesi
+an_opt-claude_cli-claude-sonnet-5-5-20261101-180135
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/bayesian_opt/bayesian_opt/log/bayesian_
+opt-claude_cli-claude-sonnet-5-5-20261101-180135.log

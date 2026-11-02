@@ -1,0 +1,3 @@
+{
+  "explanation": "The problem asks you to find the slope formula (the derivative) of 3x³ − x, simplify it by factoring, and then find the x-values where that slope equals zero. First, differentiating gives 9x² − 1. Next, factoring that expression gives (3x − 1)(3x + 1). Finally, setting the factored form equal to zero and solving gives x = −1/3 and x = 1/3. So the answer is **x = −1/3 or x = 1/3**, the two points where the original curve has a flat (zero-slope) tangent."
+}

@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/078_constraint_opt` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `exp-claude_cli-n05.md`, `run_experiment.sh`, `run_experiment.py`, `experiment.db`, `experiment_H2_scale_sensitivity.md`, `experiment_results.db` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `pulp` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): all 4 graphs completed (8 model calls, 3551 tokens in / 2319 out in total); the SPL token counters `_total_input_tokens`/`_total_output_tokens` were replaced by `globals().get(...)`. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pip install pulp`
 
@@ -115,7 +115,7 @@ Each recipe is self-contained. The SPL structure is identical — only the tool 
 
 ```bash
 # Default problem (bakery production planning) — solver ON
-graf run ~/.graflang/solvers/constraint_opt/constraint_opt.graph.yaml \
+graf run cookbook_solvers/constraint_opt/constraint_opt.graph.yaml \
     --llm claude_cli
 
 
@@ -124,18 +124,18 @@ export PROBLEM="A factory makes chairs (2h labor, 4kg wood, \$20 profit) and tab
 
 
 # solver ON (default)
-graf run ~/.graflang/solvers/constraint_opt/constraint_opt.graph.yaml \
+graf run cookbook_solvers/constraint_opt/constraint_opt.graph.yaml \
     --llm claude_cli \
     --param problem="$PROBLEM"
 
 # solver OFF — LLM baseline for ablation comparison
-graf run ~/.graflang/solvers/constraint_opt/constraint_opt.graph.yaml \
+graf run cookbook_solvers/constraint_opt/constraint_opt.graph.yaml \
     --llm claude_cli \
     --param use_solver=false \
     --param problem="$PROBLEM"
 
 # More repair attempts (default 3)
-graf run ~/.graflang/solvers/constraint_opt/constraint_opt.graph.yaml \
+graf run cookbook_solvers/constraint_opt/constraint_opt.graph.yaml \
     --llm claude_cli \
     --param max_tries=5 \
     --param problem="$PROBLEM"

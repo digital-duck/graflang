@@ -1,0 +1,65 @@
+⚡ Loading graph: cookbook_solvers/graph_reasoning/graph_reasoning.graph.yaml
+✓ Graph loaded: graph_reasoning
+  Nodes: 23
+  Edges: 55
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ EVALUATE eval_4 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ SOLVE tool_6 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ CONTEXT set_7 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ GENERATE gen_4 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Graph Reasoning Report\n\n**Problem:** A logistics network
+connects 6 warehouses (A, B, C, D, E, F) by roads with these distances in miles:
+A-B:4, A-C:2, B-C:1, B-D:5, C-D:8, C-E:10, D-E:2, D-F:6, E-F:3. What is the 
+shortest route from warehouse A to warehouse F, and what is its total 
+distance?\n\n**networkx status:** `OK`\n**Query type:** `shortest route and 
+total distance from A to F`\n**Ground-truth answer:** `13`\n**Round-trip 
+check:** `match`\n\n## Interpretation\n\n**Question:** What is the quickest way 
+to drive from warehouse A to warehouse F, and how many miles is 
+it?\n\n**Answer:** The verified result gives the route A → C → B → D → E → F, 
+with a total distance of 13 miles.\n\n**Why it makes sense:** The route uses A-C
+(2), C-B (1), B-D (5), D-E (2), and E-F (3), which sum to 13. It detours through
+B because the A-C-B-D stretch (8) beats the direct C-D road (8 from C, 10 total 
+via A-C), and going through E to F (5) beats the direct D-F road (6).\n\nFinal 
+answer: 13\n\n## Solver Code (LLM-generated, networkx)\n\n```python\nG = 
+nx.Graph()\nedges = [\n    ("A", "B", 4), ("A", "C", 2), ("B", "C", 1), ("B", 
+"D", 5),\n    ("C", "D", 8), ("C", "E", 10), ("D", "E", 2), ("D", "F", 6),\n    
+("E", "F", 3),\n]\nG.add_weighted_edges_from(edges)\npath = nx.shortest_path(G, 
+"A", "F", weight="weight")\nlength = nx.shortest_path_length(G, "A", "F", 
+weight="weight")\n_result = {\n    "status": "OK",\n    "query": "shortest route
+and total distance from A to F",\n    "answer": length,\n    "path": path,\n    
+"distance": length,\n}\n```'}
+27 steps · 2 LLM calls, 537 tokens in / 247 out · slowest: gen_4 3.5s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/graph_reasoning/graph_reasoning/result/
+graph_reasoning-claude_cli-claude-sonnet-5-5-20261101-180437
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/graph_reasoning/graph_reasoning/log/gra
+ph_reasoning-claude_cli-claude-sonnet-5-5-20261101-180437.log

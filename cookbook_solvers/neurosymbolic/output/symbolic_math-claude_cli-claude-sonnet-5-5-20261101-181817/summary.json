@@ -1,0 +1,159 @@
+{
+  "steps": 45,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 2,
+    "input_tokens": 1501,
+    "output_tokens": 98,
+    "cost_usd": 0.0,
+    "ms": 5556
+  },
+  "nodes": {
+    "gen_8": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2897
+    },
+    "gen_7": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2660
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 432
+    },
+    "loop_3": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 350
+    },
+    "call_1": {
+      "type": "GENERATE",
+      "n": 3,
+      "ms": 311
+    },
+    "tool_42": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 110
+    },
+    "tool_37": {
+      "type": "SOLVE",
+      "n": 3,
+      "ms": 11
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 10
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 10
+    },
+    "tool_36": {
+      "type": "SOLVE",
+      "n": 3,
+      "ms": 10
+    },
+    "tool_38": {
+      "type": "SOLVE",
+      "n": 3,
+      "ms": 9
+    },
+    "tool_33": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "tool_34": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "tool_41": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 4
+    },
+    "tool_40": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_2": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_4": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_13": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "set_33": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_34": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_35": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_36": {
+      "type": "CONTEXT",
+      "n": 3,
+      "ms": 0
+    },
+    "eval_14": {
+      "type": "EVALUATE",
+      "n": 3,
+      "ms": 0
+    },
+    "set_37": {
+      "type": "CONTEXT",
+      "n": 3,
+      "ms": 0
+    },
+    "set_38": {
+      "type": "CONTEXT",
+      "n": 3,
+      "ms": 0
+    },
+    "eval_15": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

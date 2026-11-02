@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/117_pyomo_stochastic` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 646 tokens in / 338 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 Given a seasonal inventory problem where demand is uncertain, find the order quantity that minimizes **expected total cost** across all demand scenarios — using Pyomo's Extensive Form (EF) to solve the two-stage stochastic LP.
 
@@ -101,12 +101,12 @@ Why Q=200 > E[D]=190: critical ratio = c_u / (c_u + c_o) = 15 / (15 + 2) = 15/17
 
 ```bash
 # solver=ON — Pyomo Extensive Form (auto-selects GLPK / CBC / HiGHS)
-graf run ~/.graflang/solvers/pyomo_stochastic/pyomo_stochastic.graph.yaml \
+graf run cookbook_solvers/pyomo_stochastic/pyomo_stochastic.graph.yaml \
   --llm claude_cli \
   --param use_solver=true
 
 # solver=OFF — LLM EV heuristic baseline
-graf run ~/.graflang/solvers/pyomo_stochastic/pyomo_stochastic.graph.yaml \
+graf run cookbook_solvers/pyomo_stochastic/pyomo_stochastic.graph.yaml \
   --llm claude_cli \
   --param use_solver=false
 ```

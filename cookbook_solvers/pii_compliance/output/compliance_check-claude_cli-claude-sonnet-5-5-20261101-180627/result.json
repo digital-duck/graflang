@@ -1,0 +1,3 @@
+{
+  "verdict": "{\"status\": \"OK\", \"engine\": \"stdlib\", \"compliant\": true, \"violated\": [], \"facts\": {\"has_ssn\": false, \"has_ccn\": false, \"has_email\": false, \"has_phone\": false, \"has_address\": false, \"has_name\": false, \"has_dob\": false, \"has_other\": false, \"has_pii\": false, \"is_masked\": true, \"is_external\": true}}"
+}

@@ -166,3 +166,20 @@ def test_a_join_after_a_fork_is_fine():
     edges = [_e("s.entry", "f.trigger"), _e("f.a", "A.trigger"), _e("f.b", "B.trigger"),
              _e("A.complete", "j.trigger"), _e("B.complete", "j.trigger")]
     assert not any("deadlock" in m for m in errs(nodes, edges))
+
+
+def test_a_prompt_placeholder_that_nothing_fills_is_an_error():
+    gen = lambda prompt, ports=("trigger", "complete", "in_problem", "out_text"): {
+        "id": "g", "type": "GENERATE", "ports": list(ports), "config": {"prompt_inline": prompt}}
+    src = {"id": "p", "type": "CONTEXT", "ports": ["trigger", "complete", "out_x"], "config": {"action": "set", "expression": "'a'"}}
+    bind = lambda port: {"source": "p.out_x", "target": f"g.{port}", "type": "binds"}
+    trig = [{"source": "s.entry", "target": "p.trigger", "type": "triggers"}, {"source": "p.complete", "target": "g.trigger", "type": "triggers"}]
+
+    ok = errs([src, gen("Solve {{in_problem}}")], [*trig, bind("in_problem")])
+    assert ok == []
+    unfed = errs([src, gen("Solve {{in_problem}}")], trig)
+    assert any("{{in_problem}}" in m and "no binds edge feeds" in m for m in unfed)
+    renamed = errs([src, gen("Solve {{in_problem}}", ("trigger", "complete", "in_problem_text", "out_text"))], [*trig, bind("in_problem_text")])
+    assert any("{{in_problem}}" in m and "has no port" in m for m in renamed)
+    braces = errs([src, gen('Return {{ "k": 1 }} for {{in_problem}}')], [*trig, bind("in_problem")])      # a JSON example is not a placeholder
+    assert braces == []

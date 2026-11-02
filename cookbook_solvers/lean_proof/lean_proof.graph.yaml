@@ -27,32 +27,15 @@ nodes:
         - '''from spl3.lean_bridge import LeanREPL; _spl_lean = LeanREPL().start(); print("ready")'''
       code: |
         def run_python(code: str, timeout: str='30') -> str:
-            """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-            Returns stdout on success, or stderr on failure.
-            Timeout is in seconds (default 30).
-
-            Usage in SPL:
-                CALL run_python(@code_snippet) INTO @output;
-
-            Security note: executes arbitrary code — use only with trusted input.
-
-            Deprecated: with --kernel (now default), deterministic Python belongs in
-            CREATE TOOL_API blocks, which execute in the persistent kernel session and
-            share state across calls. This subprocess fallback remains for --no-kernel
-            mode only. Scheduled for removal in spl-llm v3.2.
-            """
-            import subprocess
-            import sys
+            """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+            import contextlib, io
+            out = io.StringIO()
             try:
-                result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                if result.returncode == 0:
-                    return result.stdout.strip()
-                return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-            except subprocess.TimeoutExpired:
-                return f'run_python timed out after {timeout}s'
+                with contextlib.redirect_stdout(out):
+                    exec(str(code), globals())
+                return out.getvalue().strip()
             except Exception as e:
-                return f'run_python error: {e}'
+                return f'Error: {type(e).__name__}: {e}'
         _spl_result = run_python('from spl3.lean_bridge import LeanREPL; _spl_lean = LeanREPL().start(); print("ready")')
       result: _spl_result
       out_type: TEXT
@@ -219,32 +202,15 @@ nodes:
                 - '@check_code'
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python(check_code)
               result: _spl_result
               out_type: TEXT
@@ -267,32 +233,15 @@ nodes:
                 - '''print(_spl_lean.feedback)'''
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python('print(_spl_lean.feedback)')
               result: _spl_result
               out_type: TEXT
@@ -352,7 +301,7 @@ nodes:
                 Claim (prose): {{in_claim}}
                 Attempted proposition: {{in_lean_stmt}}
                 Lean's diagnostics:
-                {{in_feedback}}
+                {{in_lean_feedback}}
 
                 Output ONLY the corrected proposition (what goes after `example :`).
                 No proof, no fences, no commentary. Bind every variable with ∀.
@@ -365,7 +314,7 @@ nodes:
               - complete
               - in_claim
               - in_lean_stmt
-              - in_feedback
+              - in_lean_feedback
               - out_stmt_raw
           - id: tool_6
             type: SOLVE
@@ -413,32 +362,15 @@ nodes:
                 - '@check_code'
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python(check_code)
               result: _spl_result
               out_type: TEXT
@@ -461,32 +393,15 @@ nodes:
                 - '''print(_spl_lean.feedback)'''
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python('print(_spl_lean.feedback)')
               result: _spl_result
               out_type: TEXT
@@ -731,32 +646,15 @@ nodes:
         - '@find_code'
       code: |
         def run_python(code: str, timeout: str='30') -> str:
-            """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-            Returns stdout on success, or stderr on failure.
-            Timeout is in seconds (default 30).
-
-            Usage in SPL:
-                CALL run_python(@code_snippet) INTO @output;
-
-            Security note: executes arbitrary code — use only with trusted input.
-
-            Deprecated: with --kernel (now default), deterministic Python belongs in
-            CREATE TOOL_API blocks, which execute in the persistent kernel session and
-            share state across calls. This subprocess fallback remains for --no-kernel
-            mode only. Scheduled for removal in spl-llm v3.2.
-            """
-            import subprocess
-            import sys
+            """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+            import contextlib, io
+            out = io.StringIO()
             try:
-                result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                if result.returncode == 0:
-                    return result.stdout.strip()
-                return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-            except subprocess.TimeoutExpired:
-                return f'run_python timed out after {timeout}s'
+                with contextlib.redirect_stdout(out):
+                    exec(str(code), globals())
+                return out.getvalue().strip()
             except Exception as e:
-                return f'run_python error: {e}'
+                return f'Error: {type(e).__name__}: {e}'
         _spl_result = run_python(find_code)
       result: _spl_result
       out_type: TEXT
@@ -863,32 +761,15 @@ nodes:
         - '@check_code'
       code: |
         def run_python(code: str, timeout: str='30') -> str:
-            """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-            Returns stdout on success, or stderr on failure.
-            Timeout is in seconds (default 30).
-
-            Usage in SPL:
-                CALL run_python(@code_snippet) INTO @output;
-
-            Security note: executes arbitrary code — use only with trusted input.
-
-            Deprecated: with --kernel (now default), deterministic Python belongs in
-            CREATE TOOL_API blocks, which execute in the persistent kernel session and
-            share state across calls. This subprocess fallback remains for --no-kernel
-            mode only. Scheduled for removal in spl-llm v3.2.
-            """
-            import subprocess
-            import sys
+            """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+            import contextlib, io
+            out = io.StringIO()
             try:
-                result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                if result.returncode == 0:
-                    return result.stdout.strip()
-                return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-            except subprocess.TimeoutExpired:
-                return f'run_python timed out after {timeout}s'
+                with contextlib.redirect_stdout(out):
+                    exec(str(code), globals())
+                return out.getvalue().strip()
             except Exception as e:
-                return f'run_python error: {e}'
+                return f'Error: {type(e).__name__}: {e}'
         _spl_result = run_python(check_code)
       result: _spl_result
       out_type: TEXT
@@ -1108,32 +989,15 @@ nodes:
                 - '@check_code'
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python(check_code)
               result: _spl_result
               out_type: TEXT
@@ -1156,32 +1020,15 @@ nodes:
                 - '''print(_spl_lean.feedback)'''
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python('print(_spl_lean.feedback)')
               result: _spl_result
               out_type: TEXT
@@ -1241,7 +1088,7 @@ nodes:
                 Proposition: {{in_lean_stmt}}
                 Failed tactic script: {{in_tactics}}
                 Lean's diagnostics:
-                {{in_feedback}}
+                {{in_lean_feedback}}
 
                 Output ONLY a corrected tactic script (what goes after `:= by`) — no
                 fences, no explanation, nothing after the final tactic.
@@ -1258,7 +1105,7 @@ nodes:
               - complete
               - in_lean_stmt
               - in_tactics
-              - in_feedback
+              - in_lean_feedback
               - out_tactics_raw
           - id: tool_20
             type: SOLVE
@@ -1338,32 +1185,15 @@ nodes:
                 - '@check_code'
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python(check_code)
               result: _spl_result
               out_type: TEXT
@@ -1386,32 +1216,15 @@ nodes:
                 - '''print(_spl_lean.feedback)'''
               code: |
                 def run_python(code: str, timeout: str='30') -> str:
-                    """RUN_PYTHON(code [, timeout]) — execute Python code in a subprocess.
-
-                    Returns stdout on success, or stderr on failure.
-                    Timeout is in seconds (default 30).
-
-                    Usage in SPL:
-                        CALL run_python(@code_snippet) INTO @output;
-
-                    Security note: executes arbitrary code — use only with trusted input.
-
-                    Deprecated: with --kernel (now default), deterministic Python belongs in
-                    CREATE TOOL_API blocks, which execute in the persistent kernel session and
-                    share state across calls. This subprocess fallback remains for --no-kernel
-                    mode only. Scheduled for removal in spl-llm v3.2.
-                    """
-                    import subprocess
-                    import sys
+                    """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                    import contextlib, io
+                    out = io.StringIO()
                     try:
-                        result = subprocess.run([sys.executable, '-c', str(code)], capture_output=True, text=True, timeout=float(timeout))
-                        if result.returncode == 0:
-                            return result.stdout.strip()
-                        return f'Error (exit {result.returncode}):\n{result.stderr.strip()}'
-                    except subprocess.TimeoutExpired:
-                        return f'run_python timed out after {timeout}s'
+                        with contextlib.redirect_stdout(out):
+                            exec(str(code), globals())
+                        return out.getvalue().strip()
                     except Exception as e:
-                        return f'run_python error: {e}'
+                        return f'Error: {type(e).__name__}: {e}'
                 _spl_result = run_python('print(_spl_lean.feedback)')
               result: _spl_result
               out_type: TEXT

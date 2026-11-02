@@ -1,0 +1,85 @@
+⚡ Loading graph: 
+cookbook_solvers/route_optimization/route_optimization.graph.yaml
+✓ Graph loaded: route_optimization
+  Nodes: 23
+  Edges: 55
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ EVALUATE eval_4 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ SOLVE tool_6 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ CONTEXT set_7 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ GENERATE gen_4 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Route Optimization Report\n\n**Problem:** A delivery 
+driver starts and ends at the depot (location 0) and must visit 5 customer 
+locations (1-5). The distance matrix in miles is: 
+[[0,29,20,21,16,31],[29,0,15,29,28,40],[20,15,0,15,14,25],[21,29,15,0,4,12],[16,
+28,14,4,0,16],[31,40,25,12,16,0]] (row/col order = depot,1,2,3,4,5). Find the 
+shortest round-trip route visiting every location exactly once.\n\n**OR-Tools 
+status:** `Optimal`\n**Route (node indices):** `[0, 4, 3, 5, 2, 1, 0]`\n**Total 
+distance (ground truth):** `101`\n**Round-trip check:** `match`\n\n## 
+Interpretation\n\n**Question:** Find the shortest round trip from the depot 
+(location 0) that visits each of the 5 customer locations exactly once and 
+returns.\n\n**Result:** The solver reports status "Optimal" with route [0, 4, 3,
+5, 2, 1, 0], i.e. depot → 4 → 3 → 5 → 2 → 1 → depot, for a total of 101 
+miles.\n\n**Why a solver:** Even 5 stops allow 120 possible orderings, and the 
+count grows factorially, so hand-planning can\'t guarantee the shortest route, 
+while a solver proves optimality.\n\nFinal answer: 101\n\n## Solver Code 
+(LLM-generated, OR-Tools)\n\n```python\ndistance_matrix = [\n    [0, 29, 20, 21,
+16, 31],\n    [29, 0, 15, 29, 28, 40],\n    [20, 15, 0, 15, 14, 25],\n    [21, 
+29, 15, 0, 4, 12],\n    [16, 28, 14, 4, 0, 16],\n    [31, 40, 25, 12, 16, 
+0],\n]\nnum_vehicles = 1\ndepot = 0\n\nmanager = 
+pywrapcp.RoutingIndexManager(len(distance_matrix), num_vehicles, depot)\nrouting
+= pywrapcp.RoutingModel(manager)\n\ndef distance_callback(from_index, 
+to_index):\n    from_node = manager.IndexToNode(from_index)\n    to_node = 
+manager.IndexToNode(to_index)\n    return 
+distance_matrix[from_node][to_node]\n\ntransit_callback_index = 
+routing.RegisterTransitCallback(distance_callback)\nrouting.SetArcCostEvaluatorO
+fAllVehicles(transit_callback_index)\n\nsearch_parameters = 
+pywrapcp.DefaultRoutingSearchParameters()\nsearch_parameters.first_solution_stra
+tegy = (\n    
+routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC\n)\nsearch_parameters.
+local_search_metaheuristic = (\n    
+routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH\n)\nsearch_parame
+ters.time_limit.seconds = 2\n\nsolution = 
+routing.SolveWithParameters(search_parameters)\n\nif solution:\n    index = 
+routing.Start(0)\n    route = []\n    total_distance = 0\n    while not 
+routing.IsEnd(index):\n        route.append(manager.IndexToNode(index))\n       
+previous_index = index\n        index = solution.Value(routing.NextVar(index))\n
+total_distance += routing.GetArcCostForVehicle(previous_index, index, 0)\n    
+route.append(manager.IndexToNode(index))\n    _result = {"status": "Optimal", 
+"route": route, "answer": total_distance}\nelse:\n    _result = {"status": 
+"NoSolution"}\n```'}
+27 steps · 2 LLM calls, 669 tokens in / 512 out · slowest: loop_1 7.5s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/route_optimization/route_optimization/r
+esult/route_optimization-claude_cli-claude-sonnet-5-5-20261101-180857
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/route_optimization/route_optimization/l
+og/route_optimization-claude_cli-claude-sonnet-5-5-20261101-180857.log

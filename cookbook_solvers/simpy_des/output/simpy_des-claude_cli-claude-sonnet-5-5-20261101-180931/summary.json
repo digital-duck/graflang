@@ -1,0 +1,89 @@
+{
+  "steps": 15,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 369,
+    "output_tokens": 404,
+    "cost_usd": 0.0,
+    "ms": 6629
+  },
+  "nodes": {
+    "gen_1": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 6629
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 431
+    },
+    "tool_6": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 132
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 15
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 14
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 13
+    },
+    "tool_5": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 6
+    },
+    "tool_11": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "tool_7": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_8": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_9": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_10": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 1
+    },
+    "assert_1": {
+      "type": "ASSERT",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

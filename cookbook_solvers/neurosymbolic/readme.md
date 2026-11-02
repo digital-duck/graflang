@@ -4,9 +4,10 @@
 > `symbolic_math.spl` are SPL workflows that graphs here call (`procedure_ref`); running those graphs also needs SPL.py importable (`pip install 'graflang[spl]'`).
 > The lift skipped statements GraphLang has no node for: symbolic_math.spl: COMMIT inside a WHILE body was skipped (a LOOP body cannot reach wf_exit).
 > `sympolic_tools.spl` define tools only (no workflow) and are not ported.
-> Dropped from the commands, as `graf run` has no such option: `--kernel`.
+> Dropped from the commands, as `graf run` has no such option: `--kernel`. `--kernel-name NAME` is there and means what it does in `spl3 run`.
 > Not ported: `hackernews-v0.1.md`, `experiment_failure_modes.csv`, `experiment_results_by_model.csv`, `HackerNews-v1.1.md`, `expected_answers_DRAFT.md`, `HackerNews-v1.2.md`, `roundtrip_verification_report.md`, `run_extra_backend_split.sh`, `run_experiment.sh`, `experiment_results_backup_2026-07-17_pre-go-run.db`, `run_experiment_momagrid.py`, `experiment_results_by_run.csv`, `hackernews-v0.2.md`, `Show-HN-v1.0.md`, `app_experiment.py`, `run_experiment.py`, `experiment_aggregation_summary.md`, `hackernews-v0.3.md`, `analyze_experiment.py`, `verify_roundtrip.py`, `roundtrip_checks.py`, `compute_expected_DRAFT.py`, `latex_tables_for_paper.tex`, `HackerNews-v1.0-outline.md`, `experiment_results_by_tier_backend.csv`, `HackerNews-v1.0.md`, `roundtrip_verification_results.csv`, `experiment_results.db`, `SPL-workflow.png`, `ollama_pull_models.sh` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): validates; stops at a tool that imports `roundtrip_checks`, a helper module of the SPL original that was not ported (copy `roundtrip_checks.py` from SPL.py's `cookbook-solver/077_neurosymbolic` and make it importable to run it). This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): all three rungs were tried. `backend=sympy` and the default `backend=sage` (run with `--kernel-name sagemath`, see below) complete with the right answer for "differentiate 3*x**3-x, then factor if needed, finally solve for x" (x = ±1/3). `backend=lean` completes but reports `unverified` for a claim about real numbers, because the Lean installation here has no Mathlib (`ℝ` is unknown); claims over `Nat` are proved (see `lean_proof`). It needs SPL.py importable (`procedure_ref`); `sympolic_tools.spl` and `roundtrip_checks.py` were copied next to the graph. A run that completes does not show the answer is right: read the output before you rely on a recipe.
+> The Sage rung needs the SageMath kernel: `pip install 'spl-llm[sage]'`, `python -m sage.repl.ipython_kernel.install --user`, then `graf run ... --kernel-name sagemath` (the SPL original's `--kernel-name`).
 
 **Pattern:** ONE declarative workflow (`symbolic_math.graph.yaml`) where the
 probabilistic regime (`GENERATE` — plan, formalize, judge, narrate) and the
@@ -85,19 +86,19 @@ Single problems, three rungs, one flag apart:
 
 ```bash
 # Sage rung (default backend): Galois group — SymPy cannot do this
-graf run ~/.graflang/solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
+graf run cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
     --param problem="find the Galois group of x**5 - x - 1 over the rationals"
 
 # SymPy rung: same chain machinery, classic battery
-graf run ~/.graflang/solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
+graf run cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
     --param backend=sympy --param problem="differentiate 3*x**3-x, then factor if needed, finally solve for x"
 
 # Lean rung: a CLAIM, kernel-checked against mathlib (citation-first)
-graf run ~/.graflang/solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
+graf run cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
     --param backend=lean --param problem="the square of any real number is nonnegative"
 
 # Baseline arm: same problem, NO verifier — the A/B contrast
-graf run ~/.graflang/solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
+graf run cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml --llm claude_cli \
     --param backend=lean --param enable_solver=false \
     --param problem="the square of any real number is nonnegative"
 ```

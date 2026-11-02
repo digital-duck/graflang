@@ -1,0 +1,99 @@
+⚡ Loading graph: cookbook_solvers/constraint_opt/supply_chain.graph.yaml
+✓ Graph loaded: supply_chain
+  Nodes: 39
+  Edges: 91
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ CONTEXT set_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ CONTEXT set_7 (#1)
+⚡ CONTEXT set_8 (#1)
+⚡ CONTEXT set_9 (#1)
+⚡ CONTEXT set_10 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ CONTEXT set_11 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_2 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ GENERATE gen_1 (#1)
+  ⚡ CONTEXT set_13 (#1)
+  ⚡ SOLVE tool_4 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ CONTEXT set_14 (#1)
+  ⚡ EVALUATE eval_2 (#1)
+  ⚡ CONTEXT set_12 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ GENERATE gen_3 (#1)
+⚡ CONTEXT set_17 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_19 (#1)
+⚡ SOLVE tool_20 (#1)
+⚡ SOLVE tool_21 (#1)
+⚡ SOLVE tool_22 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Supply Chain Optimization Report\n\n**Problem:** A company
+has two warehouses and three retail stores. Warehouse W1 has 80 units of 
+inventory; Warehouse W2 has 60 units. Store S1 needs 50 units, Store S2 needs 40
+units, Store S3 needs 50 units. Shipping costs per unit: W1 to S1 costs $2, W1 
+to S2 costs $3, W1 to S3 costs $1; W2 to S1 costs $5, W2 to S2 costs $4, W2 to 
+S3 costs $8. All store demand must be met exactly. Minimize total shipping 
+cost.\n\n**Solver status:** `Optimal`\n**Minimum total shipping cost:** 
+$370.00\n\n**Shipping plan (units):**\n  - x_0_0: 30 units\n  - x_0_2: 50 
+units\n  - x_1_0: 20 units\n  - x_1_1: 40 units\n\n## Interpretation\n\n1. The 
+minimum total shipping cost is **$370**.\n2. The largest flows are W1→S3 (50 
+units) and W2→S2 (40 units), followed by W1→S1 (30 units) and W2→S1 (20 units). 
+Two routes are unused. W1→S2 ($3) loses because W1\'s stock is worth more on the
+$1 route to S3. Shifting a unit to W1→S2 would raise total cost by about $2. 
+W2→S3 ($8) is simply the most expensive route.\n3. Yes. Both warehouses are 
+fully used (W1 ships 80 of 80, W2 ships 60 of 60), so total supply equals total 
+demand at 140 units.\n4. **Recommendation:** There is no spare inventory 
+anywhere in the network. Hold a small safety stock or arrange a backup supplier,
+because any demand increase or warehouse disruption cannot be absorbed.\n\n## 
+Solution Verification\n\n**Supply constraints**\n- W1: 30 (to S1) + 0 (to S2) + 
+50 (to S3) = 80, which equals the 80 available. This is **binding**, with no 
+slack.\n- W2: 20 (to S1) + 40 (to S2) + 0 (to S3) = 60, which equals the 60 
+available. This is **binding**, with no slack.\n\n**Demand constraints**\n- S1: 
+30 (from W1) + 20 (from W2) = 50, which meets demand exactly.\n- S2: 0 (from W1)
++ 40 (from W2) = 40, which meets demand exactly.\n- S3: 50 (from W1) + 0 (from 
+W2) = 50, which meets demand exactly.\n\n**Cost, route by route**\n- W1→S1: 30 ×
+$2 = $60\n- W1→S2: 0 × $3 = $0\n- W1→S3: 50 × $1 = $50\n- W2→S1: 20 × $5 = 
+$100\n- W2→S2: 40 × $4 = $160\n- W2→S3: 0 × $8 = $0\n\nSum: 60 + 0 + 50 + 100 + 
+160 + 0 = **$370**\n\nThis matches the solver\'s reported objective of 370. All 
+constraints are satisfied, so the solution is feasible and consistent with the 
+reported optimum.\n\n## Solver Code (LLM-generated, PuLP)\n\n```python\nsupply =
+[80, 60]\ndemand = [50, 40, 50]\ncost = [[2, 3, 1], [5, 4, 8]]\n\nprob = 
+pulp.LpProblem("transportation", pulp.LpMinimize)\n\nx = 
+[[pulp.LpVariable(f"x_{i}_{j}", lowBound=0) for j in range(3)] for i in 
+range(2)]\n\nprob += pulp.lpSum(cost[i][j] * x[i][j] for i in range(2) for j in 
+range(3))\n\nfor i in range(2):\n    prob += pulp.lpSum(x[i][j] for j in 
+range(3)) <= supply[i]\n\nfor j in range(3):\n    prob += pulp.lpSum(x[i][j] for
+i in range(2)) == demand[j]\n\nprob.solve(pulp.PULP_CBC_CMD(msg=0))\n\n_result =
+{\n    "status": pulp.LpStatus[prob.status],\n    "objective": 
+pulp.value(prob.objective),\n    "variables": {v.name: pulp.value(v) for v in 
+prob.variables()}\n}\n```\n\n## Run Metrics\n\n| Metric | Value |\n|---|---|\n| 
+Mode | solver=ON  (PuLP/CBC + ASSERT gate) |\n| LLM calls | 2 |\n| Stage 1 — 
+formulation + solve (s) | 3.50 |\n| Stage 2 — interpretation (s) | 11.90 |\n| 
+Total latency (s) | 15.50 |\n| Input tokens | 0 |\n| Output tokens | 0 |\n| 
+Total tokens | 0 |'}
+38 steps · 2 LLM calls, 731 tokens in / 562 out · slowest: gen_3 11.9s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/constraint_opt/supply_chain/result/supp
+ly_chain-claude_cli-claude-sonnet-5-5-20261101-181304
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/constraint_opt/supply_chain/log/supply_
+chain-claude_cli-claude-sonnet-5-5-20261101-181304.log

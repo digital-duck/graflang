@@ -1,0 +1,64 @@
+⚡ Loading graph: cookbook_solvers/auto_planning/auto_planning.graph.yaml
+✓ Graph loaded: auto_planning
+  Nodes: 24
+  Edges: 59
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ EVALUATE eval_4 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_6 (#1)
+  ⚡ SOLVE tool_7 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ CONTEXT set_7 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ GENERATE gen_4 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ SOLVE tool_15 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Automated Planning Report\n\n**Problem:** Truck t1 starts 
+at A. Package p1 starts at A, package p2 starts at B. Deliver BOTH packages to 
+location C using t1 (t1 can carry any number of packages at once; it can drive 
+directly between any two locations).\n\n**Validator status (VAL-style):** 
+`OK`\n**Plan length:** `6 steps`\n**Final package locations:** `{\'p1\': \'C\', 
+\'p2\': \'C\'}`\n**Round-trip check:** `match`\n\n## Interpretation\n\n1. 
+**Goal:** Get both packages, p1 (starting at A) and p2 (starting at B), 
+delivered to location C using the single truck t1, which starts at A and can 
+carry multiple packages.\n\n2. **Plan length:** The validator reports `"status":
+"OK"` with `"answer": 6`, so the plan took 6 steps. It ended with p1 and p2 both
+at C and t1 at C.\n\n3. **Why preconditions matter:** Each action (load, drive, 
+unload) is only legal if its preconditions hold, such as the truck being at the 
+package\'s location. A plan that skips one can look right but be physically 
+impossible.\n\nFinal answer: 6\n\n## Proposed Plan (LLM-generated, 
+JSON)\n\n```json\n[{"action": "load", "truck": "t1", "pkg": "p1", "loc": "A"}, 
+{"action": "drive", "truck": "t1", "from": "A", "to": "B"}, {"action": "load", 
+"truck": "t1", "pkg": "p2", "loc": "B"}, {"action": "drive", "truck": "t1", 
+"from": "B", "to": "C"}, {"action": "unload", "truck": "t1", "pkg": "p1", "loc":
+"C"}, {"action": "unload", "truck": "t1", "pkg": "p2", "loc": "C"}]\n```'}
+28 steps · 2 LLM calls, 580 tokens in / 234 out · slowest: gen_4 3.5s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/auto_planning/auto_planning/result/auto
+_planning-claude_cli-claude-sonnet-5-5-20261101-181919
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/auto_planning/auto_planning/log/auto_pl
+anning-claude_cli-claude-sonnet-5-5-20261101-181919.log

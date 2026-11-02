@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/079_code_pytest` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > `code_pytest.spl` are SPL workflows that graphs here call (`procedure_ref`); running those graphs also needs SPL.py importable (`pip install 'graflang[spl]'`).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 479 tokens in / 296 out in total); needs SPL.py importable (`procedure_ref`); the generated code passed its 27 tests (VERIFIED). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pytest` (stdlib in most environments; `pip install pytest` if missing)
 
@@ -52,16 +52,16 @@ No additional configuration needed. The recipe writes code and tests to a tempor
 
 ```bash
 # Default spec (merge two sorted lists, O(n+m))
-graf run ~/.graflang/solvers/code_pytest/code_pytest.graph.yaml \
+graf run cookbook_solvers/code_pytest/code_pytest.graph.yaml \
     --llm claude_cli
 
 # More repair attempts (default 3)
-graf run ~/.graflang/solvers/code_pytest/code_pytest.graph.yaml \
+graf run cookbook_solvers/code_pytest/code_pytest.graph.yaml \
     --llm claude_cli \
     --param max_tries=5
 
 # Custom spec
-graf run ~/.graflang/solvers/code_pytest/code_pytest.graph.yaml \
+graf run cookbook_solvers/code_pytest/code_pytest.graph.yaml \
     --llm ollama:gemma3 \
     --param spec="Write a Python function count_words(text) that returns a dict mapping each word to its frequency. Words are case-insensitive and punctuation is stripped."
 ```

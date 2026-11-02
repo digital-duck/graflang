@@ -1,0 +1,47 @@
+=== Supply Sourcing (solver=ON / PuLP ε-constraint) ===
+
+Problem:
+A manufacturer needs 1000 units from 3 suppliers. S1: $10/unit, 95% fill rate, capacity 400 units. S2: $7/unit, 80% fill rate, capacity 500 units. S3: $5/unit, 60% fill rate, capacity 400 units. Find allocations that minimize cost and maximize fill rate.
+
+Pareto Front (8 points):
+| Cost ($) | Fill rate (%) | S1  |  S2  |  S3 |
+|---|---|---|---|---|
+| 6,500.00 | 73.5 | 100  |  500  |  400 |
+| 6,714.30 | 75.0 | 142  |  500  |  357 |
+| 6,928.55 | 76.5 | 185  |  500  |  314 |
+| 7,142.85 | 78.0 | 228  |  500  |  271 |
+| 7,357.15 | 79.5 | 271  |  500  |  228 |
+| 7,571.45 | 81.0 | 314  |  500  |  185 |
+| 7,785.70 | 82.5 | 357  |  500  |  142 |
+| 8,000.00 | 84.0 | 400  |  500  |  100 |
+
+Interpretation:
+## Interpretation
+
+**1. The tradeoff**
+
+The front is a straight line. Every ~43 units moved from S3 to S1 adds about $214 and 1.5 points of fill rate, which works out to **about $143 per fill-rate point**, with no knee. S2 is at its 500-unit capacity in every row, so the only lever is the S1 vs. S3 split: paying $5 more per unit buys 35 more points of reliability on those units (95% vs. 60%).
+
+Fill rate here is expected delivery. At 73.5% you should plan for roughly 735 of 1,000 units arriving, and at 84% roughly 840. Even the best point leaves a 16% expected shortfall, because S1's 400-unit cap prevents more high-reliability volume.
+
+**2. Recommended operating points**
+
+| Role | Cost | Fill | S1 / S2 / S3 | Why |
+|---|---|---|---|---|
+| Low-cost anchor | $6,714 | 75.0% | 142 / 500 / 357 | Saves $1,286 (16%) vs. the max-fill point. It is also one step off the extreme, so S3 is not at its capacity limit and there is a little slack. |
+| Balanced | $7,357 | 79.5% | 271 / 500 / 228 | About the midpoint of both ranges, with volume spread fairly evenly between S1 and S3. Good default when no shortage is anticipated. |
+| High-fill anchor | $8,000 | 84.0% | 400 / 500 / 100 | The most reliable allocation available, with S1 maxed out. Use for critical or line-down-risk supply. |
+
+**3. Which suppliers dominate**
+
+- **Low-cost:** S2 (50%) and S3 (36%) carry the volume, and S1 is a minor 14%. Reliability risk sits with S3.
+- **Balanced:** S2 holds 50%, and S1 (27%) and S3 (23%) are roughly even.
+- **High-fill:** S2 (50%) and S1 (40%) dominate, and S3 is down to a 10% top-up.
+
+**4. Takeaway**
+
+Treat S2 as the fixed 500-unit base. Then decide how much you will pay (~$143 per point) to shift the remaining 500 units from S3 to S1, and choose the point by the cost of a shortage, not by price alone.
+
+*Note: rows 2-5 sum to 999 units rather than 1,000, which looks like rounding in the solver output. The costs and fill rates are consistent with the underlying allocation, but round the final order quantities before issuing POs.*
+
+LLM calls: 2

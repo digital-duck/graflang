@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/118_trading_rule_z3` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 293 tokens in / 398 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** A disciplined trader has rules. But rules interact. A strategy that looks consistent when traced rule-by-rule can be internally contradictory — no market state ever fires it. Z3 audits the entire rulebook formally, finds the exact boundary scenario where all rules first align, and surfaces hidden conflicts before the first dollar is risked. The LLM does the domain translation (NL → formal spec); Z3 does the proof.
 
@@ -40,21 +40,21 @@ If a trader adds a new rule "RSI ≥ 30 for liquidity" alongside E1's "RSI ≤ 3
 
 ```bash
 # AUDIT mode — default Momentum Breakout strategy
-graf run ~/.graflang/solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
+graf run cookbook_solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
     --llm claude_cli
 
 # AUDIT mode — custom NL trading rules
-graf run ~/.graflang/solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
+graf run cookbook_solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
     --llm claude_cli \
     --param "rules_text=Enter long when RSI is between 30 and 40, price is above the 50-day moving average, and volume is at least twice the 20-day average. Never enter if a Fed announcement is scheduled today. Skip if ADR% is below 1.5."
 
 # SNAPSHOT mode — check today's indicators against the default strategy
-graf run ~/.graflang/solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
+graf run cookbook_solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
     --llm claude_cli \
     --param 'snapshot_json={"rsi":31,"price_vs_ma200":5,"volume_ratio":180,"adr_pct":25,"in_uptrend":true,"earnings_week":false}'
 
 # SNAPSHOT with custom rules + today's data
-graf run ~/.graflang/solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
+graf run cookbook_solvers/trading_rule_z3/trading_rule_z3.graph.yaml \
     --llm claude_cli \
     --param "rules_text=Enter when RSI is between 30 and 45 and volume ratio exceeds 150. No earnings weeks." \
     --param 'snapshot_json={"rsi":38,"volume_ratio":160,"earnings_week":false}'

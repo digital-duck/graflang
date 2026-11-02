@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/116_openspiel_cfr` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 491 tokens in / 416 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pip install open_spiel` (heavy C++ build)
 · **Solver class:** S025 (imperfect-information games, CFR)
@@ -173,15 +173,15 @@ CFR reaches exploitability 0.0009 — effectively the analytic equilibrium — a
 
 ```bash
 # solver=ON — OpenSpiel CFR (1000 iterations by default)
-graf run ~/.graflang/solvers/openspiel_cfr/openspiel_cfr.graph.yaml \
+graf run cookbook_solvers/openspiel_cfr/openspiel_cfr.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF — LLM strategic reasoning baseline
-graf run ~/.graflang/solvers/openspiel_cfr/openspiel_cfr.graph.yaml \
+graf run cookbook_solvers/openspiel_cfr/openspiel_cfr.graph.yaml \
     --llm claude_cli --param use_solver=false
 
 # vary iterations
-graf run ~/.graflang/solvers/openspiel_cfr/openspiel_cfr.graph.yaml \
+graf run cookbook_solvers/openspiel_cfr/openspiel_cfr.graph.yaml \
     --llm claude_cli --param use_solver=true --param n_iterations=100
 
 ```

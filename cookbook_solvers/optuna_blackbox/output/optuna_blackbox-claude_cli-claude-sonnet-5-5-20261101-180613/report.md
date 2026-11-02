@@ -1,0 +1,35 @@
+=== Optuna Black-Box Optimization (r112) | solver=ON ===
+
+## Optuna Black-Box Optimization — SaaS Pricing Strategy Optimization
+
+**Trials:** 50  
+**Best LTV:** $253.72/customer  
+**Naive LTV:** $166.05/customer  
+**Improvement:** +52.8%
+
+| Parameter | Naive (LLM guess) | Optuna Best |
+|---|---|---|
+| monthly_price | $50 | $46.5 |
+| annual_discount_pct | 20% | 0.6% |
+| trial_days | 14 days | 29 days |
+
+### Top 5 Trials
+
+| Rank | Price | Discount | Trial Days | LTV |
+|---|---|---|---|---|
+| 1 | $46.5 | 0.6% | 29 days | $253.72 |
+| 2 | $46.4 | 1.5% | 28 days | $249.53 |
+| 3 | $46.8 | 1.9% | 28 days | $249.26 |
+| 4 | $42.2 | 0.1% | 30 days | $248.04 |
+| 5 | $41.3 | 1.2% | 30 days | $243.35 |
+
+── Analytics Explanation ───────────────────────────────────
+**1. Result:** Optuna found $46.5/month, a 0.6% annual discount and a 29-day trial, for an LTV of $253.72 against the naive $166.05 (+52.8%). The top 5 trials cluster tightly (price about $41–47, discount under 2%, trial 28–30 days), so the optimum looks stable. With only 50 trials, though, it isn't proven global.
+
+**2. Price:** The drop is small ($50 to $46.5). Lower price lifts trial-to-paid conversion, and more paying customers outweigh the lost margin. The bigger move is the discount: 20% to about 0% means no revenue given away, and the LTV model seemingly doesn't reward it.
+
+**3. Trial length:** Your premise is off. The optimal trial is *longer* (29 days vs 14), not shorter. A longer trial likely lets users reach their "aha" moment and build habits, which raises conversion and cuts early churn.
+
+**4. Non-convex:** Parameters interact (price × trial × discount) through a churn model and funnel, creating multiple local optima and flat regions. Gradients aren't available, and local ones would stall at a poor peak. TPE samples globally instead.
+
+**5. When to use which:** Use Optuna when the model is a simulator or black box with interacting levers. Use analytical pricing when demand is well understood (for example, elasticity curves) and you need speed and interpretability.

@@ -1,0 +1,66 @@
+⚡ Loading graph: cookbook_solvers/openspiel_cfr/openspiel_cfr.graph.yaml
+✓ Graph loaded: openspiel_cfr
+  Nodes: 16
+  Edges: 36
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '=== OpenSpiel CFR — Kuhn Poker (r116) | solver=ON ===\n\n## 
+CFR Report — Kuhn Poker\n\n**Iterations:** 1000  \n**Exploitability:** 0.0009 
+(threshold: 0.05)  \n**Converged to Nash:** Yes ✓\n\n### Average Policy at Key 
+Information Sets\n\n| Info set | Pass / Check | Bet / Call |\n|---|---|---|\n| 
+P1:0 | 0.806 | 0.194 |\n| P1:0pb | 1.000 | 0.000 |\n| P1:1 | 0.993 | 0.007 |\n| 
+P1:1pb | 0.469 | 0.531 |\n| P1:2 | 0.416 | 0.584 |\n| P1:2pb | 0.001 | 0.999 
+|\n| P2:0b | 1.000 | 0.000 |\n| P2:0p | 0.667 | 0.333 |\n| P2:1b | 0.664 | 0.336
+|\n| P2:1p | 0.996 | 0.004 |\n| P2:2b | 0.000 | 1.000 |\n| P2:2p | 0.001 | 0.999
+|\n\n### Known Nash Equilibrium (Kuhn Poker)\n\n> Player 1: Bet with K always 
+(1.0), Bet with J at probability 1/3 (bluff), Pass with Q always. Player 2: Call
+with K always, Call with Q at probability 1/3, Pass with J always.\n\n### 
+Exploitability Interpretation\n\n| Policy | Exploitability | Meaning 
+|\n|---|---|---|\n| Perfect Nash | 0.000 | Unexploitable — best response cannot 
+gain |\n| CFR avg (this run) | 0.001 | Near-Nash ✓ |\n| LLM naive (bet-K-only) |
+~0.250 | Exploitable — opponent folds J/Q, always calls K |\n\n── Game Theory 
+Explanation ─────────────────────────────────\n1. **Exploitability** is how much
+an opponent\'s best response could win against your strategy, beyond the game\'s
+value. At 0.0009, a best-responding opponent gains almost nothing. A good player
+wants it near zero because it means no pattern can be punished.\n\n2. 
+**Equilibrium:** With K, bet or call often; with Q, mostly check, and call a bet
+about 1/3 of the time; with J, bluff about 1/3 (CFR shows P1:0 ≈ 0.19, which 
+sits within the equilibrium family, since P1\'s J-bluff rate can range from 0 to
+1/3 and is linked to its K-bet rate). Bluffing is optimal because it makes 
+K-bets less readable. If P1 only bet with K, P2 would always fold J and Q, and 
+P1 would win only the small pot. Bluffs with J also put Q in a real dilemma: 
+calling and folding both cost the same in expectation, so P2 is indifferent at 
+1/3.\n\n3. **Pure strategies fail** because they can be exploited. "Bet only 
+with K" tells P2 that a bet means K, so P2 folds everything else and calls with 
+K only when it gains. P2 then pays nothing for folding. Equilibrium needs each 
+player\'s mix to leave the opponent indifferent, which only randomization 
+achieves (~0.25 exploitability for bet-K-only).\n\n4. **Generalization:** CFR 
+tracks regret for each decision at each information set and averages strategies 
+over many iterations. This converges to Nash in two-player zero-sum games. 
+Variants (Monte Carlo CFR, abstraction, and neural approximation) scale it to 
+Texas Hold\'em, as in Libratus and Pluribus. For sealed auctions or negotiation,
+the same approach works if the game is modeled with private types and sequential
+moves. Outside zero-sum or two-player settings, convergence guarantees weaken.'}
+12 steps · 1 LLM calls, 491 tokens in / 416 out · slowest: gen_1 7.3s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/openspiel_cfr/openspiel_cfr/result/open
+spiel_cfr-claude_cli-claude-sonnet-5-5-20261101-180605
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/openspiel_cfr/openspiel_cfr/log/openspi
+el_cfr-claude_cli-claude-sonnet-5-5-20261101-180605.log

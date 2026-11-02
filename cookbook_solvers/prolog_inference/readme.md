@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/105_prolog_inference` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 286 tokens in / 292 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** Insurance policy with 4 rules and 3 customers. `carol` is eligible via a 4-level proof chain: `emergency_claim ← eligible_claim ← claim_covered ← catastrophic_event` (bypassing the deductible requirement). LLM traces `alice` and `bob` correctly but misses `carol`'s indirect path. The backward-chaining engine finds all proof paths automatically.
 
@@ -91,12 +91,12 @@ Token gap is smaller than r103/r104 (12% vs 70–230%) because the solver=ON exp
 
 ```bash
 # solver=ON — backward-chaining inference
-graf run ~/.graflang/solvers/prolog_inference/prolog_inference.graph.yaml \
+graf run cookbook_solvers/prolog_inference/prolog_inference.graph.yaml \
     --llm claude_cli \
     --param use_solver=true
 
 # solver=OFF — LLM manual tracing
-graf run ~/.graflang/solvers/prolog_inference/prolog_inference.graph.yaml \
+graf run cookbook_solvers/prolog_inference/prolog_inference.graph.yaml \
     --llm claude_cli \
     --param use_solver=false
 ```

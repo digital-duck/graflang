@@ -1,7 +1,7 @@
 # Recipe 86 — Financial Calculation Verifier
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/086_financial_calc_verifier` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 564 tokens in / 313 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** stdlib `decimal` only — no new pip dependency
 
@@ -34,15 +34,15 @@ No installation needed — `decimal` is part of the Python standard library.
 
 ```bash
 # Default problem (5-year loan amortization)
-graf run ~/.graflang/solvers/financial_calc_verifier/financial_calc_verifier.graph.yaml --llm claude_cli
+graf run cookbook_solvers/financial_calc_verifier/financial_calc_verifier.graph.yaml --llm claude_cli
 
 # Custom problem
-graf run ~/.graflang/solvers/financial_calc_verifier/financial_calc_verifier.graph.yaml \
+graf run cookbook_solvers/financial_calc_verifier/financial_calc_verifier.graph.yaml \
     --llm ollama:gemma4 \
     --param problem="If you invest \$5,000 at 4% annual interest, compounded quarterly, what is it worth after 10 years?"
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/financial_calc_verifier/financial_calc_verifier.graph.yaml \
+graf run cookbook_solvers/financial_calc_verifier/financial_calc_verifier.graph.yaml \
     --llm claude_cli --param enable_solver=false
 ```
 

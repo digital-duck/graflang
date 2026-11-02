@@ -1,0 +1,24 @@
+=== Prolog Inference Engine (r105) | solver=ON ===
+
+## Prolog Inference Report — ComprehensiveAuto_v3
+
+**Query:** `emergency_claim`  
+**Customers:** 3  
+**Eligible:** 1
+
+| Customer | Eligible | Verdict |
+|---|---|---|
+| alice | ✓ | alice: ELIGIBLE for emergency_claim |
+| bob | ✗ | bob: NOT ELIGIBLE for emergency_claim |
+| carol | ✗ | carol: NOT ELIGIBLE for emergency_claim |
+
+── Explanation ─────────────────────────────────────────────
+**Discrepancy:** the policy makes Carol eligible, but the report marks her NOT ELIGIBLE. The report is also internally inconsistent: Carol would be a second eligible customer, yet the header says only 1 is eligible. Treat the report as suspect.
+
+1. **Carol (expected proof):** `comprehensive(carol)` ∧ `policy_active(carol)` ∧ (`deductible_met` ∨ `catastrophic(carol)`). The disjunction succeeds via `catastrophic`, so `emergency_claim(carol)` should be provable. A likely cause is that the catastrophic branch is missing from the rules, or the fact wasn't loaded.
+
+2. **Bob:** `comprehensive(bob)` and `policy_active(bob)` are both absent. He has a basic policy, and the policy is lapsed. Under negation-as-failure, either gap alone blocks him.
+
+3. **Manual tracing risk:** people skip OR branches and misread missing facts, so a bug like Carol's goes unnoticed. A solver gives a reproducible proof trace.
+
+4. **9th rule:** `high_value_client → deductible_waived` only helps if the claim rule also accepts `deductible_waived`. It's monotonic and affects only customers with that fact. Bob stays ineligible, and Carol's result is unchanged until the OR branch is fixed.

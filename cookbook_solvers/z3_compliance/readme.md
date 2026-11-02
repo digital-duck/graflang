@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/102_z3_compliance` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 205 tokens in / 264 out in total); the explanation prompt shows an empty policy text, as in the SPL original. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** Five loan eligibility rules interact in a way that traps a specific applicant profile: a self-employed applicant with income $40K–$49K is ineligible even with a 700 credit score — UNLESS they also have collateral. Z3 surfaces this hidden constraint in milliseconds. LLM traces rules linearly and misses the interaction.
 
@@ -42,32 +42,33 @@ Z3 finds this by exhaustively checking all rule interactions — not just left-t
 
 Z3 finds a qualifying profile: `age=18, income=50000, credit_score=650, months_employed=12, has_collateral=False, self_employed=False`.
 
-## Run commands
-
-```bash
-# solver=ON — Z3 theorem prover
-graf run ~/.graflang/solvers/z3_compliance/z3_compliance.graph.yaml \
-    --llm claude_cli --param use_solver=true
-
-# solver=OFF — LLM manual tracing
-graf run ~/.graflang/solvers/z3_compliance/z3_compliance.graph.yaml \
-    --llm claude_cli --param use_solver=false
-
-# Custom policy text
-graf run ~/.graflang/solvers/z3_compliance/z3_compliance.graph.yaml \
-    --llm claude_cli --param use_solver=true \
-    --param "policy_text=Subscription eligibility: user must be 13+, account in good standing, and premium_tier=true or lifetime_member=true."
-```
-
 ## Install
 
 ```bash
-conda activate spl123
+conda activate graf
 
 # https://github.com/Z3Prover/z3/wiki#background
 # https://z3prover.github.io/papers/programmingz3.html
 pip install z3-solver
 ```
+
+## Run commands
+
+```bash
+# solver=ON — Z3 theorem prover
+graf run cookbook_solvers/z3_compliance/z3_compliance.graph.yaml \
+    --llm claude_cli --param use_solver=true
+
+# solver=OFF — LLM manual tracing
+graf run cookbook_solvers/z3_compliance/z3_compliance.graph.yaml \
+    --llm claude_cli --param use_solver=false
+
+# Custom policy text
+graf run cookbook_solvers/z3_compliance/z3_compliance.graph.yaml \
+    --llm claude_cli --param use_solver=true \
+    --param "policy_text=Subscription eligibility: user must be 13+, account in good standing, and premium_tier=true or lifetime_member=true."
+```
+
 
 ## TOOL_API reference
 

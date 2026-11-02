@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/127_pii_compliance` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `bench_engines.py`, `rules.json`, `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): all 2 graphs completed (1 model calls, 141 tokens in / 20 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The idea:** an LLM finds the personal data in a document (a *PII map*: types only, never the values); Boolean rules then decide whether the document may be sent to a destination. The rules are checked by one of three engines that **must give the same answer**:
 
@@ -26,7 +26,7 @@ The rules live in [`rules.json`](rules.json), which you can edit: `external_dest
 
 ```bash
 python cookbook-solver/127_pii_compliance/tools.py my_rules.json    # validates the file and checks the rules are consistent
-graf run ~/.graflang/solvers/pii_compliance/compliance_check.graph.yaml --adapter echo \
+graf run cookbook_solvers/pii_compliance/compliance_check.graph.yaml --adapter echo \
     --param rules_file=my_rules.json --param destination=external_api \
     --param 'pii_map={"entities":[{"type":"SSN","masked":false}]}'
 ```
@@ -61,15 +61,15 @@ Read it with care: it is one machine, one Python, one run, and only three Boolea
 
 ```bash
 # the LLM extracts the PII map, the chosen engine checks the rules
-graf run ~/.graflang/solvers/pii_compliance/pii_compliance.graph.yaml --adapter claude_cli \
+graf run cookbook_solvers/pii_compliance/pii_compliance.graph.yaml --adapter claude_cli \
     --param engine=stdlib --param destination=external_api
 
 # no LLM: check a PII map directly (this is also what GraphLang calls as a procedure)
-graf run ~/.graflang/solvers/pii_compliance/compliance_check.graph.yaml --adapter echo \
+graf run cookbook_solvers/pii_compliance/compliance_check.graph.yaml --adapter echo \
     --param 'pii_map={"entities":[{"type":"SSN","masked":false}]}' --param destination=external_api --param engine=z3
 
 # ablation: the LLM judges compliance itself
-graf run ~/.graflang/solvers/pii_compliance/pii_compliance.graph.yaml --adapter claude_cli --param use_solver=false
+graf run cookbook_solvers/pii_compliance/pii_compliance.graph.yaml --adapter claude_cli --param use_solver=false
 ```
 
 ## Files

@@ -1,0 +1,32 @@
+⚡ Loading graph: cookbook_solvers/symbolic_math/hello_symbolic_math.graph.yaml
+✓ Graph loaded: math_solver
+  Nodes: 10
+  Edges: 20
+
+▶ Executing workflow...
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ GENERATE gen_2 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'explanation': 'You\'re being asked to find the "roots" of x² − 5x + 6,
+which means the values of x that make the expression equal zero. The answer is 
+**x = 2 and x = 3**. The key idea is that a quadratic equation can have up to 
+two solutions, and these are the points where its graph (a U-shaped curve called
+a parabola) crosses the x-axis. A symbolic math engine finds these exactly, 
+rather than approximating them, which is why you get clean whole numbers here.'}
+9 steps · 2 LLM calls, 317 tokens in / 116 out · slowest: gen_1 3.6s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/symbolic_math/hello_symbolic_math/resul
+t/hello_symbolic_math-claude_cli-claude-sonnet-5-5-20261101-181723
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/symbolic_math/hello_symbolic_math/log/h
+ello_symbolic_math-claude_cli-claude-sonnet-5-5-20261101-181723.log

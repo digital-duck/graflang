@@ -1,0 +1,9 @@
+{
+  "graph": "insurance_policy_z3",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "use_solver": "true"
+  },
+  "started": "2026-11-01T18:04:56"
+}

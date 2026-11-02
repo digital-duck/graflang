@@ -1,7 +1,7 @@
 # Recipe 90 — Physics Conservation Check
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/090_compsci_physics` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 551 tokens in / 198 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `numpy` (already a project dependency, no new install)
 
@@ -34,15 +34,15 @@ No new dependency — NumPy is already required by the cookbook.
 
 ```bash
 # Default problem (elastic collision, equal masses: velocities swap)
-graf run ~/.graflang/solvers/compsci_physics/physics_conservation.graph.yaml --llm claude_cli
+graf run cookbook_solvers/compsci_physics/physics_conservation.graph.yaml --llm claude_cli
 
 # Custom problem
-graf run ~/.graflang/solvers/compsci_physics/physics_conservation.graph.yaml \
+graf run cookbook_solvers/compsci_physics/physics_conservation.graph.yaml \
     --llm ollama:gemma3 \
     --param problem="A 3 kg cart at 4 m/s collides and sticks to a stationary 1 kg cart. What is their common final velocity, in m/s?"
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/compsci_physics/physics_conservation.graph.yaml \
+graf run cookbook_solvers/compsci_physics/physics_conservation.graph.yaml \
     --llm claude_cli --param enable_solver=false
 ```
 

@@ -1,0 +1,39 @@
+=== Hard MILP Unit Commitment (r123) | solver=ON ===
+
+## Unit Commitment Report — SCIP
+
+**Total operating cost:** $150,550  
+**Optimality gap:** 0.0%  
+**Solve time:** 0.8s  
+**Status:** optimal  
+
+### Generator Schedule (hours committed / 24)
+
+| Generator | Hours ON | Min MW | Max MW | Var Cost $/MWh |
+|---|---|---|---|---|
+| G1_coal | 24 | 50 | 200 | 28.0 |
+| G2_gas_cc | 12 | 30 | 150 | 45.0 |
+| G3_gas_ct | 0 | 10 | 80 | 72.0 |
+| G4_nuclear | 24 | 80 | 120 | 12.0 |
+| G5_peaker | 0 | 5 | 50 | 95.0 |
+
+### Peak Hour Snapshot (hour 18 — evening peak, 360 MW demand)
+
+| Generator | Output (MW) |
+|---|---|
+| G1_coal | 200.0 |
+| G2_gas_cc | 50.0 |
+| G3_gas_ct | 0.0 |
+| G4_nuclear | 120.0 |
+| G5_peaker | 0.0 |
+
+── Analyst Explanation ─────────────────────────────────────
+1. **Cutting planes:** A cutting plane is a linear inequality that every integer-feasible solution satisfies but the current fractional LP optimum violates. Adding it shaves off fractional space without removing any valid schedule. SCIP adds cuts (cover, flow-cover, MIR, and others) at the root, so the LP bound rises before branching and the tree stays small.
+
+2. **HiGHS vs SCIP:** The big-M links `min·on ≤ p ≤ max·on` give weak LP relaxations, with `on` fractionally around 0.3. Startup costs, min up/down times, and ramp limits couple the hours, and identical or similar units create symmetry. SCIP's stronger cuts, presolve, and heuristics usually close the gap faster. Which solver wins depends on the instance.
+
+3. **Cost of a 5% gap:** On $2B of annual fuel cost, that is up to $100M/year of avoidable cost. Real gaps are usually much smaller (0.1% to 1%), but 0.1% is still $2M/year.
+
+4. **ISO scale:** SCIP alone doesn't scale well to 1000+ units and 8760 hours. ISOs use tighter formulations (convex-hull or ramp-aware), rolling horizons (day-ahead, 24–48h windows), decomposition (Lagrangian or Benders), and commercial solvers with parallelism and MIP gaps of about 0.1–0.5%.
+
+**Data issue:** The hour-18 snapshot sums to 200 + 50 + 120 = 370 MW against 360 MW of demand. Either the snapshot is wrong, or it's over-generating by 10 MW, which an optimal solution wouldn't do (G2 at 40 MW would give exactly 360). Check the model output before relying on the $150,550 figure.

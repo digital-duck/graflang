@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/125_progressive_hedging` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 454 tokens in / 423 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Solver class:** Parallel Stochastic Programming (Two-Stage SP, Scenario Decomposition)  
 **Backend:** Progressive Hedging (custom Python PH loop over Pyomo/HiGHS subproblems)  
@@ -78,15 +78,15 @@ The LLM correctly reasoned that high-demand scenarios create superlinear payoffs
 
 ```bash
 # solver=ON: Progressive Hedging across 30 scenarios
-graf run ~/.graflang/solvers/progressive_hedging/progressive_hedging.graph.yaml \
+graf run cookbook_solvers/progressive_hedging/progressive_hedging.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF: deterministic EV (mean scenario) + LLM reasoning
-graf run ~/.graflang/solvers/progressive_hedging/progressive_hedging.graph.yaml \
+graf run cookbook_solvers/progressive_hedging/progressive_hedging.graph.yaml \
     --llm claude_cli --param use_solver=false
 
 # More scenarios (slower, better convergence demo)
-graf run ~/.graflang/solvers/progressive_hedging/progressive_hedging.graph.yaml \
+graf run cookbook_solvers/progressive_hedging/progressive_hedging.graph.yaml \
     --llm claude_cli --param use_solver=true --param n_scenarios=50
 
 ```

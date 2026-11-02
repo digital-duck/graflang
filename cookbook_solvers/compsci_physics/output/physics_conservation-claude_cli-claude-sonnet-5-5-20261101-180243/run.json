@@ -1,0 +1,10 @@
+{
+  "graph": "physics_conservation",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "enable_solver": "true",
+    "out_dir": "/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-a866-23f8fbd7fcc1/scratchpad/solver_runs/compsci_physics/physics_conservation/out_dir"
+  },
+  "started": "2026-11-01T18:02:43"
+}

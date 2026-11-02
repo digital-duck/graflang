@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/121_platypus_moea` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `pulp` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 2267 tokens in / 406 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** Same B4 benchmark as r107 (pymoo NSGA-II), re-solved with platypus NSGA-II — a pure-Python MOEA library with no C/Fortran extensions. Platypus reproduces the identical Pareto surface (cost \$3,900–\$6,200, quality 0.867–0.900, risk 0.2125–0.2500), finding **100 non-dominated integer points** and correctly pinning the strictly-dominated Night shift at its minimum. Two independent `S020` validations: (1) platypus matches pymoo's front on the same problem spec — DODA holds across MOEA libraries; (2) across two solver=OFF runs the LLM **consistently picked the same plan (20/10/10) but reported wrong arithmetic one run and correct arithmetic the next** — the back-substitution verifier caught the bad run. When dependency weight matters (embedded / containerized edge inference), platypus is the right MOEA choice.
 
@@ -114,11 +114,11 @@ deterministic and needs no such guard.
 
 ```bash
 # solver=ON — platypus NSGA-II Pareto surface
-graf run ~/.graflang/solvers/platypus_moea/platypus_moea.graph.yaml \
+graf run cookbook_solvers/platypus_moea/platypus_moea.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF — LLM direct scheduling + arithmetic verification
-graf run ~/.graflang/solvers/platypus_moea/platypus_moea.graph.yaml \
+graf run cookbook_solvers/platypus_moea/platypus_moea.graph.yaml \
     --llm claude_cli --param use_solver=false
 ```
 

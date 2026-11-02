@@ -1,0 +1,40 @@
+⚡ Loading graph: cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml
+✓ Graph loaded: neurosymbolic_solver
+  Nodes: 65
+  Edges: 169
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ EVALUATE eval_4 (#1)
+⚡ GENERATE gen_7 (#1)
+⚡ SOLVE tool_33 (#1)
+⚡ SOLVE tool_34 (#1)
+⚡ EVALUATE eval_13 (#1)
+⚡ CONTEXT set_33 (#1)
+⚡ CONTEXT set_34 (#1)
+⚡ CONTEXT set_35 (#1)
+⚡ LOOP loop_3 (#1)
+  ⚡ SOLVE tool_36 (#1)
+  ⚡ GENERATE call_1 (#1)
+  ⚡ SOLVE tool_37 (#1)
+  ⚡ SOLVE tool_38 (#1)
+  ⚡ CONTEXT set_36 (#1)
+  ⚡ EVALUATE eval_14 (#1)
+  ⚡ SOLVE tool_39 (#1)
+  ⚡ CONTEXT set_37 (#1)
+  ⚡ CONTEXT set_38 (#1)
+⚡ SOLVE tool_40 (#1)
+⚡ GENERATE gen_8 (#1)
+⚡ SOLVE tool_41 (#1)
+⚡ SOLVE tool_42 (#1)
+✗ Run failed: SOLVE node 'tool_42': ModuleNotFoundError: No module named 
+'roundtrip_checks'
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/neurosymbolic/symbolic_math/log/symboli
+c_math-claude_cli-claude-sonnet-5-5-20261101-181708.log

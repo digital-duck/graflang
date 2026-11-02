@@ -1,0 +1,10 @@
+{
+  "graph": "property_based_code_verify",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "enable_solver": "true",
+    "out_dir": "/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-a866-23f8fbd7fcc1/scratchpad/solver_runs/property_based_code_verify/property_based_code_verify/out_dir"
+  },
+  "started": "2026-11-01T18:08:03"
+}

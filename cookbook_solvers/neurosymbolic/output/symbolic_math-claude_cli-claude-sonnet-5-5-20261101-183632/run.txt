@@ -1,0 +1,69 @@
+⚡ Loading graph: cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml
+✓ Graph loaded: neurosymbolic_solver
+  Nodes: 65
+  Edges: 169
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ EVALUATE eval_4 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_5 (#1)
+  ⚡ EVALUATE eval_6 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_7 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ SOLVE tool_8 (#1)
+  ⚡ SOLVE tool_9 (#1)
+  ⚡ SOLVE tool_10 (#1)
+  ⚡ CONTEXT set_9 (#1)
+  ⚡ EVALUATE eval_5 (#1)
+  ⚡ EVALUATE eval_6 (#1)
+  ⚡ GENERATE gen_3 (#1)
+  ⚡ SOLVE tool_11 (#1)
+  ⚡ CONTEXT set_10 (#1)
+  ⚡ SOLVE tool_12 (#1)
+  ⚡ SOLVE tool_13 (#1)
+  ⚡ SOLVE tool_14 (#1)
+  ⚡ CONTEXT set_11 (#1)
+  ⚡ EVALUATE eval_5 (#1)
+  ⚡ EVALUATE eval_6 (#1)
+  ⚡ GENERATE gen_3 (#1)
+  ⚡ SOLVE tool_11 (#1)
+  ⚡ CONTEXT set_10 (#1)
+  ⚡ SOLVE tool_12 (#1)
+  ⚡ SOLVE tool_13 (#1)
+  ⚡ SOLVE tool_14 (#1)
+  ⚡ CONTEXT set_11 (#1)
+⚡ CONTEXT set_12 (#1)
+⚡ CONTEXT set_13 (#1)
+⚡ CONTEXT set_14 (#1)
+⚡ CONTEXT set_15 (#1)
+⚡ CONTEXT set_16 (#1)
+⚡ EVALUATE eval_7 (#1)
+⚡ SOLVE tool_31 (#1)
+⚡ SOLVE tool_32 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'result': '# Lean verification report (mathlib)\n\n**Claim (prose):** 
+the square of any real number is nonnegative\n\n**Formalization:** `∀ a : ℝ, 0 ≤
+a ^ 2`\n\n**Faithfulness (LLM judge):** not judged (formalization 
+failed)\n\n**Badge:** `unverified`'}
+48 steps · 3 LLM calls, 450 tokens in / 13 out · slowest: loop_1 6.8s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/sage/lean/symbolic_math-claude_cli-claude-sonnet-5-
+5-20261101-183632
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/sage/lean/log/symbolic_math-claude_cli-claude-sonne
+t-5-5-20261101-183632.log

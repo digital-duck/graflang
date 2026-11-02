@@ -1,0 +1,59 @@
+{
+  "steps": 9,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 199,
+    "output_tokens": 593,
+    "cost_usd": 0.0,
+    "ms": 8914
+  },
+  "nodes": {
+    "gen_3": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 8915
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 426
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 15
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 10
+    },
+    "tool_10": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 6
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 4
+    },
+    "eval_3": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_4": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

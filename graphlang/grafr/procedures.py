@@ -57,14 +57,32 @@ def _import_spl_get_adapter():
     return get_adapter
 
 
-def declared_inputs(path: Path) -> list[str]:
-    """Names of the workflow INPUT parameters in an .spl file (the last WORKFLOW defined, as `spl3 run` picks)."""
-    _import_spl_get_adapter()                   # puts SPL_PY_PATH on sys.path if SPL.py is not installed
-    from spl3._loader import load_workflows_from_file
-    defns = load_workflows_from_file(Path(path))
+def _pick(defns, path: Path, workflow: Optional[str]):
+    """The workflow to run: the one named `workflow`; else the one named like the file; else the last defined, as `spl3 run` picks."""
     if not defns:
         raise ValueError(f"{path} defines no WORKFLOW")
-    return [p.name for p in defns[-1].ast_node.inputs]
+    if workflow:
+        target = next((d for d in defns if d.name == workflow), None)
+        if target is None:
+            raise ValueError(f"workflow {workflow!r} not found in {Path(path).name}")
+        return target
+    stem = Path(path).stem.replace("-", "_")
+    return next((d for d in defns if d.name == stem), defns[-1])
+
+
+def workflow_names(path: Path) -> list[str]:
+    """The names of the workflows an .spl file defines."""
+    _import_spl_get_adapter()
+    from spl3._loader import load_workflows_from_file
+    return [d.name for d in load_workflows_from_file(Path(path))]
+
+
+def declared_inputs(path: Path, workflow: Optional[str] = None) -> list[str]:
+    """Names of the INPUT parameters of one workflow of an .spl file (see `_pick` for which)."""
+    _import_spl_get_adapter()                   # puts SPL_PY_PATH on sys.path if SPL.py is not installed
+    from spl3._loader import load_workflows_from_file
+    path = Path(path)
+    return [p.name for p in _pick(load_workflows_from_file(path), path, workflow).ast_node.inputs]
 
 
 def _load_sibling_tools(executor, path: Path) -> None:
@@ -111,14 +129,7 @@ async def _run(path: Path, params: Dict[str, str], adapter_name: str, model: Opt
         executor.functions.register_procedure(stmt)
     executor._load_tool_apis(SimpleNamespace(statements=tool_apis))
 
-    defns = load_workflows_from_file(path)
-    if not defns:
-        raise ValueError(f"{path} defines no WORKFLOW")
-    stem = path.stem.replace("-", "_")
-    target = (next((d for d in defns if d.name == workflow), None) if workflow
-              else next((d for d in defns if d.name == stem), defns[-1]))
-    if target is None:
-        raise ValueError(f"workflow {workflow!r} not found in {path.name}")
+    target = _pick(load_workflows_from_file(path), path, workflow)
     result = await executor.execute_workflow(target.ast_node, params=params)
     if result.status != "complete":
         raise RuntimeError(f"procedure {target.name} ended with status {result.status}: {result.committed_value}")
@@ -137,7 +148,7 @@ def run_procedure(path: Path, args: Dict[str, Any], adapter_name: str, model: Op
     land where the caller chooses instead of under the current directory.
     """
     path = Path(path)
-    names = declared_inputs(path)
+    names = declared_inputs(path, workflow)
     # a value that is None (a loop's carried value before its first iteration) is passed as empty text, not as "None"
     params = {k: ("" if v is None else str(v)) for k, v in args.items() if k in names}
     for name in names:
@@ -187,11 +198,13 @@ def run_node_procedure(node_data: Dict, in_data: Dict[str, Any], resolver, llm) 
         return {output_ports[0]: text} if output_ports else {}
     if not hasattr(llm, 'adapter_name'):
         raise NotImplementedError(f"node {node_id!r}: procedure_ref needs an SPL.py adapter (got {llm.name!r})")
+    ref_name = str(config['procedure_ref']).rsplit('.', 1)[-1]
+    workflow = config.get('workflow') or (ref_name if ref_name in workflow_names(path) else None)   # a file may define several workflows
     args = {k[3:]: v for k, v in in_data.items()}
     for spl_name, port in (config.get('params') or {}).items():
         if port not in in_data:
             raise ValueError(f"node {node_id!r}: params maps {spl_name!r} to {port!r}, which has no value")
         args[spl_name] = in_data[port]
     out = run_procedure(path, args, llm.adapter_name, getattr(llm, 'model_override', None) or getattr(llm, 'default_model', None),
-                        log_dir=resolver.base_dir / '.grafr' / 'logs')
+                        log_dir=resolver.base_dir / '.grafr' / 'logs', workflow=workflow)
     return {output_ports[0]: out} if output_ports else {}

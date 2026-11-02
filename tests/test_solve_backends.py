@@ -339,3 +339,33 @@ def test_KNOWN_a_kernel_runs_with_the_runtime_environment(monkeypatch):
     monkeypatch.setenv("GRAFLANG_TEST_SECRET", "s3cret")
     _, out = run([("k", {"backend": "kernel", "code": "import os", "result": "os.environ.get('GRAFLANG_TEST_SECRET')", "out_type": "TEXT"}, [])])
     assert out == {"result": "s3cret"}
+
+
+def test_a_kernel_name_picks_the_kernel_and_one_kernel_is_kept_per_name(monkeypatch):
+    from graphlang.grafr import kernel as k
+
+    started = []
+
+    class Fake:
+        def __init__(self, seed=None, kernel_name="python3"):
+            started.append(kernel_name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(k, "KernelSession", Fake)
+    pool = k.KernelPool("sagemath")
+    for name in (None, None, "python3", "python3"):
+        with pool.session("run", None, name):
+            pass
+    assert started == ["sagemath", "python3"]
+    with pool.session("node", None, None):              # a fresh kernel for the node, of the default name
+        pass
+    assert started[-1] == "sagemath"
+    pool.close()
+
+
+def test_a_kernel_name_must_be_text():
+    errors, _ = check_solve({"id": "s", "type": "SOLVE", "ports": ["trigger", "complete", "out_x"],
+                                "config": {"backend": "kernel", "code": "x = 1", "result": "x", "kernel_name": 3}}, Path("."))
+    assert any("kernel_name" in e for e in errors)

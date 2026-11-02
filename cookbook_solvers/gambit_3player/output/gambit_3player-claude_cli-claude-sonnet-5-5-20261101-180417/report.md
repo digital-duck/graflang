@@ -1,0 +1,53 @@
+=== Gambit 3-Player Game Theory (r115) | solver=ON ===
+
+## 3-Player Nash Equilibrium Report — 3-Firm SaaS Pricing Triopoly
+
+**Solver:** pygambit  
+**Players:** Firm A, Firm B, Firm C  
+**Nash equilibria found:** 1
+
+### Nash Equilibria
+
+| # | Firm A | Firm B | Firm C | Payoff A | Payoff B | Payoff C |
+|---|---|---|---|---|---|---|
+| 1 | Standard | Standard | Standard | $120.0K | $120.0K | $120.0K |
+
+### Cooperative Optimum (NOT a Nash equilibrium)
+
+| Firm A | Firm B | Firm C | Payoff A | Payoff B | Payoff C |
+|---|---|---|---|---|---|
+| Premium | Premium | Premium | $200K | $200K | $200K |
+
+> *Collective optimum is unstable: every firm can unilaterally*
+> *gain by defecting to Standard, making Premium unsustainable.*
+
+### Prisoner's Dilemma Gap
+
+Nash ['Standard', 'Standard', 'Standard'] → each earns $120.0K; cooperative ['Premium', 'Premium', 'Premium'] → each earns $200K; gap = $80.0K/firm
+
+── Business Explanation ────────────────────────────────────
+**1. Equilibrium.** All three firms choose Standard and each earns $120K/month. No firm can do better by switching alone, so the market settles into a race to the bottom, even though everyone would prefer higher prices.
+
+**2. Dominance.** Compare Premium with Standard for one firm, given what its rivals do:
+- Both rivals Premium: Standard earns 300, Premium earns 200.
+- One Standard, one Premium: Standard earns 260, Premium earns 120.
+- Both rivals Standard: Standard earns 120, Premium earns 80.
+
+Standard wins in every case, so it is strictly dominant and the equilibrium is unique.
+
+**3. Gap.** Cooperation would pay $200K each, versus $120K at equilibrium. That is $80K per firm, or $240K per month across the three firms. This is the collective cost of each firm acting rationally for itself.
+
+**4. Why three players is harder.** I don't have r110's numbers, so this is the general argument:
+- Cooperation fails if any one of three firms defects, so there are more chances for it to break.
+- Defecting is very tempting (300 vs 200), and the loyal firms are hurt badly (120 or 80).
+- Monitoring and coordination are harder with three firms, and a punishment aimed at one defector is costly to the other two.
+- Punishers have to agree on who pays for the punishment, and each may prefer to free-ride on the others.
+
+**5. Sustaining Premium.**
+- Repeated play with credible trigger strategies, such as reverting to Standard after any defection.
+- Fast price transparency, so defection is detected quickly.
+- Differentiated products or switching costs, such as lock-in and contracts, that reduce the gain from undercutting.
+- Most-favoured-customer clauses.
+- Brand or reputation norms.
+
+Explicit collusion is illegal under antitrust law.

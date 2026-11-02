@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/110_nash_game_theory` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 357 tokens in / 275 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** Two SaaS firms choose simultaneously between High ($100/mo) and Low ($70/mo) pricing. LLM says "both should hold High prices for mutual benefit." nashpy proves (Low, Low) is the unique Nash equilibrium — a Prisoner's Dilemma where each firm earns $25K/mo instead of the cooperative $40K/mo.
 
@@ -31,11 +31,11 @@
 
 ```bash
 # solver=ON — nashpy Nash equilibrium
-graf run ~/.graflang/solvers/nash_game_theory/nash_game_theory.graph.yaml \
+graf run cookbook_solvers/nash_game_theory/nash_game_theory.graph.yaml \
     --adapter claude_cli --param use_solver=true
 
 # solver=OFF — LLM strategic reasoning
-graf run ~/.graflang/solvers/nash_game_theory/nash_game_theory.graph.yaml \
+graf run cookbook_solvers/nash_game_theory/nash_game_theory.graph.yaml \
     --adapter ollama -m gemma3 --param use_solver=false
 ```
 

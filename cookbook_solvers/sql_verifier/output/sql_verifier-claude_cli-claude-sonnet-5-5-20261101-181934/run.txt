@@ -1,0 +1,57 @@
+⚡ Loading graph: cookbook_solvers/sql_verifier/sql_verifier.graph.yaml
+✓ Graph loaded: sql_verifier
+  Nodes: 25
+  Edges: 61
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ EVALUATE eval_4 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_6 (#1)
+  ⚡ SOLVE tool_7 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ CONTEXT set_7 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ GENERATE gen_4 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ SOLVE tool_15 (#1)
+⚡ SOLVE tool_16 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': "# Text-to-SQL Verification Report\n\n**Question:** What is 
+the average salary in the Engineering department?\n\n**LLM SQL result:** 
+`[[97333.33333333333]]`\n**Ground-truth result:** 
+`[[97333.33333333333]]`\n**Round-trip check (row diff):** `match`\n\n## 
+Interpretation\n\nThe average salary in the Engineering department is about 
+**$97,333.33**. The query returned a single row with one column, 
+`average_salary`, holding the value 97333.33333333333. Rounded to the nearest 
+cent, that is $97,333.33. The result gives only this average, so it does not 
+show how many employees are included or how individual salaries are 
+distributed.\n\n## LLM-generated SQL\n\n```sql\nSELECT AVG(salary) AS 
+average_salary FROM employees WHERE department = 'Engineering';\n```"}
+29 steps · 2 LLM calls, 308 tokens in / 110 out · slowest: gen_4 2.5s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/sql_verifier/sql_verifier/result/sql_ve
+rifier-claude_cli-claude-sonnet-5-5-20261101-181934
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/sql_verifier/sql_verifier/log/sql_verif
+ier-claude_cli-claude-sonnet-5-5-20261101-181934.log

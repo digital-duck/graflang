@@ -163,6 +163,8 @@ Used as a Python library (`GraphLangRuntime(...).execute(...)`), the runtime log
 
 Checks edges point to real nodes and ports, `triggers`/`binds` join the right kinds of port, resources exist, conditions parse and use only available variables, and `GUARD`/`MUTATE`/`LOOP` configs are complete. Errors fail the command; warnings (an input nothing feeds, a node nothing triggers) do not.
 
+A `GENERATE` prompt that names `{{in_x}}` must have that port, fed by a `binds` edge (or a default, or a loop's carried value); otherwise it is an error, because the model would get the text unfilled and answer without its input. A JSON example in `{{ ... }}` is not a placeholder.
+
 It also checks that **every risky node is behind a `GUARD`**. A node is risky if its type is `EMIT` or `QUERY` (they reach outside the workflow) or you mark it with `config: {risky: true}`; mark an `OUTPUT` that releases data, or a `procedure_ref` node that acts on the world. A `LOOP` whose body holds a risky node counts as risky itself. The check follows `triggers` edges from the `INPUT` node with every edge that leaves a `GUARD` removed. A risky node still reached has a path around the guard, which is an error; a risky node reachable from a guard's `deny` port is an error too. Limits: `binds` (data) edges are ignored, guards inside a `LOOP` body are not credited, and a node you forget to mark is not checked, so the check is only as complete as your marking.
 
 ## `graf describe`: what a graph or a recipe does, in words
@@ -370,6 +372,7 @@ limits: {max_steps: 200, wall_time_s: 300}
 
 - **JOIN as fan-in.** A `JOIN` with `in_*` ports and one `out_*` port waits for all its branches, then puts their values in one object keyed by the port names (`in_x` becomes `x`). A node downstream reads a field with `@in_args.x`. Expressions also read `@list[0]` and `@obj['key']`.
 - **`BATCH`** runs a `subgraph` once per item of a list and collects one value per item, in order. `over` names the `in_*` port holding the list, `item_var` (default `item`) and `index` are visible to the body, `outputs: {texts: {collect: "w.out_text"}}` names what to collect, `concurrency` sets how many items run at once, `max_items` caps the list (default 1000).
+- **`graf run --kernel-name NAME`** sets the Jupyter kernel that `backend: kernel` SOLVE nodes run in (default `python3`; `sagemath` after `pip install 'spl-llm[sage]'` and `python -m sage.repl.ipython_kernel.install --user`). A node's own `kernel_name` wins; each kernel name is one kernel for the run.
 - **`graf run --workers N`** (or `limits.concurrency` in a bindings file) runs the nodes that are released together, such as the branches of a `FORK`, at the same time. The result does not depend on which call finishes first. The default is 1, one node at a time.
 
 ## RUN: work done by an executor
@@ -424,6 +427,7 @@ port is a named JSON value, the node's one `out_*` port (besides `out_error`) ge
     out_type: "INTEGER"
     timeout: 30                  # seconds
     scope: "run"                 # "run": one kernel for the whole run (default); "node": a fresh kernel for every firing
+    kernel_name: "python3"       # optional: another installed Jupyter kernel, e.g. "sagemath" (jupyter kernelspec list); default: --kernel-name
   ports: ["trigger", "complete", "in_values", "out_total"]
 
 - id: "solve_sat"

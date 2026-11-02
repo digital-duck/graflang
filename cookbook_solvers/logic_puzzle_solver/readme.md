@@ -1,7 +1,7 @@
 # Recipe 82 — Logic Puzzle Solver
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/082_logic_puzzle_solver` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `python-constraint` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 1167 tokens in / 517 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pip install python-constraint`
 
@@ -47,10 +47,10 @@ The README findings session that proposed this recipe flagged the choice between
 
 ```bash
 # Default puzzle (3-house zebra-lite: who drinks Coffee?)
-graf run ~/.graflang/solvers/logic_puzzle_solver/logic_puzzle_solver.graph.yaml --llm claude_cli
+graf run cookbook_solvers/logic_puzzle_solver/logic_puzzle_solver.graph.yaml --llm claude_cli
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/logic_puzzle_solver/logic_puzzle_solver.graph.yaml \
+graf run cookbook_solvers/logic_puzzle_solver/logic_puzzle_solver.graph.yaml \
     --llm claude_cli --param enable_solver=false
 ```
 

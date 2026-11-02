@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/124_simpy_des` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 369 tokens in / 404 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Solver class:** Discrete-Event Simulation (DES) â€” "what happens?" not "what is optimal?"  
 **Backend:** SimPy  
@@ -82,15 +82,15 @@ However, the LLM computed per-subsystem wait times in isolation (specialist Wq â
 
 ```bash
 # solver=ON: SimPy DES (10,000 patients, 1-week simulation)
-graf run ~/.graflang/solvers/simpy_des/simpy_des.graph.yaml \
+graf run cookbook_solvers/simpy_des/simpy_des.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF: M/M/c analytic formula + LLM reasoning
-graf run ~/.graflang/solvers/simpy_des/simpy_des.graph.yaml \
+graf run cookbook_solvers/simpy_des/simpy_des.graph.yaml \
     --llm claude_cli --param use_solver=false
 
 # With larger cohort (slower but better statistics)
-graf run ~/.graflang/solvers/simpy_des/simpy_des.graph.yaml \
+graf run cookbook_solvers/simpy_des/simpy_des.graph.yaml \
     --llm claude_cli --param use_solver=true --param n_patients=50000
 
 

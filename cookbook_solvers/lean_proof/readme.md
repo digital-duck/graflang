@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/076_lean_proof` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Dropped from the commands, as `graf run` has no such option: `--kernel`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model (the Lean steps need a Lean installation to mean anything). This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 189 tokens in / 37 out in total); Lean 4 is used for real (`~/.elan/bin/lean`, SPL.py's `LeanREPL`): the commutativity claim comes back `machine_proved` with a kernel-checked proof. The tool `run_python` runs in the shared kernel session so the Lean REPL started by one node is there for the next. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 The **B-3** milestone recipe of
 [`docs/DEV/sage_lean_integration_plan.md`](../../docs/DEV/sage_lean_integration_plan.md):
@@ -101,13 +101,13 @@ bash cookbook/tools/lean/setup_lean.sh   # elan + pinned repl v4.30.0, built wit
 
 ```bash
 # Default claim: "addition of natural numbers is commutative"
-graf run ~/.graflang/solvers/lean_proof/lean_proof.graph.yaml --llm claude_cli
+graf run cookbook_solvers/lean_proof/lean_proof.graph.yaml --llm claude_cli
 
 # Local model
-graf run ~/.graflang/solvers/lean_proof/lean_proof.graph.yaml --llm ollama:gemma3
+graf run cookbook_solvers/lean_proof/lean_proof.graph.yaml --llm ollama:gemma3
 
 # Your own claim
-graf run ~/.graflang/solvers/lean_proof/lean_proof.graph.yaml --llm claude_cli \
+graf run cookbook_solvers/lean_proof/lean_proof.graph.yaml --llm claude_cli \
     --param claim="for any natural number n, n^2 >= n" \
     --param max_tries=3
 

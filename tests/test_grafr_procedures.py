@@ -109,3 +109,77 @@ def test_prompts_are_logged_one_folder_per_call_when_asked(tmp_path, monkeypatch
     folders = sorted(p.name for p in (tmp_path / "prompts").iterdir())
     assert len(folders) == 2 and folders[0].endswith("-00_analyze_spec") and folders[0] < folders[1]
     assert all(list((tmp_path / "prompts" / f).glob("spec_analyst_001.md")) for f in folders)
+
+
+# ── a file that defines several workflows: the node runs the one its procedure is named after ─────────────────
+
+MANY = '''CREATE FUNCTION say_a(x TEXT)
+RETURNS TEXT AS $$
+first workflow got {x}
+$$;
+
+CREATE FUNCTION say_b(x TEXT, y TEXT)
+RETURNS TEXT AS $$
+second workflow got {x} and {y}
+$$;
+
+WORKFLOW helper_a
+  INPUT @x TEXT
+  OUTPUT @r TEXT
+DO
+  GENERATE say_a(@x) INTO @r;
+  COMMIT @r WITH status = 'complete';
+END;
+
+WORKFLOW helper_b
+  INPUT @x TEXT
+  INPUT @y TEXT
+  OUTPUT @r TEXT
+DO
+  GENERATE say_b(@x, @y) INTO @r;
+  COMMIT @r WITH status = 'complete';
+END;
+
+WORKFLOW main_flow
+  INPUT @x TEXT
+  OUTPUT @r TEXT
+DO
+  GENERATE say_a(@x) INTO @r;
+  COMMIT @r WITH status = 'complete';
+END;
+'''
+
+
+def many_graph(folder, ref, extra=None):
+    cfg = {"procedure_ref": f"procedures.{ref}", **(extra or {})}
+    return {"version": "1.0-graph", "_source_dir": str(folder), "resources": {"procedures": {ref: "./many.spl"}},
+            "workflow": {"name": "t", "inputs": [{"name": "x", "type": "TEXT"}, {"name": "y", "type": "TEXT"}], "outputs": [{"name": "r", "type": "TEXT"}]},
+            "nodes": [{"id": "s", "type": "INPUT", "ports": ["entry", "out_x", "out_y"]},
+                      {"id": "p", "type": "GENERATE", "config": cfg, "ports": ["trigger", "complete", "in_x", "in_y", "out_r"]},
+                      {"id": "e", "type": "OUTPUT", "ports": ["trigger", "exit", "in_r"]}],
+            "edges": [{"source": "s.entry", "target": "p.trigger", "type": "triggers"}, {"source": "p.complete", "target": "e.trigger", "type": "triggers"},
+                      {"source": "s.out_x", "target": "p.in_x", "type": "binds"}, {"source": "s.out_y", "target": "p.in_y", "type": "binds"},
+                      {"source": "p.out_r", "target": "e.in_r", "type": "binds"}]}
+
+
+def test_a_procedure_named_like_one_of_the_workflows_of_its_file_runs_that_one(tmp_path):
+    (tmp_path / "many.spl").write_text(MANY)
+    out = GraphLangRuntime(many_graph(tmp_path, "helper_b"), llm=make_llm("echo"), verbose=False).execute({"x": "X1", "y": "Y1"})
+    assert "second workflow got X1 and Y1" in out["r"]                       # not the last workflow of the file (main_flow)
+
+
+def test_a_name_that_matches_no_workflow_keeps_the_old_choice_and_config_workflow_wins(tmp_path):
+    (tmp_path / "many.spl").write_text(MANY)
+    out = GraphLangRuntime(many_graph(tmp_path, "whatever"), llm=make_llm("echo"), verbose=False).execute({"x": "X1", "y": "Y1"})
+    assert "first workflow got X1" in out["r"]                              # the last workflow, main_flow, as before
+    out = GraphLangRuntime(many_graph(tmp_path, "whatever", {"workflow": "helper_b"}), llm=make_llm("echo"), verbose=False).execute({"x": "X2", "y": "Y2"})
+    assert "second workflow got X2 and Y2" in out["r"]
+
+
+def test_declared_inputs_and_workflow_names_know_every_workflow(tmp_path):
+    from graphlang.grafr.procedures import workflow_names
+    (tmp_path / "many.spl").write_text(MANY)
+    assert workflow_names(tmp_path / "many.spl") == ["helper_a", "helper_b", "main_flow"]
+    assert declared_inputs(tmp_path / "many.spl", "helper_b") == ["x", "y"] and declared_inputs(tmp_path / "many.spl") == ["x"]
+    with pytest.raises(ValueError, match="not found"):
+        declared_inputs(tmp_path / "many.spl", "nope")

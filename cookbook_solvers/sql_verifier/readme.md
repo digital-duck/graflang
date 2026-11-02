@@ -1,7 +1,7 @@
 # Recipe 84 — SQL Verifier (Text-to-SQL)
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/084_sql_verifier` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 308 tokens in / 110 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** stdlib `sqlite3` only — no new pip dependency
 
@@ -34,15 +34,15 @@ No installation needed — `sqlite3` is part of the Python standard library.
 
 ```bash
 # Default question (average Engineering salary)
-graf run ~/.graflang/solvers/sql_verifier/sql_verifier.graph.yaml \
+graf run cookbook_solvers/sql_verifier/sql_verifier.graph.yaml \
     --llm claude_cli
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/sql_verifier/sql_verifier.graph.yaml \
+graf run cookbook_solvers/sql_verifier/sql_verifier.graph.yaml \
     --llm claude_cli --param enable_solver=false
 
 # Custom question (also update the ground-truth SQL to match!)
-graf run ~/.graflang/solvers/sql_verifier/sql_verifier.graph.yaml \
+graf run cookbook_solvers/sql_verifier/sql_verifier.graph.yaml \
     --llm claude_cli \
     --param question="How many employees were hired before 2020?" \
     --param ground_truth_sql="SELECT COUNT(*) FROM employees WHERE hire_year < 2020;"

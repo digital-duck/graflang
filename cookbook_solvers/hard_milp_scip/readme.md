@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/123_hard_milp_scip` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 429 tokens in / 372 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Solver class:** Hard Mixed-Integer Linear Programming (MILP)  
 **Backend:** SCIP via `pyscipopt` (primary); HiGHS (comparison baseline)  
@@ -76,11 +76,11 @@ This reveals a key LLM failure mode: **hallucination of problem data** rather th
 
 ```bash
 # solver=ON: SCIP branch-and-cut
-graf run ~/.graflang/solvers/hard_milp_scip/hard_milp_scip.graph.yaml \
+graf run cookbook_solvers/hard_milp_scip/hard_milp_scip.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF: LLM merit-order heuristic
-graf run ~/.graflang/solvers/hard_milp_scip/hard_milp_scip.graph.yaml \
+graf run cookbook_solvers/hard_milp_scip/hard_milp_scip.graph.yaml \
     --llm claude_cli --param use_solver=false
 ```
 

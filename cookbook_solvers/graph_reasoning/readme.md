@@ -1,7 +1,7 @@
 # Recipe 81 — Graph Reasoning
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/081_graph_reasoning` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 537 tokens in / 247 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `networkx` (already installed — no pip install needed)
 
@@ -38,15 +38,15 @@ python3 -c "import networkx; print(networkx.__version__)"
 
 ```bash
 # Default problem (6-warehouse shortest-path network)
-graf run ~/.graflang/solvers/graph_reasoning/graph_reasoning.graph.yaml \
+graf run cookbook_solvers/graph_reasoning/graph_reasoning.graph.yaml \
     --llm claude_cli
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/graph_reasoning/graph_reasoning.graph.yaml \
+graf run cookbook_solvers/graph_reasoning/graph_reasoning.graph.yaml \
     --llm claude_cli --param enable_solver=false
 
 # Custom problem
-graf run ~/.graflang/solvers/graph_reasoning/graph_reasoning.graph.yaml \
+graf run cookbook_solvers/graph_reasoning/graph_reasoning.graph.yaml \
     --llm ollama:gemma3 \
     --param problem="Is the graph with edges A-B, B-C, C-D, D-A bipartite?"
 

@@ -1,0 +1,28 @@
+⚡ Loading graph: cookbook_solvers/pii_compliance/compliance_check.graph.yaml
+✓ Graph loaded: compliance_check
+  Nodes: 7
+  Edges: 17
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'verdict': '{"status": "OK", "engine": "stdlib", "compliant": true, 
+"violated": [], "facts": {"has_ssn": false, "has_ccn": false, "has_email": 
+false, "has_phone": false, "has_address": false, "has_name": false, "has_dob": 
+false, "has_other": false, "has_pii": false, "is_masked": true, "is_external": 
+true}}'}
+6 steps · slowest: tool_1 0.4s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/pii_compliance/compliance_check/result/
+compliance_check-claude_cli-claude-sonnet-5-5-20261101-180627
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/pii_compliance/compliance_check/log/com
+pliance_check-claude_cli-claude-sonnet-5-5-20261101-180627.log

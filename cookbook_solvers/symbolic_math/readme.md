@@ -6,7 +6,7 @@
 > `sympy_tools.spl` define tools only (no workflow) and are not ported.
 > Dropped from the commands, as `graf run` has no such option: `--self-healing`.
 > Not ported: `case-3-experiment.md`, `readme-momagrid.md`, `case-2-linkedin-v1.1.md`, `run_analysis.py`, `run_experiment.sh`, `app.py`, `app_experiment.py`, `run_experiment.py`, `case-1.md`, `case-2-linkedin-v1.0.md`, `test_run_with_sonnet-4-6.md`, `case-2-linkedin-v0.1.md`, `experiment_results.db`, `case-2-log.md`, `case-2-log-1.md`, `test_run_with_rnj-1.md`, `case-2-hackernews.md` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): all 4 graphs completed (10 model calls, 4179 tokens in / 455 out in total); needs SPL.py importable (`procedure_ref`); `sympy_tools.spl` was copied next to the graphs because the SPL workflows `IMPORT` it; answers checked on `9*x**2 - 1` (x = ±1/3). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Pattern:** `CREATE TOOL_API` (deterministic SymPy) sandwiched between two `CREATE FUNCTION` (LLM) steps
 
@@ -56,16 +56,16 @@ pip install sympy
 ## Run
 
 ```bash
-graf run ~/.graflang/solvers/symbolic_math/hello_symbolic_math.graph.yaml \
+graf run cookbook_solvers/symbolic_math/hello_symbolic_math.graph.yaml \
     --adapter ollama --model gemma3
 
 # Custom problem
-graf run ~/.graflang/solvers/symbolic_math/hello_symbolic_math.graph.yaml \
+graf run cookbook_solvers/symbolic_math/hello_symbolic_math.graph.yaml \
     --adapter ollama --model gemma3 \
     --param problem="differentiate 3x cubed plus 2x"
 
 # With self-healing (auto-installs sympy if missing)
-graf run ~/.graflang/solvers/symbolic_math/hello_symbolic_math.graph.yaml \
+graf run cookbook_solvers/symbolic_math/hello_symbolic_math.graph.yaml \
     --adapter ollama --model gemma3 \
     --param problem="integrate sine of x"
 ```
@@ -161,16 +161,16 @@ GENERATE explain_chain()             → probabilistic: plain-English walkthroug
 ## Run
 
 ```bash
-graf run ~/.graflang/solvers/symbolic_math/sympy_math_multi_step.graph.yaml \
+graf run cookbook_solvers/symbolic_math/sympy_math_multi_step.graph.yaml \
     --adapter ollama --model gemma3
 
 # Custom multi-step problem
-graf run ~/.graflang/solvers/symbolic_math/sympy_math_multi_step.graph.yaml \
+graf run cookbook_solvers/symbolic_math/sympy_math_multi_step.graph.yaml \
     --adapter ollama --model gemma3 \
     --param problem="expand (x+1) squared, then factor the expanded form"
 
 # With self-healing (auto-installs sympy if missing)
-graf run ~/.graflang/solvers/symbolic_math/sympy_math_multi_step.graph.yaml \
+graf run cookbook_solvers/symbolic_math/sympy_math_multi_step.graph.yaml \
     --adapter ollama --model gemma3 \
     --param problem="differentiate e**x and then simplify the result"
 ```
@@ -201,7 +201,7 @@ chain — `decompose_problem` (planning) and `explain_chain` (narration):
 | `gemma4:12b` (ollama) | 389 tokens, 19.3s → `3*x**3-x\|diff` / `PREV\|factor` (eventually correct, ~20-65x the cost) | same | **1000 tokens, 39.7s → empty.** `WARNING: GENERATE chain returned empty content for @explanation` — `Output: (no COMMIT)` | ❌ fails |
 
 ```
-graf run ~/.graflang/solvers/symbolic_math/sympy_math_multi_step.graph.yaml --llm claude_cli \
+graf run cookbook_solvers/symbolic_math/sympy_math_multi_step.graph.yaml --llm claude_cli \
    --param problem="differentiate 3*x**3-x, then factor if needed, finally solve for x"
 ...
 Output:  We're asked to find the derivative of 3x³ - x and then factor the result if
@@ -212,7 +212,7 @@ LLM calls: 2  Latency: 6500ms
 ```
 
 ```
-$ graf run ~/.graflang/solvers/symbolic_math/sympy_math_multi_step.graph.yaml --llm ollama:gemma4:12b \
+$ graf run cookbook_solvers/symbolic_math/sympy_math_multi_step.graph.yaml --llm ollama:gemma4:12b \
       --param problem="differentiate 3*x**3-x, then factor if needed"
 ...
 GENERATE segment 1 (explain_chain) -> 1000 tokens, 39730ms

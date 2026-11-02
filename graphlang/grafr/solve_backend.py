@@ -75,7 +75,7 @@ def run_backend(node_data: Dict, in_data: Dict[str, Any], resolver, kernels: Ker
     try:
         if backend == "kernel":
             fields["code_sha"] = _digest(cfg["code"] + "\n" + cfg["result"])
-            with kernels.session(cfg.get("scope", "run"), cfg.get("seed")) as kernel:
+            with kernels.session(cfg.get("scope", "run"), cfg.get("seed"), cfg.get("kernel_name")) as kernel:
                 value = check_type(kernel.execute(inputs, cfg["code"], cfg["result"], timeout), out_type)
         elif backend == "subprocess":
             names = cfg.get("env_passthrough", [])
@@ -156,6 +156,8 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
                 used = _names_in(cfg["code"], "exec") | _names_in(cfg["result"], "eval")
             except SyntaxError as e:
                 errors.append(f"code or result has a syntax error: {e.msg} (line {e.lineno})")
+        if not isinstance(cfg.get("kernel_name", ""), str):
+            errors.append("kernel_name must be text: the name of an installed Jupyter kernel (see `jupyter kernelspec list`)")
         if cfg.get("scope", "run") not in SCOPES:
             errors.append(f"scope must be one of {', '.join(SCOPES)}")
         for name in in_names:

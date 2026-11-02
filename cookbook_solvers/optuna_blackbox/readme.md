@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/112_optuna_blackbox` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 361 tokens in / 323 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** A SaaS team needs to tune (monthly_price, annual_discount_pct, trial_days) to maximize customer LTV. The LTV model is non-convex with no gradient. Optuna TPE (50 trials) finds price≈\$45.7, discount≈3.6%, trial≈30 days → LTV=\$246 — a **+48%** improvement over the naive baseline (\$166). The LLM's recommendation (\$79, 20% discount, 14-day trial) goes in the opposite direction on all three dimensions, reasoning from real-world SaaS heuristics that conflict with the actual objective function's structure.
 
@@ -96,11 +96,11 @@ solver=ON is 2× faster and finds a 48% improvement the LLM not only missed but 
 
 ```bash
 # solver=ON — Optuna 50-trial TPE study
-graf run ~/.graflang/solvers/optuna_blackbox/optuna_blackbox.graph.yaml \
+graf run cookbook_solvers/optuna_blackbox/optuna_blackbox.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF — LLM heuristic guess
-graf run ~/.graflang/solvers/optuna_blackbox/optuna_blackbox.graph.yaml \
+graf run cookbook_solvers/optuna_blackbox/optuna_blackbox.graph.yaml \
     --llm claude_cli --param use_solver=false
 ```
 

@@ -1,0 +1,68 @@
+⚡ Loading graph: 
+cookbook_solvers/compsci_materials/materials_crystal.graph.yaml
+✓ Graph loaded: materials_crystal
+  Nodes: 23
+  Edges: 55
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ EVALUATE eval_4 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ SOLVE tool_6 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ CONTEXT set_7 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ GENERATE gen_4 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Crystal Structure Check Report\n\n**Problem:** NaCl 
+crystallizes in a cubic (rock-salt) structure with lattice parameter a = 5.640 
+Angstrom, all angles 90 degrees, Z = 4 formula units per unit cell, and molar 
+mass 58.44 g/mol. What is its theoretical density, in g/cm^3?\n\n**Verifier 
+status:** `OK`\n**Theoretical density:** `2.1636 g/cm^3`\n**Crystal system:** 
+`cubic` (symmetry_ok=True)\n**Unit cell volume:** `179.406 Å³`\n**Round-trip 
+check:** `match`\n\n## Interpretation\n\nNaCl adopts a **cubic** (rock-salt) 
+crystal system, with a unit-cell volume of **179.406 Å³** (from a = 5.640 Å, Z =
+4).\n\nIts theoretical density is **2.1636 g/cm³** (reported as 2.164 g/cm³), 
+meaning the packed ions in the cell are a bit more than twice as dense as 
+water.\n\nThis cross-check matters because verifying the symmetry constraints 
+and independently recomputing density from the raw lattice parameters catches 
+inconsistent or mistyped structural data before it spreads into databases and 
+downstream calculations.\n\nFinal answer: 2.1636\n\n## Solver Code 
+(LLM-generated, Python)\n\n```python\na = 5.640\nb = 5.640\nc = 5.640\nalpha = 
+90.0\nbeta = 90.0\ngamma = 90.0\nZ = 4\nmolar_mass = 58.44\nN_A = 
+6.02214076e23\n\nca = math.cos(math.radians(alpha))\ncb = 
+math.cos(math.radians(beta))\ncg = math.cos(math.radians(gamma))\n\nV_angstrom3 
+= a * b * c * math.sqrt(1 - ca**2 - cb**2 - cg**2 + 2 * ca * cb * cg)\nV_cm3 = 
+V_angstrom3 * 1e-24\n\ndensity = Z * molar_mass / (N_A * V_cm3)\ndensity = 
+float(f"{density:.4g}")\n\n_result = {\n    "system": "cubic",\n    "a": a, "b":
+b, "c": c,\n    "alpha": alpha, "beta": beta, "gamma": gamma,\n    "Z": Z, 
+"molar_mass": molar_mass,\n    "density": density\n}\n```'}
+27 steps · 2 LLM calls, 683 tokens in / 281 out · slowest: loop_1 5.6s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/compsci_materials/materials_crystal/res
+ult/materials_crystal-claude_cli-claude-sonnet-5-5-20261101-180231
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/compsci_materials/materials_crystal/log
+/materials_crystal-claude_cli-claude-sonnet-5-5-20261101-180231.log

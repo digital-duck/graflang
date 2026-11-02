@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/106_shapely_geo` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 394 tokens in / 308 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** Three delivery zones in Maplewood have a 2 km² routing conflict (Zone A ∩ Zone B) where Alice and Bob both claim the same neighborhood, and a 2 km² northeast gap where no driver is assigned. Shapely computes both exactly in <0.01s. LLM estimates the gap as "small" from the description.
 
@@ -49,11 +49,11 @@ City: 10×8 = 80 km²
 
 ```bash
 # solver=ON — Shapely exact geometry
-graf run ~/.graflang/solvers/shapely_geo/shapely_geo.graph.yaml \
+graf run cookbook_solvers/shapely_geo/shapely_geo.graph.yaml \
     --adapter claude_cli --param use_solver=true
 
 # solver=OFF — LLM spatial estimate
-graf run ~/.graflang/solvers/shapely_geo/shapely_geo.graph.yaml \
+graf run cookbook_solvers/shapely_geo/shapely_geo.graph.yaml \
     --adapter ollama -m gemma3 --param use_solver=false
 ```
 

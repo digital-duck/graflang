@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/126_minizinc_cp` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 500 tokens in / 458 out in total); the MiniZinc binary is not installed, so the Python backtracking fallback answered; the model text itself is not checked. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Solver class:** Constraint Programming (CP), backend-agnostic via MiniZinc  
 **Backend:** MiniZinc → CP-SAT (via OR-Tools) or Gecode  
@@ -83,11 +83,11 @@ The LLM produced a **fully hard-constraint-compliant schedule with all three sof
 
 ```bash
 # solver=ON: MiniZinc → CP-SAT (or Gecode) backend
-graf run ~/.graflang/solvers/minizinc_cp/minizinc_cp.graph.yaml \
+graf run cookbook_solvers/minizinc_cp/minizinc_cp.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF: LLM scheduling heuristic + constraint violation check
-graf run ~/.graflang/solvers/minizinc_cp/minizinc_cp.graph.yaml \
+graf run cookbook_solvers/minizinc_cp/minizinc_cp.graph.yaml \
     --llm claude_cli --param use_solver=false
 ```
 

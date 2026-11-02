@@ -187,7 +187,7 @@ nodes:
 
         KNOWN_FACTS = tuple((f'has_{t}' for t in DATA_TYPES)) + ('has_pii', 'is_masked', 'is_external')
 
-        RULES_FILE = Path.home() / '.graflang' / 'solvers' / 'pii_compliance' / 'rules.json'
+        RULES_FILE = Path('cookbook_solvers') / 'pii_compliance' / 'rules.json'
 
         def expr_variables(expr: dict) -> set:
             """Names of the variables an expression uses."""
@@ -279,7 +279,7 @@ nodes:
 
         KNOWN_FACTS = tuple((f'has_{t}' for t in DATA_TYPES)) + ('has_pii', 'is_masked', 'is_external')
 
-        RULES_FILE = Path.home() / '.graflang' / 'solvers' / 'pii_compliance' / 'rules.json'
+        RULES_FILE = Path('cookbook_solvers') / 'pii_compliance' / 'rules.json'
 
         def expr_variables(expr: dict) -> set:
             """Names of the variables an expression uses."""
@@ -569,7 +569,7 @@ nodes:
 
         KNOWN_FACTS = tuple((f'has_{t}' for t in DATA_TYPES)) + ('has_pii', 'is_masked', 'is_external')
 
-        RULES_FILE = Path.home() / '.graflang' / 'solvers' / 'pii_compliance' / 'rules.json'
+        RULES_FILE = Path('cookbook_solvers') / 'pii_compliance' / 'rules.json'
 
         def expr_variables(expr: dict) -> set:
             """Names of the variables an expression uses."""

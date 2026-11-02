@@ -1,0 +1,54 @@
+=== Two-Stage Stochastic Programming (r117) | solver=ON ===
+
+## Two-Stage Stochastic Programming — Inventory Stocking
+
+**Solver:** Pyomo + cbc  
+**Status:** optimal
+
+### Stage 1 Decision
+
+| Method | Order Quantity | Expected Cost | vs. Optimum |
+|---|---|---|---|
+| **Pyomo stochastic optimum** | **200 units** | **$1,360** | — |
+| EV baseline (order E[demand]) | 190 units | $1,409 | +$49 worse |
+
+> **Value of the Stochastic Solution (VSS) = $49**
+> Ordering the expected demand instead of Q* costs $49 more
+> because the asymmetric penalties (shortage=$15/unit >> holding=$2/unit) push the optimal quantity above the mean.
+
+### Per-Scenario Breakdown (Stochastic Optimum)
+
+| Scenario | Demand | Prob | Shortage | Excess | Scenario Cost | Weighted |
+|---|---|---|---|---|---|---|
+| pessimistic | 100 | 0.3 | 0 | 100 | $1,200 | $360.0 |
+| nominal | 200 | 0.5 | 0 | 0 | $1,000 | $500.0 |
+| optimistic | 300 | 0.2 | 100 | 0 | $2,500 | $500.0 |
+
+### Per-Scenario Breakdown (EV Baseline — order expected demand)
+
+| Scenario | Demand | Prob | Shortage | Excess | Scenario Cost | Weighted |
+|---|---|---|---|---|---|---|
+| pessimistic | 100 | 0.3 | 0 | 90 | $1,130 | $339.0 |
+| nominal | 200 | 0.5 | 10 | 0 | $1,100 | $550.0 |
+| optimistic | 300 | 0.2 | 110 | 0 | $2,600 | $520.0 |
+
+### Critical Ratio Insight
+
+The optimal Q* satisfies: **P(demand ≤ Q*) = (c_shortage − c_order) / (c_shortage + c_holding)**
+= (15 − 5) / (15 + 2) = **0.833**
+
+This means: stock enough to satisfy demand in **83.3% of scenarios** — much higher than the 50th percentile, because shortages cost 7.5× more than overstock.
+
+── Operations Research Explanation ─────────────────────────
+**1. Two-stage in plain terms.** Stage 1: commit to an order quantity now, before demand is known. Stage 2: once demand is revealed, absorb the consequences (shortage or excess). The model picks the order that minimizes expected total cost across all three scenarios.
+
+**2. Why 200, not 190?** Mistakes aren't symmetric. A missing unit costs $15 in lost sales, while a surplus unit costs only $2 to hold. So it pays to lean toward overstocking. Since demand only takes values 100, 200, or 300, the optimum lands on 200, the first level that covers enough scenarios (80% of the probability).
+
+*Correction:* the solver's critical ratio is miscalculated. (15−5)/(15+2) is 10/17 ≈ **0.59**, not 0.833. Q=200 is still correct, since the cumulative probability is 0.3 at 100 and 0.8 at 200, but it covers 80% of scenarios, not 83.3%.
+
+**3. VSS = $49.** This is the savings from modeling uncertainty rather than planning around the average (about 3.5% of $1,409). Managers should read it as the value of the analysis. A large VSS means averages are misleading and scenario planning is worth the effort.
+
+**4. Other uses.**
+- **Energy dispatch:** commit generation before knowing wind, solar, or load.
+- **Clinical trials:** choose the initial sample size, then adapt after interim results.
+- **Financial hedging:** set the hedge now, rebalance as markets move.

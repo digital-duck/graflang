@@ -2,9 +2,8 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/075_sage_math` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > The lift skipped statements GraphLang has no node for: basic_sagemath.spl: tool 'isinstance' has no Python source in the SPL: the node names it but cannot run it.
-> Dropped from the commands, as `graf run` has no such option: `--kernel-name`.
-> **Not runnable yet:** `basic_sagemath.graph.yaml` does not pass `graf validate`: the SPL original runs `SOLVE`/`ASSERT` inside a SageMath Jupyter kernel and relies on kernel state, which the lift cannot express and graflang's `kernel` backend (Python) does not provide. Kept for reference.
-> Smoke test (2026-11-01, placeholder model, no real model call): not runnable yet (SageMath kernel; the lift is incomplete). This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> The Sage steps are `SOLVE` nodes with `backend: kernel` and `kernel_name: sagemath`, so the graph needs the SageMath Jupyter kernel (`pip install 'spl-llm[sage]'`, `python -m sage.repl.ipython_kernel.install --user`, check with `jupyter kernelspec list`) and no flag; `graf run --kernel-name sagemath` sets the kernel for the nodes that name none. The lift left the Sage statements as bare expressions, so they were rewritten by hand into kernel nodes (the preflight `isinstance(1, Integer)`, `version()`, the four operations, the timer) and the last `ASSERT` checks the result of the operation that ran.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): completes; "what is the Galois group of x^5 - x - 1 over the rationals?" gives transitive group 5 of degree 5, S₅ (order 120), and the explanation says the quintic is not solvable by radicals. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Pattern:** `SOLVE`/`ASSERT` routed to the **SageMath Jupyter kernel** via
 `spl3 run sandwiched between two `CREATE FUNCTION`
@@ -81,21 +80,21 @@ jupyter kernelspec list                              # verify: 'sagemath' should
 
 ```bash
 # Default problem: Galois group of x^5 - x - 1
-graf run ~/.graflang/solvers/sage_math/basic_sagemath.graph.yaml \
+graf run cookbook_solvers/sage_math/basic_sagemath.graph.yaml \
     --llm ollama:gemma3
 
 # Rational point on a conic (Legendre-style question)
-graf run ~/.graflang/solvers/sage_math/basic_sagemath.graph.yaml \
+graf run cookbook_solvers/sage_math/basic_sagemath.graph.yaml \
     --llm claude_cli \
     --param problem="does x^2 + y^2 = 3*z^2 have a rational solution?"
 
 # Elliptic curve rank (curve 11a1)
-graf run ~/.graflang/solvers/sage_math/basic_sagemath.graph.yaml \
+graf run cookbook_solvers/sage_math/basic_sagemath.graph.yaml \
     --llm claude_cli \
     --param problem="what is the rank of the elliptic curve y^2 + y = x^3 - x^2 - 10*x - 20"
 
 # Exact factorization over Q
-graf run ~/.graflang/solvers/sage_math/basic_sagemath.graph.yaml \
+graf run cookbook_solvers/sage_math/basic_sagemath.graph.yaml \
     --llm claude_cli \
     --param problem="factor x^4 - 1 over the rationals"
 ```

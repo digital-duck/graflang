@@ -139,6 +139,8 @@ nodes:
         - history must be a flat list of numbers (no labels, no dates)
         - seasonal_period: 12 for monthly, 4 for quarterly, 7 for daily-weekly
         - if the problem provides raw data, use it exactly
+        - if it gives no data (e.g. asks for the default dataset), return this default problem unchanged:
+          {{in_default_problem_json}}
 
         Problem: {{in_problem}}
       arguments:
@@ -147,6 +149,7 @@ nodes:
       - trigger
       - complete
       - in_problem
+      - in_default_problem_json
       - out_problem_json
   - id: set_4
     type: CONTEXT
@@ -630,6 +633,9 @@ edges:
     type: triggers
   - source: wf_entry.out_problem
     target: gen_1.in_problem
+    type: binds
+  - source: tool_2.out_default_problem_json
+    target: gen_1.in_default_problem_json
     type: binds
   - source: gen_1.complete
     target: set_4.trigger

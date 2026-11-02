@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/100_supply_sourcing` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `pulp` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 506 tokens in / 568 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 Given a set of suppliers with different cost, fill rate, and capacity profiles,
 find allocations that trade off total cost against blended fill rate — using the
@@ -65,17 +65,17 @@ S2 maxes out in every solution because it dominates — it is strictly better th
 
 ```bash
 # solver=ON — PuLP ε-constraint sweep (default 8 Pareto points)
-graf run ~/.graflang/solvers/supply_sourcing/supply_sourcing.graph.yaml \
+graf run cookbook_solvers/supply_sourcing/supply_sourcing.graph.yaml \
   --llm claude_cli \
   --param use_solver=true
 
 # solver=OFF — LLM heuristic allocation with back-substitution check
-graf run ~/.graflang/solvers/supply_sourcing/supply_sourcing.graph.yaml \
+graf run cookbook_solvers/supply_sourcing/supply_sourcing.graph.yaml \
   --llm claude_cli \
   --param use_solver=false
 
 # solver=ON — custom n_points
-graf run ~/.graflang/solvers/supply_sourcing/supply_sourcing.graph.yaml \
+graf run cookbook_solvers/supply_sourcing/supply_sourcing.graph.yaml \
   --llm claude_cli \
   --param use_solver=true \
   --param n_points=12
@@ -84,7 +84,7 @@ graf run ~/.graflang/solvers/supply_sourcing/supply_sourcing.graph.yaml \
 # More points = finer coverage of the tradeoff curve, at the cost of more LP solves 
 
 # Custom problem
-graf run ~/.graflang/solvers/supply_sourcing/supply_sourcing.graph.yaml \
+graf run cookbook_solvers/supply_sourcing/supply_sourcing.graph.yaml \
   --llm claude_cli \
   --param use_solver=true \
   --param problem="A factory needs 2000 units. SupA: $12/unit, 98% fill rate, capacity 800. SupB: $8/unit, 75% fill rate, capacity 1200. SupC: $6/unit, 55% fill rate, capacity 900."

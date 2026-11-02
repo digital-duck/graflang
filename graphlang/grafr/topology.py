@@ -5,6 +5,7 @@ time; warnings are suspicious but allowed (an input nothing feeds, a node nothin
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
@@ -33,6 +34,21 @@ def _check_condition(where: str, expr: str, known: Set[str], errors: List[str]) 
     if unknown:
         errors.append(f"{where}: condition uses {sorted('@' + u for u in unknown)}, which is not available "
                       f"(available: {sorted('@' + k for k in known)})")
+
+
+PROMPT_PORT = re.compile(r"\{\{(in_\w+)\}\}")
+
+
+def _prompt_ports(cfg: Dict, resolver: ResourceResolver) -> List[str]:
+    """The `{{in_x}}` placeholders of a GENERATE node's prompt (inline, or the file of its prompt_ref), in order, once each."""
+    text = cfg.get("prompt_inline")
+    if text is None and "prompt_ref" in cfg:
+        try:
+            path = resolver.path_for(cfg["prompt_ref"], "prompts")
+            text = path.read_text(encoding="utf-8") if path.exists() else None
+        except (OSError, ValueError, KeyError):
+            text = None                                       # a missing or unreadable prompt is reported elsewhere
+    return list(dict.fromkeys(PROMPT_PORT.findall(text))) if isinstance(text, str) else []
 
 
 def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: ResourceResolver,
@@ -138,6 +154,12 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             _check_batch(n, prefix, resolver, errors, warnings)
 
         defaulted = set(cfg.get("phases", {}).get("pre", {}).get("defaults", {})) if isinstance(cfg.get("phases"), dict) else set()
+        if typ == "GENERATE":
+            for port in _prompt_ports(cfg, resolver):        # {{in_x}} in the prompt must be filled by something
+                if port not in n["ports"]:
+                    errors.append(f"{where}: the prompt uses {{{{{port}}}}} but the node has no port {port!r}, so the model would get the text unfilled")
+                elif (nid, port) not in fed and port not in defaulted and not (port in boundary or port[3:] in loop_vars):
+                    errors.append(f"{where}: the prompt uses {{{{{port}}}}} but no binds edge feeds {port!r}, so the model would get the text unfilled")
         for port in sorted(in_ports - defaulted):
             if (nid, port) not in fed and not (port in boundary or port[3:] in loop_vars) and typ not in ("OUTPUT",):
                 warnings.append(f"{where}: input {port!r} is not fed by any binds edge")

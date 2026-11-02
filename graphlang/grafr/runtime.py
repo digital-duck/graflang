@@ -147,7 +147,7 @@ class GraphLangRuntime:
 
     def __init__(self, graph_data: Dict, adapter: str = "mock", max_steps: int = DEFAULT_MAX_STEPS,
                  verbose: bool = True, model: Optional[str] = None, llm=None,
-                 node_output: Optional[RunOutput] = None, wall_time_s: Optional[float] = None, workers: int = 1, *,
+                 node_output: Optional[RunOutput] = None, wall_time_s: Optional[float] = None, workers: int = 1, kernel_name: str = "python3", *,
                  _parent: "GraphLangRuntime | None" = None, _nodes: Optional[List[Dict]] = None,
                  _edges: Optional[List[Dict]] = None, _boundary: Optional[Dict[str, Any]] = None,
                  _scope: Optional[Dict[str, Any]] = None):
@@ -179,7 +179,7 @@ class GraphLangRuntime:
             self.resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
             self.depth = 0
             self.node_output = node_output              # --save-nodes: where each node's outputs are written
-            self.kernels = KernelPool()                 # kernel SOLVE nodes' Python kernels, closed when the run ends
+            self.kernels = KernelPool(kernel_name)               # kernel SOLVE nodes' Python kernels, closed when the run ends
         else:
             self.llm, self.context, self.budget = _parent.llm, _parent.context, _parent.budget
             self.workers = _parent.workers

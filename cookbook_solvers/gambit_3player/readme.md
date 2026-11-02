@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/115_gambit_3player` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 506 tokens in / 435 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pip install pygambit` (C++ toolchain)
 · **Solver class:** S024 (N-player normal-form Nash)
@@ -99,11 +99,11 @@ why the collectively-best outcome is individually unstable.
 
 ```bash
 # solver=ON — pygambit pure-Nash enumeration
-graf run ~/.graflang/solvers/gambit_3player/gambit_3player.graph.yaml \
+graf run cookbook_solvers/gambit_3player/gambit_3player.graph.yaml \
     --llm claude_cli --param use_solver=true
 
 # solver=OFF — LLM strategic reasoning baseline
-graf run ~/.graflang/solvers/gambit_3player/gambit_3player.graph.yaml \
+graf run cookbook_solvers/gambit_3player/gambit_3player.graph.yaml \
     --llm claude_cli --param use_solver=false
 ```
 

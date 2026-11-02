@@ -1,0 +1,3 @@
+{
+  "report": "# Text-to-SQL Verification Report\n\n**Question:** What is the average salary in the Engineering department?\n\n**LLM SQL result:** `[[97333.33333333333]]`\n**Ground-truth result:** `[[97333.33333333333]]`\n**Round-trip check (row diff):** `match`\n\n## Interpretation\n\nThe average salary in the Engineering department is about **$97,333.33**. The query returned a single row with one column, `average_salary`, holding the value 97333.33333333333. Rounded to the nearest cent, that is $97,333.33. The result gives only this average, so it does not show how many employees are included or how individual salaries are distributed.\n\n## LLM-generated SQL\n\n```sql\nSELECT AVG(salary) AS average_salary FROM employees WHERE department = 'Engineering';\n```"
+}

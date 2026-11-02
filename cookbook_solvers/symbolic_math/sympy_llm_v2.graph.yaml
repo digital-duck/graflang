@@ -616,7 +616,7 @@ nodes:
   - id: loop_1
     type: LOOP
     config:
-      condition: latest(@in_i, @i) < @in_n_steps
+      condition: latest(@in_i, @i) < int(@in_n_steps)
       outputs:
         step:
           from: tool_10.out_step

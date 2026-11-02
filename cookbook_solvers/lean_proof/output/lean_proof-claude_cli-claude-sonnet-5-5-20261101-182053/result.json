@@ -1,0 +1,3 @@
+{
+  "report": "# Lean verification report\n\n**Claim (prose):** addition of natural numbers is commutative\n\n**Formalization:** `∀ a b : Nat, a + b = b + a`\n\n**Faithfulness (LLM judge):** FAITHFUL - It universally quantifies over all natural numbers a and b with no extra hypotheses, stating exactly a + b = b + a.\n\n**Badge:** `machine_proved`\n\n**Kernel-checked proof:**\n```lean\ntheorem spl_claim : ∀ a b : Nat, a + b = b + a := by\n  exact fun a b => Nat.add_comm a b\n```\n\n**Library search (exact?):** `exact fun a b => Nat.add_comm a b`"
+}

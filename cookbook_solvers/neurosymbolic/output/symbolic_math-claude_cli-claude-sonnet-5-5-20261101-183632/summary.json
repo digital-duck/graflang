@@ -1,0 +1,199 @@
+{
+  "steps": 48,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 3,
+    "input_tokens": 450,
+    "output_tokens": 13,
+    "cost_usd": 0.0,
+    "ms": 6697
+  },
+  "nodes": {
+    "loop_1": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 6810
+    },
+    "gen_3": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 4360
+    },
+    "gen_2": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2337
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 423
+    },
+    "tool_6": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 178
+    },
+    "tool_12": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 17
+    },
+    "tool_13": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 15
+    },
+    "tool_7": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 12
+    },
+    "tool_14": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 12
+    },
+    "tool_11": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 10
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 9
+    },
+    "tool_8": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 9
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 8
+    },
+    "tool_32": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 7
+    },
+    "tool_31": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 6
+    },
+    "tool_9": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "tool_10": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 4
+    },
+    "set_8": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 1
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_2": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_4": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "set_4": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_5": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_6": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_5": {
+      "type": "EVALUATE",
+      "n": 3,
+      "ms": 0
+    },
+    "eval_6": {
+      "type": "EVALUATE",
+      "n": 3,
+      "ms": 0
+    },
+    "set_9": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_10": {
+      "type": "CONTEXT",
+      "n": 2,
+      "ms": 0
+    },
+    "set_11": {
+      "type": "CONTEXT",
+      "n": 2,
+      "ms": 0
+    },
+    "set_12": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_13": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_14": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_15": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_16": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_7": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

@@ -1,0 +1,72 @@
+⚡ Loading graph: cookbook_solvers/pyomo_stochastic/pyomo_stochastic.graph.yaml
+✓ Graph loaded: pyomo_stochastic
+  Nodes: 18
+  Edges: 41
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': "=== Two-Stage Stochastic Programming (r117) | solver=ON 
+===\n\n## Two-Stage Stochastic Programming — Inventory Stocking\n\n**Solver:** 
+Pyomo + cbc  \n**Status:** optimal\n\n### Stage 1 Decision\n\n| Method | Order 
+Quantity | Expected Cost | vs. Optimum |\n|---|---|---|---|\n| **Pyomo 
+stochastic optimum** | **200 units** | **$1,360** | — |\n| EV baseline (order 
+E[demand]) | 190 units | $1,409 | +$49 worse |\n\n> **Value of the Stochastic 
+Solution (VSS) = $49**\n> Ordering the expected demand instead of Q* costs $49 
+more\n> because the asymmetric penalties (shortage=$15/unit >> holding=$2/unit) 
+push the optimal quantity above the mean.\n\n### Per-Scenario Breakdown 
+(Stochastic Optimum)\n\n| Scenario | Demand | Prob | Shortage | Excess | 
+Scenario Cost | Weighted |\n|---|---|---|---|---|---|---|\n| pessimistic | 100 |
+0.3 | 0 | 100 | $1,200 | $360.0 |\n| nominal | 200 | 0.5 | 0 | 0 | $1,000 | 
+$500.0 |\n| optimistic | 300 | 0.2 | 100 | 0 | $2,500 | $500.0 |\n\n### 
+Per-Scenario Breakdown (EV Baseline — order expected demand)\n\n| Scenario | 
+Demand | Prob | Shortage | Excess | Scenario Cost | Weighted 
+|\n|---|---|---|---|---|---|---|\n| pessimistic | 100 | 0.3 | 0 | 90 | $1,130 | 
+$339.0 |\n| nominal | 200 | 0.5 | 10 | 0 | $1,100 | $550.0 |\n| optimistic | 300
+| 0.2 | 110 | 0 | $2,600 | $520.0 |\n\n### Critical Ratio Insight\n\nThe optimal
+Q* satisfies: **P(demand ≤ Q*) = (c_shortage − c_order) / (c_shortage + 
+c_holding)**\n= (15 − 5) / (15 + 2) = **0.833**\n\nThis means: stock enough to 
+satisfy demand in **83.3% of scenarios** — much higher than the 50th percentile,
+because shortages cost 7.5× more than overstock.\n\n── Operations Research 
+Explanation ─────────────────────────\n**1. Two-stage in plain terms.** Stage 1:
+commit to an order quantity now, before demand is known. Stage 2: once demand is
+revealed, absorb the consequences (shortage or excess). The model picks the 
+order that minimizes expected total cost across all three scenarios.\n\n**2. Why
+200, not 190?** Mistakes aren't symmetric. A missing unit costs $15 in lost 
+sales, while a surplus unit costs only $2 to hold. So it pays to lean toward 
+overstocking. Since demand only takes values 100, 200, or 300, the optimum lands
+on 200, the first level that covers enough scenarios (80% of the 
+probability).\n\n*Correction:* the solver's critical ratio is miscalculated. 
+(15−5)/(15+2) is 10/17 ≈ **0.59**, not 0.833. Q=200 is still correct, since the 
+cumulative probability is 0.3 at 100 and 0.8 at 200, but it covers 80% of 
+scenarios, not 83.3%.\n\n**3. VSS = $49.** This is the savings from modeling 
+uncertainty rather than planning around the average (about 3.5% of $1,409). 
+Managers should read it as the value of the analysis. A large VSS means averages
+are misleading and scenario planning is worth the effort.\n\n**4. Other 
+uses.**\n- **Energy dispatch:** commit generation before knowing wind, solar, or
+load.\n- **Clinical trials:** choose the initial sample size, then adapt after 
+interim results.\n- **Financial hedging:** set the hedge now, rebalance as 
+markets move."}
+14 steps · 1 LLM calls, 646 tokens in / 338 out · slowest: gen_1 10.7s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/pyomo_stochastic/pyomo_stochastic/resul
+t/pyomo_stochastic-claude_cli-claude-sonnet-5-5-20261101-180827
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/pyomo_stochastic/pyomo_stochastic/log/p
+yomo_stochastic-claude_cli-claude-sonnet-5-5-20261101-180827.log

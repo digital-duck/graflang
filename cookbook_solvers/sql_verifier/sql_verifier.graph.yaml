@@ -484,7 +484,7 @@ nodes:
                 Question: {{in_question}}
 
                 Previous SQL:
-                {{in_sql}}
+                {{in_llm_sql}}
 
                 Error:
                 {{in_error_info}}
@@ -503,7 +503,7 @@ nodes:
               - complete
               - in_question
               - in_schema
-              - in_sql
+              - in_llm_sql
               - in_error_info
               - out_llm_sql
           - id: tool_9

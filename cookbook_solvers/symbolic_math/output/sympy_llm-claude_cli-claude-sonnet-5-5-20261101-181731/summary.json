@@ -1,0 +1,139 @@
+{
+  "steps": 41,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 2,
+    "input_tokens": 1116,
+    "output_tokens": 123,
+    "cost_usd": 0.0,
+    "ms": 5853
+  },
+  "nodes": {
+    "gen_2": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3520
+    },
+    "gen_1": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2333
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 436
+    },
+    "loop_1": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 280
+    },
+    "call_1": {
+      "type": "GENERATE",
+      "n": 3,
+      "ms": 243
+    },
+    "tool_6": {
+      "type": "SOLVE",
+      "n": 3,
+      "ms": 10
+    },
+    "tool_5": {
+      "type": "SOLVE",
+      "n": 3,
+      "ms": 9
+    },
+    "tool_7": {
+      "type": "SOLVE",
+      "n": 3,
+      "ms": 9
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 6
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 4
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 4
+    },
+    "tool_10": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 4
+    },
+    "tool_9": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_2": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_3": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "set_4": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_5": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_6": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_7": {
+      "type": "CONTEXT",
+      "n": 3,
+      "ms": 0
+    },
+    "eval_4": {
+      "type": "EVALUATE",
+      "n": 3,
+      "ms": 0
+    },
+    "set_8": {
+      "type": "CONTEXT",
+      "n": 3,
+      "ms": 0
+    },
+    "set_9": {
+      "type": "CONTEXT",
+      "n": 3,
+      "ms": 0
+    },
+    "eval_5": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

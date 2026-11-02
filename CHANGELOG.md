@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `graf validate` reports an error for a `GENERATE` prompt (inline or `prompt_ref`) that uses `{{in_x}}` when the node has no port `in_x`, or nothing feeds it. Found in four lifted solver recipes, where a port had been named after an SPL function parameter and the model got the prompt unfilled.
+
+- `backend: kernel` SOLVE nodes can run in another Jupyter kernel: `kernel_name` on the node, or `graf run --kernel-name NAME` for the nodes that name none (as SPL's `--kernel-name`), e.g. `sagemath`. One kernel per name is started per run. `cookbook_solvers/sage_math` is rewritten to use it and runs; `neurosymbolic`'s Sage rung runs under `--kernel-name sagemath`.
+
+- `cookbook_solvers/demand_forecast`: the model that turns the problem text into JSON got only "Use the default 36-month widget sales dataset." and no data, so the solver found no forecast points; it is now given the default dataset (`in_default_problem_json`) to return when the text carries no data.
+
+- A `procedure_ref` into an `.spl` file with several workflows ran the last one in the file. It now runs `config.workflow`, else the workflow named like the ref (`procedures.helper_b` runs `helper_b`), else the old choice (`procedures.workflow_names`, `declared_inputs(path, workflow)`).
+
+- `cookbook_solvers/` (47 recipes lifted from SPL.py's `cookbook-solver`) was run end to end with `claude_cli` `claude-sonnet-5-5`: every graph completes except `sage_math` (needs SageMath). Fixes from the run: SPL token builtins in `constraint_opt`, GENERATE input ports renamed after the variables that feed them (`auto_planning`, `lean_proof`, `neurosymbolic`, `sql_verifier`), `run_python` of `lean_proof`/`neurosymbolic` runs in the shared kernel session (the Lean REPL persists), SPL library files copied next to the graphs that `IMPORT` them. `global_minlp` and `minizinc_cp` use their Python fallbacks unless Couenne/Bonmin or MiniZinc are installed.
+
 - The Edit page's *Browse files* box has a **Folders** multiselect (apps, cookbook, solvers; all chosen to begin with) that filters the Recipe list.
 
 - The expression language reads **f-strings**: `f'{@step_no}. {@line}\n'` in a `CONTEXT` expression or a condition. Each field is an expression under the usual whitelist; `!r`/`!s`/`!a` and a plain format spec (`{@x:.2f}`) work, fields inside a format spec, `=` and bytes f-strings are refused. They are rewritten to internal calls (`__fstr`, `__fmt`) before the parse, so nothing new can be called. This is what the lift of SPL's string building produced, and it unblocks `lean_proof`, `symbolic_math` and the other solver recipes that stopped at it.

@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/101_production_sustainability` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `pulp` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 447 tokens in / 600 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 Given a factory producing two products with different profitability and emissions profiles,
 find the set of non-dominated production plans that simultaneously maximize profit and minimize
@@ -88,19 +88,19 @@ For this clean 2-product B3 problem the LLM heuristic agrees with the solver. Th
 
 ```bash
 # solver=ON — PuLP Pareto sweep, claude_cli
-graf run ~/.graflang/solvers/production_sustainability/production_sustainability.graph.yaml \
+graf run cookbook_solvers/production_sustainability/production_sustainability.graph.yaml \
   --llm claude_cli \
   --param use_solver=true \
   --param n_points=10
 
 # solver=OFF — LLM heuristic, ollama/gemma3
-graf run ~/.graflang/solvers/production_sustainability/production_sustainability.graph.yaml \
+graf run cookbook_solvers/production_sustainability/production_sustainability.graph.yaml \
   --llm claude_cli \
   --param use_solver=false \
   --param n_points=10
 
 # solver=ON — finer sweep (20 λ steps)
-graf run ~/.graflang/solvers/production_sustainability/production_sustainability.graph.yaml \
+graf run cookbook_solvers/production_sustainability/production_sustainability.graph.yaml \
   --llm claude_cli \
   --param use_solver=true \
   --param n_points=20

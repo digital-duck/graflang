@@ -1,0 +1,72 @@
+=== Robust Supply Chain MILP (solver=ON / python-mip) ===
+
+Problem:
+A manufacturer must decide whether to build its own factory (capacity 300 units, one-time cost $4,000) or lease a smaller facility (capacity 150 units, no fixed cost) for Q2 production. Production cost from either: $8/unit. Emergency spot-market sourcing if demand exceeds capacity: $60/unit. Demand is uncertain: Low demand 100 units (30% probability), Normal demand 200 units (50% probability), High demand 300 units (20% probability). Find the capacity investment decision that minimizes expected total cost.
+
+MILP Solution:
+Decision: **Lease facility** (capacity 150.0 units, no fixed cost)
+
+| Scenario | Prob | Demand | Own/Lease prod | Emergency | Scenario cost |
+|---|---|---|---|---|---|
+| Low | 30% | 100 | 100 | 0 | $800 |
+| Normal | 50% | 200 | 150 | 50 | $4,200 |
+| High | 20% | 300 | 150 | 150 | $10,200 |
+
+**Fixed cost:** $0  
+**Expected operational cost:** $4,380  
+**Total expected cost:** $4,380
+
+Interpretation:
+## Interpretation: Build vs. Lease for Q2
+
+### 1. Optimal decision: lease the 150-unit facility
+
+Leasing has an expected cost of **$4,380**. Building would cost **$5,520**, so the model chooses to lease.
+
+The factory's $4,000 fixed cost is larger than the emergency-sourcing cost it would avoid ($2,860 in expectation, see item 3). The factory does not pay for itself at these demand odds and this spot price.
+
+### 2. Which scenario drives the decision: High demand
+
+| Scenario | Lease cost | Build cost (op only) | Extra cost of leasing | × Probability | Expected penalty |
+|---|---|---|---|---|---|
+| Low (30%) | $800 | $800 | $0 | 0.3 | $0 |
+| Normal (50%) | $4,200 | $1,600 | $2,600 | 0.5 | $1,300 |
+| High (20%) | $10,200 | $2,400 | **$7,800** | 0.2 | **$1,560** |
+
+- High demand is the most expensive to under-prepare for. It costs $7,800 more per occurrence than under the factory.
+- It makes up 47% of the lease plan's expected cost ($2,040 of $4,380) despite only a 20% chance of happening.
+- Normal demand is a close second at $1,300, because it is far more likely.
+- Together the two scenarios give $1,560 + $1,300 = **$2,860**, which is less than the $4,000 factory cost.
+
+### 3. Savings vs. the alternative
+
+**Build factory:**
+- Operating cost: 0.3×(100×8) + 0.5×(200×8) + 0.2×(300×8) = 240 + 800 + 480 = $1,520
+- Fixed cost: $4,000
+- Total: **$5,520**
+
+**Lease:** $0.3×800 + 0.5×4,200 + 0.2×10,200 = 240 + 2,100 + 2,040 = **$4,380**
+
+**Saving from leasing:** $5,520 − $4,380 = **$1,140 per quarter**. That is 20.7% below the build option.
+
+### 4. Role of emergency sourcing
+
+Spot-market units cost $60 each against $8 for own production, a 7.5× premium.
+
+| Scenario | Emergency units | Share of demand | Emergency spend | Share of scenario cost |
+|---|---|---|---|---|
+| Low | 0 | 0% | $0 | 0% |
+| Normal | 50 | 25% | $3,000 | 71% |
+| High | 150 | 50% | $9,000 | 88% |
+
+- Emergency sourcing works as a pay-per-use substitute for capacity. Expected spend is $1,500 (Normal) + $1,800 (High) = **$3,300**, or 75% of the lease plan's cost.
+- On average it buys 0.5×50 + 0.2×150 = **55 units**, and that volume is cheaper than carrying 150 extra units of factory capacity.
+- Break-even: building wins only if the spot price exceeds roughly **$80.70/unit**, since (p − 8) × 55 > $4,000. Alternatively, it wins if the factory's fixed cost falls below **$2,860**.
+
+### 5. Recommendation
+
+Lease the 150-unit facility and keep a spot-market arrangement as a backstop. Revisit the build decision only if spot prices climb past about $80 per unit or High-demand odds rise materially above 20%.
+
+**Caveat:** this minimizes *expected* cost. If a High quarter would hurt more than the average suggests, the worst case under leasing is $10,200 against $6,400 for building. That would be a risk-appetite call the model doesn't capture.
+
+LLM calls: 1

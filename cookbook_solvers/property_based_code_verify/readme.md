@@ -1,7 +1,7 @@
 # Recipe 85 — Property-Based Code Verification
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/085_property_based_code_verify` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (4 model calls, 1360 tokens in / 1223 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pip install hypothesis pytest`
 
@@ -42,15 +42,15 @@ pip install hypothesis pytest
 
 ```bash
 # Default spec (merge two sorted lists)
-graf run ~/.graflang/solvers/property_based_code_verify/property_based_code_verify.graph.yaml --llm claude_cli
+graf run cookbook_solvers/property_based_code_verify/property_based_code_verify.graph.yaml --llm claude_cli
 
 # Custom spec
-graf run ~/.graflang/solvers/property_based_code_verify/property_based_code_verify.graph.yaml \
+graf run cookbook_solvers/property_based_code_verify/property_based_code_verify.graph.yaml \
     --llm ollama:gemma3 \
     --param spec="Write a function is_palindrome(s: str) -> bool that ignores case and non-alphanumeric characters."
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/property_based_code_verify/property_based_code_verify.graph.yaml \
+graf run cookbook_solvers/property_based_code_verify/property_based_code_verify.graph.yaml \
     --llm claude_cli --param enable_solver=false
 ```
 

@@ -1,7 +1,7 @@
 # Recipe 94 — Text-to-SQL with Data-Quality Gates
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/094_data_eng_text2spl` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 466 tokens in / 215 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** stdlib `sqlite3` only — no new pip dependency
 
@@ -44,16 +44,16 @@ orders(id, customer_id, amount, order_date)
 
 ```bash
 # Default question (average Enterprise-segment order amount; known ground truth: $6,000.00)
-graf run ~/.graflang/solvers/data_eng_text2spl/text2sql_quality.graph.yaml \
+graf run cookbook_solvers/data_eng_text2spl/text2sql_quality.graph.yaml \
     --llm claude_cli
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/data_eng_text2spl/text2sql_quality.graph.yaml \
+graf run cookbook_solvers/data_eng_text2spl/text2sql_quality.graph.yaml \
     --llm claude_cli \
     --param enable_solver=false
 
 # Custom question (must also update ground_truth_sql / stat_sql_a / stat_sql_b to match)
-graf run ~/.graflang/solvers/data_eng_text2spl/text2sql_quality.graph.yaml \
+graf run cookbook_solvers/data_eng_text2spl/text2sql_quality.graph.yaml \
     --llm ollama:gemma3 \
     --param question="What is the total order amount for the SMB segment?" \
     --param ground_truth_sql="SELECT SUM(o.amount) FROM orders o JOIN customers c ON o.customer_id=c.id WHERE c.segment='SMB'" \

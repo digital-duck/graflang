@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/114_scipy_nonlinear` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 478 tokens in / 540 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 Given a nonlinear profit function (pricing or logistics), find the profit-maximizing
 decision using `scipy.optimize` — and verify the result by independent back-substitution.
@@ -76,31 +76,31 @@ Analytical optimum (MR = MC):
 
 ```bash
 # Pricing — SLSQP (gradient-based, default)
-graf run ~/.graflang/solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
+graf run cookbook_solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
   --llm claude_cli \
   --param problem_type=pricing \
   --param method=SLSQP
 
 # Pricing — differential_evolution (global search, no gradient needed)
-graf run ~/.graflang/solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
+graf run cookbook_solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
   --llm claude_cli \
   --param problem_type=pricing \
   --param method=differential_evolution
 
 # Logistics — Nelder-Mead (derivative-free)
-graf run ~/.graflang/solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
+graf run cookbook_solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
   --llm claude_cli \
   --param problem_type=logistics \
   --param method=Nelder-Mead
 
 # solver=OFF ablation — LLM estimates without scipy
-graf run ~/.graflang/solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
+graf run cookbook_solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
   --adapter ollama -m gemma3 \
   --param problem_type=pricing \
   --param use_solver=false
 
 # Custom pricing problem (higher elasticity)
-graf run ~/.graflang/solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
+graf run cookbook_solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
   --llm claude_cli \
   --param problem_type=pricing \
   --param demand_scale=50000 \
@@ -109,7 +109,7 @@ graf run ~/.graflang/solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
   --param x_min=5 --param x_max=200
 
 # Write output to a custom directory
-graf run ~/.graflang/solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
+graf run cookbook_solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml \
   --llm claude_cli \
   --param problem_type=pricing \
   --param out_dir=./results/r114

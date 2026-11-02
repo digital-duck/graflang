@@ -1,0 +1,58 @@
+⚡ Loading graph: cookbook_solvers/optuna_blackbox/optuna_blackbox.graph.yaml
+✓ Graph loaded: optuna_blackbox
+  Nodes: 17
+  Edges: 38
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '=== Optuna Black-Box Optimization (r112) | solver=ON 
+===\n\n## Optuna Black-Box Optimization — SaaS Pricing Strategy 
+Optimization\n\n**Trials:** 50  \n**Best LTV:** $253.72/customer  \n**Naive 
+LTV:** $166.05/customer  \n**Improvement:** +52.8%\n\n| Parameter | Naive (LLM 
+guess) | Optuna Best |\n|---|---|---|\n| monthly_price | $50 | $46.5 |\n| 
+annual_discount_pct | 20% | 0.6% |\n| trial_days | 14 days | 29 days |\n\n### 
+Top 5 Trials\n\n| Rank | Price | Discount | Trial Days | LTV 
+|\n|---|---|---|---|---|\n| 1 | $46.5 | 0.6% | 29 days | $253.72 |\n| 2 | $46.4 
+| 1.5% | 28 days | $249.53 |\n| 3 | $46.8 | 1.9% | 28 days | $249.26 |\n| 4 | 
+$42.2 | 0.1% | 30 days | $248.04 |\n| 5 | $41.3 | 1.2% | 30 days | $243.35 
+|\n\n── Analytics Explanation ───────────────────────────────────\n**1. 
+Result:** Optuna found $46.5/month, a 0.6% annual discount and a 29-day trial, 
+for an LTV of $253.72 against the naive $166.05 (+52.8%). The top 5 trials 
+cluster tightly (price about $41–47, discount under 2%, trial 28–30 days), so 
+the optimum looks stable. With only 50 trials, though, it isn\'t proven 
+global.\n\n**2. Price:** The drop is small ($50 to $46.5). Lower price lifts 
+trial-to-paid conversion, and more paying customers outweigh the lost margin. 
+The bigger move is the discount: 20% to about 0% means no revenue given away, 
+and the LTV model seemingly doesn\'t reward it.\n\n**3. Trial length:** Your 
+premise is off. The optimal trial is *longer* (29 days vs 14), not shorter. A 
+longer trial likely lets users reach their "aha" moment and build habits, which 
+raises conversion and cuts early churn.\n\n**4. Non-convex:** Parameters 
+interact (price × trial × discount) through a churn model and funnel, creating 
+multiple local optima and flat regions. Gradients aren\'t available, and local 
+ones would stall at a poor peak. TPE samples globally instead.\n\n**5. When to 
+use which:** Use Optuna when the model is a simulator or black box with 
+interacting levers. Use analytical pricing when demand is well understood (for 
+example, elasticity curves) and you need speed and interpretability.'}
+13 steps · 1 LLM calls, 361 tokens in / 323 out · slowest: gen_1 6.9s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/optuna_blackbox/optuna_blackbox/result/
+optuna_blackbox-claude_cli-claude-sonnet-5-5-20261101-180613
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/optuna_blackbox/optuna_blackbox/log/opt
+una_blackbox-claude_cli-claude-sonnet-5-5-20261101-180613.log

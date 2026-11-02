@@ -1,0 +1,68 @@
+⚡ Loading graph: cookbook_solvers/minizinc_cp/minizinc_cp.graph.yaml
+✓ Graph loaded: minizinc_cp
+  Nodes: 18
+  Edges: 41
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '=== MiniZinc CP — Nurse Scheduling (r126) | solver=ON 
+===\n\n## CP Schedule Report — Nurse Scheduling\n\n**Backend:** MiniZinc → 
+python_backtracking_fallback  \n**Preference score:** 0  \n**Night→Morning 
+violations:** 0  \n**Coverage shortages:** 0  \n**Overwork violations:** 2  
+\n\n> MiniZinc binary not found — install from 
+https://www.minizinc.org/software.html\n\n### Weekly Schedule\n\n| Nurse | Mon |
+Tue | Wed | Thu | Fri | Sat | Sun | Days 
+|\n|---|---|---|---|---|---|---|---|---|\n| N1_senior | M | M | M | M | M | M | 
+M | 7 |\n| N2_senior | M | M | M | M | M | M | M | 7 |\n| N3 | Off | N | N | A |
+A | Off | Off | 4 |\n| N4 | A | A | A | Off | Off | A | A | 5 |\n| N5 | A | Off 
+| Off | N | Off | Off | N | 3 |\n| N6 | Off | Off | A | Off | A | A | Off | 3 
+|\n| N7 | N | Off | Off | Off | Off | N | Off | 2 |\n| N8 | Off | A | Off | A | 
+N | Off | A | 4 |\n\n── Analyst Explanation 
+─────────────────────────────────────\n**Caveat first:** this isn\'t an 
+optimized MiniZinc result. The binary was missing, so a backtracking fallback 
+produced the table. Its report also doesn\'t match the schedule.\n\n- 
+**Overwork:** N1 and N2 work 7 days, which breaks the 5-day cap (the 2 
+violations).\n- **Coverage:** Monday afternoon has only N4, so the "0 shortages"
+figure is wrong.\n- **Night→Morning:** I found no violation, which matches the 
+report\'s 0. The premise of question 2 doesn\'t hold for this table.\n\n1. 
+**Propagation vs. LP relaxation:** CP prunes variable domains by inference. If 
+N1 and N2 hit 5 days, their remaining values are removed, and a nurse on Night 
+day D loses Morning on D+1. It stays in discrete, logical space and handles 
+global constraints like `cardinality`. LP relaxes integrality to get a 
+continuous bound and then branches. CP is strong at feasibility, LP at 
+bounds.\n\n2. **Night→Morning:** If a schedule did violate it, that would be a 
+search-complexity or enforcement failure, not a reasoning one. The rule is easy 
+to state, but a heuristic or LLM can\'t track all the interacting constraints. 
+Here the fallback ignored the 5-day cap, which is that kind of failure.\n\n3. 
+**Model/solver separation:**\n   - You can swap solvers (Gecode, Chuffed, 
+OR-Tools, or a commercial one) without rewriting the model when licenses 
+change.\n   - You can benchmark several solvers on the same model and avoid 
+vendor lock-in.\n\n4. **Monthly roster, 30+ nurses:** Use `regular` automaton 
+constraints for shift sequences, `global_cardinality` for coverage, and 
+sliding-window sums for weekly caps. Symmetry breaking among interchangeable 
+nurses and decomposition by week help too. CP scales well because these global 
+constraints propagate strongly and handle sequencing rules directly. MILP needs 
+many big-M or linearized constraints that weaken its relaxation.'}
+13 steps · 1 LLM calls, 500 tokens in / 458 out · slowest: gen_1 10.4s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/minizinc_cp/minizinc_cp/result/minizinc
+_cp-claude_cli-claude-sonnet-5-5-20261101-180533
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/minizinc_cp/minizinc_cp/log/minizinc_cp
+-claude_cli-claude-sonnet-5-5-20261101-180533.log

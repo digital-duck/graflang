@@ -3,7 +3,7 @@
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/099_portfolio_opt` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > The SPL file holds two workflows, so there are two graphs: `portfolio_optimization.graph.yaml` and `portfolio_comparison.graph.yaml` (`--main`/`--workflow` are gone from the commands: the graph you run is the workflow).
 > Not ported: `readme-cvxpy-Markowitz.md`, `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): `portfolio_comparison` runs; `portfolio_optimization` needs live prices (yfinance). This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): all 2 graphs completed (3 model calls, 1205 tokens in / 1226 out in total); `portfolio_optimization` fetched live prices with yfinance; `portfolio_comparison` found the Markowitz and CVaR cases infeasible at the default target return 0.12 and max weight 0.2 (as in the SPL demo). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Personal use**: run monthly with fresh data for rebalancing signals.  
 **DODA**: same `.spl` spec runs on any adapter — ollama for exploration, claude_cli for production.
@@ -68,7 +68,7 @@ Sharpe ratio is the headline quality metric. Higher is better; >1.0 is good, >2.
 
 ```bash
 # solver=ON, Markowitz — live data + deterministic optimization
-graf run ~/.graflang/solvers/portfolio_opt/portfolio_optimization.graph.yaml \
+graf run cookbook_solvers/portfolio_opt/portfolio_optimization.graph.yaml \
   --llm claude_cli \
   --param use_solver=true \
   --param algorithm=markowitz \
@@ -83,7 +83,7 @@ graf run ~/.graflang/solvers/portfolio_opt/portfolio_optimization.graph.yaml \
 
 
 # solver=OFF — LLM heuristic allocation (back-checked by verify_portfolio)
-graf run ~/.graflang/solvers/portfolio_opt/portfolio_optimization.graph.yaml \
+graf run cookbook_solvers/portfolio_opt/portfolio_optimization.graph.yaml \
   --llm claude_cli \
   --param use_solver=false \
   --param algorithm=markowitz \
@@ -170,7 +170,7 @@ Instead of hardcoding an algorithm, the workflow lets the LLM read the market da
 ```
 
 ```bash
-graf run ~/.graflang/solvers/portfolio_opt/portfolio_opt.graph.yaml \
+graf run cookbook_solvers/portfolio_opt/portfolio_opt.graph.yaml \
   --adapter claude_cli \
   --param use_solver=true \
   --param algorithm=auto \
@@ -193,7 +193,7 @@ The `portfolio_comparison` workflow runs **all 6 algorithms on the same data**, 
 This is the **SPL synthesis pattern**: N independent deterministic computations feed a single LLM synthesis step that reasons holistically across all results. The math is exact; the synthesis is intelligent.
 
 ```bash
-graf run ~/.graflang/solvers/portfolio_opt/portfolio_comparison.graph.yaml \
+graf run cookbook_solvers/portfolio_opt/portfolio_comparison.graph.yaml \
   --adapter claude_cli \
   --param tickers="AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA,BRK-B" \
   --param capital=20000 \
@@ -241,7 +241,7 @@ Run the comparison workflow monthly. Fresh μ and Σ mean the algorithm recommen
 
 ```bash
 # Monthly rebalancing signal — let the data and LLM decide the method
-graf run ~/.graflang/solvers/portfolio_opt/portfolio_comparison.graph.yaml \
+graf run cookbook_solvers/portfolio_opt/portfolio_comparison.graph.yaml \
   --llm claude_cli \
   --param tickers="AAPL,MSFT,GOOGL,AMZN,NVDA,GDX,SILJ,WEAT,DBA,XLE" \
   --param capital=100000 \

@@ -1,7 +1,7 @@
 # Recipe 87 — Route Optimization
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/087_route_optimization` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `ortools` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 669 tokens in / 512 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pip install ortools`
 
@@ -39,17 +39,17 @@ OR-Tools ships prebuilt wheels with the CP-SAT/routing solver bundled — no sep
 
 ```bash
 # Default problem (1 depot + 5 customer locations)
-graf run ~/.graflang/solvers/route_optimization/route_optimization.graph.yaml \
+graf run cookbook_solvers/route_optimization/route_optimization.graph.yaml \
     --llm claude_cli
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/route_optimization/route_optimization.graph.yaml \
+graf run cookbook_solvers/route_optimization/route_optimization.graph.yaml \
     --llm claude_cli \
     --param enable_solver=false
 
 
 # Custom problem
-graf run ~/.graflang/solvers/route_optimization/route_optimization.graph.yaml \
+graf run cookbook_solvers/route_optimization/route_optimization.graph.yaml \
     --llm claude_cli \
     --param problem="A driver starts at the depot (0) and must visit 4 stops. Distance matrix: [[0,10,15,20,25],[10,0,35,25,30],[15,35,0,30,20],[20,25,30,0,15],[25,30,20,15,0]]. Find the shortest round trip."
 
@@ -69,7 +69,7 @@ graf run ~/.graflang/solvers/route_optimization/route_optimization.graph.yaml \
 Verified end-to-end (2026-07-17) with `--llm claude_cli`: correct OR-Tools routing code (RoutingIndexManager + RoutingModel + PATH_CHEAPEST_ARC + GUIDED_LOCAL_SEARCH) on the first attempt, `ASSERT is_optimal` passed, computed route and distance (101) exactly matching the independently-verified optimum, round-trip check returned `match`.
 
 ```bash
-graf run ~/.graflang/solvers/route_optimization/route_optimization.graph.yaml \
+graf run cookbook_solvers/route_optimization/route_optimization.graph.yaml \
     --llm claude_cli --param enable_solver=true
 
 # Final answer: 101
@@ -82,7 +82,7 @@ graf run ~/.graflang/solvers/route_optimization/route_optimization.graph.yaml \
 
 
 ```bash
-graf run ~/.graflang/solvers/route_optimization/route_optimization.graph.yaml \
+graf run cookbook_solvers/route_optimization/route_optimization.graph.yaml \
     --llm claude_cli --param enable_solver=false
 
 # Final answer: 101

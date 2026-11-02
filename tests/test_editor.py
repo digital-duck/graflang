@@ -35,10 +35,11 @@ def test_a_node_is_added_then_wired_and_the_graph_is_invalid_in_between(work):
     ed = GraphEditor(work)
     ed.add_node("polish", "GENERATE", ["trigger", "complete", "in_essay", "out_essay"], {"prompt_inline": "Polish {{in_essay}}"})
     errors, warnings = ed.problems()
-    assert errors == [] and any("nothing triggers it" in w for w in warnings)         # not wired yet: a warning
+    assert any("nothing triggers it" in w for w in warnings)                          # not wired yet: a warning
+    assert len(errors) == 1 and "{{in_essay}}" in errors[0]                           # and the prompt's input is not fed yet: an error
     ed.add_edge("refine.complete", "polish.trigger", "triggers")
     ed.add_edge("refine.out_essay", "polish.in_essay", "binds")
-    assert ed.problems()[1] == []
+    assert ed.problems() == ([], [])
     ed.save()
     assert "polish" in work.read_text() and GraphEditor(work).node("polish")["config"]["prompt_inline"] == "Polish {{in_essay}}"
 

@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/104_pandera_schema` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 202 tokens in / 226 out in total); reports three failed column checks on the sample data. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** A 200-row employee payroll CSV has 6 rows with `salary=0` (data entry error) and 4 rows with `department="Temp"` (non-standard value). pandera validates all 200 rows against a typed schema in <0.1s and returns exact violation counts. LLM inspects a sample and misses both issues.
 
@@ -74,17 +74,17 @@ solver=ON (fixed) is **4.5× faster** and uses **70% fewer output tokens** than 
 
 ```bash
 # solver=ON — pandera validates all 200 rows
-graf run ~/.graflang/solvers/pandera_schema/pandera_schema.graph.yaml \
+graf run cookbook_solvers/pandera_schema/pandera_schema.graph.yaml \
     --llm claude_cli \
     --param use_solver=true
 
 # solver=OFF — LLM reasons from schema description
-graf run ~/.graflang/solvers/pandera_schema/pandera_schema.graph.yaml \
+graf run cookbook_solvers/pandera_schema/pandera_schema.graph.yaml \
     --llm claude_cli \
     --param use_solver=false
 
 # Validate your own CSV
-graf run ~/.graflang/solvers/pandera_schema/pandera_schema.graph.yaml \
+graf run cookbook_solvers/pandera_schema/pandera_schema.graph.yaml \
     --llm claude_cli \
     --param use_solver=true \
     --param data_csv="$(cat employees.csv)"

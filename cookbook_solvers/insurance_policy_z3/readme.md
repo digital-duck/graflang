@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/120_insurance_policy_z3` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 378 tokens in / 248 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** Same 3-customer insurance policy as r105 (Prolog), now solved by Z3's Fixedpoint (Datalog) engine. Z3 applies the closed-world assumption strictly: it cannot infer `catastrophic_event` implies `emergency_event` from real-world semantics — it checks only what is explicitly stated. Carol's blocking fact (`emergency_event` absent) is machine-extracted and named in the output, eliminating the semantic-drift failure observed in r105's LLM explanation phase.
 
@@ -100,12 +100,12 @@ The r105 semantic-drift failure was partly prompt design, not purely a solver pr
 
 ```bash
 # solver=ON — Z3 Fixedpoint inference
-graf run ~/.graflang/solvers/insurance_policy_z3/insurance_policy_z3.graph.yaml \
+graf run cookbook_solvers/insurance_policy_z3/insurance_policy_z3.graph.yaml \
     --adapter claude_cli \
     --param use_solver=true
 
 # solver=OFF — LLM manual rule tracing (r105 baseline)
-graf run ~/.graflang/solvers/insurance_policy_z3/insurance_policy_z3.graph.yaml \
+graf run cookbook_solvers/insurance_policy_z3/insurance_policy_z3.graph.yaml \
     --adapter claude_cli \
     --param use_solver=false
 ```

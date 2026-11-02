@@ -57,7 +57,7 @@ def read_result(stdout: str) -> Any:
 class KernelSession:
     """One running kernel."""
 
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: Optional[int] = None, kernel_name: str = "python3"):
         try:
             from jupyter_client.manager import KernelManager
         except ImportError:
@@ -65,14 +65,14 @@ class KernelSession:
         try:
             # Unix sockets are protected by file permissions; the default TCP ports on localhost would let any local user
             # connect and run code as this user.
-            self.km = KernelManager(kernel_name="python3", transport="ipc" if os.name == "posix" else "tcp")
+            self.km = KernelManager(kernel_name=kernel_name, transport="ipc" if os.name == "posix" else "tcp")
             self.km.start_kernel()
             self.kc = self.km.client()
             self.kc.start_channels()
             self.kc.wait_for_ready(timeout=STARTUP_TIMEOUT)
         except Exception as e:
             self.close()
-            raise KernelError(f"could not start a Python kernel: {e}") from None
+            raise KernelError(f"could not start the {kernel_name!r} kernel: {e}") from None
         if seed is not None:
             self._run(f"import random as __random; __random.seed({int(seed)})\n"
                       f"try:\n    import numpy as __numpy; __numpy.random.seed({int(seed)})\nexcept ImportError:\n    pass\n",
@@ -124,29 +124,31 @@ class KernelSession:
 
 
 class KernelPool:
-    """The kernels of one run. The root runtime owns it and closes it when the run ends."""
+    """The kernels of one run (one per kernel name, started when first needed). The root runtime owns it and closes it when the run ends."""
 
-    def __init__(self):
-        self._shared: Optional[KernelSession] = None
+    def __init__(self, default_kernel: str = "python3"):
+        self.default_kernel = default_kernel            # `graf run --kernel-name`: the kernel of a SOLVE that names none
+        self._shared: Dict[str, KernelSession] = {}
         self._registered = False
 
     @contextmanager
-    def session(self, scope: str = "run", seed: Optional[int] = None) -> Iterator[KernelSession]:
+    def session(self, scope: str = "run", seed: Optional[int] = None, kernel_name: Optional[str] = None) -> Iterator[KernelSession]:
+        kernel_name = kernel_name or self.default_kernel
         if scope == "node":
-            fresh = KernelSession(seed)
+            fresh = KernelSession(seed, kernel_name)
             try:
                 yield fresh
             finally:
                 fresh.close()
             return
-        if self._shared is None:
-            self._shared = KernelSession(seed)      # the seed applies when the run's kernel starts
+        if kernel_name not in self._shared:
+            self._shared[kernel_name] = KernelSession(seed, kernel_name)      # the seed applies when the run's kernel starts
             if not self._registered:
                 atexit.register(self.close)         # a safety net if the runtime never reaches its `finally`
                 self._registered = True
-        yield self._shared
+        yield self._shared[kernel_name]
 
     def close(self) -> None:
-        if self._shared is not None:
-            self._shared.close()
-            self._shared = None
+        sessions, self._shared = list(self._shared.values()), {}
+        for s in sessions:
+            s.close()

@@ -68,11 +68,11 @@ def test_undo_restores_the_edit(at):
 def test_a_node_is_added_from_the_form_and_saved(at):
     at.text_input(key="new_id").set_value("polish")
     at.text_input(key="new_ports").set_value("trigger, complete, in_essay, out_essay")
-    at.text_area(key="new_config").set_value("prompt_inline: Polish {{in_essay}}")
+    at.text_area(key="new_config").set_value("prompt_inline: Polish the essay")
     button(at, "add_node_submit").click().run()
     assert not at.exception
     pick(at, "polish")
-    assert at.text_area(key="cfg_polish_prompt_inline").value == "Polish {{in_essay}}"
+    assert at.text_area(key="cfg_polish_prompt_inline").value == "Polish the essay"
     button(at, "save").click().run()                                       # unwired is only a warning, so it saves
     assert "polish" in at.file.read_text()
 

@@ -1,0 +1,129 @@
+{
+  "steps": 23,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 479,
+    "output_tokens": 296,
+    "cost_usd": 0.0,
+    "ms": 5094
+  },
+  "nodes": {
+    "call_2": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 9302
+    },
+    "gen_2": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 5094
+    },
+    "call_1": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2917
+    },
+    "loop_1": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 508
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 499
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 428
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 10
+    },
+    "tool_9": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 6
+    },
+    "tool_10": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "fork_1": {
+      "type": "FORK",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_5": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_7": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_8": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_11": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "join_1": {
+      "type": "JOIN",
+      "n": 1,
+      "ms": 0
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_2": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_3": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "set_4": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "assert_1": {
+      "type": "ASSERT",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

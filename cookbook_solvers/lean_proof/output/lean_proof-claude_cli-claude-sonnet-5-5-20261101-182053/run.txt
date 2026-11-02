@@ -1,0 +1,73 @@
+⚡ Loading graph: cookbook_solvers/lean_proof/lean_proof.graph.yaml
+✓ Graph loaded: lean_proof
+  Nodes: 32
+  Edges: 83
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ CONTEXT set_2 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_1 (#1)
+  ⚡ EVALUATE eval_2 (#1)
+  ⚡ GENERATE gen_1 (#1)
+  ⚡ SOLVE tool_2 (#1)
+  ⚡ CONTEXT set_4 (#1)
+  ⚡ SOLVE tool_3 (#1)
+  ⚡ SOLVE tool_4 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ CONTEXT set_5 (#1)
+  ⚡ EVALUATE eval_1 (#1)
+  ⚡ CONTEXT set_3 (#1)
+  ⚡ EVALUATE eval_1 (#1)
+  ⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_8 (#1)
+⚡ CONTEXT set_9 (#1)
+⚡ CONTEXT set_10 (#1)
+⚡ CONTEXT set_11 (#1)
+⚡ EVALUATE eval_3 (#1)
+⚡ GENERATE gen_3 (#1)
+⚡ CONTEXT set_12 (#1)
+⚡ CONTEXT set_13 (#1)
+⚡ CONTEXT set_14 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ EVALUATE eval_4 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ CONTEXT set_16 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ CONTEXT set_17 (#1)
+⚡ LOOP loop_2 (#1)
+  ⚡ EVALUATE eval_5 (#1)
+  ⚡ CONTEXT set_18 (#1)
+  ⚡ EVALUATE eval_5 (#1)
+  ⚡ CONTEXT set_18 (#1)
+  ⚡ EVALUATE eval_5 (#1)
+  ⚡ CONTEXT set_18 (#1)
+⚡ EVALUATE eval_7 (#1)
+⚡ CONTEXT set_23 (#1)
+⚡ SOLVE tool_25 (#1)
+⚡ CONTEXT set_25 (#1)
+⚡ EVALUATE eval_8 (#1)
+⚡ SOLVE tool_26 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Lean verification report\n\n**Claim (prose):** addition of
+natural numbers is commutative\n\n**Formalization:** `∀ a b : Nat, a + b = b + 
+a`\n\n**Faithfulness (LLM judge):** FAITHFUL - It universally quantifies over 
+all natural numbers a and b with no extra hypotheses, stating exactly a + b = b 
++ a.\n\n**Badge:** `machine_proved`\n\n**Kernel-checked 
+proof:**\n```lean\ntheorem spl_claim : ∀ a b : Nat, a + b = b + a := by\n  exact
+fun a b => Nat.add_comm a b\n```\n\n**Library search (exact?):** `exact fun a b 
+=> Nat.add_comm a b`'}
+48 steps · 2 LLM calls, 189 tokens in / 37 out · slowest: gen_3 2.6s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/lean_proof/lean_proof/result/lean_proof
+-claude_cli-claude-sonnet-5-5-20261101-182053
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/lean_proof/lean_proof/log/lean_proof-cl
+aude_cli-claude-sonnet-5-5-20261101-182053.log

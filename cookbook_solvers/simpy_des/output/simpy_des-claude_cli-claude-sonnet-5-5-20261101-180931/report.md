@@ -1,0 +1,42 @@
+=== Discrete-Event Simulation — Hospital ED (r124) | solver=ON ===
+
+## SimPy DES Report — Emergency Department
+
+**Patients simulated:** 10,000  
+**Mean total wait:** 62.0 min  
+**Median wait:** 50.6 min  
+**95th-percentile wait:** 145.6 min  
+
+### Resource Utilization
+
+| Resource | Utilization |
+|---|---|
+| Triage nurses (×3) | 1.8% |
+| Treatment bays (×8) | 13.4% |
+| Specialists (×2) | 19.9% |
+
+### Wait Time Distribution
+
+| Bucket | Patients |
+|---|---|
+| 0-10min | 45 |
+| 10-20min | 700 |
+| 20-30min | 1,451 |
+| 30-45min | 2,157 |
+| 45-60min | 1,624 |
+| 60-90min | 2,062 |
+| 90-120min | 1,000 |
+| 120-120+min | 961 |
+
+── M/M/c Analytic Baseline ─────────────────────────────────
+**M/M/c Analytic Baseline (M/M/c Erlang-C — total sojourn (queue + service, all stages)):**  
+Mean wait: 57.0 min | P95 wait: 97.0 min | Bay utilization: 26.7%
+
+── Analyst Explanation ─────────────────────────────────────
+**1. Higher P95.** M/M/c assumes Poisson arrivals (inter-arrival CV = 1) and exponential service. Real ED arrivals are bursty: CV > 1, meaning the standard deviation of gaps exceeds their mean, so patients arrive in clusters separated by lulls. Kingman's approximation scales waiting time by (Ca² + Cs²)/2, so extra variability stretches the tail far more than the mean (57 vs 62 min, but P95 97 vs 146).
+
+**2. Inspection paradox.** A random arrival is more likely to land inside a long busy period, because long periods cover more time. Patients thus experience the congested state, not the time-average. Low average utilization hides the fact that most patients arrive during bursts.
+
+**3. Operational changes.** Specialists are the most utilized resource (19.9%), so they are the likely bottleneck. Priorities: add specialist capacity or flex it to match arrival peaks, cut specialist service-time variability (protocols, pre-consult workup), and smooth arrivals (scheduling, fast-track for low acuity). Triage nurses (1.8%) and bays (13.4%) have slack, so adding there does little. Note that utilizations this low do not explain a 62-minute mean wait, so I would check for batching, shift gaps, or blocking between stages in the model.
+
+**4. Simulation vs optimization.** A simulation only evaluates a given configuration: it answers "what happens if?" To optimize, add decision variables (staff counts per shift), an objective (total cost, including waiting cost), constraints (budget, P95 ≤ target), and a search method (e.g. simulation-optimization, or MILP/stochastic programming wrapped around replications).

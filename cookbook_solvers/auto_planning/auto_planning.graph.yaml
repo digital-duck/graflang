@@ -332,7 +332,7 @@ nodes:
 
                 {{in_domain}}
 
-                Problem: {{in_problem}}
+                Problem: {{in_problem_text}}
 
                 Output ONLY a JSON list of grounded actions, each one of:
                   {{"action": "drive", "truck": "t1", "from": "A", "to": "B"}}
@@ -347,7 +347,7 @@ nodes:
               - trigger
               - complete
               - in_domain
-              - in_problem
+              - in_problem_text
               - out_plan
           - id: tool_6
             type: SOLVE
@@ -535,10 +535,10 @@ nodes:
 
                 {{in_domain}}
 
-                Problem: {{in_problem}}
+                Problem: {{in_problem_text}}
 
                 Previous plan:
-                {{in_plan_json}}
+                {{in_plan}}
 
                 Validator error:
                 {{in_error_info}}
@@ -556,8 +556,8 @@ nodes:
               - trigger
               - complete
               - in_domain
-              - in_problem
-              - in_plan_json
+              - in_problem_text
+              - in_plan
               - in_error_info
               - out_plan
           - id: tool_9

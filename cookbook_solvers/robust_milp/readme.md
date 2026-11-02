@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/108_robust_milp` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `mip` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 508 tokens in / 708 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** a naive *expected-demand heuristic* recommends the wrong capacity decision. The two-stage stochastic MILP prices all demand scenarios simultaneously and finds the true optimum — often the opposite recommendation.
 
@@ -79,15 +79,15 @@ The naive heuristic (E[D]=190 > 150 lease cap) recommends BUILD and overpays by 
 
 ```bash
 # solver=ON — python-mip two-stage MILP
-graf run ~/.graflang/solvers/robust_milp/robust_milp.graph.yaml \
+graf run cookbook_solvers/robust_milp/robust_milp.graph.yaml \
   --llm claude_cli --param use_solver=true
 
 # solver=OFF — naive heuristic + comparison
-graf run ~/.graflang/solvers/robust_milp/robust_milp.graph.yaml \
+graf run cookbook_solvers/robust_milp/robust_milp.graph.yaml \
   --llm claude_cli --param use_solver=false
 
 # Custom scenario (pipe a different problem)
-graf run ~/.graflang/solvers/robust_milp/robust_milp.graph.yaml \
+graf run cookbook_solvers/robust_milp/robust_milp.graph.yaml \
   --llm claude_cli --param use_solver=true \
   --param "problem=A retailer must decide whether to build a large warehouse (capacity 500 units, cost $8,000) or rent a small one (capacity 250 units). Production: $5/unit. Emergency restocking: $45/unit. Scenarios: Low (20%, 150 units), Normal (60%, 300 units), High (20%, 500 units)."
 ```

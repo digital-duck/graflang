@@ -1,7 +1,7 @@
 # Recipe 83 — Unit / Dimensional Check
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/083_unit_dimensional_check` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs once `pint` is installed. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 446 tokens in / 171 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** `pip install pint`
 
@@ -24,7 +24,7 @@ This recipe targets physics/engineering word problems, where the LLM's most comm
 ## Setup
 
 ```bash
-conda activate spl123
+conda activate graf
 pip install pint
 ```
 
@@ -39,15 +39,15 @@ pip install pint
 
 ```bash
 # Default problem (kinematics: final speed after constant acceleration)
-graf run ~/.graflang/solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml \
+graf run cookbook_solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml \
     --llm claude_cli
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml \
+graf run cookbook_solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml \
     --llm claude_cli --param enable_solver=false
 
 # Custom problem
-graf run ~/.graflang/solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml \
+graf run cookbook_solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml \
     --llm claude_cli \
     --param problem="A 500 g mass falls from 3 meters. What is its speed in mph when it hits the ground (g = 9.8 m/s^2)?"
 

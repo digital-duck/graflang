@@ -1178,7 +1178,7 @@ nodes:
             sep    = "|---|---|"
             lines  = [header, sep] + [f"| {k} | {v} |" for k, v in rows]
             return "\n".join(lines)
-        _spl_result = make_metrics(use_solver, llm_calls, stage1_s, stage2_s, total_s, _total_input_tokens, _total_output_tokens)
+        _spl_result = make_metrics(use_solver, llm_calls, stage1_s, stage2_s, total_s, globals().get('_total_input_tokens', 0), globals().get('_total_output_tokens', 0))
       result: _spl_result
       out_type: TEXT
       tool_params:

@@ -1,0 +1,62 @@
+⚡ Loading graph: 
+cookbook_solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml
+✓ Graph loaded: unit_dimensional_check
+  Nodes: 23
+  Edges: 55
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ EVALUATE eval_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ EVALUATE eval_4 (#1)
+  ⚡ GENERATE gen_2 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ SOLVE tool_6 (#1)
+  ⚡ CONTEXT set_8 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ CONTEXT set_7 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ GENERATE gen_4 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_14 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Unit / Dimensional Check Report\n\n**Problem:** A car 
+accelerates from rest at 2.5 m/s^2 for 12 seconds. What is its final speed, in 
+km/h?\n\n**pint status:** `OK`\n**Ground-truth answer:** `108.0 
+km/h`\n**Round-trip check:** `match`\n\n## Interpretation\n\nThe problem asks 
+for the final speed, in km/h, of a car that starts from rest and accelerates at 
+2.5 m/s² for 12 seconds.\n\nThe verified result gives an answer of **108.0 
+km/h**, which matches the intermediate value of 30.0 m/s.\n\nThe relationship 
+used is the constant-acceleration kinematic equation v = v₀ + at, with v₀ = 0. 
+This gives v = 2.5 × 12 = 30 m/s, and multiplying by 3.6 converts it to 
+km/h.\n\nFinal answer: 108.0\n\n## Solver Code (LLM-generated, 
+pint)\n\n```python\na = Q_(2.5, \'m/s^2\')\nt = Q_(12, \'s\')\nv0 = Q_(0, 
+\'m/s\')\nv_final = v0 + a * t\nv_kmh = v_final.to(\'km/h\')\n_result = {\n    
+"status": "OK",\n    "answer": float(f"{v_kmh.magnitude:.3g}"),\n    "unit": 
+"km/h",\n    "final_speed_m_per_s": 
+float(v_final.to(\'m/s\').magnitude),\n}\n```'}
+27 steps · 2 LLM calls, 446 tokens in / 171 out · slowest: gen_4 3.2s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/unit_dimensional_check/unit_dimensional
+_check/result/unit_dimensional_check-claude_cli-claude-sonnet-5-5-20261101-18111
+5
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/unit_dimensional_check/unit_dimensional
+_check/log/unit_dimensional_check-claude_cli-claude-sonnet-5-5-20261101-181115.l
+og

@@ -1,0 +1,32 @@
+⚡ Loading graph: cookbook_solvers/pii_compliance/pii_compliance.graph.yaml
+✓ Graph loaded: pii_compliance
+  Nodes: 15
+  Edges: 40
+
+▶ Executing workflow...
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '## Compliance check\n\n**Destination:** external_api  
+\n**Engine:** stdlib  \n**Verdict:** NOT COMPLIANT\n\n- R1: PII sent to an 
+external destination must be masked\n- R2: A social security number never leaves
+externally, even masked'}
+11 steps · 1 LLM calls, 141 tokens in / 20 out · slowest: gen_1 2.2s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/pii_compliance/pii_compliance/result/pi
+i_compliance-claude_cli-claude-sonnet-5-5-20261101-180628
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/pii_compliance/pii_compliance/log/pii_c
+ompliance-claude_cli-claude-sonnet-5-5-20261101-180628.log

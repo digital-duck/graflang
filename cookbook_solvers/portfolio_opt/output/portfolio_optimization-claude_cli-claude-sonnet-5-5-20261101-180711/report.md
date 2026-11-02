@@ -1,0 +1,53 @@
+=== Portfolio Optimization (solver=ON / cvxpy Markowitz) ===
+
+Tickers: AAPL,MSFT,GOOGL,AMZN,NVDA  |  Period: 1y  |  Capital: $10000
+Target return: 0.12  |  Max position: 0.20
+
+Market Data:
+{"tickers": ["AAPL", "AMZN", "GOOGL", "MSFT", "NVDA"], "annual_returns": {"AAPL": 0.283635, "AMZN": -0.001238, "GOOGL": 0.046213, "MSFT": 0.070936, "NVDA": 0.061038}, "cov_matrix": [[0.05837998, 0.00441838, 0.00756354, 0.00894386, 0.00575376], [0.00441838, 0.11184689, 0.0678113, 0.04643544, 0.0333663], [0.00756354, 0.0678113, 0.1147992, 0.01757978, 0.02960432], [0.00894386, 0.04643544, 0.01757978, 0.10835977, 0.03143934], [0.00575376, 0.0333663, 0.02960432, 0.03143934, 0.14029485]], "period": "1y", "trading_days": 249}
+
+Optimization Result:
+{"status": "OPTIMAL", "algorithm": "markowitz", "weights": {"AAPL": 0.2, "AMZN": 0.2, "GOOGL": 0.2, "MSFT": 0.2, "NVDA": 0.2}, "expected_return": 0.0921, "annual_volatility": 0.2039, "sharpe_ratio": 0.2065, "solver_log": "CLARABEL Markowitz; obj=0.041581"}
+
+Capital Allocation:
+{"capital": 10000.0, "allocations": [{"ticker": "AAPL", "weight_pct": 20.0, "dollars": 2000.0}, {"ticker": "AMZN", "weight_pct": 20.0, "dollars": 2000.0}, {"ticker": "GOOGL", "weight_pct": 20.0, "dollars": 2000.0}, {"ticker": "MSFT", "weight_pct": 20.0, "dollars": 2000.0}, {"ticker": "NVDA", "weight_pct": 20.0, "dollars": 2000.0}], "expected_annual_return": 0.0921, "annual_volatility": 0.2039, "sharpe_ratio": 0.2065}
+
+Interpretation:
+## Your portfolio at a glance
+
+The optimizer split your $10,000 **equally across all five stocks**, $2,000 (20%) each:
+
+| Stock | Weight | Dollars |
+|---|---|---|
+| AAPL | 20% | $2,000 |
+| MSFT | 20% | $2,000 |
+| GOOGL | 20% | $2,000 |
+| AMZN | 20% | $2,000 |
+| NVDA | 20% | $2,000 |
+
+## What to expect
+
+- **Expected annual return: 9.21%.** On $10,000 that's roughly $920 a year, if the past year repeats. This is **below your 12% target**.
+- **Volatility: 20.4%.** In a typical year, your return could land roughly 20 points above or below the average. A rough range is about -11% to +30% (one standard deviation around 9.2%), so a losing year is quite possible.
+- **Sharpe ratio: 0.21.** This measures return per unit of risk, after the risk-free rate. Above 1 is considered good, so 0.21 is low. You're taking a lot of risk for a modest reward.
+
+## Why nothing was excluded
+
+No stock was dropped or underweighted. The reason is the **20% cap**: with five stocks and a 20% maximum per position, the only way to be fully invested is exactly 20% in each. The optimizer had no freedom to tilt toward the better performers or away from the weaker ones. The result is just an equal-weight portfolio.
+
+That also explains why the 12% target wasn't reached. The solver returned OPTIMAL, but with this cap and this basket, 9.21% is the best it could find (or it prioritized risk over the target). To aim higher you could:
+- Raise the position cap (for example 30-40%), accepting more concentration risk.
+- Add more stocks or other assets, such as an index fund or bonds, to improve diversification.
+- Lower the return target to something the basket supports.
+
+Also note that all five are large-cap US tech names, so they tend to move together. Holding five of them is less diversified than it looks.
+
+## Rebalancing tip
+
+Review **quarterly**. If one stock has drifted well above 20% (NVDA is the likely candidate), trim it back to $2,000-equivalent and top up the laggards. This keeps your risk where you intended it.
+
+## Disclaimer
+
+Past performance does not guarantee future results. This is based on only one year of historical data, which is a short window, and is not personalized financial advice.
+
+LLM calls: 2

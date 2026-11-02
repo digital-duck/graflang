@@ -1,0 +1,53 @@
+⚡ Loading graph: cookbook_solvers/prolog_inference/prolog_inference.graph.yaml
+✓ Graph loaded: prolog_inference
+  Nodes: 17
+  Edges: 38
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': "=== Prolog Inference Engine (r105) | solver=ON ===\n\n## 
+Prolog Inference Report — ComprehensiveAuto_v3\n\n**Query:** `emergency_claim`  
+\n**Customers:** 3  \n**Eligible:** 1\n\n| Customer | Eligible | Verdict 
+|\n|---|---|---|\n| alice | ✓ | alice: ELIGIBLE for emergency_claim |\n| bob | ✗
+| bob: NOT ELIGIBLE for emergency_claim |\n| carol | ✗ | carol: NOT ELIGIBLE for
+emergency_claim |\n\n── Explanation 
+─────────────────────────────────────────────\n**Discrepancy:** the policy makes
+Carol eligible, but the report marks her NOT ELIGIBLE. The report is also 
+internally inconsistent: Carol would be a second eligible customer, yet the 
+header says only 1 is eligible. Treat the report as suspect.\n\n1. **Carol 
+(expected proof):** `comprehensive(carol)` ∧ `policy_active(carol)` ∧ 
+(`deductible_met` ∨ `catastrophic(carol)`). The disjunction succeeds via 
+`catastrophic`, so `emergency_claim(carol)` should be provable. A likely cause 
+is that the catastrophic branch is missing from the rules, or the fact wasn't 
+loaded.\n\n2. **Bob:** `comprehensive(bob)` and `policy_active(bob)` are both 
+absent. He has a basic policy, and the policy is lapsed. Under 
+negation-as-failure, either gap alone blocks him.\n\n3. **Manual tracing risk:**
+people skip OR branches and misread missing facts, so a bug like Carol's goes 
+unnoticed. A solver gives a reproducible proof trace.\n\n4. **9th rule:** 
+`high_value_client → deductible_waived` only helps if the claim rule also 
+accepts `deductible_waived`. It's monotonic and affects only customers with that
+fact. Bob stays ineligible, and Carol's result is unchanged until the OR branch 
+is fixed."}
+13 steps · 1 LLM calls, 286 tokens in / 292 out · slowest: gen_1 8.7s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/prolog_inference/prolog_inference/resul
+t/prolog_inference-claude_cli-claude-sonnet-5-5-20261101-180754
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/prolog_inference/prolog_inference/log/p
+rolog_inference-claude_cli-claude-sonnet-5-5-20261101-180754.log

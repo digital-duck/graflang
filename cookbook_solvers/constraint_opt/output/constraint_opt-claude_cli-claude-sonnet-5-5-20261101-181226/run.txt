@@ -1,0 +1,95 @@
+⚡ Loading graph: cookbook_solvers/constraint_opt/constraint_opt.graph.yaml
+✓ Graph loaded: constraint_opt
+  Nodes: 39
+  Edges: 91
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ CONTEXT set_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ CONTEXT set_7 (#1)
+⚡ CONTEXT set_8 (#1)
+⚡ CONTEXT set_9 (#1)
+⚡ CONTEXT set_10 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ CONTEXT set_11 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_2 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ GENERATE gen_1 (#1)
+  ⚡ CONTEXT set_13 (#1)
+  ⚡ SOLVE tool_4 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ CONTEXT set_14 (#1)
+  ⚡ EVALUATE eval_2 (#1)
+  ⚡ CONTEXT set_12 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ GENERATE gen_3 (#1)
+⚡ CONTEXT set_17 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_19 (#1)
+⚡ SOLVE tool_20 (#1)
+⚡ SOLVE tool_21 (#1)
+⚡ SOLVE tool_22 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Constraint Optimization Report\n\n**Problem:** A bakery 
+produces artisan bread and croissants. Each loaf of bread requires 3 hours of 
+labor and 2 kg of flour, earning $12 profit. Each batch of croissants requires 1
+hour of labor and 3 kg of flour, earning $8 profit. The bakery has 12 hours of 
+labor and 15 kg of flour available each day. Both products must have 
+non-negative quantities. Maximize daily profit.\n\n**Solver status:** 
+`Optimal`\n**Optimal objective value:** 60\n\n**Decision variables:**\n  - bread
+= 3\n  - croissants = 3\n\n## Interpretation\n\nBake **3 loaves of bread** and 
+**3 batches of croissants** each day. This earns the maximum daily profit of 
+**$60**. Both constraints are binding: all 12 labor hours and all 15 kg of flour
+are used, so neither resource has any spare capacity. Since both are fully used,
+extra labor or flour would let you earn more, but only if you add both together.
+The recommendation is to keep this 3-and-3 production plan, and if you want to 
+grow profit, look at adding labor and flour capacity together.\n\n## Solution 
+Verification\n\n**Labor constraint:** 3·(bread) + 1·(croissants) ≤ 12\n- 3 × 3 +
+1 × 3 = 9 + 3 = 12 hours\n- 12 ≤ 12 is satisfied and **binding** (no 
+slack).\n\n**Flour constraint:** 2·(bread) + 3·(croissants) ≤ 15\n- 2 × 3 + 3 × 
+3 = 6 + 9 = 15 kg\n- 15 ≤ 15 is satisfied and **binding** (no 
+slack).\n\n**Non-negativity:**\n- bread = 3 ≥ 0 and croissants = 3 ≥ 0, so both 
+are satisfied. They are slack, since both are strictly 
+positive.\n\n**Objective:**\n- 3 × $12 + 3 × $8 = $36 + $24 = **$60**\n\nThe 
+computed profit of $60 matches the solver\'s reported objective of 
+60.0.\n\n**Optimality check:** Two constraints are binding in two variables, so 
+this point is a corner of the feasible region. The other corners give less 
+profit:\n- Bread only: limited by flour at 7.5 loaves, but labor allows only 4, 
+so 4 loaves give $48.\n- Croissants only: limited by flour at 5 batches, giving 
+$40.\n- Origin: $0.\n\nThe corner at (3, 3) gives $60, the highest, which 
+confirms the solver\'s result.\n\n## Solver Code (LLM-generated, 
+PuLP)\n\n```python\nprob = pulp.LpProblem("bakery_profit", 
+pulp.LpMaximize)\n\nbread = pulp.LpVariable("bread", lowBound=0)\ncroissants = 
+pulp.LpVariable("croissants", lowBound=0)\n\nprob += 12 * bread + 8 * 
+croissants, "daily_profit"\n\nprob += 3 * bread + 1 * croissants <= 12, 
+"labor_hours"\nprob += 2 * bread + 3 * croissants <= 15, 
+"flour_kg"\n\nprob.solve(pulp.PULP_CBC_CMD(msg=0))\n\n_result = {\n    "status":
+pulp.LpStatus[prob.status],\n    "objective": pulp.value(prob.objective),\n    
+"variables": {v.name: pulp.value(v) for v in prob.variables()}\n}\n```\n\n## Run
+Metrics\n\n| Metric | Value |\n|---|---|\n| Mode | solver=ON  (PuLP/CBC + ASSERT
+gate) |\n| LLM calls | 2 |\n| Stage 1 — formulation + solve (s) | 3.10 |\n| 
+Stage 2 — interpretation (s) | 5.70 |\n| Total latency (s) | 8.90 |\n| Input 
+tokens | 0 |\n| Output tokens | 0 |\n| Total tokens | 0 |'}
+38 steps · 2 LLM calls, 682 tokens in / 503 out · slowest: gen_3 5.7s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/constraint_opt/constraint_opt/result/co
+nstraint_opt-claude_cli-claude-sonnet-5-5-20261101-181226
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/constraint_opt/constraint_opt/log/const
+raint_opt-claude_cli-claude-sonnet-5-5-20261101-181226.log

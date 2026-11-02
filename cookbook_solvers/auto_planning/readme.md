@@ -1,7 +1,7 @@
 # Recipe 93 — Automated Planning (PDDL / STRIPS)
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/093_auto_planning` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 580 tokens in / 234 out in total); plan valid, 6 steps, round trip matches. A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Category:** reasoning · **Tier:** 2 · **Requires:** stdlib `json` only — no new pip dependency
 
@@ -47,12 +47,12 @@ Actions:
 
 ```bash
 # Default problem (deliver p1 from A and p2 from B to C; known minimal plan: 6 steps)
-graf run ~/.graflang/solvers/auto_planning/auto_planning.graph.yaml \
+graf run cookbook_solvers/auto_planning/auto_planning.graph.yaml \
     --llm claude_cli \
     --param enable_solver=true
 
 # Unaided baseline arm
-graf run ~/.graflang/solvers/auto_planning/auto_planning.graph.yaml \
+graf run cookbook_solvers/auto_planning/auto_planning.graph.yaml \
     --llm claude_cli \
     --param enable_solver=false
 ```

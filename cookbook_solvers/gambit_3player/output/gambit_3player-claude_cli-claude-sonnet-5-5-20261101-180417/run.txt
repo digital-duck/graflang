@@ -1,0 +1,67 @@
+⚡ Loading graph: cookbook_solvers/gambit_3player/gambit_3player.graph.yaml
+✓ Graph loaded: gambit_3player
+  Nodes: 17
+  Edges: 38
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_4 (#1)
+⚡ SOLVE tool_5 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_6 (#1)
+⚡ SOLVE tool_7 (#1)
+⚡ SOLVE tool_8 (#1)
+⚡ GENERATE gen_1 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': "=== Gambit 3-Player Game Theory (r115) | solver=ON ===\n\n##
+3-Player Nash Equilibrium Report — 3-Firm SaaS Pricing Triopoly\n\n**Solver:** 
+pygambit  \n**Players:** Firm A, Firm B, Firm C  \n**Nash equilibria found:** 
+1\n\n### Nash Equilibria\n\n| # | Firm A | Firm B | Firm C | Payoff A | Payoff B
+| Payoff C |\n|---|---|---|---|---|---|---|\n| 1 | Standard | Standard | 
+Standard | $120.0K | $120.0K | $120.0K |\n\n### Cooperative Optimum (NOT a Nash 
+equilibrium)\n\n| Firm A | Firm B | Firm C | Payoff A | Payoff B | Payoff C 
+|\n|---|---|---|---|---|---|\n| Premium | Premium | Premium | $200K | $200K | 
+$200K |\n\n> *Collective optimum is unstable: every firm can unilaterally*\n> 
+*gain by defecting to Standard, making Premium unsustainable.*\n\n### Prisoner's
+Dilemma Gap\n\nNash ['Standard', 'Standard', 'Standard'] → each earns $120.0K; 
+cooperative ['Premium', 'Premium', 'Premium'] → each earns $200K; gap = 
+$80.0K/firm\n\n── Business Explanation 
+────────────────────────────────────\n**1. Equilibrium.** All three firms choose
+Standard and each earns $120K/month. No firm can do better by switching alone, 
+so the market settles into a race to the bottom, even though everyone would 
+prefer higher prices.\n\n**2. Dominance.** Compare Premium with Standard for one
+firm, given what its rivals do:\n- Both rivals Premium: Standard earns 300, 
+Premium earns 200.\n- One Standard, one Premium: Standard earns 260, Premium 
+earns 120.\n- Both rivals Standard: Standard earns 120, Premium earns 
+80.\n\nStandard wins in every case, so it is strictly dominant and the 
+equilibrium is unique.\n\n**3. Gap.** Cooperation would pay $200K each, versus 
+$120K at equilibrium. That is $80K per firm, or $240K per month across the three
+firms. This is the collective cost of each firm acting rationally for 
+itself.\n\n**4. Why three players is harder.** I don't have r110's numbers, so 
+this is the general argument:\n- Cooperation fails if any one of three firms 
+defects, so there are more chances for it to break.\n- Defecting is very 
+tempting (300 vs 200), and the loyal firms are hurt badly (120 or 80).\n- 
+Monitoring and coordination are harder with three firms, and a punishment aimed 
+at one defector is costly to the other two.\n- Punishers have to agree on who 
+pays for the punishment, and each may prefer to free-ride on the others.\n\n**5.
+Sustaining Premium.**\n- Repeated play with credible trigger strategies, such as
+reverting to Standard after any defection.\n- Fast price transparency, so 
+defection is detected quickly.\n- Differentiated products or switching costs, 
+such as lock-in and contracts, that reduce the gain from undercutting.\n- 
+Most-favoured-customer clauses.\n- Brand or reputation norms.\n\nExplicit 
+collusion is illegal under antitrust law."}
+13 steps · 1 LLM calls, 506 tokens in / 435 out · slowest: gen_1 10.9s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/gambit_3player/gambit_3player/result/ga
+mbit_3player-claude_cli-claude-sonnet-5-5-20261101-180417
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/gambit_3player/gambit_3player/log/gambi
+t_3player-claude_cli-claude-sonnet-5-5-20261101-180417.log

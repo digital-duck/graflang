@@ -1,0 +1,27 @@
+=== Z3 Compliance Checker (r102) | solver=ON ===
+
+## Z3 Eligibility Check — Subscription Eligibility Policy
+
+**Status:** SAT  
+**Verdict:** Policy is satisfiable — a qualifying customer profile exists
+**Rules checked:** 3
+
+### Qualifying Profile Found by Z3
+
+| Variable | Value |
+|---|---|
+| age | 13 |
+| good_standing | True |
+| premium_tier | True |
+| lifetime_member | False |
+
+── Business Explanation ────────────────────────────────────
+1. **What Z3 found:** The solver confirmed that at least one customer can meet every eligibility rule at once. Its example is a 13-year-old in good standing with a premium tier subscription.
+
+2. **Business meaning:** The three rules are consistent. They don't contradict each other, so the policy can actually admit customers. It is not an empty or impossible rule set.
+
+3. **What's notable:** The example sits exactly on the minimum age boundary (13), and the customer is not a lifetime member. This shows the age threshold is inclusive and that premium tier alone is enough to qualify. Both are worth checking against your intended policy, especially since this involves minors.
+
+4. **Risk of manual tracing:** People tend to check typical cases and miss edge cases, such as boundary ages or rule combinations that conflict. Manual review can't prove that a qualifying customer exists, or that none do, so contradictions and loopholes can go unnoticed until they affect real customers.
+
+(Note: the prompt says "loan eligibility," but the policy is for subscriptions.)

@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/103_data_quality` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (1 model calls, 360 tokens in / 286 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **The key story:** A 500-row sales dataset has 12 negative amounts (billing reversal bug) and 8 null customer_ids (data ingestion failure). LLM inspects the description → "data looks clean." The expectation engine runs 10 declarative rules against all 500 rows in <0.1s → fails 4 expectations with exact row counts.
 
@@ -69,17 +69,17 @@ The LLM explanation in solver=ON (business causes + downstream impact) shows tha
 
 ```bash
 # solver=ON — expectation engine on demo dataset
-graf run ~/.graflang/solvers/data_quality/data_quality.graph.yaml \
+graf run cookbook_solvers/data_quality/data_quality.graph.yaml \
     --adapter claude_cli \
     --param use_solver=true
 
 # solver=OFF — LLM inspects description
-graf run ~/.graflang/solvers/data_quality/data_quality.graph.yaml \
+graf run cookbook_solvers/data_quality/data_quality.graph.yaml \
     --adapter claude_cli \
     --param use_solver=false
 
 # Validate your own CSV file
-graf run ~/.graflang/solvers/data_quality/data_quality.graph.yaml \
+graf run cookbook_solvers/data_quality/data_quality.graph.yaml \
     --adapter claude_cli --param use_solver=true \
     --param "data_csv=$(cat my_sales.csv)"
 ```

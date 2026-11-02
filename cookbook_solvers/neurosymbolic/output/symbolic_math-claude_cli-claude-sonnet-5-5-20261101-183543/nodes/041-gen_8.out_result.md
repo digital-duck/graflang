@@ -1,0 +1,1 @@
+The problem asks you to find how the expression 3x³ − x changes (its derivative), simplify that result by factoring, and then find which x-values make it equal to zero. First, differentiating gives 9x² − 1. Next, factoring that gives (3x − 1)(3x + 1). Finally, setting the factored form equal to zero and solving gives x = −1/3 and x = 1/3. So the answer is **x = −1/3 or x = 1/3**.

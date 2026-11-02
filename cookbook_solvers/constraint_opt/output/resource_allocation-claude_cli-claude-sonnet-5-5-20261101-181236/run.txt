@@ -1,0 +1,106 @@
+⚡ Loading graph: cookbook_solvers/constraint_opt/resource_allocation.graph.yaml
+✓ Graph loaded: resource_allocation
+  Nodes: 39
+  Edges: 91
+
+▶ Executing workflow...
+⚡ SOLVE tool_1 (#1)
+⚡ SOLVE tool_2 (#1)
+⚡ CONTEXT set_1 (#1)
+⚡ CONTEXT set_2 (#1)
+⚡ CONTEXT set_3 (#1)
+⚡ CONTEXT set_4 (#1)
+⚡ CONTEXT set_5 (#1)
+⚡ CONTEXT set_6 (#1)
+⚡ CONTEXT set_7 (#1)
+⚡ CONTEXT set_8 (#1)
+⚡ CONTEXT set_9 (#1)
+⚡ CONTEXT set_10 (#1)
+⚡ EVALUATE eval_1 (#1)
+⚡ SOLVE tool_3 (#1)
+⚡ CONTEXT set_11 (#1)
+⚡ LOOP loop_1 (#1)
+  ⚡ EVALUATE eval_2 (#1)
+  ⚡ EVALUATE eval_3 (#1)
+  ⚡ GENERATE gen_1 (#1)
+  ⚡ CONTEXT set_13 (#1)
+  ⚡ SOLVE tool_4 (#1)
+  ⚡ SOLVE tool_5 (#1)
+  ⚡ CONTEXT set_14 (#1)
+  ⚡ EVALUATE eval_2 (#1)
+  ⚡ CONTEXT set_12 (#1)
+⚡ SOLVE tool_9 (#1)
+⚡ SOLVE tool_10 (#1)
+⚡ ASSERT assert_1 (#1)
+⚡ SOLVE tool_11 (#1)
+⚡ SOLVE tool_12 (#1)
+⚡ GENERATE gen_3 (#1)
+⚡ CONTEXT set_17 (#1)
+⚡ SOLVE tool_13 (#1)
+⚡ SOLVE tool_19 (#1)
+⚡ SOLVE tool_20 (#1)
+⚡ SOLVE tool_21 (#1)
+⚡ SOLVE tool_22 (#1)
+⚡ OUTPUT wf_exit (#1)
+
+✓ Workflow completed
+Output: {'report': '# Resource Allocation Report\n\n**Problem:** An IT 
+department must select a portfolio of projects for next quarter. Six candidate 
+projects are available. Project P1 costs $120K and requires 3 developer-months, 
+delivering strategic value 8. Project P2 costs $80K and requires 2 
+developer-months, delivering value 5. Project P3 costs $200K and requires 5 
+developer-months, delivering value 10. Project P4 costs $150K and requires 3 
+developer-months, delivering value 9. Project P5 costs $60K and requires 2 
+developer-months, delivering value 4. Project P6 costs $90K and requires 2 
+developer-months, delivering value 6. The total budget is $500K and the team has
+10 developer-months available. Each project is either fully funded or not funded
+— no partial investment. Select which projects to fund to maximize total 
+strategic value.\n\n**Solver status:** `Optimal`\n**Maximum portfolio value:** 
+28\n\n**Selected projects:**\n  ✓ y_P1\n  ✓ y_P2\n  ✓ y_P4\n  ✓ 
+y_P6\n\n**Rejected projects:**\n  ✗ y_P3\n  ✗ y_P5\n\n## 
+Interpretation\n\n**Selected:** P1, P2, P4 and P6, for a total strategic value 
+of 28.\n\n**Resources:** The portfolio costs $440K of the $500K budget, leaving 
+$60K unspent. It uses all 10 of the 10 available developer-months, so there is 
+no headcount slack.\n\n**Left out:** P3 (value 10, the single largest) and P5 
+(value 4).\n- P3 is excluded because of headcount. It needs 5 developer-months, 
+half the team\'s capacity, and displaces more value than it adds.\n- P5 fits the
+leftover budget exactly, but there is no headcount left for it.\n\n**Strategic 
+observation:** Developer capacity, not money, is the constraint. Extra budget 
+alone would change nothing. Two more developer-months would let the team add P5 
+(value 4) for $60K, using the unspent budget exactly and lifting value to 32. 
+Hiring or contracting capacity is therefore the better lever than a budget 
+increase.\n\n## Solution Verification\n\n**Cost:** 120 + 80 + 150 + 90 = $440K, 
+which is within the $500K budget.\n\n**Developer-months:** 3 + 2 + 3 + 2 = 10, 
+which equals the 10 available, so the limit is met exactly.\n\n**Value:** 8 + 5 
++ 9 + 6 = 28.\n\n**Rejected alternatives:**\n- Swap P2 for P5: cost is $420K and
+developer-months are 10, so it is feasible, but value is 8 + 4 + 9 + 6 = 27, 
+which is lower.\n- Include P3 with P1 and P4: cost is $470K, but 
+developer-months are 3 + 5 + 3 = 11, which breaks the limit.\n- Include P3 with 
+P4 and P6: this is feasible (cost $440K, 10 developer-months), but value is 10 +
+9 + 6 = 25, which is lower.\n\n**Match with solver:** The computed value of 28 
+equals the solver\'s reported optimum of 28, so the result is confirmed.\n\n## 
+Solver Code (LLM-generated, PuLP)\n\n```python\nprojects = ["P1", "P2", "P3", 
+"P4", "P5", "P6"]\ncost     = {"P1": 120, "P2": 80, "P3": 200, "P4": 150, "P5": 
+60, "P6": 90}\ndevmos   = {"P1": 3, "P2": 2, "P3": 5, "P4": 3, "P5": 2, "P6": 
+2}\nvalue    = {"P1": 8, "P2": 5, "P3": 10, "P4": 9, "P5": 4, "P6": 6}\nbudget  
+= 500\ncapacity = 10\n\nprob = pulp.LpProblem("portfolio", pulp.LpMaximize)\ny =
+{p: pulp.LpVariable(f"y_{p}", cat="Binary") for p in projects}\nprob += 
+pulp.lpSum(value[p] * y[p] for p in projects)\nprob += (pulp.lpSum(cost[p] * 
+y[p] for p in projects) <= budget)\nprob += (pulp.lpSum(devmos[p] * y[p] for p 
+in projects) <= capacity)\nprob.solve(pulp.PULP_CBC_CMD(msg=0))\n_result = {\n  
+"status": pulp.LpStatus[prob.status],\n    "objective": 
+pulp.value(prob.objective),\n    "variables": {v.name: pulp.value(v) for v in 
+prob.variables()}\n}\n```\n\n## Run Metrics\n\n| Metric | Value |\n|---|---|\n| 
+Mode | solver=ON  (PuLP/CBC + ASSERT gate) |\n| LLM calls | 2 |\n| Stage 1 — 
+formulation + solve (s) | 4.50 |\n| Stage 2 — interpretation (s) | 10.30 |\n| 
+Total latency (s) | 14.90 |\n| Input tokens | 0 |\n| Output tokens | 0 |\n| 
+Total tokens | 0 |'}
+38 steps · 2 LLM calls, 1100 tokens in / 603 out · slowest: gen_3 10.3s
+output: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/constraint_opt/resource_allocation/resu
+lt/resource_allocation-claude_cli-claude-sonnet-5-5-20261101-181236
+log: 
+/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-
+a866-23f8fbd7fcc1/scratchpad/solver_runs/constraint_opt/resource_allocation/log/
+resource_allocation-claude_cli-claude-sonnet-5-5-20261101-181235.log

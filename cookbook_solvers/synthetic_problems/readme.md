@@ -2,7 +2,7 @@
 
 > **GraphLang port.** Lifted from SPL.py's `cookbook-solver/109_synthetic_problems` with `spl3 util spl2graph` (no model was involved). The Python tools travel inside the graph as `SOLVE` nodes (`backend: kernel`), so `graf run` needs the `kernel` extra (`pip install 'graflang[kernel]'`) and the libraries named below, not SPL.py. Commands use `graf run`; `--llm ADAPTER[:MODEL]` and `--param key=value` work as in `spl3 run`.
 > Not ported: `tools.py` (the SPL original's tool registration, experiment and app scripts).
-> Smoke test (2026-11-01, placeholder model, no real model call): runs end to end with the placeholder model. This is a run-through of the graph, not a check that the answers are right: run it with a real model before you rely on it.
+> Test run (2026-11-01, `claude_cli` `claude-sonnet-5-5`, solver on): the graph completed (2 model calls, 1079 tokens in / 1887 out in total). A run that completes does not show the answer is right: read the output before you rely on a recipe.
 
 **Purpose:** Turn one verified (problem, optimal) pair into a labeled test suite of N variants — expanding the benchmark space for any solver recipe without writing problems by hand.
 
@@ -64,31 +64,31 @@ Additional domains (production, workforce, job-shop) can be added by extending `
 
 ```bash
 # n05: small LP problems (5 products) — mirrors r78 n05 baseline
-graf run ~/.graflang/solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
+graf run cookbook_solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
     --llm claude_cli \
     --param domain=LP \
     --param n_variants=5 --param n_size=5
 
 # n10: medium scale — where gemma3 formulation starts to degrade (per r78 H2)
-graf run ~/.graflang/solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
+graf run cookbook_solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
     --llm claude_cli \
     --param domain=LP \
     --param n_variants=5 --param n_size=10
 
 # n20: large scale — crossover point where solver=OFF collapses
-graf run ~/.graflang/solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
+graf run cookbook_solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
     --llm claude_cli \
     --param domain=LP \
     --param n_variants=5 --param n_size=20
 
 # Supply-sourcing n10 (10 suppliers, B1 pattern)
-graf run ~/.graflang/solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
+graf run cookbook_solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
     --llm claude_cli \
     --param domain=supply-sourcing \
     --param n_variants=5 --param n_size=10
 
 # Custom reference problem + ILP at n08
-graf run ~/.graflang/solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
+graf run cookbook_solvers/synthetic_problems/synthetic_problem_gen.graph.yaml \
     --llm claude_cli \
     --param domain=ILP \
     --param n_variants=5 --param n_size=8 \

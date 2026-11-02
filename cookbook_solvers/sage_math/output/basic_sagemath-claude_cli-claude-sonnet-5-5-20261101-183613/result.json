@@ -1,0 +1,3 @@
+{
+  "explanation": "The question asks which symmetry group captures how the roots of x⁵ − x − 1 can be shuffled around while preserving all the polynomial relationships over the rationals. Sage reports the answer as transitive group number 5 of degree 5, which is S₅, the full symmetric group on five letters (order 120). The Galois group is the group of field automorphisms of the splitting field that fix ℚ, and each automorphism permutes the roots; here, every possible permutation of the five roots is realized, so there are no hidden algebraic relations among them beyond the obvious ones. Because S₅ is not solvable, this also means the roots of this quintic cannot be expressed using radicals (nth roots and arithmetic)."
+}

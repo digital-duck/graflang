@@ -1,0 +1,7 @@
+{
+  "graph": "trading_rule_z3",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {},
+  "started": "2026-11-01T18:11:07"
+}

@@ -1,0 +1,3 @@
+{
+  "report": "## Compliance check\n\n**Destination:** external_api  \n**Engine:** stdlib  \n**Verdict:** NOT COMPLIANT\n\n- R1: PII sent to an external destination must be masked\n- R2: A social security number never leaves externally, even masked"
+}

@@ -1,0 +1,9 @@
+{
+  "graph": "symbolic_math",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "problem": "differentiate 3*x**3-x, then factor if needed, finally solve for x"
+  },
+  "started": "2026-11-01T18:35:43"
+}

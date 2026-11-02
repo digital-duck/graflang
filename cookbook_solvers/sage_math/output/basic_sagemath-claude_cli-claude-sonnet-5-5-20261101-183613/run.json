@@ -1,0 +1,9 @@
+{
+  "graph": "basic_sagemath",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "log_dir": "/tmp/claude-1000/-home-gongai-projects-digital-duck-graflang/82c10320-79f5-48db-a866-23f8fbd7fcc1/scratchpad/sage/sm/logs-spl"
+  },
+  "started": "2026-11-01T18:36:13"
+}

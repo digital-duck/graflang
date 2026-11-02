@@ -45,6 +45,9 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--workers", type=int, default=None,
               help="run nodes released together (the branches of a FORK, ...) on this many threads; default 1, or limits.concurrency "
                    "of a --bind file. Results are applied in a fixed order, so a run does not depend on which call finishes first")
+@click.option("--kernel-name", default="python3", show_default=True,
+              help="the Jupyter kernel that `backend: kernel` SOLVE nodes run in (see `jupyter kernelspec list`), e.g. sagemath; "
+                   "a node's own `kernel_name` wins")
 @click.option("--record", "record_file", type=click.Path(dir_okay=False), default=None,
               help="write every GENERATE call to this cassette (JSON lines) while running")
 @click.option("--replay", "replay_file", type=click.Path(exists=True, dir_okay=False), default=None,
@@ -70,7 +73,7 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--no-output", is_flag=True, help="do not write result files")
 @click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
               help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")
-def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, replay_file, checkpoint_file, resume_file, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
+def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, record_file, replay_file, checkpoint_file, resume_file, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
             no_output, log_prompts):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
     if log_prompts:
@@ -154,7 +157,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, record_file, re
             llm = RecordingLLM(llm, Path(record_file))
         llm = MeteredLLM(llm, limits.get("max_llm_calls"), limits.get("max_cost_usd"))
         runtime = GraphLangRuntime(graph_data, llm=llm, adapter=adapter, model=model, max_steps=max_steps, wall_time_s=limits.get("wall_time_s"),
-                                   workers=workers or limits.get("concurrency") or 1,
+                                   workers=workers or limits.get("concurrency") or 1, kernel_name=kernel_name,
                                    node_output=run_output if save_nodes else None)
         if adapter == "mock":
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")

@@ -21,8 +21,11 @@ nodes:
   - id: tool_1
     type: SOLVE
     config:
-      expression: isinstance(1, Integer)
-      tool: isinstance
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: isinstance(1, Integer)
+      out_type: BOOL
     ports:
       - trigger
       - complete
@@ -39,8 +42,12 @@ nodes:
   - id: solve_1
     type: SOLVE
     config:
-      expression: version()
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: str(version())
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -108,8 +115,12 @@ nodes:
   - id: solve_2
     type: SOLVE
     config:
-      expression: str(var('x y z'))
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: str(var('x y z'))
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -334,8 +345,12 @@ nodes:
   - id: solve_3
     type: SOLVE
     config:
-      expression: str(__import__('time').perf_counter())
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: str(__import__('time').perf_counter())
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -353,8 +368,12 @@ nodes:
   - id: solve_4
     type: SOLVE
     config:
-      expression: str(QQ['x'](@in_expression).galois_group())
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: str(QQ['x'](expression).galois_group())
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -373,8 +392,12 @@ nodes:
   - id: solve_5
     type: SOLVE
     config:
-      expression: str(factor(QQ['x'](@in_expression)))
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: str(factor(QQ['x'](expression)))
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -393,8 +416,12 @@ nodes:
   - id: solve_6
     type: SOLVE
     config:
-      expression: str(Conic(QQ['x,y,z'](@in_expression)).has_rational_point(point=True))
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: str(Conic(QQ['x,y,z'](expression)).has_rational_point(point=True))
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -413,8 +440,12 @@ nodes:
   - id: solve_7
     type: SOLVE
     config:
-      expression: str(EllipticCurve(@in_expression).rank())
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: str(EllipticCurve(expression).rank())
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -432,8 +463,12 @@ nodes:
   - id: solve_8
     type: SOLVE
     config:
-      expression: '''%.3fs''%(__import__(''time'').perf_counter()-float(''@in__t0''))'
       type: TEXT
+      backend: kernel
+      kernel_name: sagemath
+      code: ''
+      result: "'%.3fs'%(__import__('time').perf_counter()-float(_t0))"
+      out_type: TEXT
     ports:
       - trigger
       - complete
@@ -442,11 +477,12 @@ nodes:
   - id: assert_2
     type: ASSERT
     config:
-      condition: len(str(@_spl_solve_result))>0
+      condition: len(str(@in_sage_result))>0
     ports:
       - trigger
       - pass
       - fail
+      - in_sage_result
   - id: tool_9
     type: SOLVE
     config:
@@ -795,3 +831,18 @@ edges:
   - source: tool_10.complete
     target: wf_exit.trigger
     type: triggers
+  - source: solve_4.out_sage_result
+    target: assert_2.in_sage_result
+    type: binds
+  - source: solve_5.out_sage_result
+    target: assert_2.in_sage_result
+    type: binds
+  - source: solve_6.out_sage_result
+    target: assert_2.in_sage_result
+    type: binds
+  - source: solve_7.out_sage_result
+    target: assert_2.in_sage_result
+    type: binds
+  - source: set_2.out_sage_result
+    target: assert_2.in_sage_result
+    type: binds

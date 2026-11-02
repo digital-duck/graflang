@@ -1,0 +1,3 @@
+{
+  "result": "# Lean verification report (mathlib)\n\n**Claim (prose):** the square of any real number is nonnegative\n\n**Formalization:** `∀ a : ℝ, 0 ≤ a ^ 2`\n\n**Faithfulness (LLM judge):** not judged (formalization failed)\n\n**Badge:** `unverified`"
+}

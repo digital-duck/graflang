@@ -1,0 +1,10 @@
+{
+  "graph": "symbolic_math",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "backend": "lean",
+    "problem": "the square of any real number is nonnegative"
+  },
+  "started": "2026-11-01T18:36:32"
+}
