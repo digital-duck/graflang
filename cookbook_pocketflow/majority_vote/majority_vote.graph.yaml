@@ -1,0 +1,357 @@
+version: 1.0-graph
+workflow:
+  name: majority_vote
+  inputs:
+  - name: question
+    type: TEXT
+    default: What is 15% of 240?
+  outputs:
+  - name: answer
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_question
+- id: fork_1
+  type: FORK
+  ports:
+  - trigger
+  - branch_1
+  - branch_2
+  - branch_3
+- id: gen_1
+  type: GENERATE
+  config:
+    function: attempt_reasoning
+    params:
+    - question
+    prompt_inline: |-
+      Answer the following reasoning question carefully and concisely.
+      State only your final answer — no explanation or preamble.
+
+      Question: {{in_question}}
+    arguments:
+    - '@question'
+  ports:
+  - trigger
+  - complete
+  - in_question
+  - out_ans1
+- id: gen_2
+  type: GENERATE
+  config:
+    function: attempt_reasoning
+    params:
+    - question
+    prompt_inline: |-
+      Answer the following reasoning question carefully and concisely.
+      State only your final answer — no explanation or preamble.
+
+      Question: {{in_question}}
+    arguments:
+    - '@question'
+  ports:
+  - trigger
+  - complete
+  - in_question
+  - out_ans2
+- id: gen_3
+  type: GENERATE
+  config:
+    function: attempt_reasoning
+    params:
+    - question
+    prompt_inline: |-
+      Answer the following reasoning question carefully and concisely.
+      State only your final answer — no explanation or preamble.
+
+      Question: {{in_question}}
+    arguments:
+    - '@question'
+  ports:
+  - trigger
+  - complete
+  - in_question
+  - out_ans3
+- id: join_1
+  type: JOIN
+  ports:
+  - trigger
+  - complete
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_ans1 + ''\n'' + @in_ans2 + ''\n'' + @in_ans3'
+  ports:
+  - trigger
+  - complete
+  - in_ans1
+  - in_ans2
+  - in_ans3
+  - out_collected
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: tally_votes
+    backend: kernel
+    arguments:
+    - '@collected'
+    code: |
+      import json
+      from collections import Counter
+
+      def tally_votes(answers: str) -> str:
+          try:
+              items = [a.strip() for a in answers.split("\n") if a.strip()]
+              if not items:
+                  return json.dumps({"winner": "", "first_candidate": "", "consensus": "no"})
+              counts = Counter(items)
+              most_common = counts.most_common()
+              top_count = most_common[0][1]
+              top_candidates = [v for v, c in most_common if c == top_count]
+              consensus = "yes" if len(top_candidates) == 1 else "no"
+              return json.dumps({
+                  "winner": most_common[0][0],
+                  "first_candidate": top_candidates[0],
+                  "consensus": consensus
+              })
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = tally_votes(collected)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - answers
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_collected
+  - out_tally
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tally'
+    - '''consensus'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'consensus')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_tally
+  - out_consensus
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'yes')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tally'
+    - '''winner'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'winner')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_tally
+  - out_answer
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tally'
+    - '''first_candidate'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'first_candidate')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_tally
+  - out_answer
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_answer
+edges:
+- source: wf_entry.entry
+  target: fork_1.trigger
+  type: triggers
+- source: fork_1.branch_1
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: gen_1.in_question
+  type: binds
+- source: fork_1.branch_2
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: gen_2.in_question
+  type: binds
+- source: fork_1.branch_3
+  target: gen_3.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: gen_3.in_question
+  type: binds
+- source: gen_1.complete
+  target: join_1.trigger
+  type: triggers
+- source: gen_2.complete
+  target: join_1.trigger
+  type: triggers
+- source: gen_3.complete
+  target: join_1.trigger
+  type: triggers
+- source: join_1.complete
+  target: set_1.trigger
+  type: triggers
+- source: gen_1.out_ans1
+  target: set_1.in_ans1
+  type: binds
+- source: gen_2.out_ans2
+  target: set_1.in_ans2
+  type: binds
+- source: gen_3.out_ans3
+  target: set_1.in_ans3
+  type: binds
+- source: set_1.complete
+  target: tool_1.trigger
+  type: triggers
+- source: set_1.out_collected
+  target: tool_1.in_collected
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_tally
+  target: tool_2.in_tally
+  type: binds
+- source: tool_2.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_2.out_consensus
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: tool_3.trigger
+  type: triggers
+- source: tool_1.out_tally
+  target: tool_3.in_tally
+  type: binds
+- source: eval_1.fail
+  target: tool_4.trigger
+  type: triggers
+- source: tool_1.out_tally
+  target: tool_4.in_tally
+  type: binds
+- source: tool_3.out_answer
+  target: wf_exit.in_answer
+  type: binds
+- source: tool_4.out_answer
+  target: wf_exit.in_answer
+  type: binds
+- source: tool_3.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: tool_4.complete
+  target: wf_exit.trigger
+  type: triggers

@@ -1,0 +1,134 @@
+{
+  "steps": 79,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0,
+    "ms": 0
+  },
+  "nodes": {
+    "loop_1": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 609
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 6,
+      "ms": 454
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 5,
+      "ms": 24
+    },
+    "tool_5": {
+      "type": "SOLVE",
+      "n": 5,
+      "ms": 23
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 6,
+      "ms": 18
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 6,
+      "ms": 17
+    },
+    "tool_9": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 11
+    },
+    "tool_7": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 4
+    },
+    "tool_8": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 3
+    },
+    "tool_6": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 2
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 1
+    },
+    "set_2": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_3": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_4": {
+      "type": "CONTEXT",
+      "n": 6,
+      "ms": 0
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 6,
+      "ms": 0
+    },
+    "set_7": {
+      "type": "CONTEXT",
+      "n": 5,
+      "ms": 0
+    },
+    "eval_2": {
+      "type": "EVALUATE",
+      "n": 5,
+      "ms": 0
+    },
+    "eval_3": {
+      "type": "EVALUATE",
+      "n": 4,
+      "ms": 0
+    },
+    "eval_4": {
+      "type": "EVALUATE",
+      "n": 3,
+      "ms": 0
+    },
+    "set_8": {
+      "type": "CONTEXT",
+      "n": 5,
+      "ms": 0
+    },
+    "set_9": {
+      "type": "CONTEXT",
+      "n": 5,
+      "ms": 0
+    },
+    "set_5": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_6": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

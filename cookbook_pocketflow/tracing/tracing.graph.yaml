@@ -1,0 +1,1220 @@
+version: 1.0-graph
+workflow:
+  name: pocketflow_langfuse_trace
+  inputs:
+  - name: flow_name
+    type: TEXT
+    default: pocketflow
+  - name: node_list
+    type: TEXT
+    default: node_a,node_b,node_c
+  - name: flow_inputs
+    type: TEXT
+    default: '{}'
+  - name: max_nodes
+    type: INTEGER
+    default: 10
+  outputs:
+  - name: trace_summary
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_flow_name
+  - out_node_list
+  - out_flow_inputs
+  - out_max_nodes
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: apply_trace_decorator
+    backend: kernel
+    arguments:
+    - '@flow_name'
+    code: |
+      import json, time
+      def apply_trace_decorator(flow_name: str) -> str:
+          try:
+              trace_id = f"{flow_name}_{int(time.time() * 1000)}"
+              return json.dumps({"status": "ok", "trace_id": trace_id})
+          except Exception as e:
+              return json.dumps({"status": "error", "exception": str(e)})
+      _spl_result = apply_trace_decorator(flow_name)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - flow_name
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_flow_name
+  - out_decorator_result
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@decorator_result'
+    - '''trace_id'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(decorator_result, 'trace_id')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_decorator_result
+  - out_trace_id
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''ok'''
+  ports:
+  - trigger
+  - complete
+  - out_flow_status
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_trace_summary
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_nodes
+    outputs:
+      current_node:
+        from: tool_3.out_current_node
+      no_more:
+        from: tool_4.out_no_more
+      i:
+        from:
+        - set_4.out_i
+        - set_7.out_i
+        - set_10.out_i
+        - set_13.out_i
+        - set_15.out_i
+      prep_result:
+        from: tool_5.out_prep_result
+      log_out:
+        from:
+        - tool_8.out_log_out
+        - tool_12.out_log_out
+        - tool_16.out_log_out
+        - tool_17.out_log_out
+      phase_status:
+        from:
+        - tool_7.out_phase_status
+        - tool_11.out_phase_status
+        - tool_15.out_phase_status
+      flow_status:
+        from:
+        - set_5.out_flow_status
+        - set_8.out_flow_status
+        - set_11.out_flow_status
+      trace_summary:
+        from:
+        - set_6.out_trace_summary
+        - set_9.out_trace_summary
+        - set_12.out_trace_summary
+        - set_14.out_trace_summary
+      exec_result:
+        from: tool_9.out_exec_result
+      post_result:
+        from: tool_13.out_post_result
+    subgraph:
+      nodes:
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@node_list'
+          - '@i'
+          - ''','''
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(node_list, i, ',')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_node_list
+        - in_i
+        - out_current_node
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: isblank
+          backend: kernel
+          arguments:
+          - '@current_node'
+          code: |
+            def isblank(value: str) -> str:
+                """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+                return 'true' if str(value).strip() == '' else 'false'
+            _spl_result = isblank(current_node)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - out_no_more
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_nodes'
+        ports:
+        - trigger
+        - complete
+        - in_max_nodes
+        - out_i
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: run_prep
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '@flow_inputs'
+          code: |
+            import json, time
+            def run_prep(node_name: str, inputs: str) -> str:
+                try:
+                    start = time.time()
+                    timing_ms = round((time.time() - start) * 1000, 2)
+                    return json.dumps({"status": "ok", "phase": "prep", "node": node_name,
+                                       "result": f"prep:{node_name}", "timing_ms": timing_ms, "inputs": inputs})
+                except Exception as e:
+                    return json.dumps({"status": "error", "phase": "prep", "node": node_name, "exception": str(e)})
+            _spl_result = run_prep(current_node, flow_inputs)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - inputs
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_flow_inputs
+        - out_prep_result
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: langfuse_log
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '''prep'''
+          - '@prep_result'
+          code: |
+            import json
+            def langfuse_log(node_name: str, phase: str, payload_json: str) -> str:
+                try:
+                    from langfuse import Langfuse
+                    payload = json.loads(payload_json)
+                    lf = Langfuse()
+                    span = lf.span(
+                        name=f"{node_name}.{phase}",
+                        input={"inputs": payload.get("inputs")},
+                        metadata={"timing_ms": payload.get("timing_ms")}
+                    )
+                    span.end(output=payload.get("result"))
+                    return "logged"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = langfuse_log(current_node, 'prep', prep_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - phase
+          - payload_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_prep_result
+        - out_log_out
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@prep_result'
+          - '''status'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(prep_result, 'status')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_prep_result
+        - out_phase_status
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'error')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: langfuse_record_exception
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '''prep'''
+          - '@prep_result'
+          code: |
+            import json
+            def langfuse_record_exception(node_name: str, phase: str, result_json: str) -> str:
+                try:
+                    from langfuse import Langfuse
+                    payload = json.loads(result_json)
+                    lf = Langfuse()
+                    span = lf.span(
+                        name=f"{node_name}.{phase}.exception",
+                        metadata={"exception": payload.get("exception"), "node": node_name, "phase": phase}
+                    )
+                    span.end(level="ERROR")
+                    return "exception_recorded"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = langfuse_record_exception(current_node, 'prep', prep_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - phase
+          - result_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_prep_result
+        - out_log_out
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''error'''
+        ports:
+        - trigger
+        - complete
+        - out_flow_status
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_trace_summary + ''ERROR:prep:'' + @in_current_node'
+        ports:
+        - trigger
+        - complete
+        - in_trace_summary
+        - in_current_node
+        - out_trace_summary
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_nodes'
+        ports:
+        - trigger
+        - complete
+        - in_max_nodes
+        - out_i
+      - id: tool_9
+        type: SOLVE
+        config:
+          tool: run_exec
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '@prep_result'
+          code: |
+            import json, time
+            def run_exec(node_name: str, prep_result: str) -> str:
+                try:
+                    start = time.time()
+                    timing_ms = round((time.time() - start) * 1000, 2)
+                    return json.dumps({"status": "ok", "phase": "exec", "node": node_name,
+                                       "result": f"exec:{node_name}", "timing_ms": timing_ms, "inputs": prep_result})
+                except Exception as e:
+                    return json.dumps({"status": "error", "phase": "exec", "node": node_name, "exception": str(e)})
+            _spl_result = run_exec(current_node, prep_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - prep_result
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_prep_result
+        - out_exec_result
+      - id: tool_10
+        type: SOLVE
+        config:
+          tool: langfuse_log
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '''exec'''
+          - '@exec_result'
+          code: |
+            import json
+            def langfuse_log(node_name: str, phase: str, payload_json: str) -> str:
+                try:
+                    from langfuse import Langfuse
+                    payload = json.loads(payload_json)
+                    lf = Langfuse()
+                    span = lf.span(
+                        name=f"{node_name}.{phase}",
+                        input={"inputs": payload.get("inputs")},
+                        metadata={"timing_ms": payload.get("timing_ms")}
+                    )
+                    span.end(output=payload.get("result"))
+                    return "logged"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = langfuse_log(current_node, 'exec', exec_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - phase
+          - payload_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_exec_result
+        - out_log_out
+      - id: tool_11
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@exec_result'
+          - '''status'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(exec_result, 'status')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_exec_result
+        - out_phase_status
+      - id: eval_3
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'error')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_12
+        type: SOLVE
+        config:
+          tool: langfuse_record_exception
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '''exec'''
+          - '@exec_result'
+          code: |
+            import json
+            def langfuse_record_exception(node_name: str, phase: str, result_json: str) -> str:
+                try:
+                    from langfuse import Langfuse
+                    payload = json.loads(result_json)
+                    lf = Langfuse()
+                    span = lf.span(
+                        name=f"{node_name}.{phase}.exception",
+                        metadata={"exception": payload.get("exception"), "node": node_name, "phase": phase}
+                    )
+                    span.end(level="ERROR")
+                    return "exception_recorded"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = langfuse_record_exception(current_node, 'exec', exec_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - phase
+          - result_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_exec_result
+        - out_log_out
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''error'''
+        ports:
+        - trigger
+        - complete
+        - out_flow_status
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_trace_summary + ''ERROR:exec:'' + @in_current_node'
+        ports:
+        - trigger
+        - complete
+        - in_trace_summary
+        - in_current_node
+        - out_trace_summary
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_nodes'
+        ports:
+        - trigger
+        - complete
+        - in_max_nodes
+        - out_i
+      - id: tool_13
+        type: SOLVE
+        config:
+          tool: run_post
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '@exec_result'
+          code: |
+            import json, time
+            def run_post(node_name: str, exec_result: str) -> str:
+                try:
+                    start = time.time()
+                    timing_ms = round((time.time() - start) * 1000, 2)
+                    return json.dumps({"status": "ok", "phase": "post", "node": node_name,
+                                       "result": f"post:{node_name}", "timing_ms": timing_ms, "inputs": exec_result})
+                except Exception as e:
+                    return json.dumps({"status": "error", "phase": "post", "node": node_name, "exception": str(e)})
+            _spl_result = run_post(current_node, exec_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - exec_result
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_exec_result
+        - out_post_result
+      - id: tool_14
+        type: SOLVE
+        config:
+          tool: langfuse_log
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '''post'''
+          - '@post_result'
+          code: |
+            import json
+            def langfuse_log(node_name: str, phase: str, payload_json: str) -> str:
+                try:
+                    from langfuse import Langfuse
+                    payload = json.loads(payload_json)
+                    lf = Langfuse()
+                    span = lf.span(
+                        name=f"{node_name}.{phase}",
+                        input={"inputs": payload.get("inputs")},
+                        metadata={"timing_ms": payload.get("timing_ms")}
+                    )
+                    span.end(output=payload.get("result"))
+                    return "logged"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = langfuse_log(current_node, 'post', post_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - phase
+          - payload_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_post_result
+        - out_log_out
+      - id: tool_15
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@post_result'
+          - '''status'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(post_result, 'status')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_post_result
+        - out_phase_status
+      - id: eval_4
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'error')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_16
+        type: SOLVE
+        config:
+          tool: langfuse_record_exception
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '''post'''
+          - '@post_result'
+          code: |
+            import json
+            def langfuse_record_exception(node_name: str, phase: str, result_json: str) -> str:
+                try:
+                    from langfuse import Langfuse
+                    payload = json.loads(result_json)
+                    lf = Langfuse()
+                    span = lf.span(
+                        name=f"{node_name}.{phase}.exception",
+                        metadata={"exception": payload.get("exception"), "node": node_name, "phase": phase}
+                    )
+                    span.end(level="ERROR")
+                    return "exception_recorded"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = langfuse_record_exception(current_node, 'post', post_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - phase
+          - result_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_post_result
+        - out_log_out
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''error'''
+        ports:
+        - trigger
+        - complete
+        - out_flow_status
+      - id: set_12
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_trace_summary + ''ERROR:post:'' + @in_current_node'
+        ports:
+        - trigger
+        - complete
+        - in_trace_summary
+        - in_current_node
+        - out_trace_summary
+      - id: set_13
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_nodes'
+        ports:
+        - trigger
+        - complete
+        - in_max_nodes
+        - out_i
+      - id: tool_17
+        type: SOLVE
+        config:
+          tool: langfuse_flush_span
+          backend: kernel
+          arguments:
+          - '@current_node'
+          - '@trace_id'
+          code: |
+            def langfuse_flush_span(node_name: str, trace_id: str) -> str:
+                try:
+                    from langfuse import Langfuse
+                    lf = Langfuse()
+                    lf.flush()
+                    return f"flushed:{node_name}"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = langfuse_flush_span(current_node, trace_id)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - node_name
+          - trace_id
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_node
+        - in_trace_id
+        - out_log_out
+      - id: set_14
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_trace_summary + ''OK:'' + @in_current_node + '' '''
+        ports:
+        - trigger
+        - complete
+        - in_trace_summary
+        - in_current_node
+        - out_trace_summary
+      - id: set_15
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_4.in_current_node
+        type: binds
+      - source: tool_4.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_4.out_no_more
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_4.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_5.in_current_node
+        type: binds
+      - source: tool_5.complete
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_6.in_current_node
+        type: binds
+      - source: tool_5.out_prep_result
+        target: tool_6.in_prep_result
+        type: binds
+      - source: tool_6.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_5.out_prep_result
+        target: tool_7.in_prep_result
+        type: binds
+      - source: tool_7.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_7.out_phase_status
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: tool_8.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_8.in_current_node
+        type: binds
+      - source: tool_5.out_prep_result
+        target: tool_8.in_prep_result
+        type: binds
+      - source: tool_8.complete
+        target: set_5.trigger
+        type: triggers
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: set_6.in_current_node
+        type: binds
+      - source: set_6.complete
+        target: set_7.trigger
+        type: triggers
+      - source: eval_2.fail
+        target: tool_9.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_9.in_current_node
+        type: binds
+      - source: tool_5.out_prep_result
+        target: tool_9.in_prep_result
+        type: binds
+      - source: tool_9.complete
+        target: tool_10.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_10.in_current_node
+        type: binds
+      - source: tool_9.out_exec_result
+        target: tool_10.in_exec_result
+        type: binds
+      - source: tool_10.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: tool_9.out_exec_result
+        target: tool_11.in_exec_result
+        type: binds
+      - source: tool_11.complete
+        target: eval_3.trigger
+        type: triggers
+      - source: tool_11.out_phase_status
+        target: eval_3.in_subject
+        type: binds
+      - source: eval_3.pass
+        target: tool_12.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_12.in_current_node
+        type: binds
+      - source: tool_9.out_exec_result
+        target: tool_12.in_exec_result
+        type: binds
+      - source: tool_12.complete
+        target: set_8.trigger
+        type: triggers
+      - source: set_8.complete
+        target: set_9.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: set_9.in_current_node
+        type: binds
+      - source: set_9.complete
+        target: set_10.trigger
+        type: triggers
+      - source: eval_3.fail
+        target: tool_13.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_13.in_current_node
+        type: binds
+      - source: tool_9.out_exec_result
+        target: tool_13.in_exec_result
+        type: binds
+      - source: tool_13.complete
+        target: tool_14.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_14.in_current_node
+        type: binds
+      - source: tool_13.out_post_result
+        target: tool_14.in_post_result
+        type: binds
+      - source: tool_14.complete
+        target: tool_15.trigger
+        type: triggers
+      - source: tool_13.out_post_result
+        target: tool_15.in_post_result
+        type: binds
+      - source: tool_15.complete
+        target: eval_4.trigger
+        type: triggers
+      - source: tool_15.out_phase_status
+        target: eval_4.in_subject
+        type: binds
+      - source: eval_4.pass
+        target: tool_16.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_16.in_current_node
+        type: binds
+      - source: tool_13.out_post_result
+        target: tool_16.in_post_result
+        type: binds
+      - source: tool_16.complete
+        target: set_11.trigger
+        type: triggers
+      - source: set_11.complete
+        target: set_12.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: set_12.in_current_node
+        type: binds
+      - source: set_12.complete
+        target: set_13.trigger
+        type: triggers
+      - source: eval_4.fail
+        target: tool_17.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: tool_17.in_current_node
+        type: binds
+      - source: tool_17.complete
+        target: set_14.trigger
+        type: triggers
+      - source: tool_3.out_current_node
+        target: set_14.in_current_node
+        type: binds
+      - source: set_14.complete
+        target: set_15.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_node_list
+  - in_i
+  - in_max_nodes
+  - in_flow_inputs
+  - in_trace_summary
+  - in_trace_id
+  - in_flow_status
+  - out_current_node
+  - out_no_more
+  - out_i
+  - out_prep_result
+  - out_log_out
+  - out_phase_status
+  - out_flow_status
+  - out_trace_summary
+  - out_exec_result
+  - out_post_result
+- id: eval_5
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'ok')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: tool_18
+  type: SOLVE
+  config:
+    tool: langfuse_finalize_trace
+    backend: kernel
+    arguments:
+    - '@trace_id'
+    code: |
+      def langfuse_finalize_trace(trace_id: str) -> str:
+          try:
+              from langfuse import Langfuse
+              lf = Langfuse()
+              lf.flush()
+              return f"trace_finalized:{trace_id}"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = langfuse_finalize_trace(trace_id)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - trace_id
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_trace_id
+  - out_finalize_result
+- id: set_16
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_trace_summary + ''| finalized:'' + @in_trace_id'
+  ports:
+  - trigger
+  - complete
+  - in_trace_summary
+  - in_trace_id
+  - out_trace_summary
+- id: set_17
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_trace_summary + ''| trace_ended_with_error'''
+  ports:
+  - trigger
+  - complete
+  - in_trace_summary
+  - out_trace_summary
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_trace_summary
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_flow_name
+  target: tool_1.in_flow_name
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_decorator_result
+  target: tool_2.in_decorator_result
+  type: binds
+- source: tool_2.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_node_list
+  target: loop_1.in_node_list
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_max_nodes
+  target: loop_1.in_max_nodes
+  type: binds
+- source: wf_entry.out_flow_inputs
+  target: loop_1.in_flow_inputs
+  type: binds
+- source: set_3.out_trace_summary
+  target: loop_1.in_trace_summary
+  type: binds
+- source: tool_2.out_trace_id
+  target: loop_1.in_trace_id
+  type: binds
+- source: set_2.out_flow_status
+  target: loop_1.in_flow_status
+  type: binds
+- source: loop_1.exit
+  target: eval_5.trigger
+  type: triggers
+- source: loop_1.out_flow_status
+  target: eval_5.in_subject
+  type: binds
+- source: eval_5.pass
+  target: tool_18.trigger
+  type: triggers
+- source: tool_2.out_trace_id
+  target: tool_18.in_trace_id
+  type: binds
+- source: tool_18.complete
+  target: set_16.trigger
+  type: triggers
+- source: loop_1.out_trace_summary
+  target: set_16.in_trace_summary
+  type: binds
+- source: tool_2.out_trace_id
+  target: set_16.in_trace_id
+  type: binds
+- source: eval_5.fail
+  target: set_17.trigger
+  type: triggers
+- source: loop_1.out_trace_summary
+  target: set_17.in_trace_summary
+  type: binds
+- source: set_16.out_trace_summary
+  target: wf_exit.in_trace_summary
+  type: binds
+- source: set_17.out_trace_summary
+  target: wf_exit.in_trace_summary
+  type: binds
+- source: set_16.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_17.complete
+  target: wf_exit.trigger
+  type: triggers

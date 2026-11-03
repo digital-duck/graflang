@@ -1,0 +1,70 @@
+CREATE TOOL_API init_db_schema(db_path TEXT) RETURNS TEXT AS PYTHON $$
+import sqlite3
+def init_db_schema(db_path: str) -> str:
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+        return "schema initialized"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API insert_task(db_path TEXT, title TEXT, description TEXT) RETURNS TEXT AS PYTHON $$
+import sqlite3
+def insert_task(db_path: str, title: str, description: str) -> str:
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO tasks (title, description) VALUES (?, ?)",
+            (title, description)
+        )
+        conn.commit()
+        task_id = cursor.lastrowid
+        conn.close()
+        return str(task_id)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API retrieve_all_tasks(db_path TEXT) RETURNS TEXT AS PYTHON $$
+import sqlite3, json
+def retrieve_all_tasks(db_path: str) -> str:
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, title, description, created_at FROM tasks ORDER BY id"
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        tasks = [
+            {"id": r[0], "title": r[1], "description": r[2], "created_at": r[3]}
+            for r in rows
+        ]
+        return json.dumps(tasks, indent=2)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+WORKFLOW task_manager
+  INPUT @title TEXT := "web_search"
+  INPUT @description TEXT := "Search the web for current information on a given query"
+  INPUT @db_path TEXT := "tasks.db"
+  OUTPUT @task_list TEXT
+DO
+  CALL init_db_schema(@db_path) INTO @schema_status;
+  CALL insert_task(@db_path, @title, @description) INTO @task_id;
+  CALL retrieve_all_tasks(@db_path) INTO @task_list;
+  RETURN @task_list WITH status = "complete";
+END;

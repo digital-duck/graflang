@@ -1,0 +1,22 @@
+version: "1.0-graph"
+# Three existing recipes, untouched, used as parts of one workflow: guardrail -> agent_notes -> supervisor.
+# Each stage's text becomes the next stage's `question`. It is a test of the part interface, not a product.
+workflow:
+  name: "recipe_chain"
+  inputs:
+    - {name: "question", type: "TEXT"}
+    - {name: "max_steps", type: "INTEGER", default: 4}
+    - {name: "max_rounds", type: "INTEGER", default: 3}
+  outputs:
+    - {name: "answer", type: "TEXT"}
+    - {name: "status", type: "TEXT"}
+resources:
+  parts:
+    guardrail:   "../guardrail/guardrail.graph.yaml"
+    agent_notes: "../agent_notes/agent_notes.graph.yaml"
+    supervisor:  "../supervisor/supervisor.graph.yaml"
+steps:
+  - screen: {use: parts.guardrail,   in: {question: $in.question}, out: reply}
+  - notes:  {use: parts.agent_notes, in: {question: screen.reply, max_steps: $in.max_steps}, out: answer}
+  - review: {use: parts.supervisor,  in: {question: notes.answer, max_rounds: $in.max_rounds}, out: [answer, status]}
+  - done:   {output: {answer: review.answer, status: review.status}}

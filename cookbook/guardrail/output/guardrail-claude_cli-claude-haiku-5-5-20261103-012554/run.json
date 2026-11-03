@@ -1,0 +1,9 @@
+{
+  "graph": "guardrail",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "question": "What should I pack for a week in Iceland in March?"
+  },
+  "started": "2026-11-03T01:25:54"
+}

@@ -1,0 +1,16 @@
+Vector databases are specialized data stores optimized for storing and querying high-dimensional
+numerical vectors, called embeddings. They are a foundational component of modern AI applications
+that require semantic search, including recommendation engines, question-answering systems,
+and RAG pipelines.
+
+Popular vector databases include FAISS, Chroma, Weaviate, Pinecone, and Qdrant. FAISS (Facebook
+AI Similarity Search) is an open-source library developed by Meta that provides highly efficient
+similarity search over dense vectors. It supports both exact and approximate nearest-neighbor
+search, with approximate methods trading a small accuracy cost for dramatically lower latency
+at billion-vector scale.
+
+When building a RAG system, the choice of embedding model matters as much as the vector database.
+Embedding models such as all-MiniLM-L6-v2, text-embedding-3-small, and BGE-M3 transform text
+into fixed-length float vectors that capture semantic meaning. Documents with similar meaning
+have vectors that are geometrically close in the embedding space, enabling retrieval by cosine
+similarity or L2 distance rather than exact keyword matching.

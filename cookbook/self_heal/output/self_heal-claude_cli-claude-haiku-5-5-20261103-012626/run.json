@@ -1,0 +1,9 @@
+{
+  "graph": "self_heal",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "text": "Please send the invoice to Maria Lopez (maria.lopez@acme.example) by Friday."
+  },
+  "started": "2026-11-03T01:26:26"
+}

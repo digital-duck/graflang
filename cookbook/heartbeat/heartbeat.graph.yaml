@@ -1,0 +1,33 @@
+version: "1.0-graph"
+# One beat of a heartbeat: is there anything new since the last beat? If yes, the model summarises it and the summary is printed and
+# appended to output/alerts.md; if not, nothing is spent. The count of lines seen so far lives in output/state.txt, so each beat
+# remembers the one before. Run beats on a schedule with `graf watch`:
+#   graf watch cookbook/heartbeat/heartbeat.graph.yaml --every 60 --times 5
+# (the first beat finds 2 messages; add a line to input/inbox.md and the next beat reports it)
+workflow:
+  name: "heartbeat"
+  inputs:
+    - {name: "inbox", type: "TEXT", default: "input/inbox.md", description: "the file to watch (a message per line)"}
+  outputs:
+    - {name: "status", type: "TEXT", description: "what this beat found"}
+resources:
+  prompts:
+    summarise: "./prompts/summarise.md"
+  policies:
+    watch: "./policies/watch.cedar"
+steps:
+  - allowed: {guard: policies.watch, principal: 'Service::"heartbeat"', action: 'Action::"watch"', resource: 'File::"inbox"', context_mapping: {}}
+  - seen:   {node: QUERY, file: "output/state.txt", format: text, default: "0", ports: [out_seen], out: seen}
+  - inbox:  {node: QUERY, ports: [in_file, out_lines], in: {file: $in.inbox}, format: lines, default: [], out: lines}
+  - count:  {solve: "len(@in_lines)", in: {lines: inbox.lines}, out: count}
+  - fresh:  {evaluate: "@in_count > int(strip(@in_seen))", in: {count: count.count, seen: seen.seen}}
+  - text:   {solve: "@in_lines", on: fresh.pass, in: {lines: inbox.lines}, out: text}
+  - new:    {solve: "@in_count - int(strip(@in_seen))", in: {count: count.count, seen: seen.seen}, out: new}
+  - summary: {generate: prompts.summarise, in: {inbox: text.text, new: new.new}, out: summary}
+  - alert:  {node: EMIT, channel: stdout, in: {content: summary.summary}, out: receipt}
+  - log:    {node: EMIT, channel: file, file: "output/alerts.md", mode: append, in: {content: summary.summary}, out: receipt}
+  - remember: {node: EMIT, channel: file, file: "output/state.txt", in: {content: count.count}, out: receipt}
+  - news:   {solve: "'new: ' + @in_summary", in: {summary: summary.summary}, out: status}
+  - reported: {output: news.status}
+  - quiet:  {solve: "'nothing new (' + str(@in_count) + ' messages)'", on: fresh.fail, in: {count: count.count}, out: status}
+  - idle:   {output: quiet.status, on: quiet}

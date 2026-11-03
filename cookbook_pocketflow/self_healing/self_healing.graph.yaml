@@ -1,0 +1,437 @@
+version: 1.0-graph
+workflow:
+  name: mermaid_from_description
+  inputs:
+  - name: description
+    type: TEXT
+    default: 'A flowchart showing user login: start → enter credentials → validate
+      → if valid go to dashboard else show error → end'
+  - name: max_retries
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: output
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_description
+  - out_max_retries
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''false'''
+  ports:
+  - trigger
+  - complete
+  - out_is_valid
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_errors
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_mermaid_code
+- id: gen_1
+  type: GENERATE
+  config:
+    function: generate_mermaid
+    params:
+    - description
+    prompt_inline: |-
+      You are an expert in Mermaid diagram syntax.
+      Given the following plain-language description, generate valid Mermaid diagram code.
+
+      Description: {{in_description}}
+
+      Return ONLY the raw Mermaid code, starting with the diagram type declaration
+      (e.g., flowchart TD, sequenceDiagram, classDiagram, erDiagram).
+      Do not include markdown code fences or any explanation.
+    arguments:
+    - '@description'
+  ports:
+  - trigger
+  - complete
+  - in_description
+  - out_mermaid_code
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_retries
+    outputs:
+      validation_result:
+        from: tool_1.out_validation_result
+      is_valid:
+        from: set_5.out_is_valid
+      i:
+        from:
+        - set_6.out_i
+        - set_9.out_i
+        - set_8.out_i
+      errors:
+        from: set_7.out_errors
+      retry_status:
+        from: tool_2.out_retry_status
+      mermaid_code:
+        from: gen_2.out_mermaid_code
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: validate_mermaid
+          backend: kernel
+          arguments:
+          - '@mermaid_code'
+          code: |
+            import subprocess, tempfile, os
+
+            def validate_mermaid(mermaid_code: str) -> str:
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.mmd', delete=False) as f:
+                        f.write(mermaid_code)
+                        input_path = f.name
+                    output_path = input_path.replace('.mmd', '.svg')
+                    result = subprocess.run(
+                        ['mmdc', '-i', input_path, '-o', output_path],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    os.unlink(input_path)
+                    if os.path.exists(output_path):
+                        os.unlink(output_path)
+                    if result.returncode == 0:
+                        return "VALID_OK"
+                    return result.stderr or result.stdout or "validation failed: unknown error"
+                except FileNotFoundError:
+                    return "error: mmdc not found; install with: npm install -g @mermaid-js/mermaid-cli"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = validate_mermaid(mermaid_code)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - mermaid_code
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_mermaid_code
+        - out_validation_result
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'VALID_OK')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''true'''
+        ports:
+        - trigger
+        - complete
+        - out_is_valid
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_retries'
+        ports:
+        - trigger
+        - complete
+        - in_max_retries
+        - out_i
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_validation_result'
+        ports:
+        - trigger
+        - complete
+        - in_validation_result
+        - out_errors
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: retries_reached
+          backend: kernel
+          arguments:
+          - '@i'
+          - '@max_retries'
+          code: |
+            def retries_reached(current: str, maximum: str) -> str:
+                try:
+                    return "yes" if int(current) >= int(maximum) else "no"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = retries_reached(i, max_retries)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - current
+          - maximum
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - in_max_retries
+        - out_retry_status
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'yes')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_retries'
+        ports:
+        - trigger
+        - complete
+        - in_max_retries
+        - out_i
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: fix_mermaid
+          params:
+          - description
+          - mermaid_code
+          - errors
+          prompt_inline: |-
+            You are an expert in Mermaid diagram syntax.
+            A Mermaid diagram was generated for the following description but failed CLI validation.
+
+            Description: {{in_description}}
+
+            Prior code that failed:
+            {{in_mermaid_code}}
+
+            Compiler errors reported by the Mermaid CLI:
+            {{in_errors}}
+
+            Fix all syntax errors and return ONLY the corrected Mermaid code.
+            Do not include markdown code fences or any explanation.
+          arguments:
+          - '@description'
+          - '@mermaid_code'
+          - '@errors'
+        ports:
+        - trigger
+        - complete
+        - in_description
+        - in_mermaid_code
+        - in_errors
+        - out_mermaid_code
+      edges:
+      - source: tool_1.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_1.out_validation_result
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_5.trigger
+        type: triggers
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: set_7.trigger
+        type: triggers
+      - source: tool_1.out_validation_result
+        target: set_7.in_validation_result
+        type: binds
+      - source: set_7.complete
+        target: set_8.trigger
+        type: triggers
+      - source: set_8.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: set_8.out_i
+        target: tool_2.in_i
+        type: binds
+      - source: tool_2.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_2.out_retry_status
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: set_9.trigger
+        type: triggers
+      - source: eval_2.fail
+        target: gen_2.trigger
+        type: triggers
+      - source: set_7.out_errors
+        target: gen_2.in_errors
+        type: binds
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_mermaid_code
+  - in_max_retries
+  - in_i
+  - in_description
+  - in_is_valid
+  - in_errors
+  - out_validation_result
+  - out_is_valid
+  - out_i
+  - out_errors
+  - out_retry_status
+  - out_mermaid_code
+- id: eval_3
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'true')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_10
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_mermaid_code'
+  ports:
+  - trigger
+  - complete
+  - in_mermaid_code
+  - out_output
+- id: set_11
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''FAILURE: max retries reached without valid syntax. Last errors:
+      '' + @in_errors'
+  ports:
+  - trigger
+  - complete
+  - in_errors
+  - out_output
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_output
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_description
+  target: gen_1.in_description
+  type: binds
+- source: gen_1.complete
+  target: loop_1.trigger
+  type: triggers
+- source: gen_1.out_mermaid_code
+  target: loop_1.in_mermaid_code
+  type: binds
+- source: wf_entry.out_max_retries
+  target: loop_1.in_max_retries
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_description
+  target: loop_1.in_description
+  type: binds
+- source: set_2.out_is_valid
+  target: loop_1.in_is_valid
+  type: binds
+- source: set_3.out_errors
+  target: loop_1.in_errors
+  type: binds
+- source: loop_1.exit
+  target: eval_3.trigger
+  type: triggers
+- source: loop_1.out_is_valid
+  target: eval_3.in_subject
+  type: binds
+- source: eval_3.pass
+  target: set_10.trigger
+  type: triggers
+- source: loop_1.out_mermaid_code
+  target: set_10.in_mermaid_code
+  type: binds
+- source: eval_3.fail
+  target: set_11.trigger
+  type: triggers
+- source: loop_1.out_errors
+  target: set_11.in_errors
+  type: binds
+- source: set_10.out_output
+  target: wf_exit.in_output
+  type: binds
+- source: set_11.out_output
+  target: wf_exit.in_output
+  type: binds
+- source: set_10.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_11.complete
+  target: wf_exit.trigger
+  type: triggers

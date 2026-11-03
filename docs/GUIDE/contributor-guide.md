@@ -11,7 +11,8 @@ graphlang/
   grafr/       the dynamic interpreter (runtime, executors, CLI)
   grafc/       the compiler (mostly a stub; hand-written Cedar compiler, Rust codegen)
   grafv/       `graf vis`: workflow -> networkx model and a style; the engines are zinet's (`zinet.vis`)
-cookbook/      example graphs: code_pipeline, self_refine, your_book
+cookbook/      example graphs, plus cookbook_catalog.yaml (every recipe) and run_all.py (batch runner)
+cookbook_pocketflow/  cookbook_solvers/   recipes lifted from SPL.py with `spl3 util spl2graph`
 tests/         pytest
 docs/DEV/      design notes and the gap table
 ```

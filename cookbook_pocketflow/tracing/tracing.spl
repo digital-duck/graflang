@@ -1,0 +1,179 @@
+CREATE TOOL_API apply_trace_decorator(flow_name TEXT) RETURNS TEXT AS PYTHON $$
+import json, time
+def apply_trace_decorator(flow_name: str) -> str:
+    try:
+        trace_id = f"{flow_name}_{int(time.time() * 1000)}"
+        return json.dumps({"status": "ok", "trace_id": trace_id})
+    except Exception as e:
+        return json.dumps({"status": "error", "exception": str(e)})
+$$;
+
+CREATE TOOL_API run_prep(node_name TEXT, inputs TEXT) RETURNS TEXT AS PYTHON $$
+import json, time
+def run_prep(node_name: str, inputs: str) -> str:
+    try:
+        start = time.time()
+        timing_ms = round((time.time() - start) * 1000, 2)
+        return json.dumps({"status": "ok", "phase": "prep", "node": node_name,
+                           "result": f"prep:{node_name}", "timing_ms": timing_ms, "inputs": inputs})
+    except Exception as e:
+        return json.dumps({"status": "error", "phase": "prep", "node": node_name, "exception": str(e)})
+$$;
+
+CREATE TOOL_API run_exec(node_name TEXT, prep_result TEXT) RETURNS TEXT AS PYTHON $$
+import json, time
+def run_exec(node_name: str, prep_result: str) -> str:
+    try:
+        start = time.time()
+        timing_ms = round((time.time() - start) * 1000, 2)
+        return json.dumps({"status": "ok", "phase": "exec", "node": node_name,
+                           "result": f"exec:{node_name}", "timing_ms": timing_ms, "inputs": prep_result})
+    except Exception as e:
+        return json.dumps({"status": "error", "phase": "exec", "node": node_name, "exception": str(e)})
+$$;
+
+CREATE TOOL_API run_post(node_name TEXT, exec_result TEXT) RETURNS TEXT AS PYTHON $$
+import json, time
+def run_post(node_name: str, exec_result: str) -> str:
+    try:
+        start = time.time()
+        timing_ms = round((time.time() - start) * 1000, 2)
+        return json.dumps({"status": "ok", "phase": "post", "node": node_name,
+                           "result": f"post:{node_name}", "timing_ms": timing_ms, "inputs": exec_result})
+    except Exception as e:
+        return json.dumps({"status": "error", "phase": "post", "node": node_name, "exception": str(e)})
+$$;
+
+CREATE TOOL_API langfuse_log(node_name TEXT, phase TEXT, payload_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def langfuse_log(node_name: str, phase: str, payload_json: str) -> str:
+    try:
+        from langfuse import Langfuse
+        payload = json.loads(payload_json)
+        lf = Langfuse()
+        span = lf.span(
+            name=f"{node_name}.{phase}",
+            input={"inputs": payload.get("inputs")},
+            metadata={"timing_ms": payload.get("timing_ms")}
+        )
+        span.end(output=payload.get("result"))
+        return "logged"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API langfuse_record_exception(node_name TEXT, phase TEXT, result_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def langfuse_record_exception(node_name: str, phase: str, result_json: str) -> str:
+    try:
+        from langfuse import Langfuse
+        payload = json.loads(result_json)
+        lf = Langfuse()
+        span = lf.span(
+            name=f"{node_name}.{phase}.exception",
+            metadata={"exception": payload.get("exception"), "node": node_name, "phase": phase}
+        )
+        span.end(level="ERROR")
+        return "exception_recorded"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API langfuse_flush_span(node_name TEXT, trace_id TEXT) RETURNS TEXT AS PYTHON $$
+def langfuse_flush_span(node_name: str, trace_id: str) -> str:
+    try:
+        from langfuse import Langfuse
+        lf = Langfuse()
+        lf.flush()
+        return f"flushed:{node_name}"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API langfuse_finalize_trace(trace_id TEXT) RETURNS TEXT AS PYTHON $$
+def langfuse_finalize_trace(trace_id: str) -> str:
+    try:
+        from langfuse import Langfuse
+        lf = Langfuse()
+        lf.flush()
+        return f"trace_finalized:{trace_id}"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+WORKFLOW pocketflow_langfuse_trace
+  INPUT @flow_name TEXT := "pocketflow"
+  INPUT @node_list TEXT := "node_a,node_b,node_c"
+  INPUT @flow_inputs TEXT := "{}"
+  INPUT @max_nodes INTEGER := 10
+  OUTPUT @trace_summary TEXT
+DO
+  -- apply @trace_flow() decorator → obtain distributed trace_id
+  CALL apply_trace_decorator(@flow_name) INTO @decorator_result;
+  CALL json_get(@decorator_result, "trace_id") INTO @trace_id;
+
+  @i := 0;
+  @flow_status := "ok";
+  @trace_summary := "";
+
+  WHILE @i < @max_nodes DO
+    -- "More nodes?" sentinel: blank entry means list exhausted
+    CALL list_get(@node_list, @i, ",") INTO @current_node;
+    CALL isblank(@current_node) INTO @no_more;
+
+    EVALUATE @no_more WHEN contains("true") THEN
+      @i := @max_nodes;
+    ELSE
+      -- prep phase
+      CALL run_prep(@current_node, @flow_inputs) INTO @prep_result;
+      CALL langfuse_log(@current_node, "prep", @prep_result) INTO @log_out;
+      CALL json_get(@prep_result, "status") INTO @phase_status;
+
+      EVALUATE @phase_status WHEN contains("error") THEN
+        CALL langfuse_record_exception(@current_node, "prep", @prep_result) INTO @log_out;
+        @flow_status := "error";
+        @trace_summary := @trace_summary + "ERROR:prep:" + @current_node;
+        @i := @max_nodes;
+      ELSE
+        -- exec phase
+        CALL run_exec(@current_node, @prep_result) INTO @exec_result;
+        CALL langfuse_log(@current_node, "exec", @exec_result) INTO @log_out;
+        CALL json_get(@exec_result, "status") INTO @phase_status;
+
+        EVALUATE @phase_status WHEN contains("error") THEN
+          CALL langfuse_record_exception(@current_node, "exec", @exec_result) INTO @log_out;
+          @flow_status := "error";
+          @trace_summary := @trace_summary + "ERROR:exec:" + @current_node;
+          @i := @max_nodes;
+        ELSE
+          -- post phase
+          CALL run_post(@current_node, @exec_result) INTO @post_result;
+          CALL langfuse_log(@current_node, "post", @post_result) INTO @log_out;
+          CALL json_get(@post_result, "status") INTO @phase_status;
+
+          EVALUATE @phase_status WHEN contains("error") THEN
+            CALL langfuse_record_exception(@current_node, "post", @post_result) INTO @log_out;
+            @flow_status := "error";
+            @trace_summary := @trace_summary + "ERROR:post:" + @current_node;
+            @i := @max_nodes;
+          ELSE
+            -- flush span; loop back (More nodes? → Yes)
+            CALL langfuse_flush_span(@current_node, @trace_id) INTO @log_out;
+            @trace_summary := @trace_summary + "OK:" + @current_node + " ";
+            @i := @i + 1;
+          END;
+        END;
+      END;
+    END;
+  END;
+
+  -- More nodes? → No path: finalize on full success, end on error
+  EVALUATE @flow_status WHEN contains("ok") THEN
+    CALL langfuse_finalize_trace(@trace_id) INTO @finalize_result;
+    @trace_summary := @trace_summary + "| finalized:" + @trace_id;
+  ELSE
+    @trace_summary := @trace_summary + "| trace_ended_with_error";
+  END;
+
+  RETURN @trace_summary WITH status = "complete";
+END;

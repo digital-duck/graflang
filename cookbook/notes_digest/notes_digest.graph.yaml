@@ -1,0 +1,77 @@
+version: "1.0-graph"
+
+# Read a notes file, summarise it, record what was read, and write the digest to a file and to the terminal.
+# It shows the three nodes that reach outside the graph: QUERY (read in), OBSERVE (record what passes by) and EMIT (write out).
+# QUERY and EMIT are risky, so both sit behind a Cedar GUARD; the paths stay inside this folder. The notes are bundled with the recipe
+# (`input/notes.md`); when the graph is used as a part, that path is read from the part's own folder.
+
+workflow:
+  name: "notes_digest"
+  inputs: []
+  outputs:
+    - {name: "digest", type: "TEXT"}
+
+resources:
+  prompts:
+    digest: "./prompts/digest.md"
+  policies:
+    digest: "./policies/digest.cedar"
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry"]
+
+  - id: "allowed"
+    type: "GUARD"
+    config:
+      policy_ref: "policies.digest"
+      principal: 'Service::"notes-digest"'
+      action: 'Action::"digest"'
+      resource: 'File::"notes"'
+      context_mapping: {}
+      label: "May it read and write?"
+    ports: ["trigger", "allow", "deny"]
+
+  - id: "read_notes"
+    type: "QUERY"
+    config: {file: "input/notes.md", format: "text", max_bytes: 200000, label: "Read the notes"}
+    ports: ["trigger", "complete", "out_notes"]
+
+  - id: "summarise"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.digest", label: "Write the digest"}
+    ports: ["trigger", "complete", "in_notes", "out_digest"]
+
+  - id: "watch"
+    type: "OBSERVE"
+    config: {label: "digest"}
+    ports: ["trigger", "complete", "in_digest", "out_digest"]
+
+  - id: "save"
+    type: "EMIT"
+    config: {channel: "file", file: "output/digest.md", mode: "write", label: "Save the digest"}
+    ports: ["trigger", "complete", "in_content", "out_receipt"]
+
+  - id: "show"
+    type: "EMIT"
+    config: {channel: "stdout", label: "Print the digest"}
+    ports: ["trigger", "complete", "in_content", "out_receipt"]
+
+  - id: "wf_exit"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_digest"]
+
+edges:
+  - {source: "wf_entry.entry", target: "allowed.trigger", type: "triggers"}
+  - {source: "allowed.allow", target: "read_notes.trigger", type: "triggers"}
+  - {source: "read_notes.complete", target: "summarise.trigger", type: "triggers"}
+  - {source: "read_notes.out_notes", target: "summarise.in_notes", type: "binds"}
+  - {source: "summarise.complete", target: "watch.trigger", type: "triggers"}
+  - {source: "summarise.out_digest", target: "watch.in_digest", type: "binds"}
+  - {source: "watch.complete", target: "save.trigger", type: "triggers"}
+  - {source: "watch.out_digest", target: "save.in_content", type: "binds"}
+  - {source: "save.complete", target: "show.trigger", type: "triggers"}
+  - {source: "watch.out_digest", target: "show.in_content", type: "binds"}
+  - {source: "show.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "watch.out_digest", target: "wf_exit.in_digest", type: "binds"}

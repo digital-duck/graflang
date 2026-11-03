@@ -1,0 +1,40 @@
+version: "1.0-graph"
+# A model drafts; a person decides (DECISION); a Cedar guard checks that the answer was yes; only then is the file written.
+# A timeout or "no" holds the announcement. The default answer is "no", so nobody answering never publishes.
+#   graf run cookbook/release_approval/release_approval.graph.yaml --param topic="Friday demo moved to 3pm"          # asks you
+#   graf run ... --answer approve=yes --by wen                                                                          # for scripts
+workflow:
+  name: "release_approval"
+  inputs:
+    - {name: "topic", type: "TEXT", description: "what the announcement is about"}
+  outputs:
+    - {name: "result", type: "TEXT", description: "the announcement when released, or why it was held"}
+resources:
+  prompts:
+    draft: "./prompts/draft.md"
+  policies:
+    release: "./policies/release.cedar"
+steps:
+  - draft: {generate: prompts.draft, in: {topic: $in.topic}, out: text}
+  - approve:
+      node: DECISION
+      question: "Release this announcement to the team?"
+      answers: [yes, no]
+      default: "no"
+      safe_default: true            # "no" holds the announcement, so nobody answering is safe; without this, validate warns
+      ports: [answered]
+      in: {context: draft.text}
+      out: [answer, note, by]
+  - allowed:
+      guard: policies.release
+      principal: 'Service::"release-approval"'
+      action: 'Action::"publish"'
+      resource: 'File::"announcement"'
+      context_mapping: {human_approval: "@in_answer == 'yes'"}
+      in: {answer: approve.answer}
+      on: approve.answered
+  - publish: {node: EMIT, channel: file, file: "output/announcement.md", on: allowed.allow, in: {content: draft.text}, out: path}
+  - released: {solve: "@in_text", on: publish, in: {text: draft.text}, out: result}
+  - ok: {output: released.result}
+  - held: {solve: "'held, not released: ' + @in_note", on: allowed.deny, in: {note: approve.note}, out: result}
+  - stopped: {output: held.result, on: held}

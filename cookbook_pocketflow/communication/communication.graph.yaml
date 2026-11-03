@@ -1,0 +1,510 @@
+version: 1.0-graph
+workflow:
+  name: word_stats_loop
+  inputs:
+  - name: user_inputs
+    type: TEXT
+    default: Hello world, The quick brown fox jumps over the lazy dog, SPL is great
+      for AI workflows, exit
+  - name: delimiter
+    type: TEXT
+    default: ','
+  - name: max_inputs
+    type: INTEGER
+    default: 50
+  outputs:
+  - name: final_output
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_user_inputs
+  - out_delimiter
+  - out_max_inputs
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''0'''
+  ports:
+  - trigger
+  - complete
+  - out_text_count
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''0'''
+  ports:
+  - trigger
+  - complete
+  - out_total_word_count
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''0.00'''
+  ports:
+  - trigger
+  - complete
+  - out_avg_words
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_running_log
+- id: set_5
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_inputs
+    outputs:
+      current_input:
+        from: tool_2.out_current_input
+      check_input:
+        from: tool_3.out_check_input
+      i:
+        from:
+        - set_6.out_i
+        - set_8.out_i
+      words_in_input:
+        from: tool_4.out_words_in_input
+      text_count:
+        from: tool_5.out_text_count
+      total_word_count:
+        from: tool_6.out_total_word_count
+      avg_words:
+        from: tool_7.out_avg_words
+      running_log:
+        from: set_7.out_running_log
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@user_inputs'
+          - '@i'
+          - '@delimiter'
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(user_inputs, i, delimiter)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_user_inputs
+        - in_i
+        - in_delimiter
+        - out_current_input
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: trim
+          backend: kernel
+          arguments:
+          - '@current_input'
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+            _spl_result = trim(current_input)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_current_input
+        - out_current_input
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: lower
+          backend: kernel
+          arguments:
+          - '@current_input'
+          code: |
+            def lower(value: str) -> str:
+                """LOWER(value) — convert to lowercase."""
+                return str(value).lower()
+            _spl_result = lower(current_input)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_current_input
+        - out_check_input
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'exit')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_inputs'
+        ports:
+        - trigger
+        - complete
+        - in_max_inputs
+        - out_i
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: word_count
+          backend: kernel
+          arguments:
+          - '@current_input'
+          code: |
+            def word_count(value: str) -> int:
+                """Word count — number of whitespace-delimited tokens."""
+                return len(str(value).split())
+            _spl_result = word_count(current_input)
+          result: _spl_result
+          out_type: INTEGER
+          tool_params:
+          - value
+          tool_returns: INTEGER
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_current_input
+        - out_words_in_input
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: int_add
+          backend: kernel
+          arguments:
+          - '@text_count'
+          - '''1'''
+          code: |
+            def int_add(a: str, b: str) -> str:
+                try:
+                    return str(int(a) + int(b))
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = int_add(text_count, '1')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - a
+          - b
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_text_count
+        - out_text_count
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: int_add
+          backend: kernel
+          arguments:
+          - '@total_word_count'
+          - '@words_in_input'
+          code: |
+            def int_add(a: str, b: str) -> str:
+                try:
+                    return str(int(a) + int(b))
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = int_add(total_word_count, words_in_input)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - a
+          - b
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_total_word_count
+        - in_words_in_input
+        - out_total_word_count
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: safe_divide
+          backend: kernel
+          arguments:
+          - '@total_word_count'
+          - '@text_count'
+          - '''2'''
+          code: |
+            def safe_divide(numerator: str, denominator: str, decimals: str) -> str:
+                try:
+                    n = float(numerator)
+                    d = float(denominator)
+                    if d == 0:
+                        return "0.00"
+                    return str(round(n / d, int(decimals)))
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = safe_divide(total_word_count, text_count, '2')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - numerator
+          - denominator
+          - decimals
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_total_word_count
+        - in_text_count
+        - out_avg_words
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_running_log + ''[Text '' + str(@in_text_count) + ''] '' + @in_current_input
+            + '' | words: '' + str(@in_words_in_input) + '' | total words: '' + str(@in_total_word_count)
+            + '' | avg words/text: '' + str(@in_avg_words) + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_running_log
+        - in_text_count
+        - in_current_input
+        - in_words_in_input
+        - in_total_word_count
+        - in_avg_words
+        - out_running_log
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_1.out_current_input
+        target: tool_2.in_current_input
+        type: binds
+      - source: tool_2.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: tool_2.out_current_input
+        target: tool_3.in_current_input
+        type: binds
+      - source: tool_3.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_3.out_check_input
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_6.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_2.out_current_input
+        target: tool_4.in_current_input
+        type: binds
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_5.complete
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_4.out_words_in_input
+        target: tool_6.in_words_in_input
+        type: binds
+      - source: tool_6.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_6.out_total_word_count
+        target: tool_7.in_total_word_count
+        type: binds
+      - source: tool_5.out_text_count
+        target: tool_7.in_text_count
+        type: binds
+      - source: tool_7.complete
+        target: set_7.trigger
+        type: triggers
+      - source: tool_5.out_text_count
+        target: set_7.in_text_count
+        type: binds
+      - source: tool_2.out_current_input
+        target: set_7.in_current_input
+        type: binds
+      - source: tool_4.out_words_in_input
+        target: set_7.in_words_in_input
+        type: binds
+      - source: tool_6.out_total_word_count
+        target: set_7.in_total_word_count
+        type: binds
+      - source: tool_7.out_avg_words
+        target: set_7.in_avg_words
+        type: binds
+      - source: set_7.complete
+        target: set_8.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_user_inputs
+  - in_i
+  - in_delimiter
+  - in_max_inputs
+  - in_text_count
+  - in_total_word_count
+  - in_running_log
+  - in_avg_words
+  - out_current_input
+  - out_check_input
+  - out_i
+  - out_words_in_input
+  - out_text_count
+  - out_total_word_count
+  - out_avg_words
+  - out_running_log
+- id: set_9
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_running_log + ''\n=== Final Statistics ===\nTotal texts processed
+      : '' + str(@in_text_count) + ''\nTotal words counted   : '' + str(@in_total_word_count)
+      + ''\nAverage words per text: '' + str(@in_avg_words)'
+  ports:
+  - trigger
+  - complete
+  - in_running_log
+  - in_text_count
+  - in_total_word_count
+  - in_avg_words
+  - out_final_output
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_final_output
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: set_5.trigger
+  type: triggers
+- source: set_5.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_user_inputs
+  target: loop_1.in_user_inputs
+  type: binds
+- source: set_5.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_delimiter
+  target: loop_1.in_delimiter
+  type: binds
+- source: wf_entry.out_max_inputs
+  target: loop_1.in_max_inputs
+  type: binds
+- source: set_1.out_text_count
+  target: loop_1.in_text_count
+  type: binds
+- source: set_2.out_total_word_count
+  target: loop_1.in_total_word_count
+  type: binds
+- source: set_4.out_running_log
+  target: loop_1.in_running_log
+  type: binds
+- source: set_3.out_avg_words
+  target: loop_1.in_avg_words
+  type: binds
+- source: loop_1.exit
+  target: set_9.trigger
+  type: triggers
+- source: loop_1.out_running_log
+  target: set_9.in_running_log
+  type: binds
+- source: loop_1.out_text_count
+  target: set_9.in_text_count
+  type: binds
+- source: loop_1.out_total_word_count
+  target: set_9.in_total_word_count
+  type: binds
+- source: loop_1.out_avg_words
+  target: set_9.in_avg_words
+  type: binds
+- source: set_9.out_final_output
+  target: wf_exit.in_final_output
+  type: binds
+- source: set_9.complete
+  target: wf_exit.trigger
+  type: triggers

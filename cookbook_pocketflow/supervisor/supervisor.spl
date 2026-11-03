@@ -1,0 +1,106 @@
+CREATE FUNCTION decide_search_or_answer(question TEXT, search_history TEXT)
+RETURNS TEXT AS $$
+  You are a research agent deciding the next action.
+
+  Question: {question}
+  Search history so far: {search_history}
+
+  Decide: do you have enough information to answer, or do you need to search for more?
+  Reply with exactly one word: "search" if you need more information, or "answer" if you have enough.
+$$;
+
+CREATE FUNCTION extract_search_query(question TEXT, search_history TEXT)
+RETURNS TEXT AS $$
+  You are a research agent formulating a web search query.
+
+  Question: {question}
+  Search history so far: {search_history}
+
+  Generate a concise, targeted web search query to find information needed to answer the question.
+  Return only the query string, nothing else.
+$$;
+
+CREATE FUNCTION reason_over_results(question TEXT, search_history TEXT, search_results TEXT)
+RETURNS TEXT AS $$
+  You are a research agent analyzing search results.
+
+  Question: {question}
+  Previous research: {search_history}
+  New search results: {search_results}
+
+  Extract and summarize the key facts from the new results that are relevant to answering the question.
+  Return a concise reasoning note to append to the research log.
+$$;
+
+CREATE FUNCTION generate_candidate_answer(question TEXT, search_history TEXT)
+RETURNS TEXT AS $$
+  You are a research agent generating a final answer.
+
+  Question: {question}
+  Research gathered: {search_history}
+
+  Based on the research above, generate a comprehensive and accurate answer to the question.
+$$;
+
+CREATE FUNCTION validate_answer(question TEXT, candidate_answer TEXT)
+RETURNS TEXT AS $$
+  You are a supervisor validating a research agent''s answer.
+
+  Question: {question}
+  Candidate answer: {candidate_answer}
+
+  Evaluate whether the answer is:
+  1. Directly responsive to the question
+  2. Factually grounded (not fabricated or nonsensical)
+  3. Coherent and well-reasoned
+
+  Reply with exactly one word: "valid" if the answer meets all criteria,
+  or "invalid" if it is nonsensical, fabricated, or off-topic.
+$$;
+
+WORKFLOW research_agent_supervisor
+  INPUT @question TEXT := "What are the key differences between transformer and mamba architectures for LLMs?"
+  INPUT @max_search_iterations INTEGER := 5
+  INPUT @max_retries INTEGER := 3
+  OUTPUT @verified_answer TEXT
+DO
+  @retry_i := 0;
+  @verified_answer := "";
+
+  WHILE @retry_i < @max_retries DO
+    -- Initialize / re-initialize research agent state (node C in diagram)
+    @search_history := "";
+    @inner_i := 0;
+
+    -- Inner agent loop: Search or Answer (nodes D → E → F → G → D)
+    WHILE @inner_i < @max_search_iterations DO
+      GENERATE decide_search_or_answer(@question, @search_history) INTO @inner_decision;
+      EVALUATE @inner_decision WHEN contains("search") THEN
+        GENERATE extract_search_query(@question, @search_history) INTO @query;
+        CALL web_search(@query) INTO @search_results;
+        GENERATE reason_over_results(@question, @search_history, @search_results) INTO @reasoning;
+        @search_history := @search_history + "\n" + @reasoning;
+        @inner_i := @inner_i + 1;
+      ELSE
+        -- Agent decided "answer" — force-exit inner loop (node H next)
+        @inner_i := @max_search_iterations;
+      END;
+    END;
+
+    -- Generate candidate answer from accumulated research (node H)
+    GENERATE generate_candidate_answer(@question, @search_history) INTO @candidate_answer;
+    @verified_answer := @candidate_answer;
+
+    -- Supervisor validation (nodes I → J)
+    GENERATE validate_answer(@question, @candidate_answer) INTO @supervisor_decision;
+    EVALUATE @supervisor_decision WHEN contains("valid") THEN
+      -- Accept answer (node K) — force-exit outer loop
+      @retry_i := @max_retries;
+    ELSE
+      -- Reject answer (nodes L → N) — increment triggers retry from C
+      @retry_i := @retry_i + 1;
+    END;
+  END;
+
+  RETURN @verified_answer WITH status = "complete";
+END;

@@ -1,0 +1,356 @@
+version: 1.0-graph
+workflow:
+  name: RAGPipeline
+  inputs:
+  - name: documents
+    type: LIST
+    default: '[''cookbook_pocketflow/rag/data/doc1.txt'', ''cookbook_pocketflow/rag/data/doc2.txt'',
+      ''cookbook_pocketflow/rag/data/doc3.txt'']'
+  - name: query
+    type: TEXT
+    default: What is retrieval-augmented generation and when should I use it?
+  - name: output_path
+    type: TEXT
+    default: ''
+  outputs:
+  - name: generated_answer
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_documents
+  - out_query
+  - out_output_path
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: chunk_documents
+    backend: kernel
+    arguments:
+    - '@documents'
+    code: |
+      import json, os
+
+      _CHUNK_SIZE = 500   # characters per chunk
+
+      def chunk_documents(documents):
+          """Split documents into fixed-size text chunks; returns JSON list of strings."""
+          try:
+              docs = json.loads(documents)
+              if not isinstance(docs, list):
+                  docs = [documents]
+          except (json.JSONDecodeError, TypeError):
+              docs = [str(documents)]
+
+          chunks = []
+          for doc in docs:
+              text = str(doc)
+              if os.path.isfile(text):   # a path: index the file's content
+                  text = open(text, encoding='utf-8').read()
+              for i in range(0, len(text), _CHUNK_SIZE):
+                  chunk = text[i:i + _CHUNK_SIZE].strip()
+                  if chunk:
+                      chunks.append(chunk)
+          return json.dumps(chunks)
+      _spl_result = chunk_documents(documents)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - documents
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_documents
+  - out_texts
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: embed_documents
+    backend: kernel
+    arguments:
+    - '@texts'
+    code: |
+      import json, base64, numpy as np
+      from sentence_transformers import SentenceTransformer
+
+      _MODEL = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+      def embed_documents(texts):
+          """Embed a JSON list of text chunks; returns base64-encoded float32 matrix."""
+          chunks = json.loads(texts)
+          vecs = _MODEL.encode(chunks, convert_to_numpy=True).astype(np.float32)
+          return base64.b64encode(vecs.tobytes()).decode() + f"||{vecs.shape[0]}||{vecs.shape[1]}"
+      _spl_result = embed_documents(texts)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - texts
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_texts
+  - out_embeddings
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: create_faiss_index
+    backend: kernel
+    arguments:
+    - '@embeddings'
+    code: |
+      import faiss, base64, numpy as np, tempfile, os
+
+      def create_faiss_index(embeddings):
+          """Build a flat L2 FAISS index from encoded embeddings; returns path to saved index."""
+          enc, rows, cols = embeddings.rsplit("||", 2)
+          vecs = np.frombuffer(base64.b64decode(enc), dtype=np.float32).reshape(int(rows), int(cols))
+          index = faiss.IndexFlatL2(int(cols))
+          index.add(vecs)
+          tmp = tempfile.NamedTemporaryFile(suffix=".faiss", delete=False)
+          faiss.write_index(index, tmp.name)
+          return tmp.name
+      _spl_result = create_faiss_index(embeddings)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - embeddings
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_embeddings
+  - out_index
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: embed_query
+    backend: kernel
+    arguments:
+    - '@query'
+    code: |
+      import base64, numpy as np
+      from sentence_transformers import SentenceTransformer
+
+      _MODEL = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+      def embed_query(query):
+          """Embed a single query string; returns encoded float32 vector."""
+          vec = _MODEL.encode([query], convert_to_numpy=True).astype(np.float32)
+          dim = vec.shape[1]
+          return base64.b64encode(vec.tobytes()).decode() + f"||1||{dim}"
+      _spl_result = embed_query(query)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - query
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_query
+  - out_query_embedding
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: retrieve_document
+    backend: kernel
+    arguments:
+    - '@index'
+    - '@query_embedding'
+    - '@texts'
+    code: |
+      import faiss, base64, json, numpy as np
+
+      def retrieve_document(index, query_embedding, texts):
+          """Return the most relevant chunk from texts using FAISS nearest-neighbour search."""
+          enc, rows, cols = query_embedding.rsplit("||", 2)
+          qvec = np.frombuffer(base64.b64decode(enc), dtype=np.float32).reshape(int(rows), int(cols))
+          idx = faiss.read_index(index)
+          _, I = idx.search(qvec, 1)
+          chunks = json.loads(texts)
+          best = int(I[0][0])
+          return chunks[best] if 0 <= best < len(chunks) else ""
+      _spl_result = retrieve_document(index, query_embedding, texts)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - index
+    - query_embedding
+    - texts
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_index
+  - in_query_embedding
+  - in_texts
+  - out_retrieved_document
+- id: gen_1
+  type: GENERATE
+  config:
+    function: generate_answer
+    params:
+    - query
+    - retrieved_document
+    prompt_inline: |-
+      You are a helpful assistant. Use the retrieved document as context to answer the user""s query.
+
+      Query: {{in_query}}
+
+      Retrieved Document Context:
+      {{in_retrieved_document}}
+
+      Provide a clear, accurate, and comprehensive answer based solely on the context above.
+      If the context doesn""t contain relevant information, acknowledge this clearly rather than guessing.
+    arguments:
+    - '@query'
+    - '@retrieved_document'
+  ports:
+  - trigger
+  - complete
+  - in_query
+  - in_retrieved_document
+  - out_generated_answer
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, '.')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@output_path'
+    - '@generated_answer'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(output_path, generated_answer)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_output_path
+  - in_generated_answer
+  - out_write_result
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''skipped'''
+  ports:
+  - trigger
+  - complete
+  - out_write_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_generated_answer
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_documents
+  target: tool_1.in_documents
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_texts
+  target: tool_2.in_texts
+  type: binds
+- source: tool_2.complete
+  target: tool_3.trigger
+  type: triggers
+- source: tool_2.out_embeddings
+  target: tool_3.in_embeddings
+  type: binds
+- source: tool_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: wf_entry.out_query
+  target: tool_4.in_query
+  type: binds
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_3.out_index
+  target: tool_5.in_index
+  type: binds
+- source: tool_4.out_query_embedding
+  target: tool_5.in_query_embedding
+  type: binds
+- source: tool_1.out_texts
+  target: tool_5.in_texts
+  type: binds
+- source: tool_5.complete
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_query
+  target: gen_1.in_query
+  type: binds
+- source: tool_5.out_retrieved_document
+  target: gen_1.in_retrieved_document
+  type: binds
+- source: gen_1.complete
+  target: eval_1.trigger
+  type: triggers
+- source: wf_entry.out_output_path
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: tool_6.trigger
+  type: triggers
+- source: wf_entry.out_output_path
+  target: tool_6.in_output_path
+  type: binds
+- source: gen_1.out_generated_answer
+  target: tool_6.in_generated_answer
+  type: binds
+- source: eval_1.fail
+  target: set_1.trigger
+  type: triggers
+- source: gen_1.out_generated_answer
+  target: wf_exit.in_generated_answer
+  type: binds
+- source: tool_6.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_1.complete
+  target: wf_exit.trigger
+  type: triggers

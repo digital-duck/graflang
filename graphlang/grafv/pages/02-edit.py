@@ -3,7 +3,7 @@
 The picture is the same cytoscape view `graf vis` writes. Editing goes through `GraphEditor`: nothing is written until Save, Save
 refuses while `graf validate` reports errors, comments in the file are kept, and every edit can be undone; the chat on the left changes
 the graph through the same methods. `graf vis --edit` sets GRAF_EDIT_FILE (the file to open, optional) and GRAF_SRC_DIR (the work area
-instead of ~/.graflang/cookbook, solvers and apps, optional).
+instead of ~/.graflang/cookbook, solvers, pocketflow and apps, optional).
 """
 from __future__ import annotations
 

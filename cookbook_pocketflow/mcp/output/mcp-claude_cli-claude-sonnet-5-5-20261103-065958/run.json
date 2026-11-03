@@ -1,0 +1,7 @@
+{
+  "graph": "mcp",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {},
+  "started": "2026-11-03T06:59:58"
+}

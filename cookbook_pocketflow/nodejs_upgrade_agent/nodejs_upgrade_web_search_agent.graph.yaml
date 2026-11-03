@@ -1,0 +1,779 @@
+version: 1.0-graph
+workflow:
+  name: nodejs_upgrade_agent
+  inputs:
+  - name: project_dir
+    type: TEXT
+  - name: target_node
+    type: TEXT
+    default: '20'
+  - name: max_heal_attempts
+    type: TEXT
+    default: '5'
+  - name: report_path
+    type: TEXT
+    default: upgrade_report.md
+  - name: template_path
+    type: TEXT
+    default: ''
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  procedures:
+    upgrade_file: ./nodejs_upgrade_web_search_agent.spl
+    npm_validate_and_heal: ./nodejs_upgrade_web_search_agent.spl
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_project_dir
+  - out_target_node
+  - out_max_heal_attempts
+  - out_report_path
+  - out_template_path
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: scan_source_files
+    backend: kernel
+    arguments:
+    - '@project_dir'
+    code: |
+      import json, os
+      from pathlib import Path
+
+      _EXTS = {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"}
+      _SKIP = {"node_modules", ".git", "dist", "build", ".next", "coverage"}
+
+      def scan_source_files(project_dir):
+          root = Path(project_dir)
+          files = []
+          for p in root.rglob("*"):
+              if p.suffix in _EXTS and not any(s in p.parts for s in _SKIP):
+                  files.append(str(p))
+          return json.dumps(sorted(files))
+      _spl_result = scan_source_files(project_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - project_dir
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_project_dir
+  - out_all_files
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: read_package_json
+    backend: kernel
+    arguments:
+    - '@project_dir'
+    code: |
+      import json
+      from pathlib import Path
+
+      def read_package_json(project_dir):
+          pkg = Path(project_dir) / "package.json"
+          if not pkg.exists():
+              return json.dumps({"error": f"package.json not found in {project_dir}"})
+          return pkg.read_text(encoding="utf-8")
+      _spl_result = read_package_json(project_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - project_dir
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_project_dir
+  - out_pkg_json
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: list_outdated
+    backend: kernel
+    arguments:
+    - '@project_dir'
+    code: |
+      import subprocess, json
+
+      def list_outdated(project_dir):
+          result = subprocess.run(
+              ["npm", "outdated", "--json"],
+              cwd=project_dir, capture_output=True, text=True
+          )
+          # npm outdated exits non-zero when packages are outdated — that's expected
+          try:
+              data = json.loads(result.stdout) if result.stdout.strip() else {}
+          except json.JSONDecodeError:
+              data = {"raw": result.stdout}
+          return json.dumps(data)
+      _spl_result = list_outdated(project_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - project_dir
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_project_dir
+  - out_outdated
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: list_count
+    backend: kernel
+    arguments:
+    - '@all_files'
+    code: |
+      import json
+
+      def list_count(json_list):
+          return str(len(json.loads(json_list)))
+      _spl_result = list_count(all_files)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_list
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_all_files
+  - out_file_count
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: detect_project_type
+    backend: kernel
+    arguments:
+    - '@pkg_json'
+    code: |
+      import json
+
+      _FRAMEWORK_SIGNALS = [
+          # (dep_key_substring, project_type)
+          ("next",            "nextjs"),
+          ("nuxt",            "nuxtjs"),
+          ("@angular/core",   "angular"),
+          ("react-scripts",   "react-cra"),
+          ("react",           "react"),
+          ("vue",             "vue"),
+          ("svelte",          "svelte"),
+          ("@nestjs/core",    "nestjs"),
+          ("express",         "express"),
+          ("fastify",         "fastify"),
+          ("koa",             "koa"),
+          ("electron",        "electron"),
+      ]
+
+      def detect_project_type(pkg_json):
+          try:
+              pkg = json.loads(pkg_json)
+          except json.JSONDecodeError:
+              return "unknown"
+          all_deps = {
+              **pkg.get("dependencies", {}),
+              **pkg.get("devDependencies", {}),
+          }
+          for signal, ptype in _FRAMEWORK_SIGNALS:
+              if any(signal in k for k in all_deps):
+                  return ptype
+          # check scripts for clues
+          scripts = pkg.get("scripts", {})
+          if any("angular" in v for v in scripts.values()):
+              return "angular"
+          if any("react" in v for v in scripts.values()):
+              return "react"
+          return "node"   # generic Node.js backend
+      _spl_result = detect_project_type(pkg_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - pkg_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_pkg_json
+  - out_project_type
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: load_upgrade_template
+    backend: kernel
+    arguments:
+    - '@template_path'
+    - '@project_type'
+    code: |
+      from pathlib import Path
+
+      _DEFAULTS = {
+          "react":     "Focus on: React API changes, hooks deprecations, JSX transform, peer dep conflicts.",
+          "react-cra": "Focus on: react-scripts version, webpack config changes, polyfill removals.",
+          "nextjs":    "Focus on: App Router migration, getServerSideProps deprecations, Image/Link API changes.",
+          "angular":   "Focus on: ng update path, RxJS version alignment, standalone component migration, strict mode.",
+          "vue":       "Focus on: Options API vs Composition API, vue-router & vuex/pinia alignment.",
+          "nuxtjs":    "Focus on: Nuxt 3 migration, auto-imports, nitro engine changes.",
+          "svelte":    "Focus on: Svelte 4/5 syntax changes, SvelteKit routing changes.",
+          "nestjs":    "Focus on: module/decorator API changes, platform-express/fastify alignment.",
+          "express":   "Focus on: middleware signature changes, error handler arity, router API.",
+          "electron":  "Focus on: contextBridge, preload script isolation, Node.js version alignment.",
+          "node":      "Focus on: Node.js built-in API changes, ESM/CJS interop, crypto/buffer deprecations.",
+      }
+
+      def load_upgrade_template(template_path, project_type):
+          p = Path(template_path)
+          if template_path and p.exists():
+              return p.read_text(encoding="utf-8")
+          return _DEFAULTS.get(project_type, _DEFAULTS["node"])
+      _spl_result = load_upgrade_template(template_path, project_type)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - template_path
+    - project_type
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_template_path
+  - in_project_type
+  - out_analysis_template
+- id: gen_1
+  type: GENERATE
+  config:
+    function: analyze_breaking_changes
+    params:
+    - pkg_json
+    - outdated
+    - target_node
+    - project_type
+    - analysis_template
+    prompt_inline: |-
+      You are a Node.js upgrade specialist.
+
+      Project type: {{in_project_type}}
+
+      Upgrade guidance for this project type:
+      {{in_analysis_template}}
+
+      Current package.json:
+      {{in_pkg_json}}
+
+      Outdated packages (npm outdated --json):
+      {{in_outdated}}
+
+      Target Node.js version: {{in_target_node}}
+
+      Produce a structured upgrade plan in YAML:
+
+      breaking_changes:
+        - package: <name>
+          from: <version>
+          to: <version>
+          breaking_apis: [<list of changed APIs>]
+          migration_notes: <one-line summary>
+
+      recommended_script: <npm install command with exact pinned versions>
+    arguments:
+    - '@pkg_json'
+    - '@outdated'
+    - '@target_node'
+    - '@project_type'
+    - '@analysis_template'
+  ports:
+  - trigger
+  - complete
+  - in_pkg_json
+  - in_outdated
+  - in_target_node
+  - in_project_type
+  - in_analysis_template
+  - out_upgrade_plan
+- id: tool_7
+  type: SOLVE
+  config:
+    tool: run_npm
+    backend: kernel
+    arguments:
+    - '@project_dir'
+    - '''install'''
+    code: |
+      import subprocess, json
+
+      def run_npm(project_dir, cmd):
+          args = ["npm"] + cmd.split()
+          result = subprocess.run(
+              args, cwd=project_dir, capture_output=True, text=True, timeout=300
+          )
+          return json.dumps({
+              "exit_code": result.returncode,
+              "stdout": result.stdout[-4000:],   # cap to avoid token explosion
+              "stderr": result.stderr[-2000:],
+              "ok": result.returncode == 0
+          })
+      _spl_result = run_npm(project_dir, 'install')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - project_dir
+    - cmd
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_project_dir
+  - out_pre_install
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_idx
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_files_changed
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_idx, @idx) < float(@in_file_count)
+    outputs:
+      file_path:
+        from: tool_8.out_file_path
+      file_result:
+        from: call_1.out_file_result
+      files_changed:
+        from: set_3.out_files_changed
+      _:
+        from: set_4.out__
+      idx:
+        from: set_5.out_idx
+    subgraph:
+      nodes:
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@all_files'
+          - '@idx + 1'
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(all_files, idx + 1)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_all_files
+        - in_idx
+        - out_file_path
+      - id: call_1
+        type: GENERATE
+        config:
+          procedure_ref: procedures.upgrade_file
+          arguments:
+          - '@file_path'
+          - '@upgrade_plan'
+        ports:
+        - trigger
+        - complete
+        - in_file_path
+        - in_upgrade_plan
+        - out_file_result
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: '@in_file_result == ''updated'''
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_file_result
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_files_changed + 1'
+        ports:
+        - trigger
+        - complete
+        - in_files_changed
+        - out_files_changed
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: ''''''
+        ports:
+        - trigger
+        - complete
+        - out__
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_idx + 1'
+        ports:
+        - trigger
+        - complete
+        - in_idx
+        - out_idx
+      edges:
+      - source: tool_8.complete
+        target: call_1.trigger
+        type: triggers
+      - source: tool_8.out_file_path
+        target: call_1.in_file_path
+        type: binds
+      - source: call_1.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: call_1.out_file_result
+        target: eval_1.in_file_result
+        type: binds
+      - source: eval_1.pass
+        target: set_3.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: set_4.trigger
+        type: triggers
+      - source: set_3.complete
+        target: set_5.trigger
+        type: triggers
+      - source: set_4.complete
+        target: set_5.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_all_files
+  - in_idx
+  - in_upgrade_plan
+  - in_files_changed
+  - in_file_count
+  - out_file_path
+  - out_file_result
+  - out_files_changed
+  - out__
+  - out_idx
+- id: call_2
+  type: GENERATE
+  config:
+    procedure_ref: procedures.npm_validate_and_heal
+    arguments:
+    - '@project_dir'
+    - '@pkg_json'
+    - '@max_heal_attempts'
+  ports:
+  - trigger
+  - complete
+  - in_project_dir
+  - in_pkg_json
+  - in_max_heal_attempts
+  - out_npm_log
+- id: eval_2
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'test ✓')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_6
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''pass'''
+  ports:
+  - trigger
+  - complete
+  - out_final_status
+- id: set_7
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''partial'''
+  ports:
+  - trigger
+  - complete
+  - out_final_status
+- id: gen_2
+  type: GENERATE
+  config:
+    function: generate_report
+    params:
+    - project_dir
+    - upgrade_plan
+    - files_changed
+    - npm_log
+    - final_status
+    prompt_inline: |-
+      Write a concise upgrade report in markdown.
+
+      Project: {{in_project_dir}}
+      Final status: {{in_final_status}}
+
+      Upgrade plan:
+      {{in_upgrade_plan}}
+
+      Files changed: {{in_files_changed}}
+
+      npm validation log:
+      {{in_npm_log}}
+
+      Include: what was upgraded, what broke and how it was fixed, remaining TODOs.
+    arguments:
+    - '@project_dir'
+    - '@upgrade_plan'
+    - '@files_changed'
+    - '@npm_log'
+    - '@final_status'
+  ports:
+  - trigger
+  - complete
+  - in_project_dir
+  - in_upgrade_plan
+  - in_files_changed
+  - in_npm_log
+  - in_final_status
+  - out_report
+- id: tool_9
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@report_path'
+    - '@report'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(report_path, report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_report_path
+  - in_report
+  - out__
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_project_dir
+  target: tool_1.in_project_dir
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: wf_entry.out_project_dir
+  target: tool_2.in_project_dir
+  type: binds
+- source: tool_2.complete
+  target: tool_3.trigger
+  type: triggers
+- source: wf_entry.out_project_dir
+  target: tool_3.in_project_dir
+  type: binds
+- source: tool_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: tool_1.out_all_files
+  target: tool_4.in_all_files
+  type: binds
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_2.out_pkg_json
+  target: tool_5.in_pkg_json
+  type: binds
+- source: tool_5.complete
+  target: tool_6.trigger
+  type: triggers
+- source: wf_entry.out_template_path
+  target: tool_6.in_template_path
+  type: binds
+- source: tool_5.out_project_type
+  target: tool_6.in_project_type
+  type: binds
+- source: tool_6.complete
+  target: gen_1.trigger
+  type: triggers
+- source: tool_2.out_pkg_json
+  target: gen_1.in_pkg_json
+  type: binds
+- source: tool_3.out_outdated
+  target: gen_1.in_outdated
+  type: binds
+- source: wf_entry.out_target_node
+  target: gen_1.in_target_node
+  type: binds
+- source: tool_5.out_project_type
+  target: gen_1.in_project_type
+  type: binds
+- source: tool_6.out_analysis_template
+  target: gen_1.in_analysis_template
+  type: binds
+- source: gen_1.complete
+  target: tool_7.trigger
+  type: triggers
+- source: wf_entry.out_project_dir
+  target: tool_7.in_project_dir
+  type: binds
+- source: tool_7.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: tool_1.out_all_files
+  target: loop_1.in_all_files
+  type: binds
+- source: set_1.out_idx
+  target: loop_1.in_idx
+  type: binds
+- source: gen_1.out_upgrade_plan
+  target: loop_1.in_upgrade_plan
+  type: binds
+- source: set_2.out_files_changed
+  target: loop_1.in_files_changed
+  type: binds
+- source: tool_4.out_file_count
+  target: loop_1.in_file_count
+  type: binds
+- source: loop_1.exit
+  target: call_2.trigger
+  type: triggers
+- source: wf_entry.out_project_dir
+  target: call_2.in_project_dir
+  type: binds
+- source: tool_2.out_pkg_json
+  target: call_2.in_pkg_json
+  type: binds
+- source: wf_entry.out_max_heal_attempts
+  target: call_2.in_max_heal_attempts
+  type: binds
+- source: call_2.complete
+  target: eval_2.trigger
+  type: triggers
+- source: call_2.out_npm_log
+  target: eval_2.in_subject
+  type: binds
+- source: eval_2.pass
+  target: set_6.trigger
+  type: triggers
+- source: eval_2.fail
+  target: set_7.trigger
+  type: triggers
+- source: set_6.complete
+  target: gen_2.trigger
+  type: triggers
+- source: set_7.complete
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_project_dir
+  target: gen_2.in_project_dir
+  type: binds
+- source: gen_1.out_upgrade_plan
+  target: gen_2.in_upgrade_plan
+  type: binds
+- source: loop_1.out_files_changed
+  target: gen_2.in_files_changed
+  type: binds
+- source: call_2.out_npm_log
+  target: gen_2.in_npm_log
+  type: binds
+- source: set_6.out_final_status
+  target: gen_2.in_final_status
+  type: binds
+- source: set_7.out_final_status
+  target: gen_2.in_final_status
+  type: binds
+- source: gen_2.complete
+  target: tool_9.trigger
+  type: triggers
+- source: wf_entry.out_report_path
+  target: tool_9.in_report_path
+  type: binds
+- source: gen_2.out_report
+  target: tool_9.in_report
+  type: binds
+- source: gen_2.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: tool_9.complete
+  target: wf_exit.trigger
+  type: triggers

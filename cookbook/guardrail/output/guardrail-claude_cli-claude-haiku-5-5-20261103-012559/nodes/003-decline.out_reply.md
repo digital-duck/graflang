@@ -1,0 +1,1 @@
+I can only help with travel questions, so I can't help with reversing a linked list. Would you like to ask about planning a trip, such as the best time to visit Japan?

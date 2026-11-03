@@ -1,0 +1,533 @@
+version: 1.0-graph
+workflow:
+  name: research_agent_supervisor
+  inputs:
+  - name: question
+    type: TEXT
+    default: What are the key differences between transformer and mamba architectures
+      for LLMs?
+  - name: max_search_iterations
+    type: INTEGER
+    default: 5
+  - name: max_retries
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: verified_answer
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_question
+  - out_max_search_iterations
+  - out_max_retries
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_retry_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_verified_answer
+- id: loop_2
+  type: LOOP
+  config:
+    condition: latest(@in_retry_i, @retry_i) < @in_max_retries
+    outputs:
+      search_history:
+        from: loop_1.out_search_history
+      inner_i:
+        from: loop_1.out_inner_i
+      inner_decision:
+        from: loop_1.out_inner_decision
+      query:
+        from: loop_1.out_query
+      search_results:
+        from: loop_1.out_search_results
+      reasoning:
+        from: loop_1.out_reasoning
+      candidate_answer:
+        from: gen_4.out_candidate_answer
+      verified_answer:
+        from: set_8.out_verified_answer
+      supervisor_decision:
+        from: gen_5.out_supervisor_decision
+      retry_i:
+        from:
+        - set_9.out_retry_i
+        - set_10.out_retry_i
+    subgraph:
+      nodes:
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: ''''''
+        ports:
+        - trigger
+        - complete
+        - out_search_history
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '0'
+        ports:
+        - trigger
+        - complete
+        - out_inner_i
+      - id: loop_1
+        type: LOOP
+        config:
+          condition: latest(@in_inner_i, @inner_i) < @in_max_search_iterations
+          outputs:
+            inner_decision:
+              from: gen_1.out_inner_decision
+            query:
+              from: gen_2.out_query
+            search_results:
+              from: tool_1.out_search_results
+            reasoning:
+              from: gen_3.out_reasoning
+            search_history:
+              from: set_5.out_search_history
+            inner_i:
+              from:
+              - set_6.out_inner_i
+              - set_7.out_inner_i
+          subgraph:
+            nodes:
+            - id: gen_1
+              type: GENERATE
+              config:
+                function: decide_search_or_answer
+                params:
+                - question
+                - search_history
+                prompt_inline: |-
+                  You are a research agent deciding the next action.
+
+                    Question: {{in_question}}
+                    Search history so far: {{in_search_history}}
+
+                    Decide: do you have enough information to answer, or do you need to search for more?
+                    Reply with exactly one word: "search" if you need more information, or "answer" if you have enough.
+                arguments:
+                - '@question'
+                - '@search_history'
+              ports:
+              - trigger
+              - complete
+              - in_question
+              - in_search_history
+              - out_inner_decision
+            - id: eval_1
+              type: EVALUATE
+              config:
+                condition: contains(@in_subject, 'search')
+                branch: 1
+              ports:
+              - trigger
+              - pass
+              - fail
+              - in_subject
+            - id: gen_2
+              type: GENERATE
+              config:
+                function: extract_search_query
+                params:
+                - question
+                - search_history
+                prompt_inline: |-
+                  You are a research agent formulating a web search query.
+
+                    Question: {{in_question}}
+                    Search history so far: {{in_search_history}}
+
+                    Generate a concise, targeted web search query to find information needed to answer the question.
+                    Return only the query string, nothing else.
+                arguments:
+                - '@question'
+                - '@search_history'
+              ports:
+              - trigger
+              - complete
+              - in_question
+              - in_search_history
+              - out_query
+            - id: tool_1
+              type: SOLVE
+              config:
+                tool: web_search
+                backend: kernel
+                arguments:
+                - '@query'
+                code: |
+                  import re
+
+                  def web_search(query: str) -> str:
+                      """WEB_SEARCH(query) — search the web via DuckDuckGo, return top-5 results.
+
+                      Accepts a plain query string or a YAML/prefixed decision block:
+                          'search: what is quantum computing'   → extracts the query after 'search:'
+                          'search_query: ...'                   → extracts the search_query field
+
+                      Usage in SPL:
+                          CALL web_search(@query) INTO @results;
+                          CALL web_search(@decision) INTO @results;
+
+                      Requires: pip install ddgs   (or pip install duckduckgo_search)
+                      """
+                      import warnings
+                      try:
+                          from ddgs import DDGS
+                      except ImportError:
+                          try:
+                              from duckduckgo_search import DDGS
+                          except ImportError:
+                              return 'web_search unavailable: install ddgs (pip install ddgs)'
+                      q = str(query).strip()
+                      m = re.search('search_query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                      if not m:
+                          m = re.search('^search\\s*:\\s*(.+)$', q, re.MULTILINE | re.IGNORECASE)
+                      if not m:
+                          m = re.search('(?<!\\w)query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                      if m:
+                          q = m.group(1).strip()
+                      try:
+                          with warnings.catch_warnings():
+                              warnings.simplefilter('ignore', RuntimeWarning)
+                              results = DDGS().text(q, max_results=5)
+                          if not results:
+                              return f'No results found for: {q}'
+                          lines = []
+                          for i, r in enumerate(results, 1):
+                              title = r.get('title', '')
+                              url = r.get('href', '')
+                              body = r.get('body', '')
+                              lines.append(f'[{i}] {title}\n    URL: {url}\n    {body}')
+                          return '\n\n'.join(lines)
+                      except Exception as e:
+                          return f'Search error: {e}'
+                  _spl_result = web_search(query)
+                result: _spl_result
+                out_type: TEXT
+                tool_params:
+                - query
+                tool_returns: TEXT
+                tool_builtin: true
+              ports:
+              - trigger
+              - complete
+              - in_query
+              - out_search_results
+            - id: gen_3
+              type: GENERATE
+              config:
+                function: reason_over_results
+                params:
+                - question
+                - search_history
+                - search_results
+                prompt_inline: |-
+                  You are a research agent analyzing search results.
+
+                    Question: {{in_question}}
+                    Previous research: {{in_search_history}}
+                    New search results: {{in_search_results}}
+
+                    Extract and summarize the key facts from the new results that are relevant to answering the question.
+                    Return a concise reasoning note to append to the research log.
+                arguments:
+                - '@question'
+                - '@search_history'
+                - '@search_results'
+              ports:
+              - trigger
+              - complete
+              - in_question
+              - in_search_history
+              - in_search_results
+              - out_reasoning
+            - id: set_5
+              type: CONTEXT
+              config:
+                action: set
+                expression: '@in_search_history + ''\n'' + @in_reasoning'
+              ports:
+              - trigger
+              - complete
+              - in_search_history
+              - in_reasoning
+              - out_search_history
+            - id: set_6
+              type: CONTEXT
+              config:
+                action: set
+                expression: '@in_inner_i + 1'
+              ports:
+              - trigger
+              - complete
+              - in_inner_i
+              - out_inner_i
+            - id: set_7
+              type: CONTEXT
+              config:
+                action: set
+                expression: '@in_max_search_iterations'
+              ports:
+              - trigger
+              - complete
+              - in_max_search_iterations
+              - out_inner_i
+            edges:
+            - source: gen_1.complete
+              target: eval_1.trigger
+              type: triggers
+            - source: gen_1.out_inner_decision
+              target: eval_1.in_subject
+              type: binds
+            - source: eval_1.pass
+              target: gen_2.trigger
+              type: triggers
+            - source: gen_2.complete
+              target: tool_1.trigger
+              type: triggers
+            - source: gen_2.out_query
+              target: tool_1.in_query
+              type: binds
+            - source: tool_1.complete
+              target: gen_3.trigger
+              type: triggers
+            - source: tool_1.out_search_results
+              target: gen_3.in_search_results
+              type: binds
+            - source: gen_3.complete
+              target: set_5.trigger
+              type: triggers
+            - source: gen_3.out_reasoning
+              target: set_5.in_reasoning
+              type: binds
+            - source: set_5.complete
+              target: set_6.trigger
+              type: triggers
+            - source: eval_1.fail
+              target: set_7.trigger
+              type: triggers
+        ports:
+        - trigger
+        - loop
+        - exit
+        - in_question
+        - in_search_history
+        - in_inner_i
+        - in_max_search_iterations
+        - out_inner_decision
+        - out_query
+        - out_search_results
+        - out_reasoning
+        - out_search_history
+        - out_inner_i
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: generate_candidate_answer
+          params:
+          - question
+          - search_history
+          prompt_inline: |-
+            You are a research agent generating a final answer.
+
+              Question: {{in_question}}
+              Research gathered: {{in_search_history}}
+
+              Based on the research above, generate a comprehensive and accurate answer to the question.
+          arguments:
+          - '@question'
+          - '@search_history'
+        ports:
+        - trigger
+        - complete
+        - in_question
+        - in_search_history
+        - out_candidate_answer
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_candidate_answer'
+        ports:
+        - trigger
+        - complete
+        - in_candidate_answer
+        - out_verified_answer
+      - id: gen_5
+        type: GENERATE
+        config:
+          function: validate_answer
+          params:
+          - question
+          - candidate_answer
+          prompt_inline: |-
+            You are a supervisor validating a research agent''s answer.
+
+              Question: {{in_question}}
+              Candidate answer: {{in_candidate_answer}}
+
+              Evaluate whether the answer is:
+              1. Directly responsive to the question
+              2. Factually grounded (not fabricated or nonsensical)
+              3. Coherent and well-reasoned
+
+              Reply with exactly one word: "valid" if the answer meets all criteria,
+              or "invalid" if it is nonsensical, fabricated, or off-topic.
+          arguments:
+          - '@question'
+          - '@candidate_answer'
+        ports:
+        - trigger
+        - complete
+        - in_question
+        - in_candidate_answer
+        - out_supervisor_decision
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'valid')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_retries'
+        ports:
+        - trigger
+        - complete
+        - in_max_retries
+        - out_retry_i
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_retry_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_retry_i
+        - out_retry_i
+      edges:
+      - source: set_3.complete
+        target: set_4.trigger
+        type: triggers
+      - source: set_4.complete
+        target: loop_1.trigger
+        type: triggers
+      - source: set_3.out_search_history
+        target: loop_1.in_search_history
+        type: binds
+      - source: set_4.out_inner_i
+        target: loop_1.in_inner_i
+        type: binds
+      - source: loop_1.exit
+        target: gen_4.trigger
+        type: triggers
+      - source: loop_1.out_search_history
+        target: gen_4.in_search_history
+        type: binds
+      - source: gen_4.complete
+        target: set_8.trigger
+        type: triggers
+      - source: gen_4.out_candidate_answer
+        target: set_8.in_candidate_answer
+        type: binds
+      - source: set_8.complete
+        target: gen_5.trigger
+        type: triggers
+      - source: gen_4.out_candidate_answer
+        target: gen_5.in_candidate_answer
+        type: binds
+      - source: gen_5.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: gen_5.out_supervisor_decision
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: set_9.trigger
+        type: triggers
+      - source: eval_2.fail
+        target: set_10.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_question
+  - in_max_search_iterations
+  - in_max_retries
+  - in_retry_i
+  - in_verified_answer
+  - out_search_history
+  - out_inner_i
+  - out_inner_decision
+  - out_query
+  - out_search_results
+  - out_reasoning
+  - out_candidate_answer
+  - out_verified_answer
+  - out_supervisor_decision
+  - out_retry_i
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_verified_answer
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_2.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: loop_2.in_question
+  type: binds
+- source: wf_entry.out_max_search_iterations
+  target: loop_2.in_max_search_iterations
+  type: binds
+- source: wf_entry.out_max_retries
+  target: loop_2.in_max_retries
+  type: binds
+- source: set_1.out_retry_i
+  target: loop_2.in_retry_i
+  type: binds
+- source: set_2.out_verified_answer
+  target: loop_2.in_verified_answer
+  type: binds
+- source: loop_2.out_verified_answer
+  target: wf_exit.in_verified_answer
+  type: binds
+- source: loop_2.exit
+  target: wf_exit.trigger
+  type: triggers

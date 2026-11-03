@@ -5,7 +5,7 @@
   "required": ["action", "payload"],
   "additionalProperties": false,
   "properties": {
-    "action": { "enum": ["add_node", "remove_node", "add_edge", "remove_edge", "update_config"] },
+    "action": { "enum": ["add_node", "remove_node", "add_edge", "remove_edge", "update_config", "add_part"] },
     "payload": { "type": "object" }
   },
   "oneOf": [
@@ -21,6 +21,24 @@
             "type": { "enum": ["GENERATE", "SOLVE", "ASSERT", "EVALUATE", "RECOVER", "OBSERVE", "FORK", "JOIN", "CONTEXT", "QUERY"] },
             "ports": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "config": { "type": "object" }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "add_part" },
+        "payload": {
+          "type": "object", "required": ["id", "part"], "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-zA-Z0-9]+$" },
+            "part": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+            "after": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" },
+            "before": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" },
+            "binds": { "type": "object", "propertyNames": { "pattern": "^[a-zA-Z0-9_]+$" },
+                       "additionalProperties": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" } },
+            "feeds": { "type": "object", "propertyNames": { "pattern": "^[a-zA-Z0-9_]+$" },
+                       "additionalProperties": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$" } } }
           }
         }
       }

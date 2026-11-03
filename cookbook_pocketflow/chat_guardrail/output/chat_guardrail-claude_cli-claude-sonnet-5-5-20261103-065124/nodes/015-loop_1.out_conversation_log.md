@@ -1,0 +1,52 @@
+User: help me plan a trip to Wuhu, Anhui, China
+Assistant: # Wuhu, Anhui: Trip Plan
+
+Wuhu is a Yangtze River port city of about 3.7 million people. It's relaxed, walkable in places, and cheaper than nearby Nanjing or Shanghai. It's best as a 2-3 day stop, or a base for Anhui side trips.
+
+## Getting there
+- **High-speed rail** is the easiest option. Nanjing is roughly 40-60 min, Hefei about 1 hr, and Shanghai about 2.5-3 hrs. Book on Trip.com or 12306, and bring your passport, since tickets are tied to it.
+- **By air**, the closest big hub is Nanjing Lukou (NKG), then a train or transfer. Hefei (HFE) is also an option. Check current schedules for Wuhu's own airport, which has limited service.
+- **Within the city**, use Didi or Amap/Baidu Maps. There is also a metro, and taxis are cheap.
+
+## Best time to go
+Autumn (Oct-Nov) and spring (Mar-May) are the most comfortable. It's early November now, so expect roughly 8-18°C, so bring layers. Summers are hot and humid, and the plum-rain season in June-July brings a lot of rain.
+
+## Suggested 3-day itinerary
+
+**Day 1: Old town and the river**
+- Wander the old streets and the Zhongshan Road pedestrian area. Look for Wuhu iron painting (铁画), a local craft, as a souvenir.
+- Visit Zhongjiang Pagoda (中江塔) on the Yangtze, then take an evening walk along the riverfront.
+- Dinner of local Hui-style cuisine.
+
+**Day 2: Parks and lakes**
+- Jinghu (Mirror Lake) Park in the morning.
+- Pick one of these for the afternoon:
+  - Fantawild Dreamland, if you like theme parks (it's a major local draw).
+  - Museums and a leisurely café afternoon.
+- Evening street food.
+
+**Day 3: Day trip (pick one)**
+- **Ma'anshan**, for the Li Bai-related sites and Caishiji.
+- **Nanjing**, easy by train for a full day.
+- **Huangshan or Hongcun/Xidi**, more of a stretch as a day trip. It works better if you extend by 1-2 nights.
+
+## Food to try
+Anhui (Hui) cuisine leans savory and rustic. Look for **shrimp-roe noodles (虾籽面)** and local river fish and crab dishes. Menus vary a lot, so ask locals or use Dianping to check current favorites.
+
+## Practical tips
+- **Payments:** China is largely cashless. Set up Alipay or WeChat Pay with an international card before you go, and carry some cash as backup.
+- **Connectivity:** Google, WhatsApp and similar services are blocked without a VPN or eSIM with roaming. Set this up in advance, and download an offline translator.
+- **Entry:** Many nationalities now have visa-free entry or the 240-hour transit visa-free policy. Rules change, so verify with the Chinese embassy or consulate before booking.
+- **Language:** English is limited. Have your hotel name and address in Chinese on your phone.
+- **Safety:** Wuhu is very safe. The usual rules apply: watch your belongings in crowds and use licensed taxis or Didi.
+- **Customs:** Dining is communal and tipping is not expected. Don't stick chopsticks upright in rice.
+
+## To tailor this, tell me:
+1. Dates and trip length
+2. Where you're traveling from
+3. Interests (history, food, nature, family or theme parks)
+4. Budget level
+5. Whether you'd like to add Huangshan, Nanjing or Shanghai to the trip
+
+I can then build a day-by-day schedule with specific hotels, transport times and booking links to check.
+

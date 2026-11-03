@@ -1,0 +1,279 @@
+version: 1.0-graph
+workflow:
+  name: invoice_processor
+  inputs:
+  - name: pdf_path
+    type: TEXT
+    default: invoice.pdf
+  outputs:
+  - name: result
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_pdf_path
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: load_pdf_invoice
+    backend: kernel
+    arguments:
+    - '@pdf_path'
+    code: |
+      import pypdf
+
+      def load_pdf_invoice(pdf_path: str) -> str:
+          try:
+              reader = pypdf.PdfReader(pdf_path)
+              pages = [page.extract_text() or "" for page in reader.pages]
+              text = "\n".join(pages).strip()
+              return text if text else "error: no text extracted from PDF"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = load_pdf_invoice(pdf_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - pdf_path
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_pdf_path
+  - out_pdf_content
+- id: gen_1
+  type: GENERATE
+  config:
+    function: extract_invoice_fields
+    params:
+    - pdf_content
+    prompt_inline: |-
+      You are an invoice extraction specialist. Analyze the invoice text below and return a single valid JSON object with exactly these fields:
+      - vendor: string (seller name and address)
+      - customer: string (buyer/billed-to name and address)
+      - invoice_number: string
+      - invoice_date: string (ISO 8601 format)
+      - line_items: array of objects, each with: description (string), quantity (number), unit_price (number), amount (number)
+      - tax: number
+      - total: number
+
+      Invoice content:
+      {{in_pdf_content}}
+
+      Return ONLY the JSON object — no markdown fences, no explanation, no trailing text.
+    arguments:
+    - '@pdf_content'
+  ports:
+  - trigger
+  - complete
+  - in_pdf_content
+  - out_raw_json
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: parse_invoice_json
+    backend: kernel
+    arguments:
+    - '@raw_json'
+    code: |
+      import json
+
+      def parse_invoice_json(raw_json: str) -> str:
+          try:
+              text = raw_json.strip()
+              if text.startswith("```"):
+                  lines = text.split("\n")
+                  text = "\n".join(lines[1:-1]).strip()
+              return json.dumps(json.loads(text))
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = parse_invoice_json(raw_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - raw_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_raw_json
+  - out_invoice_json
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: validate_invoice_math
+    backend: kernel
+    arguments:
+    - '@invoice_json'
+    code: |
+      import json
+
+      def validate_invoice_math(invoice_json: str) -> str:
+          try:
+              data = json.loads(invoice_json)
+              line_items = data.get("line_items", [])
+              subtotal = sum(float(item.get("amount", 0)) for item in line_items)
+              tax = float(data.get("tax", 0))
+              computed = round(subtotal + tax, 2)
+              declared = round(float(data.get("total", 0)), 2)
+              if abs(computed - declared) < 0.01:
+                  return "pass"
+              return f"fail: line_items_sum={subtotal} tax={tax} computed_total={computed} declared_total={declared}"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = validate_invoice_math(invoice_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - invoice_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_invoice_json
+  - out_math_check
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'pass')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: build_invoice_output
+    backend: kernel
+    arguments:
+    - '@invoice_json'
+    - '''valid'''
+    - ''''''
+    code: |
+      import json
+
+      def build_invoice_output(invoice_json: str, status: str, notes: str) -> str:
+          try:
+              data = json.loads(invoice_json)
+              data["validation_status"] = status
+              if notes:
+                  data["validation_notes"] = notes
+              return json.dumps(data, indent=2)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = build_invoice_output(invoice_json, 'valid', '')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - invoice_json
+    - status
+    - notes
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_invoice_json
+  - out_result
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: build_invoice_output
+    backend: kernel
+    arguments:
+    - '@invoice_json'
+    - '''invalid'''
+    - '@math_check'
+    code: |
+      import json
+
+      def build_invoice_output(invoice_json: str, status: str, notes: str) -> str:
+          try:
+              data = json.loads(invoice_json)
+              data["validation_status"] = status
+              if notes:
+                  data["validation_notes"] = notes
+              return json.dumps(data, indent=2)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = build_invoice_output(invoice_json, 'invalid', math_check)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - invoice_json
+    - status
+    - notes
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_invoice_json
+  - in_math_check
+  - out_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_pdf_path
+  target: tool_1.in_pdf_path
+  type: binds
+- source: tool_1.complete
+  target: gen_1.trigger
+  type: triggers
+- source: tool_1.out_pdf_content
+  target: gen_1.in_pdf_content
+  type: binds
+- source: gen_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: gen_1.out_raw_json
+  target: tool_2.in_raw_json
+  type: binds
+- source: tool_2.complete
+  target: tool_3.trigger
+  type: triggers
+- source: tool_2.out_invoice_json
+  target: tool_3.in_invoice_json
+  type: binds
+- source: tool_3.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_3.out_math_check
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: tool_4.trigger
+  type: triggers
+- source: tool_2.out_invoice_json
+  target: tool_4.in_invoice_json
+  type: binds
+- source: eval_1.fail
+  target: tool_5.trigger
+  type: triggers
+- source: tool_2.out_invoice_json
+  target: tool_5.in_invoice_json
+  type: binds
+- source: tool_3.out_math_check
+  target: tool_5.in_math_check
+  type: binds
+- source: tool_4.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: tool_5.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: tool_4.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: tool_5.complete
+  target: wf_exit.trigger
+  type: triggers

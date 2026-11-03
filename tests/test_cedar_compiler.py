@@ -58,23 +58,23 @@ def test_compiler_simple():
     compiler = CedarCompiler()
     rust_code = compiler.compile(SIMPLE_POLICY)
     assert "pub fn evaluate" in rust_code
-    assert "permit_0" in rust_code
-    assert '"alice"' in rust_code
+    assert "fn policy0" in rust_code and "d.run(\"policy0\", false" in rust_code    # a permit (the flag is "is a forbid")
+    assert 'Uid::new("User", "alice")' in rust_code
 
 
 def test_compiler_with_condition():
     compiler = CedarCompiler()
     rust_code = compiler.compile(POLICY_WITH_CONDITION)
-    assert "forbid_0" in rust_code
+    assert "d.run(\"policy0\", true" in rust_code                                   # a forbid
     assert "contains_pii" in rust_code
 
 
 def test_compiler_complex():
     compiler = CedarCompiler()
     rust_code = compiler.compile(COMPLEX_POLICY)
-    assert "forbid_0" in rust_code
-    assert 'Policy: safety-rule-1' in rust_code
-    assert '["ASSERT", "SOLVE"]' in rust_code or 'vec![' in rust_code
+    assert "d.run(\"policy0\", true" in rust_code
+    assert "safety-rule-1" in rust_code                                             # the @id annotation is kept as a doc comment
+    assert 'lit_str("ASSERT")' in rust_code and 'lit_str("SOLVE")' in rust_code and "set_lit(" in rust_code
 
 
 def test_lexer_error():
@@ -101,8 +101,8 @@ def test_entity_hierarchy():
     '''
     compiler = CedarCompiler()
     rust_code = compiler.compile(policy)
-    assert "is_in" in rust_code
-    assert '"admins"' in rust_code
+    assert "entity_in(" in rust_code
+    assert 'Uid::new("Group", "admins")' in rust_code
 
 
 def test_like_operator():
@@ -112,7 +112,7 @@ def test_like_operator():
     '''
     compiler = CedarCompiler()
     rust_code = compiler.compile(policy)
-    assert "Regex" in rust_code or "regex" in rust_code
+    assert "like(" in rust_code and 'Some("admin"), None' in rust_code             # the pattern "admin*" as literal + wildcard
 
 
 def test_has_attribute():
@@ -122,4 +122,4 @@ def test_has_attribute():
     '''
     compiler = CedarCompiler()
     rust_code = compiler.compile(policy)
-    assert "contains_key" in rust_code
+    assert "has(req, var_context(req), \"sensitive_data\")" in rust_code

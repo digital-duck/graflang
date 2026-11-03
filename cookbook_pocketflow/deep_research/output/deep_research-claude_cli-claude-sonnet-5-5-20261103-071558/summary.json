@@ -1,0 +1,164 @@
+{
+  "steps": 51,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 22,
+    "input_tokens": 12497,
+    "output_tokens": 9566,
+    "cost_usd": 0.0,
+    "ms": 184939
+  },
+  "nodes": {
+    "loop_1": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 181051
+    },
+    "gen_9": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 29305
+    },
+    "gen_6": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 26778
+    },
+    "gen_2": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 20553
+    },
+    "gen_8": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 20538
+    },
+    "gen_12": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 20312
+    },
+    "gen_10": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 16793
+    },
+    "gen_7": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 16676
+    },
+    "gen_5": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 8436
+    },
+    "gen_13": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 7875
+    },
+    "gen_3": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 7693
+    },
+    "gen_4": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 5580
+    },
+    "gen_1": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 4404
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 460
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 12
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 9
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 5
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 1
+    },
+    "set_2": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_3": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_4": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 3,
+      "ms": 0
+    },
+    "fork_1": {
+      "type": "FORK",
+      "n": 2,
+      "ms": 0
+    },
+    "join_1": {
+      "type": "JOIN",
+      "n": 2,
+      "ms": 0
+    },
+    "fork_2": {
+      "type": "FORK",
+      "n": 2,
+      "ms": 0
+    },
+    "join_2": {
+      "type": "JOIN",
+      "n": 2,
+      "ms": 0
+    },
+    "eval_2": {
+      "type": "EVALUATE",
+      "n": 2,
+      "ms": 0
+    },
+    "set_7": {
+      "type": "CONTEXT",
+      "n": 2,
+      "ms": 0
+    },
+    "set_5": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

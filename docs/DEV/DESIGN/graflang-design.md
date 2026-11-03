@@ -17,7 +17,7 @@ This document reviews the existing prototype at `~/projects/digital-duck/graflan
 | Area | State |
 |---|---|
 | Package | `graflang` (PyPI) / `graphlang` (import); CLI `graf run\|validate\|info\|expand\|describe\|create\|compile\|vis` (`vis --edit` opens the app); 1065 offline tests pass (7 known `grafc/cedar` failures) *(2026-11-01)* |
-| Runtime `grafr` | Token-passing dataflow over a `networkx.MultiDiGraph`; node types GENERATE, EVALUATE, SOLVE, ASSERT, LOOP, BATCH, FORK/JOIN, GUARD, MUTATE, CONTEXT, RUN, RECOVER, INPUT/OUTPUT (OBSERVE, QUERY, EMIT are still pass-through) |
+| Runtime `grafr` | Token-passing dataflow over a `networkx.MultiDiGraph`; node types GENERATE, EVALUATE, SOLVE, ASSERT, LOOP, BATCH, FORK/JOIN, GUARD, MUTATE, CONTEXT, RUN, RECOVER, INPUT/OUTPUT (QUERY, EMIT and OBSERVE became real on 2026-11-03: `grafr/outside.py`) |
 | Edges | Two types: `triggers` (control tokens between named ports) and `binds` (data, keyed by port name) |
 | LLM | `mock` (tests only) plus adapters through shared `dd-llm` (`claude_cli`, `ollama`, `openai`, ...); default `claude_cli` with `claude-sonnet-5-5` |
 | Deterministic compute | `SOLVE` via `expression`, `procedure_ref` (SPL workflow), `backend: kernel` (persistent Python kernel, any installed Jupyter kernel through `kernel_name` / `--kernel-name`, e.g. `sagemath`) or `backend: subprocess` (any program, optionally in a container); `RUN` for subprocess, python and http executors |
@@ -56,7 +56,7 @@ This document reviews the existing prototype at `~/projects/digital-duck/graflan
 ### 3.2 Node execution contract is thin
 - **GENERATE** returns the raw LLM string on the first `out_*` port *(verified)*: no output schema, no structured output, no validation, no retry, no timeout, no token/cost accounting.
 - **No retry/fallback/timeout** outside SOLVE backends *(verified by grep)*. Any node exception aborts the whole run (`node.error` then re-raise). The only graceful path is `SOLVE on_error: route`.
-- **Declared but unimplemented node types:** `QUERY`, `RECOVER`, `OBSERVE`, `EMIT` are registered to the pass-through base executor *(verified)*. `RECOVER` is the natural home for error handling and it does nothing.
+- **Declared but unimplemented node types** *(as of 2026-10-30; `RECOVER` and, on 2026-11-03, `QUERY`, `OBSERVE` and `EMIT` have since been built)*: `QUERY`, `RECOVER`, `OBSERVE`, `EMIT` were registered to the pass-through base executor *(verified)*. `RECOVER` is the natural home for error handling and it does nothing.
 - Data semantics: "if several `binds` edges feed one port, the most recently written source wins" *(verified)*. Order-dependent; hard to reason about under FORK/JOIN.
 
 ### 3.3 No real concurrency
@@ -141,7 +141,7 @@ Priority: **P0** blocks the mission (SPL upgrade, practical orchestration), **P1
 | G4 parallelism | **Resolved**, opt-in (`--workers`, `BATCH`) | E5, §10 R3 |
 | G5 authoring | **Resolved**: compact `steps:` form, `graf expand`, and the app's Create page that writes a graph from a description | E3, §14 |
 | G6 executors | **Resolved** for subprocess, python and http (`RUN`); `mcp` and `wasm` are out for now | E4 |
-| G7 stub node types | **Partly.** `RECOVER` is real; `OBSERVE`, `QUERY` and `EMIT` are still pass-through | Appendix B |
+| G7 stub node types | **Closed 2026-11-03.** `RECOVER`, `QUERY`, `EMIT` and `OBSERVE` are real (`grafr/outside.py`) | Appendix B |
 | G8 bindings | **Resolved** (`--bind`) | E6 |
 | G9 `grafc/cedar` | **Decided: leave it alone**; its 7 test failures stay known | §12 decision 3 |
 | G10 portability | **Resolved** | §10 R0 |
@@ -551,7 +551,7 @@ The basic functionality is in place (see the status note at the top). This list 
 
 *Already so in graflang:* `cookbook/your_book` reads the `review_chapter` verdict (`needs_revision` sends `REVISION_NEEDED` chapters to `revise_chapter`; the loop collects whichever wrote last). The ConceptBook driver scripts are your project and were not touched; the same wiring applies when they are rewritten (item 9).
 
-5. **`OBSERVE`, `QUERY`, `EMIT`.** Registered but pass-through. Build them when an app needs them, or remove them from the schema.
+5. **`OBSERVE`, `QUERY`, `EMIT`.** Built 2026-11-03 (`grafr/outside.py`; owner: "I like them"): `QUERY` reads a file inside the graph's folder, `EMIT` writes a file, prints, posts to a webhook or e-mails fixed recipients, `OBSERVE` records without ever failing a run; `QUERY` and `EMIT` stay behind a `GUARD` and their path/target keys are `CODE_KEYS`. See `graflang-idea.md`.
 
 [WEN] build when needed 
 

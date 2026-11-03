@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The runtime commands of `graf`: run, validate, info (registered in graphlang/cli.py)."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -59,6 +60,8 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--bind", "bind_file", type=click.Path(dir_okay=False), default=None,
               help="bindings file: the model, files and limits for this environment (llm, llms, params, resources, limits)")
 @click.option("--param", multiple=True, help="Workflow parameters (key=value); repeatable")
+@click.option("--answer", multiple=True, help="an answer for a DECISION node (node=answer or node=answer|note); repeatable; without it the terminal is asked")
+@click.option("--by", "answered_by", default=None, help="who gives the --answer values (recorded on the DECISION node's out_by; default the user name)")
 @click.option("--log-level", type=click.Choice(["debug", "info", "warning", "error"]), default=None,
               help="file log level (default info, or $DD_LOG_LEVEL); debug adds every node firing and LLM text previews")
 @click.option("--log-format", type=click.Choice(["text", "jsonl", "both"]), default=None,
@@ -71,10 +74,11 @@ def _load_or_exit(graph_path: Path) -> dict:
 @click.option("--save-nodes/--no-save-nodes", default=True, show_default=True,
               help="save every node's output (LLM responses included) under <run folder>/nodes/ (--no-save-nodes keeps only the workflow outputs)")
 @click.option("--no-output", is_flag=True, help="do not write result files")
+@click.option("--stream", is_flag=True, help="print each node's result as soon as the node finishes, instead of only the final output (node by node, not token by token)")
 @click.option("--log-prompts", type=click.Path(file_okay=False), default=None,
               help="write every prompt sent by a procedure_ref node to DIR/<procedure>/<function>_NNN.md (as spl3 run --log-prompts)")
-def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, record_file, replay_file, checkpoint_file, resume_file, bind_file, param, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
-            no_output, log_prompts):
+def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, record_file, replay_file, checkpoint_file, resume_file, bind_file, param, answer, answered_by, log_level, log_format, log_dir, no_log, output_dir, save_nodes,
+            no_output, stream, log_prompts):
     """Execute a GraphLang workflow (GRAPH is the path to the .graph.yaml file)."""
     if log_prompts:
         from .procedures import PROMPT_LOG_ENV
@@ -158,9 +162,14 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, re
         llm = MeteredLLM(llm, limits.get("max_llm_calls"), limits.get("max_cost_usd"))
         runtime = GraphLangRuntime(graph_data, llm=llm, adapter=adapter, model=model, max_steps=max_steps, wall_time_s=limits.get("wall_time_s"),
                                    workers=workers or limits.get("concurrency") or 1, kernel_name=kernel_name,
-                                   node_output=run_output if save_nodes else None)
+                                   node_output=run_output, on_node=_print_node if stream else None)
         if adapter == "mock":
             console.print("[yellow]adapter: mock (no LLM is called); use --adapter claude_cli, ollama, ... for real output[/yellow]")
+        for a in answer:
+            if '=' not in a:
+                raise click.BadParameter(f"expected node=answer, got {a!r}", param_hint="--answer")
+            runtime.answers[a.split('=', 1)[0]] = a.split('=', 1)[1]
+        runtime.answered_by = answered_by
         if checkpoint_file or resume_file:
             runtime.checkpoint_path = Path(checkpoint_file or resume_file)
         result = runtime.resume(Path(resume_file)) if resume_file else runtime.execute(params)
@@ -184,6 +193,17 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, re
         console.print(f"[dim]output: {run_output.dir}[/dim]")
     if log_path:
         console.print(f"[dim]log: {log_path}[/dim]")
+
+
+def _print_node(event: dict) -> None:
+    """`--stream`: one block per finished node, with its outputs (long text cut), as the run goes."""
+    pad = "  " * event["depth"]
+    route = f" -> {event['route']}" if event["route"] else ""
+    console.print(f"{pad}[green]✓[/green] {event['type']} [bold]{event['node']}[/bold] ({event['ms']} ms){route}")
+    for port, value in event["outputs"].items():
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        shown = text if len(text) <= 600 else text[:600] + f" … [{len(text)} chars]"
+        console.print(f"{pad}  [dim]{port}:[/dim] {escape(shown)}")
 
 
 def _summary_line(summary: dict) -> str:
@@ -272,7 +292,133 @@ def cmd_expand(graph):
     data = _load_or_exit(graph_path)
     data.pop("_source_dir", None)
     data.pop("_part_of", None)
+    data.pop("_parts_calls", None)
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
     yaml.sort_base_mapping_type_on_output = False
     yaml.dump(data, sys.stdout)
+
+
+@click.command("compact", short_help="Print a long-form workflow in its compact (steps:) form: the inverse of expand.")
+@click.argument("graph")
+@click.option("-o", "--out", "out_file", type=click.Path(dir_okay=False), default=None, help="write to FILE instead of printing")
+def cmd_compact(graph, out_file):
+    """Write a long-form workflow (nodes/edges) as `steps:`. The result is checked by expanding it again; a node that
+    does not come back exactly stays in `nodes:` / `edges:`. Comments and the order of nodes are not kept."""
+    from ruamel.yaml import YAML
+    from .compactify import NotCompactable, compactify
+    graph_path = Path(graph)
+    if not graph_path.exists():
+        console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
+        sys.exit(1)
+    data = YAML(typ="safe").load(graph_path.read_text())
+    try:
+        result, report = compactify(data)
+    except (NotCompactable, ValueError) as ex:
+        console.print(f"[red]Error:[/red] {ex}")
+        sys.exit(1)
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    yaml.sort_base_mapping_type_on_output = False
+    if out_file:
+        with open(out_file, "w") as fh:
+            yaml.dump(result, fh)
+    else:
+        yaml.dump(result, sys.stdout)
+    click.echo(f"{report['steps']} steps; {report['nodes_kept']} of {report['nodes_total']} nodes and "
+               f"{report['edges_kept']} of {report['edges_total']} edges kept in long form; round trip verified.", err=True)
+
+
+@click.command("parts", short_help="List the parts a workflow uses: where each comes from, its pin, interface, what it touches and costs.")
+@click.argument("graph")
+def cmd_parts(graph):
+    """For each part a workflow uses (SUBGRAPH): the recipe it resolves to, the hash that pins it (`cookbook:name@hash`), its inputs and
+    outputs, what it can do outside the graph (files, e-mail, programs) and how many model calls it makes. Also checks `workflow.parts_policy`."""
+    from .parts import PartError
+    from .partinfo import describe, parts_report
+    path = Path(graph)
+    if not path.exists():
+        console.print(f"[red]Error:[/red] Graph file not found: {path}")
+        sys.exit(1)
+    try:
+        rows = parts_report(path)
+    except (PartError, ValueError) as ex:
+        console.print(f"[red]Error:[/red] {ex}")
+        sys.exit(1)
+    if not rows:
+        click.echo("no parts used")
+        return
+    for r in rows:
+        ins = ", ".join(f"{i['name']}" + (f" ({i['description']})" if i.get("description") else "") for i in r["inputs"])
+        outs = ", ".join(f"{o['name']}" + (f" ({o['description']})" if o.get("description") else "") for o in r["outputs"])
+        click.echo(f"{r['use']}: {r['name']}  {r['file']}  hash {r['hash']}{'  (pinned)' if r['pinned'] else ''}\n"
+                   f"    takes {ins or '-'}\n    gives {outs or '-'}\n    {describe(r['capabilities'])}")
+
+
+@click.command("trace", short_help="Read a run's log as a trace: a text timeline, or OpenTelemetry (OTLP/JSON).")
+@click.argument("log", required=False, type=click.Path(dir_okay=False))
+@click.option("--format", "fmt", type=click.Choice(["tree", "otlp"]), default="tree", show_default=True,
+              help="tree: a timeline in the terminal; otlp: OpenTelemetry JSON for Jaeger, Tempo, Langfuse or a collector")
+@click.option("-o", "--out", "out_file", type=click.Path(dir_okay=False), default=None, help="write to FILE instead of printing")
+def cmd_trace(log, fmt, out_file):
+    """Turn the .jsonl log of a run (LOG; default the newest in ~/.graflang/logs) into a trace: one span per node firing."""
+    from .trace import TraceError, read_events, spans_of, to_otlp, to_tree
+    path = Path(log) if log else None
+    if path is None:
+        logs = sorted(Path(os.environ.get("DD_LOG_DIR") or Path.home() / ".graflang" / "logs").expanduser().glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+        if not logs:
+            raise click.ClickException("no .jsonl log found; run a graph first, or give the log's path")
+        path = logs[-1]
+    try:
+        trace = spans_of(read_events(path))
+    except (TraceError, OSError) as e:
+        raise click.ClickException(str(e)) from None
+    text = json.dumps(to_otlp(trace), indent=2) if fmt == "otlp" else to_tree(trace)
+    if out_file:
+        Path(out_file).write_text(text + "\n", encoding="utf-8")
+        click.echo(f"{path.name}: {len(trace['spans']) - 1} node spans -> {out_file}")
+    else:
+        click.echo(text)
+
+
+@click.command("watch", short_help="Run a workflow again and again on a schedule (a heartbeat).",
+               context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.argument("graph", type=click.Path(dir_okay=False))
+@click.option("--every", type=float, default=60.0, show_default=True, help="seconds from the start of one run to the start of the next")
+@click.option("--times", type=int, default=10, show_default=True, help="stop after this many runs; 0 means until you press Ctrl-C")
+@click.option("--max-failures", type=int, default=3, show_default=True, help="stop after this many failed runs in a row")
+@click.pass_context
+def cmd_watch(ctx, graph, every, times, max_failures):
+    """Run GRAPH every EVERY seconds, as `graf run` does (everything after the options is passed to `graf run`).
+
+    The always-on pattern: a workflow that checks something and acts when it finds work (a QUERY that reads an inbox file, an
+    EVALUATE that decides, an EMIT that notifies). Each run is a separate process with its own log and output folder, so one
+    bad run does not take the watcher down. Every run is bound by its own limits (give `--bind` a file with `limits`); a watcher
+    that calls a real model every minute is billed every minute, which is why the default is ten runs, not forever.
+
+        graf watch checks.graph.yaml --every 300 --times 12 --param folder=inbox --llm claude_cli:claude-haiku-5-5 --bind limits.bind.yaml
+    """
+    import subprocess
+    import time
+    from datetime import datetime
+    if every <= 0:
+        raise click.BadParameter("must be positive", param_hint="--every")
+    command = [sys.executable, "-m", "graphlang", "run", graph, *ctx.args]
+    runs = failures = 0
+    click.echo(f"watching {graph}: every {every:g} s, " + (f"{times} runs" if times else "until stopped") + f"; stops after {max_failures} failures in a row")
+    try:
+        while not times or runs < times:
+            began = time.monotonic()
+            result = subprocess.run(command, capture_output=True, text=True)
+            runs += 1
+            failures = 0 if result.returncode == 0 else failures + 1
+            lines = (result.stdout if result.returncode == 0 else result.stdout + result.stderr).strip().splitlines()
+            last = lines[-1] if lines else ""
+            click.echo(f"{datetime.now():%H:%M:%S} run {runs}: {'ok' if result.returncode == 0 else 'FAILED (exit ' + str(result.returncode) + ')'}  {last}"[:200])
+            if failures >= max_failures:
+                raise click.ClickException(f"{failures} failed runs in a row; stopped")
+            if times and runs >= times:
+                break
+            time.sleep(max(0.0, every - (time.monotonic() - began)))
+    except KeyboardInterrupt:
+        click.echo(f"stopped after {runs} runs")

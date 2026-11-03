@@ -1,6 +1,6 @@
 # Setup
 
-Install GraphLang, check that it works, and (optionally) connect a real LLM. Next: [TUTORIAL.md](TUTORIAL.md) walks through a first workflow; [USER-GUIDE.md](USER-GUIDE.md) is the reference.
+Install GraphLang, check that it works, and (optionally) connect a real LLM. Next: [TUTORIAL.md](TUTORIAL.md) walks through a first workflow; [PATTERNS.md](PATTERNS.md) says which pattern fits your task and which recipe to start from; [USER-GUIDE.md](USER-GUIDE.md) is the reference.
 
 > **Status:** early prototype. `graf run` (the runtime) works end to end on the bundled workflows. `graf compile` (the Rust compiler) is a stub.
 
@@ -60,6 +60,19 @@ pytest
 `graf run` uses the default model, `claude_cli` with `claude-sonnet-5-5`, so the `claude` command-line tool must work; this workflow makes three short calls. Seeing `✓ Workflow completed` means the runtime, schema validation and Cedar import all work.
 
 `pytest` has known failures: `tests/test_cedar_compiler.py` and `tests/test_policy_slicer.py` test the hand-written Cedar compiler in `grafc/cedar/`, which is unfinished (gap #18 in the design notes; see `docs/DEV/readme.md`). Everything else should pass.
+
+## Try the whole cookbook
+
+The repository has three recipe folders (`cookbook/`, `cookbook_pocketflow/`, `cookbook_solvers/`) listed in `cookbook/cookbook_catalog.yaml`. From the checkout, in the `graf` env:
+
+```bash
+python cookbook/run_all.py --list                      # every recipe, with what it needs
+python cookbook/run_all.py --validate                  # structure of every graph; no model, free
+python cookbook/run_all.py --check --suite solvers     # are the libraries and kernels there?
+python cookbook/run_all.py --run --ids 'pocketflow.rag' --llm claude_cli:claude-sonnet-5-5
+```
+
+Some recipes need more than the base install: the `kernel` extra (`pip install 'graflang[kernel]'`) for `SOLVE` nodes that run Python, the `spl` extra for `procedure_ref`, and for `pocketflow.rag` `sentence-transformers` and `faiss-cpu` (also what `graf vis --edit` Browse uses for search by meaning, with `pip install 'graflang[semantic]'`). Install them into the same env that runs `graf`: a Jupyter kernel started by a run uses the first `python` on your `PATH`. The solver recipes list their own extra programs (SageMath, Lean, MiniZinc) in `cookbook_solvers/README.md`.
 
 ## Connect a real LLM
 

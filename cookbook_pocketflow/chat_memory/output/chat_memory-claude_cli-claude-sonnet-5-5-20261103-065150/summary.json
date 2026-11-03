@@ -1,0 +1,129 @@
+{
+  "steps": 154,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 10,
+    "input_tokens": 9387,
+    "output_tokens": 2175,
+    "cost_usd": 0.0,
+    "ms": 56613
+  },
+  "nodes": {
+    "loop_1": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 57599
+    },
+    "gen_1": {
+      "type": "GENERATE",
+      "n": 10,
+      "ms": 56615
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 10,
+      "ms": 461
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 10,
+      "ms": 63
+    },
+    "tool_6": {
+      "type": "SOLVE",
+      "n": 10,
+      "ms": 51
+    },
+    "tool_12": {
+      "type": "SOLVE",
+      "n": 7,
+      "ms": 51
+    },
+    "tool_7": {
+      "type": "SOLVE",
+      "n": 10,
+      "ms": 49
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 10,
+      "ms": 42
+    },
+    "tool_9": {
+      "type": "SOLVE",
+      "n": 7,
+      "ms": 34
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 10,
+      "ms": 32
+    },
+    "tool_10": {
+      "type": "SOLVE",
+      "n": 7,
+      "ms": 32
+    },
+    "tool_8": {
+      "type": "SOLVE",
+      "n": 7,
+      "ms": 31
+    },
+    "tool_5": {
+      "type": "SOLVE",
+      "n": 10,
+      "ms": 29
+    },
+    "tool_11": {
+      "type": "SOLVE",
+      "n": 7,
+      "ms": 28
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 1
+    },
+    "set_2": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_3": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_4": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "set_5": {
+      "type": "CONTEXT",
+      "n": 10,
+      "ms": 0
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 10,
+      "ms": 0
+    },
+    "set_6": {
+      "type": "CONTEXT",
+      "n": 3,
+      "ms": 0
+    },
+    "set_7": {
+      "type": "CONTEXT",
+      "n": 10,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

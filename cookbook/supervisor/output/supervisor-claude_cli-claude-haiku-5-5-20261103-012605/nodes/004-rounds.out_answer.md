@@ -1,0 +1,1 @@
+Sunlight contains all colors, but air molecules scatter shorter (blue) wavelengths much more strongly than longer (red) ones, a process called Rayleigh scattering. That scattered blue light reaches your eyes from every direction in the sky, so the sky looks blue.

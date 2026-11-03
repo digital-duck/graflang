@@ -1,0 +1,5 @@
+Based on the retrieved context, FAISS (Facebook AI Similarity Search) is an open-source library developed by Meta for efficient similarity search over vectors. The context lists it among the popular vector databases, alongside Chroma, Weaviate, Pinecone, and Qdrant.
+
+Vector databases store and query high-dimensional embeddings. They are used in applications that need semantic search, such as recommendation engines, question-answering systems, and RAG pipelines. FAISS is one of the tools for that job.
+
+The passage cuts off mid-sentence ("provides highly efficient..."), so it doesn't say what FAISS does specifically, such as its indexing methods, performance characteristics, or GPU support. For those details you would need the rest of the document or another source.

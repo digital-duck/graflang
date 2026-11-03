@@ -1,0 +1,9 @@
+{
+  "graph": "supervisor",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "question": "Why is the sky blue?"
+  },
+  "started": "2026-11-03T01:26:05"
+}

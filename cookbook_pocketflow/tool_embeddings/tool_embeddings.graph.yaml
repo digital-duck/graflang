@@ -1,0 +1,152 @@
+version: 1.0-graph
+workflow:
+  name: text_to_embedding
+  inputs:
+  - name: text
+    type: TEXT
+    default: Machine learning is a branch of artificial intelligence that enables
+      computers to learn from data without being explicitly programmed.
+  - name: api_key
+    type: TEXT
+    default: ''
+  outputs:
+  - name: result
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_text
+  - out_api_key
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: call_openai_embeddings
+    backend: kernel
+    arguments:
+    - '@text'
+    - '@api_key'
+    code: |
+      import json, urllib.request, os
+      def call_openai_embeddings(text: str, api_key: str) -> str:
+          try:
+              key = api_key or os.environ.get("OPENAI_API_KEY", "")
+              if not key:
+                  return "error: no API key provided"
+              payload = json.dumps({"input": text, "model": "text-embedding-3-small"}).encode()
+              req = urllib.request.Request(
+                  "https://api.openai.com/v1/embeddings",
+                  data=payload,
+                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return resp.read().decode()
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = call_openai_embeddings(text, api_key)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - text
+    - api_key
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_text
+  - in_api_key
+  - out_api_response
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'error:')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_api_response'
+  ports:
+  - trigger
+  - complete
+  - in_api_response
+  - out_result
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: extract_embedding
+    backend: kernel
+    arguments:
+    - '@api_response'
+    code: |
+      import json
+      def extract_embedding(response_json: str) -> str:
+          try:
+              data = json.loads(response_json)
+              embedding = data["data"][0]["embedding"]
+              return json.dumps(embedding)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = extract_embedding(api_response)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - response_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_api_response
+  - out_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_text
+  target: tool_1.in_text
+  type: binds
+- source: wf_entry.out_api_key
+  target: tool_1.in_api_key
+  type: binds
+- source: tool_1.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_1.out_api_response
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: set_1.trigger
+  type: triggers
+- source: tool_1.out_api_response
+  target: set_1.in_api_response
+  type: binds
+- source: eval_1.fail
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_api_response
+  target: tool_2.in_api_response
+  type: binds
+- source: set_1.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: tool_2.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: set_1.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: tool_2.complete
+  target: wf_exit.trigger
+  type: triggers

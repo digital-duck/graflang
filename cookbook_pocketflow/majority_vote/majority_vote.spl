@@ -1,0 +1,55 @@
+CREATE TOOL_API tally_votes(answers TEXT) RETURNS TEXT AS PYTHON $$
+import json
+from collections import Counter
+
+def tally_votes(answers: str) -> str:
+    try:
+        items = [a.strip() for a in answers.split("\n") if a.strip()]
+        if not items:
+            return json.dumps({"winner": "", "first_candidate": "", "consensus": "no"})
+        counts = Counter(items)
+        most_common = counts.most_common()
+        top_count = most_common[0][1]
+        top_candidates = [v for v, c in most_common if c == top_count]
+        consensus = "yes" if len(top_candidates) == 1 else "no"
+        return json.dumps({
+            "winner": most_common[0][0],
+            "first_candidate": top_candidates[0],
+            "consensus": consensus
+        })
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION attempt_reasoning(question TEXT)
+RETURNS TEXT AS $$
+Answer the following reasoning question carefully and concisely.
+State only your final answer — no explanation or preamble.
+
+Question: {question}
+$$;
+
+WORKFLOW majority_vote
+  INPUT @question TEXT := "What is 15% of 240?"
+  OUTPUT @answer TEXT
+DO
+  CALL PARALLEL
+    attempt_reasoning(@question) INTO @ans1,
+    attempt_reasoning(@question) INTO @ans2,
+    attempt_reasoning(@question) INTO @ans3
+  END;
+
+  @collected := @ans1 + "\n" + @ans2 + "\n" + @ans3;
+
+  CALL tally_votes(@collected) INTO @tally;
+
+  CALL json_get(@tally, "consensus") INTO @consensus;
+
+  EVALUATE @consensus WHEN contains("yes") THEN
+    CALL json_get(@tally, "winner") INTO @answer;
+  ELSE
+    CALL json_get(@tally, "first_candidate") INTO @answer;
+  END;
+
+  RETURN @answer WITH status = "complete";
+END;

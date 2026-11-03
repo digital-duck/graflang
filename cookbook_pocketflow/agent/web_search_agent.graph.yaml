@@ -1,0 +1,641 @@
+version: 1.0-graph
+workflow:
+  name: web_search_agent
+  inputs:
+  - name: question
+    type: TEXT
+    default: What are the latest breakthroughs in fusion energy research?
+  outputs:
+  - name: answer
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_question
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''No previous search'''
+  ports:
+  - trigger
+  - complete
+  - out_context
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_iteration
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''false'''
+  ports:
+  - trigger
+  - complete
+  - out_done
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: 'FALSE'
+  ports:
+  - trigger
+  - complete
+  - out_early_exit_1
+- id: set_5
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_early_value_1
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_done, @done) != 'true' AND latest(@in_iteration, @iteration)
+      < 10 AND latest(@in_early_exit_1, @early_exit_1) == FALSE
+    outputs:
+      iteration:
+        from: set_6.out_iteration
+      raw_response:
+        from: gen_1.out_raw_response
+      parse_result:
+        from: tool_1.out_parse_result
+      fixed_response:
+        from: tool_2.out_fixed_response
+      retry_result:
+        from: tool_3.out_retry_result
+      decision:
+        from:
+        - set_9.out_decision
+        - set_10.out_decision
+      search_query:
+        from: tool_4.out_search_query
+      search_results:
+        from: tool_5.out_search_results
+      context:
+        from: set_11.out_context
+      answer:
+        from: gen_2.out_answer
+      done:
+        from: set_12.out_done
+      early_exit_1:
+        from: set_7.out_early_exit_1
+      early_value_1:
+        from: set_8.out_early_value_1
+    subgraph:
+      nodes:
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_iteration + 1'
+        ports:
+        - trigger
+        - complete
+        - in_iteration
+        - out_iteration
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: decide_action
+          params:
+          - question
+          - context
+          prompt_inline: |-
+            You are a research agent. Given the question and accumulated search context, decide the next action.
+
+            Question: {{in_question}}
+            Context: {{in_context}}
+
+            Respond with a fenced YAML block:
+            ```yaml
+            action: search
+            search_query: <your search query here>
+            ```
+            or, if you have sufficient information to answer:
+            ```yaml
+            action: answer
+            ```
+          arguments:
+          - '@question'
+          - '@context'
+        ports:
+        - trigger
+        - complete
+        - in_question
+        - in_context
+        - out_raw_response
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: parse_yaml
+          backend: kernel
+          arguments:
+          - '@raw_response'
+          code: |
+            import re, json, yaml
+
+            def parse_yaml(text):
+                # Extract fenced yaml block if present
+                m = re.search(r'```ya?ml\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
+                raw = m.group(1).strip() if m else text.strip()
+                try:
+                    data = yaml.safe_load(raw)
+                    return json.dumps(data)
+                except yaml.YAMLError as e:
+                    return json.dumps({"parse_error": str(e), "raw": raw})
+            _spl_result = parse_yaml(raw_response)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_raw_response
+        - out_parse_result
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'parse_error')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: force_block_scalars
+          backend: kernel
+          arguments:
+          - '@raw_response'
+          code: |
+            import re
+
+            def force_block_scalars(text):
+                # Replace inline string values with block scalar style to survive multi-line content
+                def _fix(m):
+                    key = m.group(1)
+                    val = m.group(2).strip()
+                    if '\n' in val or ':' in val:
+                        indented = '\n'.join('  ' + l for l in val.splitlines())
+                        return f'{key}: |\n{indented}'
+                    return m.group(0)
+
+                return re.sub(r'(\w+):\s+"((?:[^"\\]|\\.)+)"', _fix, text)
+            _spl_result = force_block_scalars(raw_response)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_raw_response
+        - out_fixed_response
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: parse_yaml
+          backend: kernel
+          arguments:
+          - '@fixed_response'
+          code: |
+            import re, json, yaml
+
+            def parse_yaml(text):
+                # Extract fenced yaml block if present
+                m = re.search(r'```ya?ml\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
+                raw = m.group(1).strip() if m else text.strip()
+                try:
+                    data = yaml.safe_load(raw)
+                    return json.dumps(data)
+                except yaml.YAMLError as e:
+                    return json.dumps({"parse_error": str(e), "raw": raw})
+            _spl_result = parse_yaml(fixed_response)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_fixed_response
+        - out_retry_result
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'parse_error')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: 'TRUE'
+        ports:
+        - trigger
+        - complete
+        - out_early_exit_1
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_retry_result'
+        ports:
+        - trigger
+        - complete
+        - in_retry_result
+        - out_early_value_1
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_retry_result'
+        ports:
+        - trigger
+        - complete
+        - in_retry_result
+        - out_decision
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_parse_result'
+        ports:
+        - trigger
+        - complete
+        - in_parse_result
+        - out_decision
+      - id: eval_3
+        type: EVALUATE
+        config:
+          condition: 'contains(@in_subject, ''action: search'')'
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: extract_field
+          backend: kernel
+          arguments:
+          - '@decision'
+          - '''search_query'''
+          code: |
+            import json
+
+            def extract_field(yaml_json, field):
+                try:
+                    data = json.loads(yaml_json)
+                    return str(data.get(field, ""))
+                except (json.JSONDecodeError, AttributeError):
+                    return ""
+            _spl_result = extract_field(decision, 'search_query')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - yaml_json
+          - field
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_decision
+        - out_search_query
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: web_search
+          backend: kernel
+          arguments:
+          - '@search_query'
+          code: |
+            import re
+
+            def web_search(query: str) -> str:
+                """WEB_SEARCH(query) — search the web via DuckDuckGo, return top-5 results.
+
+                Accepts a plain query string or a YAML/prefixed decision block:
+                    'search: what is quantum computing'   → extracts the query after 'search:'
+                    'search_query: ...'                   → extracts the search_query field
+
+                Usage in SPL:
+                    CALL web_search(@query) INTO @results;
+                    CALL web_search(@decision) INTO @results;
+
+                Requires: pip install ddgs   (or pip install duckduckgo_search)
+                """
+                import warnings
+                try:
+                    from ddgs import DDGS
+                except ImportError:
+                    try:
+                        from duckduckgo_search import DDGS
+                    except ImportError:
+                        return 'web_search unavailable: install ddgs (pip install ddgs)'
+                q = str(query).strip()
+                m = re.search('search_query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if not m:
+                    m = re.search('^search\\s*:\\s*(.+)$', q, re.MULTILINE | re.IGNORECASE)
+                if not m:
+                    m = re.search('(?<!\\w)query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if m:
+                    q = m.group(1).strip()
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('ignore', RuntimeWarning)
+                        results = DDGS().text(q, max_results=5)
+                    if not results:
+                        return f'No results found for: {q}'
+                    lines = []
+                    for i, r in enumerate(results, 1):
+                        title = r.get('title', '')
+                        url = r.get('href', '')
+                        body = r.get('body', '')
+                        lines.append(f'[{i}] {title}\n    URL: {url}\n    {body}')
+                    return '\n\n'.join(lines)
+                except Exception as e:
+                    return f'Search error: {e}'
+            _spl_result = web_search(search_query)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - query
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_search_query
+        - out_search_results
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_context + ''\nSEARCH: '' + @in_search_query + ''\nRESULTS:
+            '' + @in_search_results'
+        ports:
+        - trigger
+        - complete
+        - in_context
+        - in_search_query
+        - in_search_results
+        - out_context
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: answer_question
+          params:
+          - question
+          - context
+          prompt_inline: |-
+            Using the search context provided, synthesize a comprehensive prose answer to the question.
+
+            Question: {{in_question}}
+            Context: {{in_context}}
+          arguments:
+          - '@question'
+          - '@context'
+        ports:
+        - trigger
+        - complete
+        - in_question
+        - in_context
+        - out_answer
+      - id: set_12
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''true'''
+        ports:
+        - trigger
+        - complete
+        - out_done
+      edges:
+      - source: set_6.complete
+        target: gen_1.trigger
+        type: triggers
+      - source: gen_1.complete
+        target: tool_1.trigger
+        type: triggers
+      - source: gen_1.out_raw_response
+        target: tool_1.in_raw_response
+        type: binds
+      - source: tool_1.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_1.out_parse_result
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: tool_2.trigger
+        type: triggers
+      - source: gen_1.out_raw_response
+        target: tool_2.in_raw_response
+        type: binds
+      - source: tool_2.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: tool_2.out_fixed_response
+        target: tool_3.in_fixed_response
+        type: binds
+      - source: tool_3.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_3.out_retry_result
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: set_7.trigger
+        type: triggers
+      - source: set_7.complete
+        target: set_8.trigger
+        type: triggers
+      - source: tool_3.out_retry_result
+        target: set_8.in_retry_result
+        type: binds
+      - source: eval_2.fail
+        target: set_9.trigger
+        type: triggers
+      - source: tool_3.out_retry_result
+        target: set_9.in_retry_result
+        type: binds
+      - source: eval_1.fail
+        target: set_10.trigger
+        type: triggers
+      - source: tool_1.out_parse_result
+        target: set_10.in_parse_result
+        type: binds
+      - source: set_9.complete
+        target: eval_3.trigger
+        type: triggers
+      - source: set_10.complete
+        target: eval_3.trigger
+        type: triggers
+      - source: set_9.out_decision
+        target: eval_3.in_subject
+        type: binds
+      - source: set_10.out_decision
+        target: eval_3.in_subject
+        type: binds
+      - source: eval_3.pass
+        target: tool_4.trigger
+        type: triggers
+      - source: set_9.out_decision
+        target: tool_4.in_decision
+        type: binds
+      - source: set_10.out_decision
+        target: tool_4.in_decision
+        type: binds
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_4.out_search_query
+        target: tool_5.in_search_query
+        type: binds
+      - source: tool_5.complete
+        target: set_11.trigger
+        type: triggers
+      - source: tool_4.out_search_query
+        target: set_11.in_search_query
+        type: binds
+      - source: tool_5.out_search_results
+        target: set_11.in_search_results
+        type: binds
+      - source: eval_3.fail
+        target: gen_2.trigger
+        type: triggers
+      - source: gen_2.complete
+        target: set_12.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_iteration
+  - in_question
+  - in_context
+  - in_done
+  - in_early_exit_1
+  - in_early_value_1
+  - out_iteration
+  - out_raw_response
+  - out_parse_result
+  - out_fixed_response
+  - out_retry_result
+  - out_decision
+  - out_search_query
+  - out_search_results
+  - out_context
+  - out_answer
+  - out_done
+  - out_early_exit_1
+  - out_early_value_1
+- id: eval_4
+  type: EVALUATE
+  config:
+    condition: '@in_early_exit_1 == TRUE'
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_early_exit_1
+- id: set_13
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_early_value_1'
+  ports:
+  - trigger
+  - complete
+  - in_early_value_1
+  - out_answer
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_answer
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: set_5.trigger
+  type: triggers
+- source: set_5.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_2.out_iteration
+  target: loop_1.in_iteration
+  type: binds
+- source: wf_entry.out_question
+  target: loop_1.in_question
+  type: binds
+- source: set_1.out_context
+  target: loop_1.in_context
+  type: binds
+- source: set_3.out_done
+  target: loop_1.in_done
+  type: binds
+- source: set_4.out_early_exit_1
+  target: loop_1.in_early_exit_1
+  type: binds
+- source: set_5.out_early_value_1
+  target: loop_1.in_early_value_1
+  type: binds
+- source: loop_1.exit
+  target: eval_4.trigger
+  type: triggers
+- source: loop_1.out_early_exit_1
+  target: eval_4.in_early_exit_1
+  type: binds
+- source: eval_4.pass
+  target: set_13.trigger
+  type: triggers
+- source: loop_1.out_early_value_1
+  target: set_13.in_early_value_1
+  type: binds
+- source: set_13.out_answer
+  target: wf_exit.in_answer
+  type: binds
+- source: set_13.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: eval_4.fail
+  target: wf_exit.trigger
+  type: triggers

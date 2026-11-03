@@ -1,0 +1,3 @@
+{
+  "final_output": "[Text 1]  | words: 0 | total words: 0 | avg words/text: 0.0\n[Text 2] Hello world | words: 2 | total words: 2 | avg words/text: 1.0\n[Text 3] The quick brown fox jumps over the lazy dog | words: 9 | total words: 11 | avg words/text: 3.67\n[Text 4] SPL is great for AI workflows | words: 6 | total words: 17 | avg words/text: 4.25\n\n=== Final Statistics ===\nTotal texts processed : 4\nTotal words counted   : 17\nAverage words per text: 4.25"
+}

@@ -1,0 +1,93 @@
+CREATE TOOL_API poll_email_inbox(host TEXT, username TEXT, password TEXT) RETURNS TEXT AS PYTHON $$
+import imaplib, email
+def poll_email_inbox(host: str, username: str, password: str) -> str:
+    try:
+        mail = imaplib.IMAP4_SSL(host)
+        mail.login(username, password)
+        mail.select("INBOX")
+        status, messages = mail.search(None, "UNSEEN")
+        if status != "OK" or not messages[0]:
+            mail.logout()
+            return "NO_NEW_EMAILS"
+        email_ids = messages[0].split()
+        results = []
+        for eid in email_ids[-5:]:
+            _, msg_data = mail.fetch(eid, "(RFC822)")
+            msg = email.message_from_bytes(msg_data[0][1])
+            subject = msg.get("Subject", "")
+            sender = msg.get("From", "")
+            body = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                        break
+            else:
+                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+            results.append(f"FROM: {sender}\nSUBJECT: {subject}\nBODY: {body[:500]}")
+        mail.logout()
+        return "\n---\n".join(results)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API sleep_interval(seconds TEXT) RETURNS TEXT AS PYTHON $$
+import time
+def sleep_interval(seconds: str) -> str:
+    try:
+        time.sleep(float(seconds))
+        return "slept"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION summarize_email(emails TEXT)
+RETURNS TEXT AS $$
+  Read the following email(s) and write a concise 2-3 sentence summary capturing
+  the sender''s intent, key information, and any explicit action items.
+  Emails:
+  {emails}
+$$;
+
+CREATE FUNCTION suggest_reply_action(summary TEXT)
+RETURNS TEXT AS $$
+  Based on this email summary, recommend the most appropriate reply action.
+  Begin your response with exactly one label from: REPLY_NOW, REPLY_LATER, FORWARD, ARCHIVE, NO_ACTION.
+  Follow with a one-sentence rationale. If the label is REPLY_NOW or REPLY_LATER,
+  also include a brief suggested reply draft.
+  Summary: {summary}
+$$;
+
+WORKFLOW email_monitor
+  INPUT @imap_host TEXT := "imap.gmail.com"
+  INPUT @imap_user TEXT := ""
+  INPUT @imap_pass TEXT := ""
+  INPUT @interval_seconds TEXT := "60"
+  INPUT @max_cycles INTEGER := 10
+  INPUT @log_file TEXT := "email_monitor.log"
+  OUTPUT @run_log TEXT
+DO
+  @cycle := 0;
+  @run_log := "";
+
+  WHILE @cycle < @max_cycles DO
+    CALL poll_email_inbox(@imap_host, @imap_user, @imap_pass) INTO @emails;
+
+    EVALUATE @emails
+      WHEN contains("NO_NEW_EMAILS") THEN
+        @run_log := @run_log + "cycle " + @cycle + ": no new emails\n";
+      ELSE
+        GENERATE summarize_email(@emails) INTO @summary;
+        GENERATE suggest_reply_action(@summary) INTO @action;
+        CALL now_iso() INTO @timestamp;
+        @log_entry := "[" + @timestamp + "] " + @summary + " | " + @action + "\n";
+        CALL write_file(@log_file, @log_entry, "a") INTO @wrote;
+        @run_log := @run_log + "cycle " + @cycle + ": processed emails\n";
+    END;
+
+    CALL sleep_interval(@interval_seconds) INTO @slept;
+    @cycle := @cycle + 1;
+  END;
+
+  RETURN @run_log WITH status = "complete";
+END;

@@ -1,0 +1,139 @@
+CREATE TOOL_API check_required_fields(candidate_info TEXT, work_experience TEXT, matched_skills TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def check_required_fields(candidate_info: str, work_experience: str, matched_skills: str) -> str:
+    try:
+        missing = []
+        try:
+            info = json.loads(candidate_info)
+            if not info.get("name"):
+                missing.append("name")
+            if not info.get("email"):
+                missing.append("email")
+        except (json.JSONDecodeError, AttributeError):
+            info_lower = candidate_info.lower()
+            if "name" not in info_lower:
+                missing.append("name")
+            if "@" not in candidate_info:
+                missing.append("email")
+        if not work_experience.strip() or work_experience.strip() in ("[]", "null"):
+            missing.append("work_experience")
+        if not matched_skills.strip() or matched_skills.strip() in ("{}", "null"):
+            missing.append("matched_skills")
+        return "missing: " + ", ".join(missing) if missing else "complete"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API validate_yaml(yaml_doc TEXT) RETURNS TEXT AS PYTHON $$
+import yaml
+def validate_yaml(yaml_doc: str) -> str:
+    try:
+        yaml.safe_load(yaml_doc)
+        return "valid"
+    except yaml.YAMLError as e:
+        return f"invalid: {e}"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION extract_candidate_info(resume_text TEXT)
+RETURNS TEXT AS $$
+  Extract the candidate''s full name and email address from the plain-text resume below.
+  Return a JSON object with exactly two keys: "name" (string) and "email" (string).
+  If a field cannot be found, use null for its value.
+  Resume:
+  {resume_text}
+$$;
+
+CREATE FUNCTION parse_work_experience(resume_text TEXT)
+RETURNS TEXT AS $$
+  Parse all work experience entries from the plain-text resume below.
+  For each position extract: company name, job title, start date, end date (or "present"), and a brief description of responsibilities.
+  Return a JSON array of objects, each with keys: "company", "title", "start_date", "end_date", "description".
+  Resume:
+  {resume_text}
+$$;
+
+CREATE FUNCTION match_skills(resume_text TEXT, work_experience TEXT, skill_list TEXT)
+RETURNS TEXT AS $$
+  Identify which skills from the predefined skill list the candidate possesses, based on their resume and parsed work experience.
+  Match by direct mention, clear synonym, or strong implication from job duties.
+  Return a JSON object with two keys:
+    "matched": list of skills from the skill list that the candidate demonstrably has,
+    "unmatched": list of skills from the skill list that were not found.
+  Resume:
+  {resume_text}
+  Work Experience:
+  {work_experience}
+  Predefined Skill List:
+  {skill_list}
+$$;
+
+CREATE FUNCTION flag_missing_fields(missing_fields TEXT)
+RETURNS TEXT AS $$
+  The following required fields could not be extracted from the candidate''s resume: {missing_fields}.
+  Write a clear, professional message explaining which fields are missing and requesting the candidate or recruiter provide the missing information to complete the record.
+$$;
+
+CREATE FUNCTION build_yaml_document(candidate_info TEXT, work_experience TEXT, matched_skills TEXT)
+RETURNS TEXT AS $$
+  Construct a normalized YAML document representing a structured candidate record using the extracted data below.
+  Use these top-level keys: "candidate" (sub-keys: "name", "email"), "work_experience" (list of job entries each with "company", "title", "start_date", "end_date", "description"), and "skills" (sub-keys: "matched" list, "unmatched" list).
+  Output only syntactically valid, well-formatted YAML — no markdown fences, no extra commentary.
+  Candidate Info:
+  {candidate_info}
+  Work Experience:
+  {work_experience}
+  Skills:
+  {matched_skills}
+$$;
+
+CREATE FUNCTION fix_yaml_errors(yaml_doc TEXT, validation_errors TEXT)
+RETURNS TEXT AS $$
+  The YAML document below contains syntax errors. Fix all errors to produce syntactically valid YAML.
+  Preserve the original data and structure — correct only syntax issues.
+  Return only the corrected YAML with no markdown fences and no explanation.
+  Validation Errors:
+  {validation_errors}
+  YAML Document:
+  {yaml_doc}
+$$;
+
+WORKFLOW resume_parser
+  INPUT @resume_path TEXT := "cookbook-pocketflow/002_structured_output/data/resume.txt"
+  INPUT @skill_list_path TEXT := "cookbook-pocketflow/002_structured_output/data/skills.txt"
+  INPUT @max_yaml_retries INTEGER := 3
+  OUTPUT @output_record TEXT
+DO
+  CALL read_file(@resume_path) INTO @resume_text;
+  CALL read_file(@skill_list_path) INTO @skill_list_text;
+
+  GENERATE extract_candidate_info(@resume_text) INTO @candidate_info;
+  GENERATE parse_work_experience(@resume_text) INTO @work_experience;
+  GENERATE match_skills(@resume_text, @work_experience, @skill_list_text) INTO @matched_skills;
+
+  CALL check_required_fields(@candidate_info, @work_experience, @matched_skills) INTO @fields_check;
+
+  @output_record := "";
+  @final_status := "incomplete";
+
+  EVALUATE @fields_check WHEN contains("complete") THEN
+    GENERATE build_yaml_document(@candidate_info, @work_experience, @matched_skills) INTO @yaml_doc;
+    @i := 0;
+    WHILE @i < @max_yaml_retries DO
+      CALL validate_yaml(@yaml_doc) INTO @yaml_result;
+      EVALUATE @yaml_result WHEN contains("valid") THEN
+        @output_record := @yaml_doc;
+        @final_status := "complete";
+        @i := @max_yaml_retries;
+      ELSE
+        GENERATE fix_yaml_errors(@yaml_doc, @yaml_result) INTO @yaml_doc;
+        @i := @i + 1;
+      END;
+    END;
+  ELSE
+    GENERATE flag_missing_fields(@fields_check) INTO @output_record;
+  END;
+
+  RETURN @output_record WITH status = @final_status;
+END;

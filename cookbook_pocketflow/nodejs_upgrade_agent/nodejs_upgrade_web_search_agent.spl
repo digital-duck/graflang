@@ -1,0 +1,243 @@
+IMPORT 'tools.spl';
+
+-- ── Node.js Upgrade Agent ────────────────────────────────────────────────────
+-- Pattern: deterministic pre-analysis → LLM file transforms →
+--          npm self-healing loop (install → build → test) → report
+-- Inspired by a production upgrade agent built on PocketFlow + Claude Code CLI.
+
+-- ── Prompts ──────────────────────────────────────────────────────────────────
+
+CREATE FUNCTION analyze_breaking_changes(pkg_json TEXT, outdated TEXT,
+                                         target_node TEXT, project_type TEXT,
+                                         template TEXT)
+RETURNS TEXT AS $$
+You are a Node.js upgrade specialist.
+
+Project type: {project_type}
+
+Upgrade guidance for this project type:
+{template}
+
+Current package.json:
+{pkg_json}
+
+Outdated packages (npm outdated --json):
+{outdated}
+
+Target Node.js version: {target_node}
+
+Produce a structured upgrade plan in YAML:
+
+breaking_changes:
+  - package: <name>
+    from: <version>
+    to: <version>
+    breaking_apis: [<list of changed APIs>]
+    migration_notes: <one-line summary>
+
+recommended_script: <npm install command with exact pinned versions>
+$$;
+
+CREATE FUNCTION transform_file(file_path TEXT, file_content TEXT, breaking_changes TEXT)
+RETURNS TEXT AS $$
+You are a senior Node.js engineer performing an automated upgrade.
+
+File: {file_path}
+
+Breaking changes to apply:
+{breaking_changes}
+
+Current file content:
+{file_content}
+
+Rewrite the file to be compatible with the upgraded packages.
+- Apply ONLY changes required by the breaking changes above.
+- Preserve all business logic, comments, and formatting style.
+- If this file needs no changes, return the original content unchanged.
+- Return ONLY the updated file content — no explanations, no markdown fences.
+$$;
+
+CREATE FUNCTION fix_npm_error(error_output TEXT, context TEXT)
+RETURNS TEXT AS $$
+You are a Node.js build doctor. An npm command failed.
+
+Error output:
+{error_output}
+
+Project context:
+{context}
+
+Diagnose the root cause and respond with the exact fix:
+
+fix_type: shell_command | package_json_edit
+fix: <the exact command to run, or the JSON change to make>
+explanation: <one sentence>
+$$;
+
+CREATE FUNCTION generate_report(project_dir TEXT, upgrade_plan TEXT,
+                                files_changed TEXT, npm_log TEXT, final_status TEXT)
+RETURNS TEXT AS $$
+Write a concise upgrade report in markdown.
+
+Project: {project_dir}
+Final status: {final_status}
+
+Upgrade plan:
+{upgrade_plan}
+
+Files changed: {files_changed}
+
+npm validation log:
+{npm_log}
+
+Include: what was upgraded, what broke and how it was fixed, remaining TODOs.
+$$;
+
+-- ── Sub-workflow: transform a single source file ──────────────────────────────
+
+WORKFLOW upgrade_file
+  INPUT @file_path TEXT, @breaking_changes TEXT
+  OUTPUT @result TEXT
+DO
+  @result := "unchanged";
+  CALL read_file(@file_path) INTO @original;
+  GENERATE transform_file(@file_path, @original, @breaking_changes) INTO @updated;
+
+  CALL strings_equal(@updated, @original) INTO @unchanged;
+  EVALUATE @unchanged WHEN = "true" THEN
+    @result := "unchanged";
+  ELSE
+    CALL backup_file(@file_path) INTO @_;
+    CALL write_file(@file_path, @updated) INTO @_;
+    @result := "updated";
+  END;
+
+  RETURN @result WITH status = "complete";
+END;
+
+-- ── Sub-workflow: npm self-healing (install → build → test, max N attempts) ──
+
+WORKFLOW npm_validate_and_heal
+  INPUT @project_dir TEXT, @context TEXT, @max_attempts TEXT
+  OUTPUT @npm_log TEXT
+DO
+  @attempt := 0;
+  @npm_log := "";
+  @healed := "false";
+
+  WHILE @healed != "true" AND @attempt < @max_attempts DO
+    @attempt := @attempt + 1;
+
+    CALL run_npm(@project_dir, "install") INTO @install_json;
+    CALL npm_result_ok(@install_json) INTO @install_ok;
+
+    EVALUATE @install_ok WHEN = "true" THEN
+
+      CALL run_npm(@project_dir, "run build") INTO @build_json;
+      CALL npm_result_ok(@build_json) INTO @build_ok;
+
+      EVALUATE @build_ok WHEN = "true" THEN
+
+        CALL run_npm(@project_dir, "test") INTO @test_json;
+        CALL npm_result_ok(@test_json) INTO @test_ok;
+
+        EVALUATE @test_ok WHEN = "true" THEN
+          @npm_log := @npm_log + "\n[" + @attempt + "] install ✓  build ✓  test ✓";
+          @healed := "true";
+        ELSE
+          CALL npm_errors(@test_json) INTO @err;
+          GENERATE fix_npm_error(@err, @context) INTO @fix;
+          @npm_log := @npm_log + "\n[" + @attempt + "] test ✗ → " + @fix;
+        END;
+
+      ELSE
+        CALL npm_errors(@build_json) INTO @err;
+        GENERATE fix_npm_error(@err, @context) INTO @fix;
+        @npm_log := @npm_log + "\n[" + @attempt + "] build ✗ → " + @fix;
+      END;
+
+    ELSE
+      CALL npm_errors(@install_json) INTO @err;
+      GENERATE fix_npm_error(@err, @context) INTO @fix;
+      @npm_log := @npm_log + "\n[" + @attempt + "] install ✗ → " + @fix;
+    END;
+
+  END;
+
+  RETURN @npm_log WITH status = "complete";
+
+EXCEPTION
+  WHEN BudgetExceeded THEN
+    RETURN @npm_log WITH status = "budget_limit";
+END;
+
+-- ── Main workflow ─────────────────────────────────────────────────────────────
+
+WORKFLOW nodejs_upgrade_agent
+  INPUT  @project_dir TEXT,
+         @target_node TEXT := "20",
+         @max_heal_attempts TEXT := "5",
+         @report_path TEXT := "upgrade_report.md",
+         @template_path TEXT := ""
+  OUTPUT @report TEXT
+DO
+  -- Phase 1: Pre-upgrade analysis (deterministic) ─────────────────────────────
+  CALL scan_source_files(@project_dir) INTO @all_files;
+  CALL read_package_json(@project_dir) INTO @pkg_json;
+  CALL list_outdated(@project_dir) INTO @outdated;
+  CALL list_count(@all_files) INTO @file_count;
+
+  -- Phase 1.5: Detect framework + load upgrade template ───────────────────────
+  CALL detect_project_type(@pkg_json) INTO @project_type;
+  CALL load_upgrade_template(@template_path, @project_type) INTO @analysis_template;
+
+  GENERATE analyze_breaking_changes(@pkg_json, @outdated, @target_node,
+                                    @project_type, @analysis_template)
+    INTO @upgrade_plan;
+
+  -- install upgraded packages before touching source files
+  CALL run_npm(@project_dir, "install") INTO @pre_install;
+
+  -- Phase 2: Apply file transforms ────────────────────────────────────────────
+  -- Sequential here; on Momagrid each CALL dispatches to a free worker node.
+  @idx := 0;
+  @files_changed := 0;
+
+  WHILE @idx < @file_count DO
+    CALL list_get(@all_files, @idx + 1) INTO @file_path;
+    CALL upgrade_file(@file_path, @upgrade_plan) INTO @file_result;
+
+    EVALUATE @file_result WHEN = "updated" THEN
+      @files_changed := @files_changed + 1;
+    ELSE
+      @_ := "";
+    END;
+
+    @idx := @idx + 1;
+  END;
+
+  -- Phase 3: npm self-healing validation ──────────────────────────────────────
+  CALL npm_validate_and_heal(
+    @project_dir, @pkg_json, @max_heal_attempts
+  ) INTO @npm_log;
+
+  -- Phase 4: Report ────────────────────────────────────────────────────────────
+  EVALUATE @npm_log WHEN contains("test ✓") THEN
+    @final_status := "pass";
+  ELSE
+    @final_status := "partial";
+  END;
+
+  GENERATE generate_report(
+    @project_dir, @upgrade_plan,
+    @files_changed, @npm_log, @final_status
+  ) INTO @report;
+
+  CALL write_file(@report_path, @report) INTO @_;
+
+  RETURN @report WITH status = @final_status;
+
+EXCEPTION
+  WHEN BudgetExceeded THEN
+    RETURN @report WITH status = "budget_limit";
+END;

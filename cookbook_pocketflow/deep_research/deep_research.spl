@@ -1,0 +1,148 @@
+CREATE FUNCTION planner(topic, feedback)
+RETURNS TEXT AS $$
+You are a research planner. Given the research topic: {topic}
+And previous iteration feedback (if any): {feedback}
+
+Generate exactly 3 specific, diverse search queries to gather comprehensive information.
+Format your response as:
+QUERY_1: <first search query>
+QUERY_2: <second search query>
+QUERY_3: <third search query>
+$$;
+
+CREATE FUNCTION extract_query(queries, position)
+RETURNS TEXT AS $$
+From this list of search queries:
+{queries}
+
+Extract and return only the search query at position {position}.
+For example, if position is 1, return the text after "QUERY_1: ".
+Return only the query text with no prefix or extra formatting.
+$$;
+
+CREATE FUNCTION extract_facts(query, result)
+RETURNS TEXT AS $$
+Given the search query: {query}
+And the search result content: {result}
+
+Extract and summarize the key facts and relevant information as a concise bullet-point list.
+Focus on information directly relevant to the query.
+$$;
+
+CREATE FUNCTION accumulate_notes(existing_notes, note1, note2, note3)
+RETURNS TEXT AS $$
+Merge the following research notes into one coherent, organized collection.
+Remove duplicates and group related facts together.
+
+Existing notes:
+{existing_notes}
+
+New notes from this research iteration:
+Batch 1: {note1}
+Batch 2: {note2}
+Batch 3: {note3}
+
+Return the complete merged notes collection.
+$$;
+
+CREATE FUNCTION synthesizer(topic, notes, loop_count)
+RETURNS TEXT AS $$
+You are a research synthesizer. Evaluate the research gathered so far.
+
+Topic: {topic}
+Research iteration: {loop_count}
+Accumulated notes: {notes}
+
+Decide whether to continue researching or finalize the report.
+
+If the notes provide sufficient coverage, respond with:
+DECISION: finalize
+REPORT: <write the complete, well-structured research report here>
+
+If important information is still missing, respond with:
+DECISION: research
+FEEDBACK: <describe specifically what information is still needed>
+
+Begin your response with either "DECISION: finalize" or "DECISION: research".
+$$;
+
+CREATE FUNCTION extract_report(decision)
+RETURNS TEXT AS $$
+From the following synthesizer output:
+{decision}
+
+Extract and return only the content that appears after "REPORT: ".
+Return the full report text with no additional prefix.
+$$;
+
+CREATE FUNCTION extract_feedback(decision)
+RETURNS TEXT AS $$
+From the following synthesizer output:
+{decision}
+
+Extract and return only the content that appears after "FEEDBACK: ".
+Return just the feedback text with no additional prefix.
+$$;
+
+CREATE FUNCTION write_concise_report(topic, notes)
+RETURNS TEXT AS $$
+Write a concise, well-structured research report on the following topic: {topic}
+
+Use these accumulated research notes as your source material: {notes}
+
+The report should include key findings, important insights, and a clear conclusion.
+Be comprehensive yet concise.
+$$;
+
+WORKFLOW deep_research
+  INPUT @topic TEXT := "Recent advances in quantum error correction"
+  INPUT @out TEXT := "cookbook-pocketflow/032_deep_research/output/report.txt"
+  OUTPUT @report TEXT
+DO
+  @loop_count := 0;
+  @feedback := "";
+  @notes := "";
+  @report := "";
+
+  GENERATE planner(@topic, @feedback) INTO @queries;
+
+  WHILE @loop_count < 3 DO
+    EVALUATE @loop_count WHEN contains("2") THEN
+      GENERATE write_concise_report(@topic, @notes) INTO @report;
+      @loop_count := 3;
+    ELSE
+      GENERATE extract_query(@queries, 1) INTO @query1;
+      GENERATE extract_query(@queries, 2) INTO @query2;
+      GENERATE extract_query(@queries, 3) INTO @query3;
+
+      CALL PARALLEL
+        web_search(@query1) INTO @result1,
+        web_search(@query2) INTO @result2,
+        web_search(@query3) INTO @result3
+      END;
+
+      CALL PARALLEL
+        extract_facts(@query1, @result1) INTO @note1,
+        extract_facts(@query2, @result2) INTO @note2,
+        extract_facts(@query3, @result3) INTO @note3
+      END;
+
+      GENERATE accumulate_notes(@notes, @note1, @note2, @note3) INTO @notes;
+
+      GENERATE synthesizer(@topic, @notes, @loop_count) INTO @decision;
+
+      EVALUATE @decision WHEN contains("DECISION: finalize") THEN
+        GENERATE extract_report(@decision) INTO @report;
+        @loop_count := 3;
+      ELSE
+        GENERATE extract_feedback(@decision) INTO @feedback;
+        @loop_count := @loop_count + 1;
+        GENERATE planner(@topic, @feedback) INTO @queries;
+      END;
+    END;
+  END;
+
+  CALL write_file(@out, @report) INTO @write_result;
+
+  RETURN @report WITH status = "complete";
+END;

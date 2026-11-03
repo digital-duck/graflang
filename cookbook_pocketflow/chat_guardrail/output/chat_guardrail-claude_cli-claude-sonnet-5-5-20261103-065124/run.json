@@ -1,0 +1,9 @@
+{
+  "graph": "chat_guardrail",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "user_messages": "help me plan a trip to Wuhu, Anhui, China"
+  },
+  "started": "2026-11-03T06:51:24"
+}

@@ -1,0 +1,9 @@
+[Text 1]  | words: 0 | total words: 0 | avg words/text: 0.0
+[Text 2] Hello world | words: 2 | total words: 2 | avg words/text: 1.0
+[Text 3] The quick brown fox jumps over the lazy dog | words: 9 | total words: 11 | avg words/text: 3.67
+[Text 4] SPL is great for AI workflows | words: 6 | total words: 17 | avg words/text: 4.25
+
+=== Final Statistics ===
+Total texts processed : 4
+Total words counted   : 17
+Average words per text: 4.25

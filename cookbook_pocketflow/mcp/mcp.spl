@@ -1,0 +1,126 @@
+CREATE TOOL_API discover_mcp_tools(mcp_server_url TEXT) RETURNS TEXT AS PYTHON $$
+import json, urllib.request
+
+def discover_mcp_tools(mcp_server_url: str) -> str:
+    try:
+        if not mcp_server_url.strip():
+            tools = [
+                {"name": "calculator", "description": "Evaluates arithmetic expressions", "params": ["expression"]},
+                {"name": "sqrt",       "description": "Computes square root of a number",  "params": ["value"]},
+                {"name": "power",      "description": "Raises base to exponent",            "params": ["base", "exponent"]},
+                {"name": "factorial",  "description": "Computes n factorial",               "params": ["n"]}
+            ]
+            return json.dumps(tools)
+        url = mcp_server_url.rstrip("/") + "/tools/list"
+        req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            return json.dumps(data.get("tools", []))
+    except Exception as e:
+        return "error: " + str(e)
+$$;
+
+CREATE TOOL_API invoke_mcp_tool(tool_name TEXT, params_json TEXT, mcp_server_url TEXT) RETURNS TEXT AS PYTHON $$
+import json, urllib.request
+
+def invoke_mcp_tool(tool_name: str, params_json: str, mcp_server_url: str) -> str:
+    try:
+        params = json.loads(params_json) if params_json.strip() else {}
+        payload = json.dumps({"name": tool_name, "arguments": params}).encode()
+        url = mcp_server_url.rstrip("/") + "/tools/call"
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            content = data.get("content", [])
+            if isinstance(content, list) and content:
+                return str(content[0].get("text", ""))
+            return json.dumps(data)
+    except Exception as e:
+        return "error: " + str(e)
+$$;
+
+CREATE TOOL_API invoke_local_tool(tool_name TEXT, params_json TEXT) RETURNS TEXT AS PYTHON $$
+import json, math
+
+def invoke_local_tool(tool_name: str, params_json: str) -> str:
+    try:
+        params = json.loads(params_json) if params_json.strip() else {}
+        name = tool_name.lower().strip()
+        if name == "calculator":
+            expr = params.get("expression", "")
+            safe_ns = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
+            return str(eval(expr, {"__builtins__": {}}, safe_ns))
+        elif name == "sqrt":
+            return str(math.sqrt(float(params.get("value", 0))))
+        elif name == "power":
+            return str(math.pow(float(params.get("base", 0)), float(params.get("exponent", 1))))
+        elif name == "factorial":
+            return str(math.factorial(int(params.get("n", 0))))
+        else:
+            return "error: unknown local tool " + tool_name
+    except Exception as e:
+        return "error: " + str(e)
+$$;
+
+CREATE FUNCTION select_tool_and_params(question TEXT, tool_list TEXT)
+RETURNS TEXT AS $$
+  You are a math assistant. Given the user''s question and the list of available tools,
+  select the single most appropriate tool and extract all required parameters from the question.
+
+  User question: {question}
+
+  Available tools (JSON array): {tool_list}
+
+  Respond with ONLY a valid JSON object in exactly this format:
+  {{"tool": "<tool_name>", "params": {{<param_key>: "<param_value>"}}}}
+
+  Output the JSON object only — no explanation, no markdown fences.
+$$;
+
+CREATE FUNCTION format_final_answer(question TEXT, tool_result TEXT)
+RETURNS TEXT AS $$
+  You are a helpful math assistant. A user asked the following question:
+  {question}
+
+  The computation tool returned this result: {tool_result}
+
+  Write a clear, concise answer to the user''s question using the computation result.
+  If the result starts with "error:", explain that the computation could not be completed
+  and suggest how the user might rephrase or simplify the question.
+$$;
+
+WORKFLOW mcp_math_agent
+  INPUT @question TEXT := "What is the square root of 144?"
+  INPUT @mcp_mode TEXT := "false"
+  INPUT @mcp_server_url TEXT := ""
+  OUTPUT @answer TEXT
+DO
+  -- B→C: discover available tools (MCP server or built-in fallback)
+  CALL discover_mcp_tools(@mcp_server_url) INTO @tool_list;
+
+  -- C→D→E: LLM receives question + tool list, selects tool and extracts parameters
+  GENERATE select_tool_and_params(@question, @tool_list) INTO @tool_selection;
+
+  @key_tool   := "tool";
+  @key_params := "params";
+  CALL json_get(@tool_selection, @key_tool)   INTO @tool_name;
+  CALL json_get(@tool_selection, @key_params) INTO @tool_params;
+
+  -- F: branch on MCP mode flag
+  EVALUATE @mcp_mode
+    WHEN contains("true") THEN
+      -- G: invoke MCP-hosted tool via HTTP
+      CALL invoke_mcp_tool(@tool_name, @tool_params, @mcp_server_url) INTO @tool_result;
+    ELSE
+      -- H: invoke local embedded tool
+      CALL invoke_local_tool(@tool_name, @tool_params) INTO @tool_result;
+  END;
+
+  -- I→J: format and return final answer
+  GENERATE format_final_answer(@question, @tool_result) INTO @answer;
+  RETURN @answer WITH status = "complete";
+END;

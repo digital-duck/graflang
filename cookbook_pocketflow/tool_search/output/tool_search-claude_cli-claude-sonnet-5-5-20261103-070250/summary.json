@@ -1,0 +1,39 @@
+{
+  "steps": 5,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0,
+    "ms": 0
+  },
+  "nodes": {
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 427
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 5
+    },
+    "eval_2": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "set_2": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

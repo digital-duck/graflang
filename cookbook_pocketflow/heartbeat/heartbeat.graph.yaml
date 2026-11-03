@@ -1,0 +1,436 @@
+version: 1.0-graph
+workflow:
+  name: email_monitor
+  inputs:
+  - name: imap_host
+    type: TEXT
+    default: imap.gmail.com
+  - name: imap_user
+    type: TEXT
+    default: ''
+  - name: imap_pass
+    type: TEXT
+    default: ''
+  - name: interval_seconds
+    type: TEXT
+    default: '60'
+  - name: max_cycles
+    type: INTEGER
+    default: 10
+  - name: log_file
+    type: TEXT
+    default: email_monitor.log
+  outputs:
+  - name: run_log
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_imap_host
+  - out_imap_user
+  - out_imap_pass
+  - out_interval_seconds
+  - out_max_cycles
+  - out_log_file
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_cycle
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_run_log
+- id: loop_1
+  type: LOOP
+  config:
+    condition: '@cycle < @in_max_cycles'
+    outputs:
+      emails:
+        from: tool_1.out_emails
+      run_log:
+        from:
+        - set_3.out_run_log
+        - set_5.out_run_log
+      summary:
+        from: gen_1.out_summary
+      action:
+        from: gen_2.out_action
+      timestamp:
+        from: tool_2.out_timestamp
+      log_entry:
+        from: set_4.out_log_entry
+      wrote:
+        from: tool_3.out_wrote
+      slept:
+        from: tool_4.out_slept
+      cycle:
+        from: set_6.out_cycle
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: poll_email_inbox
+          backend: kernel
+          arguments:
+          - '@imap_host'
+          - '@imap_user'
+          - '@imap_pass'
+          code: |
+            import imaplib, email
+            def poll_email_inbox(host: str, username: str, password: str) -> str:
+                try:
+                    mail = imaplib.IMAP4_SSL(host)
+                    mail.login(username, password)
+                    mail.select("INBOX")
+                    status, messages = mail.search(None, "UNSEEN")
+                    if status != "OK" or not messages[0]:
+                        mail.logout()
+                        return "NO_NEW_EMAILS"
+                    email_ids = messages[0].split()
+                    results = []
+                    for eid in email_ids[-5:]:
+                        _, msg_data = mail.fetch(eid, "(RFC822)")
+                        msg = email.message_from_bytes(msg_data[0][1])
+                        subject = msg.get("Subject", "")
+                        sender = msg.get("From", "")
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                if part.get_content_type() == "text/plain":
+                                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                                    break
+                        else:
+                            body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+                        results.append(f"FROM: {sender}\nSUBJECT: {subject}\nBODY: {body[:500]}")
+                    mail.logout()
+                    return "\n---\n".join(results)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = poll_email_inbox(imap_host, imap_user, imap_pass)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - host
+          - username
+          - password
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_imap_host
+        - in_imap_user
+        - in_imap_pass
+        - out_emails
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'NO_NEW_EMAILS')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_run_log + ''cycle '' + str(@in_cycle) + '': no new emails\n'''
+        ports:
+        - trigger
+        - complete
+        - in_run_log
+        - in_cycle
+        - out_run_log
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: summarize_email
+          params:
+          - emails
+          prompt_inline: |-
+            Read the following email(s) and write a concise 2-3 sentence summary capturing
+              the sender''s intent, key information, and any explicit action items.
+              Emails:
+              {{in_emails}}
+          arguments:
+          - '@emails'
+        ports:
+        - trigger
+        - complete
+        - in_emails
+        - out_summary
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: suggest_reply_action
+          params:
+          - summary
+          prompt_inline: |-
+            Based on this email summary, recommend the most appropriate reply action.
+              Begin your response with exactly one label from: REPLY_NOW, REPLY_LATER, FORWARD, ARCHIVE, NO_ACTION.
+              Follow with a one-sentence rationale. If the label is REPLY_NOW or REPLY_LATER,
+              also include a brief suggested reply draft.
+              Summary: {{in_summary}}
+          arguments:
+          - '@summary'
+        ports:
+        - trigger
+        - complete
+        - in_summary
+        - out_action
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: now_iso
+          backend: kernel
+          arguments: []
+          code: |
+            import datetime
+
+            def now_iso() -> str:
+                """NOW() — current UTC datetime as ISO-8601 string: 'YYYY-MM-DDTHH:MM:SS'."""
+                return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+            _spl_result = now_iso()
+          result: _spl_result
+          out_type: TEXT
+          tool_params: []
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - out_timestamp
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''['' + @in_timestamp + ''] '' + @in_summary + '' | '' + @in_action
+            + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_timestamp
+        - in_summary
+        - in_action
+        - out_log_entry
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: write_file
+          backend: kernel
+          arguments:
+          - '@log_file'
+          - '@log_entry'
+          - '''a'''
+          code: |
+            import pathlib
+
+            def write_file(file_path: str, content: str, mode: str='w') -> str:
+                """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+                mode: 'w' (overwrite, default) or 'a' (append).
+                Creates parent directories automatically.
+                Returns the absolute path written.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                p.parent.mkdir(parents=True, exist_ok=True)
+                m = str(mode).strip().lower()
+                if m not in ('w', 'a'):
+                    m = 'w'
+                with p.open(m, encoding='utf-8') as fh:
+                    fh.write(str(content))
+                return str(p.resolve())
+            _spl_result = write_file(log_file, log_entry, 'a')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          - content
+          - mode
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_log_file
+        - in_log_entry
+        - out_wrote
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_run_log + ''cycle '' + str(@in_cycle) + '': processed emails\n'''
+        ports:
+        - trigger
+        - complete
+        - in_run_log
+        - in_cycle
+        - out_run_log
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: sleep_interval
+          backend: kernel
+          arguments:
+          - '@interval_seconds'
+          code: |
+            import time
+            def sleep_interval(seconds: str) -> str:
+                try:
+                    time.sleep(float(seconds))
+                    return "slept"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = sleep_interval(interval_seconds)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - seconds
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_interval_seconds
+        - out_slept
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_cycle + 1'
+        ports:
+        - trigger
+        - complete
+        - in_cycle
+        - out_cycle
+      edges:
+      - source: tool_1.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_1.out_emails
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_3.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: gen_1.trigger
+        type: triggers
+      - source: tool_1.out_emails
+        target: gen_1.in_emails
+        type: binds
+      - source: gen_1.complete
+        target: gen_2.trigger
+        type: triggers
+      - source: gen_1.out_summary
+        target: gen_2.in_summary
+        type: binds
+      - source: gen_2.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_2.complete
+        target: set_4.trigger
+        type: triggers
+      - source: tool_2.out_timestamp
+        target: set_4.in_timestamp
+        type: binds
+      - source: gen_1.out_summary
+        target: set_4.in_summary
+        type: binds
+      - source: gen_2.out_action
+        target: set_4.in_action
+        type: binds
+      - source: set_4.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: set_4.out_log_entry
+        target: tool_3.in_log_entry
+        type: binds
+      - source: tool_3.complete
+        target: set_5.trigger
+        type: triggers
+      - source: set_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: set_5.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_4.complete
+        target: set_6.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_imap_host
+  - in_imap_user
+  - in_imap_pass
+  - in_run_log
+  - in_log_file
+  - in_interval_seconds
+  - in_max_cycles
+  - out_emails
+  - out_run_log
+  - out_summary
+  - out_action
+  - out_timestamp
+  - out_log_entry
+  - out_wrote
+  - out_slept
+  - out_cycle
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_run_log
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_imap_host
+  target: loop_1.in_imap_host
+  type: binds
+- source: wf_entry.out_imap_user
+  target: loop_1.in_imap_user
+  type: binds
+- source: wf_entry.out_imap_pass
+  target: loop_1.in_imap_pass
+  type: binds
+- source: set_2.out_run_log
+  target: loop_1.in_run_log
+  type: binds
+- source: wf_entry.out_log_file
+  target: loop_1.in_log_file
+  type: binds
+- source: wf_entry.out_interval_seconds
+  target: loop_1.in_interval_seconds
+  type: binds
+- source: wf_entry.out_max_cycles
+  target: loop_1.in_max_cycles
+  type: binds
+- source: loop_1.out_run_log
+  target: wf_exit.in_run_log
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

@@ -1,0 +1,69 @@
+{
+  "steps": 13,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 2,
+    "input_tokens": 353,
+    "output_tokens": 37,
+    "cost_usd": 0.0,
+    "ms": 3563
+  },
+  "nodes": {
+    "agent": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 3567
+    },
+    "decide": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 3563
+    },
+    "allowed": {
+      "type": "GUARD",
+      "n": 1,
+      "ms": 2
+    },
+    "seed": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "wants_read": {
+      "type": "EVALUATE",
+      "n": 2,
+      "ms": 0
+    },
+    "path": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "look": {
+      "type": "QUERY",
+      "n": 1,
+      "ms": 0
+    },
+    "seen": {
+      "type": "OBSERVE",
+      "n": 1,
+      "ms": 0
+    },
+    "add": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "finish": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "done": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

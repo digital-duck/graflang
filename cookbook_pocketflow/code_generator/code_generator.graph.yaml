@@ -1,0 +1,865 @@
+version: 1.0-graph
+workflow:
+  name: coding_agent
+  inputs:
+  - name: problem
+    type: TEXT
+    default: Write a Python function that finds the two numbers in a list that sum
+      to a target value, returning their indices
+  - name: max_iterations
+    type: INTEGER
+    default: 5
+  outputs:
+  - name: result
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_problem
+  - out_max_iterations
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_failure_analysis
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_revision_decision
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_tests
+- id: set_5
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_solution
+- id: set_6
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_test_results
+- id: set_7
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_best_solution
+- id: set_8
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_best_test_results
+- id: set_9
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_all_passed
+- id: set_10
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''in_progress'''
+  ports:
+  - trigger
+  - complete
+  - out_status
+- id: gen_1
+  type: GENERATE
+  config:
+    function: generate_tests
+    params:
+    - problem
+    - failure_analysis
+    prompt_inline: |-
+      You are a Python test engineer. Write comprehensive test functions for the following coding problem.
+
+      Problem:
+      {{in_problem}}
+
+      Previous failure analysis (if any):
+      {{in_failure_analysis}}
+
+      Requirements:
+      - Name every test function starting with test_ (e.g. test_basic, test_edge_empty)
+      - Use only plain assert statements — no pytest, unittest, or external imports
+      - Cover normal cases, edge cases, and boundary conditions
+      - Each test must call the function under test with specific inputs and assert the expected output
+
+      Return ONLY the Python test function definitions, no other text.
+    arguments:
+    - '@problem'
+    - '@failure_analysis'
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - in_failure_analysis
+  - out_tests
+- id: gen_2
+  type: GENERATE
+  config:
+    function: implement_solution
+    params:
+    - problem
+    - tests
+    - failure_analysis
+    prompt_inline: |-
+      You are a Python software engineer. Implement a Python function that solves the coding problem below.
+
+      Problem:
+      {{in_problem}}
+
+      Test cases to satisfy:
+      {{in_tests}}
+
+      Previous failure analysis (if any):
+      {{in_failure_analysis}}
+
+      Requirements:
+      - Match the function signature expected by the test code above
+      - Include only the implementation (function definitions and any helpers)
+      - Do not include test code or example usage
+
+      Return ONLY the Python function implementation, no other text.
+    arguments:
+    - '@problem'
+    - '@tests'
+    - '@failure_analysis'
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - in_tests
+  - in_failure_analysis
+  - out_solution
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      test_results:
+        from: tool_1.out_test_results
+      all_passed:
+        from: tool_2.out_all_passed
+      status:
+        from: set_11.out_status
+      i:
+        from:
+        - set_12.out_i
+        - set_15.out_i
+      best_solution:
+        from: set_13.out_best_solution
+      best_test_results:
+        from: set_14.out_best_test_results
+      failure_analysis:
+        from: gen_3.out_failure_analysis
+      revision_decision:
+        from: gen_4.out_revision_decision
+      solution:
+        from:
+        - gen_5.out_solution
+        - gen_7.out_solution
+      tests:
+        from: gen_6.out_tests
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: run_tests
+          backend: kernel
+          arguments:
+          - '@solution'
+          - '@tests'
+          code: |
+            import json
+            import concurrent.futures
+            import traceback
+
+            def run_tests(solution: str, tests: str) -> str:
+                try:
+                    namespace = {}
+                    try:
+                        exec(compile(solution + "\n\n" + tests, "<combined>", "exec"), namespace)
+                    except Exception as e:
+                        return json.dumps({
+                            "all_passed": "false",
+                            "passed": 0,
+                            "failed": 1,
+                            "details": [{"test": "setup", "status": "error", "message": str(e)}]
+                        })
+
+                    test_fns = {name: fn for name, fn in namespace.items()
+                                if callable(fn) and name.startswith("test_")}
+
+                    if not test_fns:
+                        return json.dumps({
+                            "all_passed": "false",
+                            "passed": 0,
+                            "failed": 1,
+                            "details": [{"test": "discovery", "status": "error",
+                                         "message": "No test_ functions found in test code"}]
+                        })
+
+                    def run_one(item):
+                        name, fn = item
+                        try:
+                            fn()
+                            return {"test": name, "status": "passed", "message": ""}
+                        except AssertionError as e:
+                            return {"test": name, "status": "failed", "message": str(e)}
+                        except Exception as e:
+                            return {"test": name, "status": "error", "message": traceback.format_exc()}
+
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        results = list(executor.map(run_one, test_fns.items()))
+
+                    passed = sum(1 for r in results if r["status"] == "passed")
+                    failed = len(results) - passed
+                    return json.dumps({
+                        "all_passed": "true" if failed == 0 else "false",
+                        "passed": passed,
+                        "failed": failed,
+                        "details": results
+                    })
+                except Exception as e:
+                    return json.dumps({
+                        "all_passed": "false",
+                        "passed": 0,
+                        "failed": 1,
+                        "details": [{"test": "runner", "status": "error", "message": str(e)}]
+                    })
+            _spl_result = run_tests(solution, tests)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - solution
+          - tests
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_solution
+        - in_tests
+        - out_test_results
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@test_results'
+          - '''all_passed'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(test_results, 'all_passed')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_test_results
+        - out_all_passed
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''complete'''
+        ports:
+        - trigger
+        - complete
+        - out_status
+      - id: set_12
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_iterations'
+        ports:
+        - trigger
+        - complete
+        - in_max_iterations
+        - out_i
+      - id: set_13
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_solution'
+        ports:
+        - trigger
+        - complete
+        - in_solution
+        - out_best_solution
+      - id: set_14
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_test_results'
+        ports:
+        - trigger
+        - complete
+        - in_test_results
+        - out_best_test_results
+      - id: set_15
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: analyze_failures
+          params:
+          - solution
+          - tests
+          - test_results
+          prompt_inline: |-
+            Diagnose the root cause of the test failures below.
+
+            Solution code:
+            {{in_solution}}
+
+            Test code:
+            {{in_tests}}
+
+            Test results (JSON):
+            {{in_test_results}}
+
+            Provide a structured analysis:
+            1. Which tests failed and the specific error or wrong output
+            2. Whether the issue lies in the solution logic, the test expectations, or both
+            3. Concrete suggestions for what to fix
+
+            Keep the analysis concise (3-5 sentences).
+          arguments:
+          - '@solution'
+          - '@tests'
+          - '@test_results'
+        ports:
+        - trigger
+        - complete
+        - in_solution
+        - in_tests
+        - in_test_results
+        - out_failure_analysis
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: decide_revision
+          params:
+          - problem
+          - failure_analysis
+          prompt_inline: |-
+            Based on the failure analysis below, decide which artifact needs revision.
+
+            Problem: {{in_problem}}
+
+            Failure analysis:
+            {{in_failure_analysis}}
+
+            Choose exactly one:
+            - "code"  — the implementation has bugs; the tests correctly specify the expected behavior
+            - "tests" — the test expectations are wrong or overly strict; the code logic is sound
+            - "both"  — both the implementation and the tests need revision
+
+            Respond with ONLY one word: code, tests, or both.
+          arguments:
+          - '@problem'
+          - '@failure_analysis'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - in_failure_analysis
+        - out_revision_decision
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'code')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: gen_5
+        type: GENERATE
+        config:
+          function: implement_solution
+          params:
+          - problem
+          - tests
+          - failure_analysis
+          prompt_inline: |-
+            You are a Python software engineer. Implement a Python function that solves the coding problem below.
+
+            Problem:
+            {{in_problem}}
+
+            Test cases to satisfy:
+            {{in_tests}}
+
+            Previous failure analysis (if any):
+            {{in_failure_analysis}}
+
+            Requirements:
+            - Match the function signature expected by the test code above
+            - Include only the implementation (function definitions and any helpers)
+            - Do not include test code or example usage
+
+            Return ONLY the Python function implementation, no other text.
+          arguments:
+          - '@problem'
+          - '@tests'
+          - '@failure_analysis'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - in_tests
+        - in_failure_analysis
+        - out_solution
+      - id: gen_6
+        type: GENERATE
+        config:
+          function: generate_tests
+          params:
+          - problem
+          - failure_analysis
+          prompt_inline: |-
+            You are a Python test engineer. Write comprehensive test functions for the following coding problem.
+
+            Problem:
+            {{in_problem}}
+
+            Previous failure analysis (if any):
+            {{in_failure_analysis}}
+
+            Requirements:
+            - Name every test function starting with test_ (e.g. test_basic, test_edge_empty)
+            - Use only plain assert statements — no pytest, unittest, or external imports
+            - Cover normal cases, edge cases, and boundary conditions
+            - Each test must call the function under test with specific inputs and assert the expected output
+
+            Return ONLY the Python test function definitions, no other text.
+          arguments:
+          - '@problem'
+          - '@failure_analysis'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - in_failure_analysis
+        - out_tests
+      - id: gen_7
+        type: GENERATE
+        config:
+          function: implement_solution
+          params:
+          - problem
+          - tests
+          - failure_analysis
+          prompt_inline: |-
+            You are a Python software engineer. Implement a Python function that solves the coding problem below.
+
+            Problem:
+            {{in_problem}}
+
+            Test cases to satisfy:
+            {{in_tests}}
+
+            Previous failure analysis (if any):
+            {{in_failure_analysis}}
+
+            Requirements:
+            - Match the function signature expected by the test code above
+            - Include only the implementation (function definitions and any helpers)
+            - Do not include test code or example usage
+
+            Return ONLY the Python function implementation, no other text.
+          arguments:
+          - '@problem'
+          - '@tests'
+          - '@failure_analysis'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - in_tests
+        - in_failure_analysis
+        - out_solution
+      edges:
+      - source: tool_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_1.out_test_results
+        target: tool_2.in_test_results
+        type: binds
+      - source: tool_2.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_2.out_all_passed
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_11.trigger
+        type: triggers
+      - source: set_11.complete
+        target: set_12.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: set_13.trigger
+        type: triggers
+      - source: set_13.complete
+        target: set_14.trigger
+        type: triggers
+      - source: tool_1.out_test_results
+        target: set_14.in_test_results
+        type: binds
+      - source: set_14.complete
+        target: set_15.trigger
+        type: triggers
+      - source: set_15.complete
+        target: gen_3.trigger
+        type: triggers
+      - source: tool_1.out_test_results
+        target: gen_3.in_test_results
+        type: binds
+      - source: gen_3.complete
+        target: gen_4.trigger
+        type: triggers
+      - source: gen_3.out_failure_analysis
+        target: gen_4.in_failure_analysis
+        type: binds
+      - source: gen_4.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: gen_4.out_revision_decision
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: gen_5.trigger
+        type: triggers
+      - source: gen_3.out_failure_analysis
+        target: gen_5.in_failure_analysis
+        type: binds
+      - source: eval_2.fail
+        target: gen_6.trigger
+        type: triggers
+      - source: gen_3.out_failure_analysis
+        target: gen_6.in_failure_analysis
+        type: binds
+      - source: gen_6.complete
+        target: gen_7.trigger
+        type: triggers
+      - source: gen_6.out_tests
+        target: gen_7.in_tests
+        type: binds
+      - source: gen_3.out_failure_analysis
+        target: gen_7.in_failure_analysis
+        type: binds
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_solution
+  - in_tests
+  - in_max_iterations
+  - in_i
+  - in_problem
+  - in_test_results
+  - in_all_passed
+  - in_status
+  - in_best_solution
+  - in_best_test_results
+  - in_failure_analysis
+  - in_revision_decision
+  - out_test_results
+  - out_all_passed
+  - out_status
+  - out_i
+  - out_best_solution
+  - out_best_test_results
+  - out_failure_analysis
+  - out_revision_decision
+  - out_solution
+  - out_tests
+- id: eval_3
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'complete')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_16
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_solution'
+  ports:
+  - trigger
+  - complete
+  - in_solution
+  - out_result
+- id: gen_8
+  type: GENERATE
+  config:
+    function: build_failure_report
+    params:
+    - best_solution
+    - best_test_results
+    prompt_inline: |-
+      Write a concise failure report for the best attempt at a coding problem.
+
+      Final solution code:
+      {{in_best_solution}}
+
+      Final test results (JSON):
+      {{in_best_test_results}}
+
+      Summarize: how many tests passed vs failed, what the remaining failures reveal, and a brief suggestion for next steps. Keep the report to 3-5 sentences.
+    arguments:
+    - '@best_solution'
+    - '@best_test_results'
+  ports:
+  - trigger
+  - complete
+  - in_best_solution
+  - in_best_test_results
+  - out_failure_report
+- id: set_17
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_best_solution + ''\n\n'' + @in_failure_report'
+  ports:
+  - trigger
+  - complete
+  - in_best_solution
+  - in_failure_report
+  - out_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: set_5.trigger
+  type: triggers
+- source: set_5.complete
+  target: set_6.trigger
+  type: triggers
+- source: set_6.complete
+  target: set_7.trigger
+  type: triggers
+- source: set_7.complete
+  target: set_8.trigger
+  type: triggers
+- source: set_8.complete
+  target: set_9.trigger
+  type: triggers
+- source: set_9.complete
+  target: set_10.trigger
+  type: triggers
+- source: set_10.complete
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_problem
+  target: gen_1.in_problem
+  type: binds
+- source: set_2.out_failure_analysis
+  target: gen_1.in_failure_analysis
+  type: binds
+- source: gen_1.complete
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_problem
+  target: gen_2.in_problem
+  type: binds
+- source: gen_1.out_tests
+  target: gen_2.in_tests
+  type: binds
+- source: set_2.out_failure_analysis
+  target: gen_2.in_failure_analysis
+  type: binds
+- source: gen_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: gen_2.out_solution
+  target: loop_1.in_solution
+  type: binds
+- source: gen_1.out_tests
+  target: loop_1.in_tests
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_problem
+  target: loop_1.in_problem
+  type: binds
+- source: set_6.out_test_results
+  target: loop_1.in_test_results
+  type: binds
+- source: set_9.out_all_passed
+  target: loop_1.in_all_passed
+  type: binds
+- source: set_10.out_status
+  target: loop_1.in_status
+  type: binds
+- source: set_7.out_best_solution
+  target: loop_1.in_best_solution
+  type: binds
+- source: set_8.out_best_test_results
+  target: loop_1.in_best_test_results
+  type: binds
+- source: set_2.out_failure_analysis
+  target: loop_1.in_failure_analysis
+  type: binds
+- source: set_3.out_revision_decision
+  target: loop_1.in_revision_decision
+  type: binds
+- source: loop_1.exit
+  target: eval_3.trigger
+  type: triggers
+- source: loop_1.out_status
+  target: eval_3.in_subject
+  type: binds
+- source: eval_3.pass
+  target: set_16.trigger
+  type: triggers
+- source: loop_1.out_solution
+  target: set_16.in_solution
+  type: binds
+- source: eval_3.fail
+  target: gen_8.trigger
+  type: triggers
+- source: loop_1.out_best_solution
+  target: gen_8.in_best_solution
+  type: binds
+- source: loop_1.out_best_test_results
+  target: gen_8.in_best_test_results
+  type: binds
+- source: gen_8.complete
+  target: set_17.trigger
+  type: triggers
+- source: loop_1.out_best_solution
+  target: set_17.in_best_solution
+  type: binds
+- source: gen_8.out_failure_report
+  target: set_17.in_failure_report
+  type: binds
+- source: set_16.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: set_17.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: set_16.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_17.complete
+  target: wf_exit.trigger
+  type: triggers

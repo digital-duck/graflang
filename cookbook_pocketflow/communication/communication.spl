@@ -1,0 +1,73 @@
+-- Deterministic integer addition over TEXT-typed accumulator variables
+CREATE TOOL_API int_add(a TEXT, b TEXT) RETURNS TEXT AS PYTHON $$
+def int_add(a: str, b: str) -> str:
+    try:
+        return str(int(a) + int(b))
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+-- Division with zero-guard; returns rounded result as TEXT
+CREATE TOOL_API safe_divide(numerator TEXT, denominator TEXT, decimals TEXT) RETURNS TEXT AS PYTHON $$
+def safe_divide(numerator: str, denominator: str, decimals: str) -> str:
+    try:
+        n = float(numerator)
+        d = float(denominator)
+        if d == 0:
+            return "0.00"
+        return str(round(n / d, int(decimals)))
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+WORKFLOW word_stats_loop
+  INPUT @user_inputs TEXT := "Hello world, The quick brown fox jumps over the lazy dog, SPL is great for AI workflows, exit"
+  INPUT @delimiter TEXT := ","
+  INPUT @max_inputs INTEGER := 50
+  OUTPUT @final_output TEXT
+DO
+  -- B: Initialize shared store
+  @text_count := "0";
+  @total_word_count := "0";
+  @avg_words := "0.00";
+  @running_log := "";
+  @i := 0;
+
+  WHILE @i < @max_inputs DO
+    -- C: Get user input (one item per loop iteration from the delimited list)
+    CALL list_get(@user_inputs, @i, @delimiter) INTO @current_input;
+    CALL trim(@current_input) INTO @current_input;
+    CALL lower(@current_input) INTO @check_input;
+
+    -- D: Exit signal check
+    EVALUATE @check_input
+      WHEN contains("exit") THEN
+        -- Force-exit: set index to max so WHILE condition fails next cycle
+        @i := @max_inputs;
+      ELSE
+        -- F: Count words in input
+        CALL word_count(@current_input) INTO @words_in_input;
+
+        -- G: Update shared store — text count and word count
+        CALL int_add(@text_count, "1") INTO @text_count;
+        CALL int_add(@total_word_count, @words_in_input) INTO @total_word_count;
+
+        -- H: Compute average words per text
+        CALL safe_divide(@total_word_count, @text_count, "2") INTO @avg_words;
+
+        -- I: Display running statistics (accumulated into log string)
+        @running_log := @running_log + "[Text " + @text_count + "] " + @current_input + " | words: " + @words_in_input + " | total words: " + @total_word_count + " | avg words/text: " + @avg_words + "
+";
+        @i := @i + 1;
+    END;
+  END;
+
+  -- E: Display final statistics
+  @final_output := @running_log + "
+=== Final Statistics ===
+Total texts processed : " + @text_count + "
+Total words counted   : " + @total_word_count + "
+Average words per text: " + @avg_words;
+
+  RETURN @final_output WITH status = "complete";
+END;

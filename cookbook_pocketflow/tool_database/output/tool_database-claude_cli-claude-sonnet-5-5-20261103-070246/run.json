@@ -1,0 +1,7 @@
+{
+  "graph": "tool_database",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {},
+  "started": "2026-11-03T07:02:46"
+}

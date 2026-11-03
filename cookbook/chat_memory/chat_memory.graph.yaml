@@ -1,0 +1,77 @@
+version: "1.0-graph"
+
+# One turn of a chat with memory. The memory is a file: QUERY reads its last lines (a sliding window), the model answers with
+# them in view, and EMIT appends the new exchange. Run the graph again and the next turn remembers this one.
+# QUERY and EMIT are risky, so they sit behind a Cedar GUARD, and the file stays inside this folder. The file's path is an input (`memory_file`),
+# so when this graph is used as a part the memory lives in the folder of the graph that uses it, not in the library.
+
+workflow:
+  name: "chat_memory"
+  inputs:
+    - {name: "message", type: "TEXT"}
+    - {name: "memory_file", type: "TEXT", default: "output/memory.md"}
+  outputs:
+    - {name: "reply", type: "TEXT"}
+
+resources:
+  prompts:
+    reply: "./prompts/reply.md"
+  policies:
+    memory: "./policies/memory.cedar"
+
+nodes:
+  - id: "wf_entry"
+    type: "INPUT"
+    ports: ["entry", "out_message", "out_memory_file"]
+
+  - id: "allowed"
+    type: "GUARD"
+    config:
+      policy_ref: "policies.memory"
+      principal: 'Service::"chat-memory"'
+      action: 'Action::"remember"'
+      resource: 'File::"memory"'
+      context_mapping: {}
+      label: "May it use the memory?"
+    ports: ["trigger", "allow", "deny", "in_message"]
+
+  - id: "recall"
+    type: "QUERY"
+    config: {format: "text", tail: 8, default: "", label: "Recall the last turns"}
+    ports: ["trigger", "complete", "in_file", "out_memory"]
+
+  - id: "answer"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.reply", label: "Reply"}
+    ports: ["trigger", "complete", "in_memory", "in_message", "out_reply"]
+
+  - id: "turn"
+    type: "SOLVE"
+    config: {expression: '"You: " + strip(@in_message) + "\n" + "Assistant: " + strip(@in_reply)', label: "Write the exchange"}
+    ports: ["trigger", "complete", "in_message", "in_reply", "out_turn"]
+
+  - id: "remember"
+    type: "EMIT"
+    config: {channel: "file", mode: "append", label: "Remember it"}
+    ports: ["trigger", "complete", "in_file", "in_content", "out_receipt"]
+
+  - id: "wf_exit"
+    type: "OUTPUT"
+    ports: ["trigger", "exit", "in_reply"]
+
+edges:
+  - {source: "wf_entry.entry", target: "allowed.trigger", type: "triggers"}
+  - {source: "wf_entry.out_message", target: "allowed.in_message", type: "binds"}
+  - {source: "wf_entry.out_memory_file", target: "recall.in_file", type: "binds"}
+  - {source: "allowed.allow", target: "recall.trigger", type: "triggers"}
+  - {source: "recall.complete", target: "answer.trigger", type: "triggers"}
+  - {source: "recall.out_memory", target: "answer.in_memory", type: "binds"}
+  - {source: "wf_entry.out_message", target: "answer.in_message", type: "binds"}
+  - {source: "answer.complete", target: "turn.trigger", type: "triggers"}
+  - {source: "wf_entry.out_message", target: "turn.in_message", type: "binds"}
+  - {source: "answer.out_reply", target: "turn.in_reply", type: "binds"}
+  - {source: "turn.complete", target: "remember.trigger", type: "triggers"}
+  - {source: "turn.out_turn", target: "remember.in_content", type: "binds"}
+  - {source: "wf_entry.out_memory_file", target: "remember.in_file", type: "binds"}
+  - {source: "remember.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "answer.out_reply", target: "wf_exit.in_reply", type: "binds"}

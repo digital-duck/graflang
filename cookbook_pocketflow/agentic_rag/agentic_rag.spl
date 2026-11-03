@@ -1,0 +1,120 @@
+CREATE TOOL_API load_document_store(store_path TEXT) RETURNS TEXT AS PYTHON $$
+import json, os
+def load_document_store(store_path: str) -> str:
+    try:
+        with open(store_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API get_document_summaries(store_data TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def get_document_summaries(store_data: str) -> str:
+    try:
+        docs = json.loads(store_data)
+        lines = []
+        for i, doc in enumerate(docs):
+            title = doc.get('title', 'Untitled')
+            summary = doc.get('summary', '')
+            lines.append(f"[{i}] {title}: {summary}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API retrieve_document_content(store_data TEXT, doc_index TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def retrieve_document_content(store_data: str, doc_index: str) -> str:
+    try:
+        docs = json.loads(store_data)
+        idx = int(doc_index.strip())
+        if idx < 0 or idx >= len(docs):
+            return f"error: index {idx} out of range (0-{len(docs)-1})"
+        return docs[idx].get('content', '')
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API append_context(existing_context TEXT, new_content TEXT) RETURNS TEXT AS PYTHON $$
+def append_context(existing_context: str, new_content: str) -> str:
+    try:
+        if not existing_context.strip():
+            return new_content
+        return existing_context + "\n\n---\n\n" + new_content
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION check_context_sufficiency(question TEXT, summaries TEXT, accumulated_context TEXT)
+RETURNS TEXT AS $$
+You are an agent evaluating whether you have enough context to answer a user question.
+
+User question: {question}
+
+Available document summaries:
+{summaries}
+
+Context accumulated so far:
+{accumulated_context}
+
+Do you have sufficient context to provide a complete and accurate answer to the question?
+Respond with exactly one word: "sufficient" if yes, or "insufficient" if you need to read more documents.
+$$;
+
+CREATE FUNCTION select_next_document(question TEXT, summaries TEXT, accumulated_context TEXT)
+RETURNS TEXT AS $$
+You are an agent selecting which document to read next in order to answer a user question.
+
+User question: {question}
+
+Available document summaries (format: [index] title: summary):
+{summaries}
+
+Context accumulated so far:
+{accumulated_context}
+
+Which document index would be most useful to read next?
+Respond with only the numeric index (e.g., "0", "1", "2"). Do not include any other text.
+$$;
+
+CREATE FUNCTION generate_final_answer(question TEXT, accumulated_context TEXT)
+RETURNS TEXT AS $$
+Based on the following context, provide a comprehensive and accurate answer to the user''s question.
+
+User question: {question}
+
+Context:
+{accumulated_context}
+
+Provide a clear, well-structured answer using only the information from the context provided.
+$$;
+
+WORKFLOW agentic_rag
+  INPUT @question TEXT := "What is retrieval-augmented generation and when should I use it?"
+  INPUT @store_path TEXT := "cookbook-pocketflow/019_agentic_rag/data/documents.json"
+  INPUT @max_iterations INTEGER := 10
+  OUTPUT @answer TEXT
+DO
+  @i := 0;
+  @context := "";
+  @answer := "";
+
+  CALL load_document_store(@store_path) INTO @store_data;
+  CALL get_document_summaries(@store_data) INTO @summaries;
+
+  WHILE @i < @max_iterations DO
+    GENERATE check_context_sufficiency(@question, @summaries, @context) INTO @gate;
+    EVALUATE @gate WHEN contains("sufficient") THEN
+      @i := @max_iterations;
+    ELSE
+      GENERATE select_next_document(@question, @summaries, @context) INTO @doc_index;
+      CALL retrieve_document_content(@store_data, @doc_index) INTO @doc_content;
+      CALL append_context(@context, @doc_content) INTO @context;
+      @i := @i + 1;
+    END;
+  END;
+
+  GENERATE generate_final_answer(@question, @context) INTO @answer;
+  RETURN @answer WITH status = "complete";
+END;

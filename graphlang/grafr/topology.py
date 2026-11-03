@@ -15,6 +15,7 @@ from .adapters import parse_node_llm
 from .parts import flatten_parts
 from .expr import ExpressionError, variables
 from .resolver import ResourceResolver, SUFFIX
+from .outside import check_outside
 from .run_node import check_run
 from .solve_backend import check_solve
 
@@ -148,11 +149,25 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             run_errors, run_warnings = check_run(n, resolver.base_dir)
             errors += [f"{where}: {m}" for m in run_errors]
             warnings += [f"{where}: {m}" for m in run_warnings]
+        elif typ in ("QUERY", "EMIT", "OBSERVE"):
+            out_errors, out_warnings = check_outside(n, resolver.base_dir)
+            errors += [f"{where}: {m}" for m in out_errors]
+            warnings += [f"{where}: {m}" for m in out_warnings]
+        elif typ == "DECISION":
+            from .decision import check_decision
+            d_errors, d_warnings = check_decision(n)
+            errors += [f"{where}: {m}" for m in d_errors]
+            warnings += [f"{where}: {m}" for m in d_warnings]
         elif typ == "LOOP":
             _check_loop(n, prefix, resolver, errors, warnings)
         elif typ == "BATCH":
             _check_batch(n, prefix, resolver, errors, warnings)
 
+        phases = cfg.get("phases") if isinstance(cfg.get("phases"), dict) else {}
+        retry = (phases.get("exec") or {}).get("retry") if isinstance(phases.get("exec"), dict) else None
+        if typ in ("EMIT", "RUN") and isinstance(retry, dict) and int(retry.get("max", 0) or 0) > 0:
+            warnings.append(f"{where}: exec is retried and this node reaches outside the graph; the step may run more than once, so make it idempotent "
+                            "(exec should only compute; the effect should be safe to repeat)")
         defaulted = set(cfg.get("phases", {}).get("pre", {}).get("defaults", {})) if isinstance(cfg.get("phases"), dict) else set()
         if typ == "GENERATE":
             for port in _prompt_ports(cfg, resolver):        # {{in_x}} in the prompt must be filled by something
@@ -433,6 +448,8 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     _check_ids(nodes, {use for use, _ in (graph_data.get("_part_of") or {}).values()}, "", errors)
     _check_scope(nodes, edges, "", resolver, set(), set(), errors, warnings)
     _check_guarded(nodes, edges, errors)
+    from .decision import default_warnings
+    warnings += default_warnings(nodes, edges, _risky)
     from .capabilities import capability_errors          # imported here: capabilities uses _risky from this module
     errors += capability_errors(graph_data, resolver)
     for kind in SUFFIX:

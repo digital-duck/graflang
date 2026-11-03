@@ -1,0 +1,420 @@
+version: 1.0-graph
+workflow:
+  name: text2sql
+  inputs:
+  - name: db_path
+    type: TEXT
+    default: database.db
+  - name: question
+    type: TEXT
+    default: How many rows are in each table?
+  - name: max_attempts
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: result
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_db_path
+  - out_question
+  - out_max_attempts
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_attempt
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_result
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''false'''
+  ports:
+  - trigger
+  - complete
+  - out_exec_ok
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_exec_result
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: read_db_schema
+    backend: kernel
+    arguments:
+    - '@db_path'
+    code: |
+      import sqlite3
+      def read_db_schema(db_path: str) -> str:
+          try:
+              conn = sqlite3.connect(db_path)
+              cur = conn.cursor()
+              cur.execute("SELECT name, sql FROM sqlite_master WHERE type=''table'' ORDER BY name")
+              rows = cur.fetchall()
+              conn.close()
+              if not rows:
+                  return "error: no tables found"
+              return "\n\n".join(sql for _, sql in rows if sql)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = read_db_schema(db_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - db_path
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_db_path
+  - out_schema
+- id: gen_1
+  type: GENERATE
+  config:
+    function: sql_from_nl
+    params:
+    - schema
+    - question
+    prompt_inline: |-
+      You are a SQL expert. Given the SQLite database schema below, write a single SQL query
+        that answers the user''s question. Return only the raw SQL — no markdown, no explanation.
+
+        Schema:
+        {{in_schema}}
+
+        Question: {{in_question}}
+    arguments:
+    - '@schema'
+    - '@question'
+  ports:
+  - trigger
+  - complete
+  - in_schema
+  - in_question
+  - out_sql
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_attempt, @attempt) < @in_max_attempts
+    outputs:
+      exec_result:
+        from: tool_2.out_exec_result
+      attempt:
+        from:
+        - set_5.out_attempt
+        - set_8.out_attempt
+      sql:
+        from: gen_2.out_sql
+      result:
+        from: set_6.out_result
+      exec_ok:
+        from: set_7.out_exec_ok
+    subgraph:
+      nodes:
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: execute_sql
+          backend: kernel
+          arguments:
+          - '@db_path'
+          - '@sql'
+          code: |
+            import sqlite3, json
+            def execute_sql(db_path: str, sql: str) -> str:
+                try:
+                    conn = sqlite3.connect(db_path)
+                    cur = conn.cursor()
+                    cur.execute(sql)
+                    cols = [d[0] for d in cur.description] if cur.description else []
+                    if cols:
+                        rows = cur.fetchall()
+                        result = json.dumps([dict(zip(cols, r)) for r in rows], default=str)
+                    else:
+                        result = json.dumps({"rows_affected": cur.rowcount})
+                    conn.commit()
+                    conn.close()
+                    return result
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = execute_sql(db_path, sql)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - db_path
+          - sql
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_db_path
+        - in_sql
+        - out_exec_result
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'error:')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_attempt + 1'
+        ports:
+        - trigger
+        - complete
+        - in_attempt
+        - out_attempt
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: debug_sql
+          params:
+          - sql
+          - exec_result
+          - schema
+          prompt_inline: |-
+            You are a SQL debugging expert. The SQLite query below failed with an error.
+              Rewrite the query to fix the problem. Return only the corrected SQL — no markdown, no explanation.
+
+              Schema:
+              {{in_schema}}
+
+              Failing SQL:
+              {{in_sql}}
+
+              Error:
+              {{in_exec_result}}
+          arguments:
+          - '@sql'
+          - '@exec_result'
+          - '@schema'
+        ports:
+        - trigger
+        - complete
+        - in_sql
+        - in_exec_result
+        - in_schema
+        - out_sql
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_exec_result'
+        ports:
+        - trigger
+        - complete
+        - in_exec_result
+        - out_result
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''true'''
+        ports:
+        - trigger
+        - complete
+        - out_exec_ok
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_attempts'
+        ports:
+        - trigger
+        - complete
+        - in_max_attempts
+        - out_attempt
+      edges:
+      - source: tool_2.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_2.out_exec_result
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_5.trigger
+        type: triggers
+      - source: set_5.complete
+        target: gen_2.trigger
+        type: triggers
+      - source: tool_2.out_exec_result
+        target: gen_2.in_exec_result
+        type: binds
+      - source: eval_1.fail
+        target: set_6.trigger
+        type: triggers
+      - source: tool_2.out_exec_result
+        target: set_6.in_exec_result
+        type: binds
+      - source: set_6.complete
+        target: set_7.trigger
+        type: triggers
+      - source: set_7.complete
+        target: set_8.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_db_path
+  - in_sql
+  - in_attempt
+  - in_schema
+  - in_max_attempts
+  - in_exec_result
+  - in_result
+  - in_exec_ok
+  - out_exec_result
+  - out_attempt
+  - out_sql
+  - out_result
+  - out_exec_ok
+- id: eval_2
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'true')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_9
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_result'
+  ports:
+  - trigger
+  - complete
+  - in_result
+  - out_result
+- id: set_10
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''SQL generation failed after all attempts. Last error: '' + @in_exec_result'
+  ports:
+  - trigger
+  - complete
+  - in_exec_result
+  - out_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_db_path
+  target: tool_1.in_db_path
+  type: binds
+- source: tool_1.complete
+  target: gen_1.trigger
+  type: triggers
+- source: tool_1.out_schema
+  target: gen_1.in_schema
+  type: binds
+- source: wf_entry.out_question
+  target: gen_1.in_question
+  type: binds
+- source: gen_1.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_db_path
+  target: loop_1.in_db_path
+  type: binds
+- source: gen_1.out_sql
+  target: loop_1.in_sql
+  type: binds
+- source: set_1.out_attempt
+  target: loop_1.in_attempt
+  type: binds
+- source: tool_1.out_schema
+  target: loop_1.in_schema
+  type: binds
+- source: wf_entry.out_max_attempts
+  target: loop_1.in_max_attempts
+  type: binds
+- source: set_4.out_exec_result
+  target: loop_1.in_exec_result
+  type: binds
+- source: set_2.out_result
+  target: loop_1.in_result
+  type: binds
+- source: set_3.out_exec_ok
+  target: loop_1.in_exec_ok
+  type: binds
+- source: loop_1.exit
+  target: eval_2.trigger
+  type: triggers
+- source: loop_1.out_exec_ok
+  target: eval_2.in_subject
+  type: binds
+- source: eval_2.pass
+  target: set_9.trigger
+  type: triggers
+- source: loop_1.out_result
+  target: set_9.in_result
+  type: binds
+- source: eval_2.fail
+  target: set_10.trigger
+  type: triggers
+- source: loop_1.out_exec_result
+  target: set_10.in_exec_result
+  type: binds
+- source: set_9.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: set_10.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: set_9.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_10.complete
+  target: wf_exit.trigger
+  type: triggers

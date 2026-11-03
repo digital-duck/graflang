@@ -1,0 +1,961 @@
+version: 1.0-graph
+workflow:
+  name: deep_research
+  inputs:
+  - name: topic
+    type: TEXT
+    default: Recent advances in quantum error correction
+  - name: out
+    type: TEXT
+    default: cookbook_pocketflow/deep_research/output/report.txt
+  outputs:
+  - name: report
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_topic
+  - out_out
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_loop_count
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_feedback
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_notes
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_report
+- id: gen_1
+  type: GENERATE
+  config:
+    function: planner
+    params:
+    - topic
+    - feedback
+    prompt_inline: |-
+      You are a research planner. Given the research topic: {{in_topic}}
+      And previous iteration feedback (if any): {{in_feedback}}
+
+      Generate exactly 3 specific, diverse search queries to gather comprehensive information.
+      Format your response as:
+      QUERY_1: <first search query>
+      QUERY_2: <second search query>
+      QUERY_3: <third search query>
+    arguments:
+    - '@topic'
+    - '@feedback'
+  ports:
+  - trigger
+  - complete
+  - in_topic
+  - in_feedback
+  - out_queries
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_loop_count, @loop_count) < 3
+    outputs:
+      report:
+        from:
+        - gen_2.out_report
+        - gen_11.out_report
+      loop_count:
+        from:
+        - set_5.out_loop_count
+        - set_6.out_loop_count
+        - set_7.out_loop_count
+      query1:
+        from: gen_3.out_query1
+      query2:
+        from: gen_4.out_query2
+      query3:
+        from: gen_5.out_query3
+      result1:
+        from: tool_1.out_result1
+      result2:
+        from: tool_2.out_result2
+      result3:
+        from: tool_3.out_result3
+      note1:
+        from: gen_6.out_note1
+      note2:
+        from: gen_7.out_note2
+      note3:
+        from: gen_8.out_note3
+      notes:
+        from: gen_9.out_notes
+      decision:
+        from: gen_10.out_decision
+      feedback:
+        from: gen_12.out_feedback
+      queries:
+        from: gen_13.out_queries
+    subgraph:
+      nodes:
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(str(@in_loop_count), '2')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_loop_count
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: write_concise_report
+          params:
+          - topic
+          - notes
+          prompt_inline: |-
+            Write a concise, well-structured research report on the following topic: {{in_topic}}
+
+            Use these accumulated research notes as your source material: {{in_notes}}
+
+            The report should include key findings, important insights, and a clear conclusion.
+            Be comprehensive yet concise.
+          arguments:
+          - '@topic'
+          - '@notes'
+        ports:
+        - trigger
+        - complete
+        - in_topic
+        - in_notes
+        - out_report
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '3'
+        ports:
+        - trigger
+        - complete
+        - out_loop_count
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: extract_query
+          params:
+          - queries
+          - position
+          prompt_inline: |-
+            From this list of search queries:
+            {{in_queries}}
+
+            Extract and return only the search query at position {{in_position}}.
+            For example, if position is 1, return the text after "QUERY_1: ".
+            Return only the query text with no prefix or extra formatting.
+          arguments:
+          - '@queries'
+          - '1'
+          phases:
+            pre:
+              defaults:
+                in_position: 1
+        ports:
+        - trigger
+        - complete
+        - in_position
+        - in_queries
+        - out_query1
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: extract_query
+          params:
+          - queries
+          - position
+          prompt_inline: |-
+            From this list of search queries:
+            {{in_queries}}
+
+            Extract and return only the search query at position {{in_position}}.
+            For example, if position is 1, return the text after "QUERY_1: ".
+            Return only the query text with no prefix or extra formatting.
+          arguments:
+          - '@queries'
+          - '2'
+          phases:
+            pre:
+              defaults:
+                in_position: 2
+        ports:
+        - trigger
+        - complete
+        - in_position
+        - in_queries
+        - out_query2
+      - id: gen_5
+        type: GENERATE
+        config:
+          function: extract_query
+          params:
+          - queries
+          - position
+          prompt_inline: |-
+            From this list of search queries:
+            {{in_queries}}
+
+            Extract and return only the search query at position {{in_position}}.
+            For example, if position is 1, return the text after "QUERY_1: ".
+            Return only the query text with no prefix or extra formatting.
+          arguments:
+          - '@queries'
+          - '3'
+          phases:
+            pre:
+              defaults:
+                in_position: 3
+        ports:
+        - trigger
+        - complete
+        - in_position
+        - in_queries
+        - out_query3
+      - id: fork_1
+        type: FORK
+        ports:
+        - trigger
+        - branch_1
+        - branch_2
+        - branch_3
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: web_search
+          backend: kernel
+          arguments:
+          - '@query1'
+          code: |
+            import re
+
+            def web_search(query: str) -> str:
+                """WEB_SEARCH(query) — search the web via DuckDuckGo, return top-5 results.
+
+                Accepts a plain query string or a YAML/prefixed decision block:
+                    'search: what is quantum computing'   → extracts the query after 'search:'
+                    'search_query: ...'                   → extracts the search_query field
+
+                Usage in SPL:
+                    CALL web_search(@query) INTO @results;
+                    CALL web_search(@decision) INTO @results;
+
+                Requires: pip install ddgs   (or pip install duckduckgo_search)
+                """
+                import warnings
+                try:
+                    from ddgs import DDGS
+                except ImportError:
+                    try:
+                        from duckduckgo_search import DDGS
+                    except ImportError:
+                        return 'web_search unavailable: install ddgs (pip install ddgs)'
+                q = str(query).strip()
+                m = re.search('search_query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if not m:
+                    m = re.search('^search\\s*:\\s*(.+)$', q, re.MULTILINE | re.IGNORECASE)
+                if not m:
+                    m = re.search('(?<!\\w)query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if m:
+                    q = m.group(1).strip()
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('ignore', RuntimeWarning)
+                        results = DDGS().text(q, max_results=5)
+                    if not results:
+                        return f'No results found for: {q}'
+                    lines = []
+                    for i, r in enumerate(results, 1):
+                        title = r.get('title', '')
+                        url = r.get('href', '')
+                        body = r.get('body', '')
+                        lines.append(f'[{i}] {title}\n    URL: {url}\n    {body}')
+                    return '\n\n'.join(lines)
+                except Exception as e:
+                    return f'Search error: {e}'
+            _spl_result = web_search(query1)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - query
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_query1
+        - out_result1
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: web_search
+          backend: kernel
+          arguments:
+          - '@query2'
+          code: |
+            import re
+
+            def web_search(query: str) -> str:
+                """WEB_SEARCH(query) — search the web via DuckDuckGo, return top-5 results.
+
+                Accepts a plain query string or a YAML/prefixed decision block:
+                    'search: what is quantum computing'   → extracts the query after 'search:'
+                    'search_query: ...'                   → extracts the search_query field
+
+                Usage in SPL:
+                    CALL web_search(@query) INTO @results;
+                    CALL web_search(@decision) INTO @results;
+
+                Requires: pip install ddgs   (or pip install duckduckgo_search)
+                """
+                import warnings
+                try:
+                    from ddgs import DDGS
+                except ImportError:
+                    try:
+                        from duckduckgo_search import DDGS
+                    except ImportError:
+                        return 'web_search unavailable: install ddgs (pip install ddgs)'
+                q = str(query).strip()
+                m = re.search('search_query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if not m:
+                    m = re.search('^search\\s*:\\s*(.+)$', q, re.MULTILINE | re.IGNORECASE)
+                if not m:
+                    m = re.search('(?<!\\w)query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if m:
+                    q = m.group(1).strip()
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('ignore', RuntimeWarning)
+                        results = DDGS().text(q, max_results=5)
+                    if not results:
+                        return f'No results found for: {q}'
+                    lines = []
+                    for i, r in enumerate(results, 1):
+                        title = r.get('title', '')
+                        url = r.get('href', '')
+                        body = r.get('body', '')
+                        lines.append(f'[{i}] {title}\n    URL: {url}\n    {body}')
+                    return '\n\n'.join(lines)
+                except Exception as e:
+                    return f'Search error: {e}'
+            _spl_result = web_search(query2)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - query
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_query2
+        - out_result2
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: web_search
+          backend: kernel
+          arguments:
+          - '@query3'
+          code: |
+            import re
+
+            def web_search(query: str) -> str:
+                """WEB_SEARCH(query) — search the web via DuckDuckGo, return top-5 results.
+
+                Accepts a plain query string or a YAML/prefixed decision block:
+                    'search: what is quantum computing'   → extracts the query after 'search:'
+                    'search_query: ...'                   → extracts the search_query field
+
+                Usage in SPL:
+                    CALL web_search(@query) INTO @results;
+                    CALL web_search(@decision) INTO @results;
+
+                Requires: pip install ddgs   (or pip install duckduckgo_search)
+                """
+                import warnings
+                try:
+                    from ddgs import DDGS
+                except ImportError:
+                    try:
+                        from duckduckgo_search import DDGS
+                    except ImportError:
+                        return 'web_search unavailable: install ddgs (pip install ddgs)'
+                q = str(query).strip()
+                m = re.search('search_query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if not m:
+                    m = re.search('^search\\s*:\\s*(.+)$', q, re.MULTILINE | re.IGNORECASE)
+                if not m:
+                    m = re.search('(?<!\\w)query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if m:
+                    q = m.group(1).strip()
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('ignore', RuntimeWarning)
+                        results = DDGS().text(q, max_results=5)
+                    if not results:
+                        return f'No results found for: {q}'
+                    lines = []
+                    for i, r in enumerate(results, 1):
+                        title = r.get('title', '')
+                        url = r.get('href', '')
+                        body = r.get('body', '')
+                        lines.append(f'[{i}] {title}\n    URL: {url}\n    {body}')
+                    return '\n\n'.join(lines)
+                except Exception as e:
+                    return f'Search error: {e}'
+            _spl_result = web_search(query3)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - query
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_query3
+        - out_result3
+      - id: join_1
+        type: JOIN
+        ports:
+        - trigger
+        - complete
+      - id: fork_2
+        type: FORK
+        ports:
+        - trigger
+        - branch_1
+        - branch_2
+        - branch_3
+      - id: gen_6
+        type: GENERATE
+        config:
+          function: extract_facts
+          params:
+          - query1
+          - result1
+          prompt_inline: |-
+            Given the search query: {{in_query1}}
+            And the search result content: {{in_result1}}
+
+            Extract and summarize the key facts and relevant information as a concise bullet-point list.
+            Focus on information directly relevant to the query.
+          arguments:
+          - '@query1'
+          - '@result1'
+        ports:
+        - trigger
+        - complete
+        - in_query1
+        - in_result1
+        - out_note1
+      - id: gen_7
+        type: GENERATE
+        config:
+          function: extract_facts
+          params:
+          - query2
+          - result2
+          prompt_inline: |-
+            Given the search query: {{in_query2}}
+            And the search result content: {{in_result2}}
+
+            Extract and summarize the key facts and relevant information as a concise bullet-point list.
+            Focus on information directly relevant to the query.
+          arguments:
+          - '@query2'
+          - '@result2'
+        ports:
+        - trigger
+        - complete
+        - in_query2
+        - in_result2
+        - out_note2
+      - id: gen_8
+        type: GENERATE
+        config:
+          function: extract_facts
+          params:
+          - query3
+          - result3
+          prompt_inline: |-
+            Given the search query: {{in_query3}}
+            And the search result content: {{in_result3}}
+
+            Extract and summarize the key facts and relevant information as a concise bullet-point list.
+            Focus on information directly relevant to the query.
+          arguments:
+          - '@query3'
+          - '@result3'
+        ports:
+        - trigger
+        - complete
+        - in_query3
+        - in_result3
+        - out_note3
+      - id: join_2
+        type: JOIN
+        ports:
+        - trigger
+        - complete
+      - id: gen_9
+        type: GENERATE
+        config:
+          function: accumulate_notes
+          params:
+          - notes
+          - note1
+          - note2
+          - note3
+          prompt_inline: |-
+            Merge the following research notes into one coherent, organized collection.
+            Remove duplicates and group related facts together.
+
+            Existing notes:
+            {{in_notes}}
+
+            New notes from this research iteration:
+            Batch 1: {{in_note1}}
+            Batch 2: {{in_note2}}
+            Batch 3: {{in_note3}}
+
+            Return the complete merged notes collection.
+          arguments:
+          - '@notes'
+          - '@note1'
+          - '@note2'
+          - '@note3'
+        ports:
+        - trigger
+        - complete
+        - in_notes
+        - in_note1
+        - in_note2
+        - in_note3
+        - out_notes
+      - id: gen_10
+        type: GENERATE
+        config:
+          function: synthesizer
+          params:
+          - topic
+          - notes
+          - loop_count
+          prompt_inline: |-
+            You are a research synthesizer. Evaluate the research gathered so far.
+
+            Topic: {{in_topic}}
+            Research iteration: {{in_loop_count}}
+            Accumulated notes: {{in_notes}}
+
+            Decide whether to continue researching or finalize the report.
+
+            If the notes provide sufficient coverage, respond with:
+            DECISION: finalize
+            REPORT: <write the complete, well-structured research report here>
+
+            If important information is still missing, respond with:
+            DECISION: research
+            FEEDBACK: <describe specifically what information is still needed>
+
+            Begin your response with either "DECISION: finalize" or "DECISION: research".
+          arguments:
+          - '@topic'
+          - '@notes'
+          - '@loop_count'
+        ports:
+        - trigger
+        - complete
+        - in_topic
+        - in_notes
+        - in_loop_count
+        - out_decision
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: 'contains(@in_subject, ''DECISION: finalize'')'
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: gen_11
+        type: GENERATE
+        config:
+          function: extract_report
+          params:
+          - decision
+          prompt_inline: |-
+            From the following synthesizer output:
+            {{in_decision}}
+
+            Extract and return only the content that appears after "REPORT: ".
+            Return the full report text with no additional prefix.
+          arguments:
+          - '@decision'
+        ports:
+        - trigger
+        - complete
+        - in_decision
+        - out_report
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '3'
+        ports:
+        - trigger
+        - complete
+        - out_loop_count
+      - id: gen_12
+        type: GENERATE
+        config:
+          function: extract_feedback
+          params:
+          - decision
+          prompt_inline: |-
+            From the following synthesizer output:
+            {{in_decision}}
+
+            Extract and return only the content that appears after "FEEDBACK: ".
+            Return just the feedback text with no additional prefix.
+          arguments:
+          - '@decision'
+        ports:
+        - trigger
+        - complete
+        - in_decision
+        - out_feedback
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_loop_count + 1'
+        ports:
+        - trigger
+        - complete
+        - in_loop_count
+        - out_loop_count
+      - id: gen_13
+        type: GENERATE
+        config:
+          function: planner
+          params:
+          - topic
+          - feedback
+          prompt_inline: |-
+            You are a research planner. Given the research topic: {{in_topic}}
+            And previous iteration feedback (if any): {{in_feedback}}
+
+            Generate exactly 3 specific, diverse search queries to gather comprehensive information.
+            Format your response as:
+            QUERY_1: <first search query>
+            QUERY_2: <second search query>
+            QUERY_3: <third search query>
+          arguments:
+          - '@topic'
+          - '@feedback'
+        ports:
+        - trigger
+        - complete
+        - in_topic
+        - in_feedback
+        - out_queries
+      edges:
+      - source: eval_1.pass
+        target: gen_2.trigger
+        type: triggers
+      - source: gen_2.complete
+        target: set_5.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: gen_3.trigger
+        type: triggers
+      - source: gen_3.complete
+        target: gen_4.trigger
+        type: triggers
+      - source: gen_4.complete
+        target: gen_5.trigger
+        type: triggers
+      - source: gen_5.complete
+        target: fork_1.trigger
+        type: triggers
+      - source: fork_1.branch_1
+        target: tool_1.trigger
+        type: triggers
+      - source: gen_3.out_query1
+        target: tool_1.in_query1
+        type: binds
+      - source: fork_1.branch_2
+        target: tool_2.trigger
+        type: triggers
+      - source: gen_4.out_query2
+        target: tool_2.in_query2
+        type: binds
+      - source: fork_1.branch_3
+        target: tool_3.trigger
+        type: triggers
+      - source: gen_5.out_query3
+        target: tool_3.in_query3
+        type: binds
+      - source: tool_1.complete
+        target: join_1.trigger
+        type: triggers
+      - source: tool_2.complete
+        target: join_1.trigger
+        type: triggers
+      - source: tool_3.complete
+        target: join_1.trigger
+        type: triggers
+      - source: join_1.complete
+        target: fork_2.trigger
+        type: triggers
+      - source: fork_2.branch_1
+        target: gen_6.trigger
+        type: triggers
+      - source: gen_3.out_query1
+        target: gen_6.in_query1
+        type: binds
+      - source: tool_1.out_result1
+        target: gen_6.in_result1
+        type: binds
+      - source: fork_2.branch_2
+        target: gen_7.trigger
+        type: triggers
+      - source: gen_4.out_query2
+        target: gen_7.in_query2
+        type: binds
+      - source: tool_2.out_result2
+        target: gen_7.in_result2
+        type: binds
+      - source: fork_2.branch_3
+        target: gen_8.trigger
+        type: triggers
+      - source: gen_5.out_query3
+        target: gen_8.in_query3
+        type: binds
+      - source: tool_3.out_result3
+        target: gen_8.in_result3
+        type: binds
+      - source: gen_6.complete
+        target: join_2.trigger
+        type: triggers
+      - source: gen_7.complete
+        target: join_2.trigger
+        type: triggers
+      - source: gen_8.complete
+        target: join_2.trigger
+        type: triggers
+      - source: join_2.complete
+        target: gen_9.trigger
+        type: triggers
+      - source: gen_6.out_note1
+        target: gen_9.in_note1
+        type: binds
+      - source: gen_7.out_note2
+        target: gen_9.in_note2
+        type: binds
+      - source: gen_8.out_note3
+        target: gen_9.in_note3
+        type: binds
+      - source: gen_9.complete
+        target: gen_10.trigger
+        type: triggers
+      - source: gen_9.out_notes
+        target: gen_10.in_notes
+        type: binds
+      - source: gen_10.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: gen_10.out_decision
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: gen_11.trigger
+        type: triggers
+      - source: gen_10.out_decision
+        target: gen_11.in_decision
+        type: binds
+      - source: gen_11.complete
+        target: set_6.trigger
+        type: triggers
+      - source: eval_2.fail
+        target: gen_12.trigger
+        type: triggers
+      - source: gen_10.out_decision
+        target: gen_12.in_decision
+        type: binds
+      - source: gen_12.complete
+        target: set_7.trigger
+        type: triggers
+      - source: set_7.complete
+        target: gen_13.trigger
+        type: triggers
+      - source: gen_12.out_feedback
+        target: gen_13.in_feedback
+        type: binds
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_loop_count
+  - in_topic
+  - in_notes
+  - in_queries
+  - in_report
+  - in_feedback
+  - out_report
+  - out_loop_count
+  - out_query1
+  - out_query2
+  - out_query3
+  - out_result1
+  - out_result2
+  - out_result3
+  - out_note1
+  - out_note2
+  - out_note3
+  - out_notes
+  - out_decision
+  - out_feedback
+  - out_queries
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@out'
+    - '@report'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(out, report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out
+  - in_report
+  - out_write_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_topic
+  target: gen_1.in_topic
+  type: binds
+- source: set_2.out_feedback
+  target: gen_1.in_feedback
+  type: binds
+- source: gen_1.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_1.out_loop_count
+  target: loop_1.in_loop_count
+  type: binds
+- source: wf_entry.out_topic
+  target: loop_1.in_topic
+  type: binds
+- source: set_3.out_notes
+  target: loop_1.in_notes
+  type: binds
+- source: gen_1.out_queries
+  target: loop_1.in_queries
+  type: binds
+- source: set_4.out_report
+  target: loop_1.in_report
+  type: binds
+- source: set_2.out_feedback
+  target: loop_1.in_feedback
+  type: binds
+- source: loop_1.exit
+  target: tool_4.trigger
+  type: triggers
+- source: wf_entry.out_out
+  target: tool_4.in_out
+  type: binds
+- source: loop_1.out_report
+  target: tool_4.in_report
+  type: binds
+- source: loop_1.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: tool_4.complete
+  target: wf_exit.trigger
+  type: triggers

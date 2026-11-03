@@ -16,7 +16,7 @@ TYPE_COLORS = {
     "GENERATE": "#4f8ef7",
     "EVALUATE": "#e0a21e", "ASSERT": "#e0a21e",
     "LOOP": "#9b59b6", "BATCH": "#9b59b6", "FORK": "#9b59b6", "JOIN": "#9b59b6",
-    "GUARD": "#e5484d", "MUTATE": "#e5484d", "RECOVER": "#e5484d",
+    "GUARD": "#e5484d", "MUTATE": "#e5484d", "RECOVER": "#e5484d", "DECISION": "#d6409f",
     "SOLVE": "#2fa84f", "QUERY": "#2fa84f", "CONTEXT": "#2fa84f", "OBSERVE": "#2fa84f",
 }
 OTHER_COLOR = "#8a8f98"

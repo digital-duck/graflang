@@ -1,0 +1,56 @@
+CREATE TOOL_API apply_image_filter(image_path TEXT, filter_name TEXT, output_dir TEXT) RETURNS TEXT AS PYTHON $$
+import os
+import numpy as np
+from PIL import Image, ImageFilter
+
+def apply_image_filter(image_path: str, filter_name: str, output_dir: str) -> str:
+    try:
+        os.makedirs(output_dir.strip(), exist_ok=True)
+        img = Image.open(image_path.strip())
+        fn = filter_name.strip().lower()
+        if fn == "grayscale":
+            result = img.convert("L").convert("RGB")
+        elif fn == "blur":
+            result = img.filter(ImageFilter.GaussianBlur(radius=2))
+        elif fn == "sepia":
+            arr = np.array(img.convert("RGB"), dtype=np.float32)
+            r = np.clip(arr[:,:,0]*0.393 + arr[:,:,1]*0.769 + arr[:,:,2]*0.189, 0, 255)
+            g = np.clip(arr[:,:,0]*0.349 + arr[:,:,1]*0.686 + arr[:,:,2]*0.168, 0, 255)
+            b = np.clip(arr[:,:,0]*0.272 + arr[:,:,1]*0.534 + arr[:,:,2]*0.131, 0, 255)
+            result = Image.fromarray(np.stack([r, g, b], axis=2).astype(np.uint8))
+        else:
+            return f"error: unknown filter ''{fn}''"
+        base = os.path.splitext(os.path.basename(image_path.strip()))[0]
+        ext  = os.path.splitext(image_path.strip())[1] or ".jpg"
+        out_path = os.path.join(output_dir.strip(), f"{base}_{fn}{ext}")
+        result.save(out_path)
+        return f"ok: {out_path}"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+WORKFLOW batch_image_filter
+  INPUT @images TEXT    := "img1.jpg,img2.jpg,img3.jpg"
+  INPUT @filters TEXT    := "grayscale,blur,sepia"
+  INPUT @max_images INTEGER := 3
+  INPUT @max_filters INTEGER := 3
+  INPUT @output_dir TEXT    := "output/"
+  OUTPUT @log TEXT
+DO
+  CALL make_dir(@output_dir) INTO @dir_ok;
+  @log := "";
+  @i := 0;
+  WHILE @i < @max_images DO
+    CALL list_get(@images, @i, ",") INTO @image;
+    @j := 0;
+    WHILE @j < @max_filters DO
+      CALL list_get(@filters, @j, ",") INTO @filter;
+      CALL apply_image_filter(@image, @filter, @output_dir) INTO @result;
+      @log := @log + @result + "
+";
+      @j := @j + 1;
+    END;
+    @i := @i + 1;
+  END;
+  RETURN @log WITH status = "complete";
+END;

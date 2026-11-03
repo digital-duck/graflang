@@ -1,0 +1,174 @@
+version: 1.0-graph
+workflow:
+  name: task_manager
+  inputs:
+  - name: title
+    type: TEXT
+    default: web_search
+  - name: description
+    type: TEXT
+    default: Search the web for current information on a given query
+  - name: db_path
+    type: TEXT
+    default: tasks.db
+  outputs:
+  - name: task_list
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_title
+  - out_description
+  - out_db_path
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: init_db_schema
+    backend: kernel
+    arguments:
+    - '@db_path'
+    code: |
+      import sqlite3
+      def init_db_schema(db_path: str) -> str:
+          try:
+              conn = sqlite3.connect(db_path)
+              cursor = conn.cursor()
+              cursor.execute("""
+                  CREATE TABLE IF NOT EXISTS tasks (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      title TEXT NOT NULL,
+                      description TEXT,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                  )
+              """)
+              conn.commit()
+              conn.close()
+              return "schema initialized"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = init_db_schema(db_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - db_path
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_db_path
+  - out_schema_status
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: insert_task
+    backend: kernel
+    arguments:
+    - '@db_path'
+    - '@title'
+    - '@description'
+    code: |
+      import sqlite3
+      def insert_task(db_path: str, title: str, description: str) -> str:
+          try:
+              conn = sqlite3.connect(db_path)
+              cursor = conn.cursor()
+              cursor.execute(
+                  "INSERT INTO tasks (title, description) VALUES (?, ?)",
+                  (title, description)
+              )
+              conn.commit()
+              task_id = cursor.lastrowid
+              conn.close()
+              return str(task_id)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = insert_task(db_path, title, description)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - db_path
+    - title
+    - description
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_db_path
+  - in_title
+  - in_description
+  - out_task_id
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: retrieve_all_tasks
+    backend: kernel
+    arguments:
+    - '@db_path'
+    code: |
+      import sqlite3, json
+      def retrieve_all_tasks(db_path: str) -> str:
+          try:
+              conn = sqlite3.connect(db_path)
+              cursor = conn.cursor()
+              cursor.execute(
+                  "SELECT id, title, description, created_at FROM tasks ORDER BY id"
+              )
+              rows = cursor.fetchall()
+              conn.close()
+              tasks = [
+                  {"id": r[0], "title": r[1], "description": r[2], "created_at": r[3]}
+                  for r in rows
+              ]
+              return json.dumps(tasks, indent=2)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = retrieve_all_tasks(db_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - db_path
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_db_path
+  - out_task_list
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_task_list
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_db_path
+  target: tool_1.in_db_path
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: wf_entry.out_db_path
+  target: tool_2.in_db_path
+  type: binds
+- source: wf_entry.out_title
+  target: tool_2.in_title
+  type: binds
+- source: wf_entry.out_description
+  target: tool_2.in_description
+  type: binds
+- source: tool_2.complete
+  target: tool_3.trigger
+  type: triggers
+- source: wf_entry.out_db_path
+  target: tool_3.in_db_path
+  type: binds
+- source: tool_3.out_task_list
+  target: wf_exit.in_task_list
+  type: binds
+- source: tool_3.complete
+  target: wf_exit.trigger
+  type: triggers

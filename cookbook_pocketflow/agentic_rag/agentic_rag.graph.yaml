@@ -1,0 +1,414 @@
+version: 1.0-graph
+workflow:
+  name: agentic_rag
+  inputs:
+  - name: question
+    type: TEXT
+    default: What is retrieval-augmented generation and when should I use it?
+  - name: store_path
+    type: TEXT
+    default: cookbook_pocketflow/agentic_rag/data/documents.json
+  - name: max_iterations
+    type: INTEGER
+    default: 10
+  outputs:
+  - name: answer
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_question
+  - out_store_path
+  - out_max_iterations
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_context
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_answer
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: load_document_store
+    backend: kernel
+    arguments:
+    - '@store_path'
+    code: |
+      import json, os
+      def load_document_store(store_path: str) -> str:
+          try:
+              with open(store_path, 'r', encoding='utf-8') as f:
+                  return f.read()
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = load_document_store(store_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - store_path
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_store_path
+  - out_store_data
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: get_document_summaries
+    backend: kernel
+    arguments:
+    - '@store_data'
+    code: |
+      import json
+      def get_document_summaries(store_data: str) -> str:
+          try:
+              docs = json.loads(store_data)
+              lines = []
+              for i, doc in enumerate(docs):
+                  title = doc.get('title', 'Untitled')
+                  summary = doc.get('summary', '')
+                  lines.append(f"[{i}] {title}: {summary}")
+              return "\n".join(lines)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = get_document_summaries(store_data)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - store_data
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_store_data
+  - out_summaries
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      gate:
+        from: gen_1.out_gate
+      i:
+        from:
+        - set_4.out_i
+        - set_5.out_i
+      doc_index:
+        from: gen_2.out_doc_index
+      doc_content:
+        from: tool_3.out_doc_content
+      context:
+        from: tool_4.out_context
+    subgraph:
+      nodes:
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: check_context_sufficiency
+          params:
+          - question
+          - summaries
+          - context
+          prompt_inline: |-
+            You are an agent evaluating whether you have enough context to answer a user question.
+
+            User question: {{in_question}}
+
+            Available document summaries:
+            {{in_summaries}}
+
+            Context accumulated so far:
+            {{in_context}}
+
+            Do you have sufficient context to provide a complete and accurate answer to the question?
+            Respond with exactly one word: "sufficient" if yes, or "insufficient" if you need to read more documents.
+          arguments:
+          - '@question'
+          - '@summaries'
+          - '@context'
+        ports:
+        - trigger
+        - complete
+        - in_question
+        - in_summaries
+        - in_context
+        - out_gate
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'sufficient')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_iterations'
+        ports:
+        - trigger
+        - complete
+        - in_max_iterations
+        - out_i
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: select_next_document
+          params:
+          - question
+          - summaries
+          - context
+          prompt_inline: |-
+            You are an agent selecting which document to read next in order to answer a user question.
+
+            User question: {{in_question}}
+
+            Available document summaries (format: [index] title: summary):
+            {{in_summaries}}
+
+            Context accumulated so far:
+            {{in_context}}
+
+            Which document index would be most useful to read next?
+            Respond with only the numeric index (e.g., "0", "1", "2"). Do not include any other text.
+          arguments:
+          - '@question'
+          - '@summaries'
+          - '@context'
+        ports:
+        - trigger
+        - complete
+        - in_question
+        - in_summaries
+        - in_context
+        - out_doc_index
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: retrieve_document_content
+          backend: kernel
+          arguments:
+          - '@store_data'
+          - '@doc_index'
+          code: |
+            import json
+            def retrieve_document_content(store_data: str, doc_index: str) -> str:
+                try:
+                    docs = json.loads(store_data)
+                    idx = int(doc_index.strip())
+                    if idx < 0 or idx >= len(docs):
+                        return f"error: index {idx} out of range (0-{len(docs)-1})"
+                    return docs[idx].get('content', '')
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = retrieve_document_content(store_data, doc_index)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - store_data
+          - doc_index
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_store_data
+        - in_doc_index
+        - out_doc_content
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: append_context
+          backend: kernel
+          arguments:
+          - '@context'
+          - '@doc_content'
+          code: |
+            def append_context(existing_context: str, new_content: str) -> str:
+                try:
+                    if not existing_context.strip():
+                        return new_content
+                    return existing_context + "\n\n---\n\n" + new_content
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = append_context(context, doc_content)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - existing_context
+          - new_content
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_context
+        - in_doc_content
+        - out_context
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: gen_1.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: gen_1.out_gate
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_4.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: gen_2.trigger
+        type: triggers
+      - source: gen_2.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: gen_2.out_doc_index
+        target: tool_3.in_doc_index
+        type: binds
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_3.out_doc_content
+        target: tool_4.in_doc_content
+        type: binds
+      - source: tool_4.complete
+        target: set_5.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_question
+  - in_summaries
+  - in_context
+  - in_max_iterations
+  - in_store_data
+  - in_i
+  - out_gate
+  - out_i
+  - out_doc_index
+  - out_doc_content
+  - out_context
+- id: gen_3
+  type: GENERATE
+  config:
+    function: generate_final_answer
+    params:
+    - question
+    - context
+    prompt_inline: |-
+      Based on the following context, provide a comprehensive and accurate answer to the user''s question.
+
+      User question: {{in_question}}
+
+      Context:
+      {{in_context}}
+
+      Provide a clear, well-structured answer using only the information from the context provided.
+    arguments:
+    - '@question'
+    - '@context'
+  ports:
+  - trigger
+  - complete
+  - in_question
+  - in_context
+  - out_answer
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_answer
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_store_path
+  target: tool_1.in_store_path
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_store_data
+  target: tool_2.in_store_data
+  type: binds
+- source: tool_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: loop_1.in_question
+  type: binds
+- source: tool_2.out_summaries
+  target: loop_1.in_summaries
+  type: binds
+- source: set_2.out_context
+  target: loop_1.in_context
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: tool_1.out_store_data
+  target: loop_1.in_store_data
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: loop_1.exit
+  target: gen_3.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: gen_3.in_question
+  type: binds
+- source: loop_1.out_context
+  target: gen_3.in_context
+  type: binds
+- source: gen_3.out_answer
+  target: wf_exit.in_answer
+  type: binds
+- source: gen_3.complete
+  target: wf_exit.trigger
+  type: triggers

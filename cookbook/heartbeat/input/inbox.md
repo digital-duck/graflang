@@ -1,0 +1,2 @@
+- 09:02 Priya: staging database moved to the new region, please re-run your smoke tests
+- 09:40 Northwind: asking again whether SSO ships before their January renewal

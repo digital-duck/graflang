@@ -1,0 +1,308 @@
+version: 1.0-graph
+workflow:
+  name: recipe_recommender
+  inputs:
+  - name: ingredients
+    type: TEXT
+    default: chicken, garlic, lemon, fresh herbs
+  - name: api_base
+    type: TEXT
+    default: https://api.spoonacular.com/recipes/search
+  - name: max_iterations
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: final_recommendation
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_ingredients
+  - out_api_base
+  - out_max_iterations
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_final_recommendation
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      candidates:
+        from: tool_1.out_candidates
+      recipe:
+        from: gen_1.out_recipe
+      suggestion:
+        from: gen_2.out_suggestion
+      approval:
+        from: gen_3.out_approval
+      final_recommendation:
+        from: gen_4.out_final_recommendation
+      i:
+        from:
+        - set_3.out_i
+        - set_4.out_i
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: fetch_candidate_recipes
+          backend: kernel
+          arguments:
+          - '@ingredients'
+          - '@api_base'
+          code: |
+            import urllib.request, urllib.parse
+
+            def fetch_candidate_recipes(ingredients: str, api_base: str) -> str:
+                try:
+                    params = urllib.parse.urlencode({"q": ingredients, "number": "5"})
+                    url = f"{api_base}?{params}"
+                    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        return resp.read().decode("utf-8")
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = fetch_candidate_recipes(ingredients, api_base)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - ingredients
+          - api_base
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_ingredients
+        - in_api_base
+        - out_candidates
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: select_best_recipe
+          params:
+          - ingredients
+          - candidates
+          prompt_inline: |-
+            Given these available ingredients: {{in_ingredients}}
+
+            Candidate recipes retrieved from the API:
+            {{in_candidates}}
+
+            Select the single best recipe that maximizes use of the available ingredients.
+            Return the recipe name, a 2-3 sentence description, and 3-5 key preparation steps.
+          arguments:
+          - '@ingredients'
+          - '@candidates'
+        ports:
+        - trigger
+        - complete
+        - in_ingredients
+        - in_candidates
+        - out_recipe
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: present_suggestion
+          params:
+          - ingredients
+          - recipe
+          prompt_inline: |-
+            A recipe has been selected for the following ingredients: {{in_ingredients}}
+
+            Selected recipe:
+            {{in_recipe}}
+
+            Write a friendly, clear presentation of this recipe suggestion to the user.
+            Highlight which of their ingredients it uses and why it is a great choice.
+          arguments:
+          - '@ingredients'
+          - '@recipe'
+        ports:
+        - trigger
+        - complete
+        - in_ingredients
+        - in_recipe
+        - out_suggestion
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: evaluate_user_approval
+          params:
+          - ingredients
+          - suggestion
+          prompt_inline: |-
+            Evaluate this recipe suggestion against the user''s available ingredients.
+
+            Ingredients: {{in_ingredients}}
+            Presented suggestion: {{in_suggestion}}
+
+            Does this suggestion meet high-quality recommendation standards?
+            Consider: ingredient coverage, recipe clarity, practicality, and overall appeal.
+            Return exactly one token — "approved" if it meets standards, or "rejected" if another attempt is needed.
+          arguments:
+          - '@ingredients'
+          - '@suggestion'
+        ports:
+        - trigger
+        - complete
+        - in_ingredients
+        - in_suggestion
+        - out_approval
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'approved')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: confirm_recipe_recommendation
+          params:
+          - suggestion
+          prompt_inline: |-
+            The following recipe suggestion has been approved by the user:
+
+            {{in_suggestion}}
+
+            Write a warm confirmation message to the user, presenting this as their final recommended recipe
+            and encouraging them to enjoy cooking it.
+          arguments:
+          - '@suggestion'
+        ports:
+        - trigger
+        - complete
+        - in_suggestion
+        - out_final_recommendation
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_iterations'
+        ports:
+        - trigger
+        - complete
+        - in_max_iterations
+        - out_i
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_1.complete
+        target: gen_1.trigger
+        type: triggers
+      - source: tool_1.out_candidates
+        target: gen_1.in_candidates
+        type: binds
+      - source: gen_1.complete
+        target: gen_2.trigger
+        type: triggers
+      - source: gen_1.out_recipe
+        target: gen_2.in_recipe
+        type: binds
+      - source: gen_2.complete
+        target: gen_3.trigger
+        type: triggers
+      - source: gen_2.out_suggestion
+        target: gen_3.in_suggestion
+        type: binds
+      - source: gen_3.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: gen_3.out_approval
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: gen_4.trigger
+        type: triggers
+      - source: gen_2.out_suggestion
+        target: gen_4.in_suggestion
+        type: binds
+      - source: gen_4.complete
+        target: set_3.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: set_4.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_ingredients
+  - in_api_base
+  - in_max_iterations
+  - in_i
+  - in_final_recommendation
+  - out_candidates
+  - out_recipe
+  - out_suggestion
+  - out_approval
+  - out_final_recommendation
+  - out_i
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_final_recommendation
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_ingredients
+  target: loop_1.in_ingredients
+  type: binds
+- source: wf_entry.out_api_base
+  target: loop_1.in_api_base
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: set_2.out_final_recommendation
+  target: loop_1.in_final_recommendation
+  type: binds
+- source: loop_1.out_final_recommendation
+  target: wf_exit.in_final_recommendation
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

@@ -25,8 +25,8 @@ console = Console()
 @click.option("--edit", is_flag=True, help="open the app instead: Create, Edit, Settings and Import/Export pages (saves only a valid graph, keeps "
                                            "your comments); needs `pip install 'graflang[edit]'`. GRAPH is optional with it")
 @click.option("--src-dir", type=click.Path(file_okay=False), default=None,
-              help="with --edit: the folder of recipes to work in (one folder per recipe, each with its *.graph.yaml); default ~/.graflang/cookbook "
-                   "and ~/.graflang/solvers (shipped, read-only) and ~/.graflang/apps (yours). $GRAFLANG_HOME moves ~/.graflang")
+              help="with --edit: the folder of recipes to work in (one folder per recipe, each with its *.graph.yaml); default ~/.graflang/cookbook, "
+                   "~/.graflang/solvers and ~/.graflang/pocketflow (shipped, read-only) and ~/.graflang/apps (yours). $GRAFLANG_HOME moves ~/.graflang")
 @click.option("--host", default="127.0.0.1", show_default=True,
               help="with --edit: the address the app listens on. The app has no login and can read your files and use your saved API keys, "
                    "so keep it on this computer; any other address is your decision")
@@ -100,7 +100,7 @@ def _run_editor(graph_path: "Path | None", src_dir: "Path | None", host: str = "
                       "The app has no login.", highlight=False, soft_wrap=True)
     app = Path(__file__).with_name("app.py")
     from .. import workspace
-    where = f"{src_dir}" if src_dir else f"{workspace.default_src_dir()}, {workspace.solvers_dir()} and {workspace.apps_dir()}"
+    where = f"{src_dir}" if src_dir else f"{workspace.default_src_dir()}, {workspace.solvers_dir()}, {workspace.pocketflow_dir()} and {workspace.apps_dir()}"
     console.print(f"editing {graph_path or 'recipes in ' + where}  (Ctrl-C to stop)", highlight=False, markup=False)
     try:
         subprocess.run([sys.executable, "-m", "streamlit", "run", str(app), "--browser.gatherUsageStats", "false", "--server.address", host], env=env, check=False)

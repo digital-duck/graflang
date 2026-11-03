@@ -1,0 +1,1 @@
+{"action": "answer", "text": "The Team plan is 29 euro per user per month, and single sign-on is included."}

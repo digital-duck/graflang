@@ -1,0 +1,81 @@
+-- Tools for Recipe 005: RAG Pipeline
+
+CREATE TOOL_API chunk_documents(documents TEXT) RETURNS TEXT AS PYTHON $$
+import json, os
+
+_CHUNK_SIZE = 500   # characters per chunk
+
+def chunk_documents(documents):
+    """Split documents into fixed-size text chunks; returns JSON list of strings."""
+    try:
+        docs = json.loads(documents)
+        if not isinstance(docs, list):
+            docs = [documents]
+    except (json.JSONDecodeError, TypeError):
+        docs = [str(documents)]
+
+    chunks = []
+    for doc in docs:
+        text = str(doc)
+        if os.path.isfile(text):   # a path: index the file's content
+            text = open(text, encoding='utf-8').read()
+        for i in range(0, len(text), _CHUNK_SIZE):
+            chunk = text[i:i + _CHUNK_SIZE].strip()
+            if chunk:
+                chunks.append(chunk)
+    return json.dumps(chunks)
+$$;
+
+CREATE TOOL_API embed_documents(texts TEXT) RETURNS TEXT AS PYTHON $$
+import json, base64, numpy as np
+from sentence_transformers import SentenceTransformer
+
+_MODEL = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+def embed_documents(texts):
+    """Embed a JSON list of text chunks; returns base64-encoded float32 matrix."""
+    chunks = json.loads(texts)
+    vecs = _MODEL.encode(chunks, convert_to_numpy=True).astype(np.float32)
+    return base64.b64encode(vecs.tobytes()).decode() + f"||{vecs.shape[0]}||{vecs.shape[1]}"
+$$;
+
+CREATE TOOL_API create_faiss_index(embeddings TEXT) RETURNS TEXT AS PYTHON $$
+import faiss, base64, numpy as np, tempfile, os
+
+def create_faiss_index(embeddings):
+    """Build a flat L2 FAISS index from encoded embeddings; returns path to saved index."""
+    enc, rows, cols = embeddings.rsplit("||", 2)
+    vecs = np.frombuffer(base64.b64decode(enc), dtype=np.float32).reshape(int(rows), int(cols))
+    index = faiss.IndexFlatL2(int(cols))
+    index.add(vecs)
+    tmp = tempfile.NamedTemporaryFile(suffix=".faiss", delete=False)
+    faiss.write_index(index, tmp.name)
+    return tmp.name
+$$;
+
+CREATE TOOL_API embed_query(query TEXT) RETURNS TEXT AS PYTHON $$
+import base64, numpy as np
+from sentence_transformers import SentenceTransformer
+
+_MODEL = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+def embed_query(query):
+    """Embed a single query string; returns encoded float32 vector."""
+    vec = _MODEL.encode([query], convert_to_numpy=True).astype(np.float32)
+    dim = vec.shape[1]
+    return base64.b64encode(vec.tobytes()).decode() + f"||1||{dim}"
+$$;
+
+CREATE TOOL_API retrieve_document(index TEXT, query_embedding TEXT, texts TEXT) RETURNS TEXT AS PYTHON $$
+import faiss, base64, json, numpy as np
+
+def retrieve_document(index, query_embedding, texts):
+    """Return the most relevant chunk from texts using FAISS nearest-neighbour search."""
+    enc, rows, cols = query_embedding.rsplit("||", 2)
+    qvec = np.frombuffer(base64.b64decode(enc), dtype=np.float32).reshape(int(rows), int(cols))
+    idx = faiss.read_index(index)
+    _, I = idx.search(qvec, 1)
+    chunks = json.loads(texts)
+    best = int(I[0][0])
+    return chunks[best] if 0 <= best < len(chunks) else ""
+$$;

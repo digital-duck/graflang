@@ -1,0 +1,315 @@
+version: 1.0-graph
+workflow:
+  name: taboo_game
+  inputs:
+  - name: target_word
+    type: TEXT
+    default: ocean
+  - name: forbidden_words
+    type: TEXT
+    default: sea,water,wave,fish,blue
+  - name: max_turns
+    type: INTEGER
+    default: 5
+  outputs:
+  - name: result
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_target_word
+  - out_forbidden_words
+  - out_max_turns
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_turn
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_wrong_guesses
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''Game Over: the target word was not guessed.'''
+  ports:
+  - trigger
+  - complete
+  - out_result
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_turn, @turn) < @in_max_turns
+    outputs:
+      hint:
+        from: gen_1.out_hint
+      guess:
+        from: gen_2.out_guess
+      check:
+        from: tool_1.out_check
+      result:
+        from: set_4.out_result
+      turn:
+        from:
+        - set_5.out_turn
+        - set_6.out_turn
+      wrong_guesses:
+        from: tool_2.out_wrong_guesses
+    subgraph:
+      nodes:
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: hinter_agent
+          params:
+          - target_word
+          - forbidden_words
+          - wrong_guesses
+          prompt_inline: |-
+            You are the Hinter in a Taboo-style word-guessing game.
+            The Guesser must identify this secret target word: {{in_target_word}}
+
+            Hard rules:
+            - NEVER say the target word
+            - NEVER use any word in the forbidden list: {{in_forbidden_words}}
+            - The Guesser''s previous wrong guesses were: {{in_wrong_guesses}} — avoid reinforcing those misdirections
+
+            Respond with exactly one creative, concise hint sentence. No preamble, no explanation.
+          arguments:
+          - '@target_word'
+          - '@forbidden_words'
+          - '@wrong_guesses'
+        ports:
+        - trigger
+        - complete
+        - in_target_word
+        - in_forbidden_words
+        - in_wrong_guesses
+        - out_hint
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: guesser_agent
+          params:
+          - hint
+          - wrong_guesses
+          prompt_inline: |-
+            You are the Guesser in a word-guessing game.
+            A Hinter has given you the following clue about a secret target word: {{in_hint}}
+
+            Your previous wrong guesses (do not repeat any of these): {{in_wrong_guesses}}
+
+            Respond with exactly one word — your best guess for the secret target word.
+          arguments:
+          - '@hint'
+          - '@wrong_guesses'
+        ports:
+        - trigger
+        - complete
+        - in_hint
+        - in_wrong_guesses
+        - out_guess
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: is_correct_guess
+          backend: kernel
+          arguments:
+          - '@guess'
+          - '@target_word'
+          code: |
+            def is_correct_guess(guess: str, target: str) -> str:
+                try:
+                    return "correct" if guess.strip().lower() == target.strip().lower() else "wrong"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = is_correct_guess(guess, target_word)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - guess
+          - target
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_guess
+        - in_target_word
+        - out_check
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'correct')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''Game Won! The target word was: '' + @in_target_word'
+        ports:
+        - trigger
+        - complete
+        - in_target_word
+        - out_result
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_turns'
+        ports:
+        - trigger
+        - complete
+        - in_max_turns
+        - out_turn
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: list_append
+          backend: kernel
+          arguments:
+          - '@wrong_guesses'
+          - '@guess'
+          code: |
+            def list_append(value: str, item: str, delimiter: str=',') -> str:
+                """LIST_APPEND(value, item, delimiter) — append item to a delimited list,
+                returning the new list string."""
+                value = str(value).strip()
+                if not value:
+                    return str(item).strip()
+                return value + str(delimiter) + str(item).strip()
+            _spl_result = list_append(wrong_guesses, guess)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - item
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_wrong_guesses
+        - in_guess
+        - out_wrong_guesses
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_turn + 1'
+        ports:
+        - trigger
+        - complete
+        - in_turn
+        - out_turn
+      edges:
+      - source: gen_1.complete
+        target: gen_2.trigger
+        type: triggers
+      - source: gen_1.out_hint
+        target: gen_2.in_hint
+        type: binds
+      - source: gen_2.complete
+        target: tool_1.trigger
+        type: triggers
+      - source: gen_2.out_guess
+        target: tool_1.in_guess
+        type: binds
+      - source: tool_1.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_1.out_check
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_4.trigger
+        type: triggers
+      - source: set_4.complete
+        target: set_5.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_2.trigger
+        type: triggers
+      - source: gen_2.out_guess
+        target: tool_2.in_guess
+        type: binds
+      - source: tool_2.complete
+        target: set_6.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_target_word
+  - in_forbidden_words
+  - in_wrong_guesses
+  - in_max_turns
+  - in_turn
+  - in_result
+  - out_hint
+  - out_guess
+  - out_check
+  - out_result
+  - out_turn
+  - out_wrong_guesses
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_target_word
+  target: loop_1.in_target_word
+  type: binds
+- source: wf_entry.out_forbidden_words
+  target: loop_1.in_forbidden_words
+  type: binds
+- source: set_2.out_wrong_guesses
+  target: loop_1.in_wrong_guesses
+  type: binds
+- source: wf_entry.out_max_turns
+  target: loop_1.in_max_turns
+  type: binds
+- source: set_1.out_turn
+  target: loop_1.in_turn
+  type: binds
+- source: set_3.out_result
+  target: loop_1.in_result
+  type: binds
+- source: loop_1.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

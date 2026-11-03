@@ -1,0 +1,534 @@
+version: 1.0-graph
+workflow:
+  name: judge_workflow
+  inputs:
+  - name: task
+    type: TEXT
+    default: Write a haiku about artificial intelligence
+  outputs:
+  - name: final_description
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_task
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_feedback
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_attempts
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_final_description
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_final_score
+- id: gen_1
+  type: GENERATE
+  config:
+    function: generate_draft
+    params:
+    - task
+    - feedback
+    prompt_inline: |-
+      You are a skilled writer. Generate a high-quality description for the following task: {{in_task}}
+      If feedback is provided, use it to improve this draft: {{in_feedback}}
+      Produce a clear, detailed, and well-structured response. Don""t simply repeat the task description verbatim.
+    arguments:
+    - '@task'
+    - '@feedback'
+  ports:
+  - trigger
+  - complete
+  - in_task
+  - in_feedback
+  - out_draft
+- id: gen_2
+  type: GENERATE
+  config:
+    function: evaluate_draft
+    params:
+    - task
+    - draft
+    prompt_inline: |-
+      You are a strict quality judge. Evaluate the draft below against the task requirements.
+      Task: {{in_task}}
+      Draft: {{in_draft}}
+      Score the draft on accuracy, clarity, completeness, and overall quality (scale 1-10).
+      If the score is 7 or above, respond with: VERDICT: PASS, Score: [score], Feedback: [brief comment]
+      If the score is below 7, respond with: VERDICT: FAIL, Score: [score], Feedback: [specific actionable suggestions for improvement]
+    arguments:
+    - '@task'
+    - '@draft'
+  ports:
+  - trigger
+  - complete
+  - in_task
+  - in_draft
+  - out_judgment
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: 'contains(@in_subject, ''VERDICT: PASS'')'
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_5
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_draft'
+  ports:
+  - trigger
+  - complete
+  - in_draft
+  - out_final_description
+- id: set_6
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_judgment'
+  ports:
+  - trigger
+  - complete
+  - in_judgment
+  - out_final_score
+- id: set_7
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_attempts + 1'
+  ports:
+  - trigger
+  - complete
+  - in_attempts
+  - out_attempts
+- id: set_8
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_judgment'
+  ports:
+  - trigger
+  - complete
+  - in_judgment
+  - out_feedback
+- id: set_9
+  type: CONTEXT
+  config:
+    action: set
+    expression: 'FALSE'
+  ports:
+  - trigger
+  - complete
+  - out_early_exit_1
+- id: set_10
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_early_value_1
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_attempts, @attempts) < 3 AND latest(@in_early_exit_1, @early_exit_1)
+      == FALSE
+    outputs:
+      draft:
+        from: gen_3.out_draft
+      judgment:
+        from: gen_4.out_judgment
+      attempts:
+        from: set_15.out_attempts
+      feedback:
+        from: set_16.out_feedback
+      early_exit_1:
+        from: set_13.out_early_exit_1
+      early_value_1:
+        from: set_14.out_early_value_1
+    subgraph:
+      nodes:
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: generate_draft
+          params:
+          - task
+          - feedback
+          prompt_inline: |-
+            You are a skilled writer. Generate a high-quality description for the following task: {{in_task}}
+            If feedback is provided, use it to improve this draft: {{in_feedback}}
+            Produce a clear, detailed, and well-structured response. Don""t simply repeat the task description verbatim.
+          arguments:
+          - '@task'
+          - '@feedback'
+        ports:
+        - trigger
+        - complete
+        - in_task
+        - in_feedback
+        - out_draft
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: evaluate_draft
+          params:
+          - task
+          - draft
+          prompt_inline: |-
+            You are a strict quality judge. Evaluate the draft below against the task requirements.
+            Task: {{in_task}}
+            Draft: {{in_draft}}
+            Score the draft on accuracy, clarity, completeness, and overall quality (scale 1-10).
+            If the score is 7 or above, respond with: VERDICT: PASS, Score: [score], Feedback: [brief comment]
+            If the score is below 7, respond with: VERDICT: FAIL, Score: [score], Feedback: [specific actionable suggestions for improvement]
+          arguments:
+          - '@task'
+          - '@draft'
+        ports:
+        - trigger
+        - complete
+        - in_task
+        - in_draft
+        - out_judgment
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: 'contains(@in_subject, ''VERDICT: PASS'')'
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_draft'
+        ports:
+        - trigger
+        - complete
+        - in_draft
+        - out_final_description
+      - id: set_12
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_judgment'
+        ports:
+        - trigger
+        - complete
+        - in_judgment
+        - out_final_score
+      - id: set_13
+        type: CONTEXT
+        config:
+          action: set
+          expression: 'TRUE'
+        ports:
+        - trigger
+        - complete
+        - out_early_exit_1
+      - id: set_14
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_final_description'
+        ports:
+        - trigger
+        - complete
+        - in_final_description
+        - out_early_value_1
+      - id: set_15
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_attempts + 1'
+        ports:
+        - trigger
+        - complete
+        - in_attempts
+        - out_attempts
+      - id: set_16
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_judgment'
+        ports:
+        - trigger
+        - complete
+        - in_judgment
+        - out_feedback
+      edges:
+      - source: gen_3.complete
+        target: gen_4.trigger
+        type: triggers
+      - source: gen_3.out_draft
+        target: gen_4.in_draft
+        type: binds
+      - source: gen_4.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: gen_4.out_judgment
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: set_11.trigger
+        type: triggers
+      - source: gen_3.out_draft
+        target: set_11.in_draft
+        type: binds
+      - source: set_11.complete
+        target: set_12.trigger
+        type: triggers
+      - source: gen_4.out_judgment
+        target: set_12.in_judgment
+        type: binds
+      - source: set_12.complete
+        target: set_13.trigger
+        type: triggers
+      - source: set_13.complete
+        target: set_14.trigger
+        type: triggers
+      - source: set_11.out_final_description
+        target: set_14.in_final_description
+        type: binds
+      - source: eval_2.fail
+        target: set_15.trigger
+        type: triggers
+      - source: set_15.complete
+        target: set_16.trigger
+        type: triggers
+      - source: gen_4.out_judgment
+        target: set_16.in_judgment
+        type: binds
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_task
+  - in_feedback
+  - in_attempts
+  - in_early_exit_1
+  - in_draft
+  - in_judgment
+  - in_early_value_1
+  - out_draft
+  - out_judgment
+  - out_attempts
+  - out_feedback
+  - out_early_exit_1
+  - out_early_value_1
+- id: eval_3
+  type: EVALUATE
+  config:
+    condition: '@in_early_exit_1 == TRUE'
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_early_exit_1
+- id: set_17
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_early_value_1'
+  ports:
+  - trigger
+  - complete
+  - in_early_value_1
+  - out_final_description
+- id: set_18
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_draft'
+  ports:
+  - trigger
+  - complete
+  - in_draft
+  - out_final_description
+- id: set_19
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_judgment'
+  ports:
+  - trigger
+  - complete
+  - in_judgment
+  - out_final_score
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_final_description
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_task
+  target: gen_1.in_task
+  type: binds
+- source: set_1.out_feedback
+  target: gen_1.in_feedback
+  type: binds
+- source: gen_1.complete
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_task
+  target: gen_2.in_task
+  type: binds
+- source: gen_1.out_draft
+  target: gen_2.in_draft
+  type: binds
+- source: gen_2.complete
+  target: eval_1.trigger
+  type: triggers
+- source: gen_2.out_judgment
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: set_5.trigger
+  type: triggers
+- source: gen_1.out_draft
+  target: set_5.in_draft
+  type: binds
+- source: set_5.complete
+  target: set_6.trigger
+  type: triggers
+- source: gen_2.out_judgment
+  target: set_6.in_judgment
+  type: binds
+- source: set_5.out_final_description
+  target: wf_exit.in_final_description
+  type: binds
+- source: set_6.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: eval_1.fail
+  target: set_7.trigger
+  type: triggers
+- source: set_2.out_attempts
+  target: set_7.in_attempts
+  type: binds
+- source: set_7.complete
+  target: set_8.trigger
+  type: triggers
+- source: gen_2.out_judgment
+  target: set_8.in_judgment
+  type: binds
+- source: set_8.complete
+  target: set_9.trigger
+  type: triggers
+- source: set_9.complete
+  target: set_10.trigger
+  type: triggers
+- source: set_10.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_task
+  target: loop_1.in_task
+  type: binds
+- source: set_8.out_feedback
+  target: loop_1.in_feedback
+  type: binds
+- source: set_7.out_attempts
+  target: loop_1.in_attempts
+  type: binds
+- source: set_9.out_early_exit_1
+  target: loop_1.in_early_exit_1
+  type: binds
+- source: gen_1.out_draft
+  target: loop_1.in_draft
+  type: binds
+- source: gen_2.out_judgment
+  target: loop_1.in_judgment
+  type: binds
+- source: set_10.out_early_value_1
+  target: loop_1.in_early_value_1
+  type: binds
+- source: loop_1.exit
+  target: eval_3.trigger
+  type: triggers
+- source: loop_1.out_early_exit_1
+  target: eval_3.in_early_exit_1
+  type: binds
+- source: eval_3.pass
+  target: set_17.trigger
+  type: triggers
+- source: loop_1.out_early_value_1
+  target: set_17.in_early_value_1
+  type: binds
+- source: set_17.out_final_description
+  target: wf_exit.in_final_description
+  type: binds
+- source: set_17.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: eval_3.fail
+  target: set_18.trigger
+  type: triggers
+- source: loop_1.out_draft
+  target: set_18.in_draft
+  type: binds
+- source: set_18.complete
+  target: set_19.trigger
+  type: triggers
+- source: loop_1.out_judgment
+  target: set_19.in_judgment
+  type: binds
+- source: set_18.out_final_description
+  target: wf_exit.in_final_description
+  type: binds
+- source: set_19.complete
+  target: wf_exit.trigger
+  type: triggers

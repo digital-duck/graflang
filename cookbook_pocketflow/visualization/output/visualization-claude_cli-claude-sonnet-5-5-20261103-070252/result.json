@@ -1,0 +1,3 @@
+{
+  "order_status": "{\n  \"payment\": {\n    \"status\": \"success\",\n    \"transaction_id\": \"TXN-705DA0E4\",\n    \"amount\": 99.99\n  },\n  \"inventory\": {\n    \"status\": \"reserved\",\n    \"reservation_id\": \"RES-446A1915\",\n    \"items\": [\n      {\n        \"name\": \"SPL Book\",\n        \"sku\": \"SPL-001\",\n        \"qty\": 1,\n        \"available\": true\n      }\n    ]\n  },\n  \"shipping\": {\n    \"status\": \"created\",\n    \"shipment_id\": \"SHIP-61AA896F\",\n    \"reservation_id\": \"RES-446A1915\",\n    \"destination\": \"123 Main St, San Francisco, CA 94105\",\n    \"carrier\": \"USPS\",\n    \"tracking_number\": \"USP-588261\"\n  },\n  \"order_status\": \"complete\"\n}"
+}

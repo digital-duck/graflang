@@ -1,0 +1,201 @@
+CREATE TOOL_API extract_domain(url TEXT) RETURNS TEXT AS PYTHON $$
+from urllib.parse import urlparse
+def extract_domain(url: str) -> str:
+    try:
+        return urlparse(url.strip()).netloc or "error: no domain"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API extract_text_and_links(html TEXT, base_url TEXT, domain TEXT) RETURNS TEXT AS PYTHON $$
+import json, re
+from urllib.parse import urljoin, urlparse
+def extract_text_and_links(html: str, base_url: str, domain: str) -> str:
+    try:
+        if html.startswith("error:"):
+            return json.dumps({"text": "", "links": ""})
+        text = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html)).strip()[:2000]
+        hrefs = re.findall(r'href=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        seen, links = set(), []
+        for href in hrefs:
+            abs_url = urljoin(base_url, href).split('#')[0].rstrip('/')
+            parsed = urlparse(abs_url)
+            if parsed.netloc == domain and parsed.scheme in ("http", "https") and abs_url not in seen:
+                seen.add(abs_url)
+                links.append(abs_url)
+        return json.dumps({"text": text, "links": ",".join(links)})
+    except Exception as e:
+        return json.dumps({"text": "", "links": ""})
+$$;
+
+CREATE TOOL_API queue_pop_url(queue TEXT) RETURNS TEXT AS PYTHON $$
+def queue_pop_url(queue: str) -> str:
+    items = [u.strip() for u in queue.split("|||") if u.strip()]
+    return items[0] if items else ""
+$$;
+
+CREATE TOOL_API queue_remove_first(queue TEXT) RETURNS TEXT AS PYTHON $$
+def queue_remove_first(queue: str) -> str:
+    items = [u.strip() for u in queue.split("|||") if u.strip()]
+    return "|||".join(items[1:])
+$$;
+
+CREATE TOOL_API visited_add(visited TEXT, url TEXT) RETURNS TEXT AS PYTHON $$
+def visited_add(visited: str, url: str) -> str:
+    items = set(u.strip() for u in visited.split("|||") if u.strip())
+    items.add(url.strip())
+    return "|||".join(sorted(items))
+$$;
+
+CREATE TOOL_API filter_new_links(links TEXT, visited TEXT, queue TEXT, domain TEXT) RETURNS TEXT AS PYTHON $$
+from urllib.parse import urlparse
+def filter_new_links(links: str, visited: str, queue: str, domain: str) -> str:
+    if not links.strip():
+        return ""
+    seen = set(u.strip() for u in visited.split("|||") if u.strip())
+    queued = set(u.strip() for u in queue.split("|||") if u.strip())
+    result = []
+    for link in [l.strip() for l in links.split(",") if l.strip()]:
+        if urlparse(link).netloc == domain and link not in seen and link not in queued:
+            result.append(link)
+    return ",".join(result)
+$$;
+
+CREATE TOOL_API queue_add_links(queue TEXT, new_links TEXT) RETURNS TEXT AS PYTHON $$
+def queue_add_links(queue: str, new_links: str) -> str:
+    existing = [u.strip() for u in queue.split("|||") if u.strip()]
+    additions = [l.strip() for l in new_links.split(",") if l.strip()]
+    seen = set(existing)
+    for a in additions:
+        if a not in seen:
+            existing.append(a)
+            seen.add(a)
+    return "|||".join(existing)
+$$;
+
+CREATE TOOL_API queue_is_empty(queue TEXT) RETURNS TEXT AS PYTHON $$
+def queue_is_empty(queue: str) -> str:
+    return "empty" if not any(u.strip() for u in queue.split("|||")) else "has_items"
+$$;
+
+CREATE TOOL_API pages_append(collection TEXT, url TEXT, text TEXT) RETURNS TEXT AS PYTHON $$
+def pages_append(collection: str, url: str, text: str) -> str:
+    entry = f"URL: {url}\nCONTENT: {text}"
+    return entry if not collection.strip() else collection + "\n|||PAGE|||\n" + entry
+$$;
+
+CREATE TOOL_API pages_to_batches(pages TEXT, batch_size TEXT) RETURNS TEXT AS PYTHON $$
+def pages_to_batches(pages: str, batch_size: str) -> str:
+    try:
+        size = max(1, int(batch_size))
+        page_list = [p.strip() for p in pages.split("|||PAGE|||") if p.strip()]
+        batches = ["\n---\n".join(page_list[i:i+size]) for i in range(0, len(page_list), size)]
+        return "|||BATCH|||".join(batches)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API batch_get(batches TEXT, idx TEXT) RETURNS TEXT AS PYTHON $$
+def batch_get(batches: str, idx: str) -> str:
+    try:
+        items = [b.strip() for b in batches.split("|||BATCH|||") if b.strip()]
+        i = int(idx)
+        return items[i] if i < len(items) else ""
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API results_append(results TEXT, analysis TEXT) RETURNS TEXT AS PYTHON $$
+def results_append(results: str, analysis: str) -> str:
+    return analysis if not results.strip() else results + "\n\n---\n\n" + analysis
+$$;
+
+CREATE FUNCTION analyze_page_batch(batch_content TEXT)
+RETURNS TEXT AS $$
+  You are a web content analyst. Analyze the following web pages and for each provide:
+  1. A 2-3 sentence summary of the page's content and purpose
+  2. Content type classification (article, product page, documentation, blog post, FAQ, landing page, etc.)
+  3. Key topics and tags (comma-separated)
+
+  Format your response as structured markdown with a clearly labeled section per page.
+
+  Pages:
+  {batch_content}
+$$;
+
+CREATE FUNCTION build_site_report(all_analyses TEXT, site_url TEXT)
+RETURNS TEXT AS $$
+  You are a web intelligence analyst. Given the per-page analyses below from a crawl of {site_url},
+  produce a structured final report containing:
+  - Executive Summary (3-5 sentences on the site's overall purpose, audience, and content strategy)
+  - Content Types Found (list each type with approximate page count)
+  - Main Topics Covered (top 10 topics ranked by frequency across pages)
+  - Page-by-Page Summaries (one-line summary per page, grouped by content type)
+
+  Analyses:
+  {all_analyses}
+$$;
+
+WORKFLOW web_crawler_analyzer
+  INPUT @url TEXT := "https://docs.python.org/3/library/os.html"
+  INPUT @batch_size TEXT := "5"
+  INPUT @max_pages INTEGER := 20
+  INPUT @max_batches INTEGER := 50
+  OUTPUT @report TEXT
+DO
+  -- Phase 1: BFS crawl — fetch pages within domain scope
+  CALL extract_domain(@url) INTO @domain;
+  @queue := @url;
+  @visited := "";
+  @page_collection := "";
+  @crawler_i := 0;
+
+  WHILE @crawler_i < @max_pages DO
+    CALL queue_is_empty(@queue) INTO @q_status;
+    EVALUATE @q_status WHEN contains("empty") THEN
+      @crawler_i := @max_pages;
+    ELSE
+      CALL queue_pop_url(@queue) INTO @current_url;
+      CALL queue_remove_first(@queue) INTO @queue;
+      CALL visited_add(@visited, @current_url) INTO @visited;
+
+      CALL http_get(@current_url, "15") INTO @html;
+      CALL extract_text_and_links(@html, @current_url, @domain) INTO @page_data;
+
+      CALL json_get(@page_data, "text") INTO @page_text;
+      CALL json_get(@page_data, "links") INTO @found_links;
+      CALL pages_append(@page_collection, @current_url, @page_text) INTO @page_collection;
+
+      CALL filter_new_links(@found_links, @visited, @queue, @domain) INTO @new_links;
+      EVALUATE @new_links WHEN contains("http") THEN
+        CALL queue_add_links(@queue, @new_links) INTO @queue;
+      ELSE
+        @queue := @queue;
+      END;
+
+      @crawler_i := @crawler_i + 1;
+    END;
+  END;
+
+  -- Phase 2: Batch pages and run LLM analysis over each batch
+  CALL pages_to_batches(@page_collection, @batch_size) INTO @batches;
+  @batch_i := 0;
+  @all_analyses := "";
+
+  WHILE @batch_i < @max_batches DO
+    CALL batch_get(@batches, @batch_i) INTO @batch;
+    CALL isblank(@batch) INTO @batch_empty;
+    EVALUATE @batch_empty WHEN contains("true") THEN
+      @batch_i := @max_batches;
+    ELSE
+      GENERATE analyze_page_batch(@batch) INTO @analysis;
+      CALL results_append(@all_analyses, @analysis) INTO @all_analyses;
+      @batch_i := @batch_i + 1;
+    END;
+  END;
+
+  -- Phase 3: Aggregate all batch analyses into final structured report
+  GENERATE build_site_report(@all_analyses, @url) INTO @report;
+
+  RETURN @report WITH status = "complete";
+END;

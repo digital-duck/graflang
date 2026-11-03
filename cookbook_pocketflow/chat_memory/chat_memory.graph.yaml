@@ -1,0 +1,769 @@
+version: 1.0-graph
+workflow:
+  name: chat_memory
+  inputs:
+  - name: user_queries
+    type: TEXT
+    default: |-
+      What is machine learning?
+      How does gradient descent work?
+      What is overfitting and how do you prevent it?
+  - name: window_max_size
+    type: TEXT
+    default: '3'
+  - name: max_turns
+    type: INTEGER
+    default: 10
+  outputs:
+  - name: conversation
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_user_queries
+  - out_window_max_size
+  - out_max_turns
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''[]'''
+  ports:
+  - trigger
+  - complete
+  - out_window_json
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''[]'''
+  ports:
+  - trigger
+  - complete
+  - out_archive_json
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_conversation
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_turn_idx
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_turn_idx, @turn_idx) < @in_max_turns
+    outputs:
+      user_input:
+        from: tool_1.out_user_input
+      query_embedding:
+        from: tool_2.out_query_embedding
+      archive_hit:
+        from: tool_3.out_archive_hit
+      window_text:
+        from: tool_4.out_window_text
+      llm_context:
+        from: tool_5.out_llm_context
+      response:
+        from: gen_1.out_response
+      conversation:
+        from: set_5.out_conversation
+      window_json:
+        from:
+        - tool_9.out_window_json
+        - tool_6.out_window_json
+      win_full:
+        from:
+        - tool_7.out_win_full
+        - set_6.out_win_full
+      evict_result:
+        from: tool_8.out_evict_result
+      evicted_text:
+        from: tool_10.out_evicted_text
+      evicted_embedding:
+        from: tool_11.out_evicted_embedding
+      archive_json:
+        from: tool_12.out_archive_json
+      turn_idx:
+        from: set_7.out_turn_idx
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: get_query
+          backend: kernel
+          arguments:
+          - '@user_queries'
+          - '@turn_idx'
+          code: |
+            def get_query(queries: str, idx: str) -> str:
+                try:
+                    lines = [q.strip() for q in queries.split("\n") if q.strip()]
+                    i = int(idx)
+                    return lines[i] if 0 <= i < len(lines) else ""
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = get_query(user_queries, turn_idx)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - queries
+          - idx
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_user_queries
+        - in_turn_idx
+        - out_user_input
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: embed_text
+          backend: kernel
+          arguments:
+          - '@user_input'
+          code: |
+            import json, re
+            from collections import Counter
+
+            def embed_text(text: str) -> str:
+                try:
+                    words = re.findall(r"\w+", text.lower())
+                    if not words:
+                        return json.dumps({})
+                    counts = Counter(words)
+                    total = sum(counts.values())
+                    vec = {w: round(c / total, 6) for w, c in counts.items()}
+                    return json.dumps(vec)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = embed_text(user_input)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_user_input
+        - out_query_embedding
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: archive_search
+          backend: kernel
+          arguments:
+          - '@archive_json'
+          - '@query_embedding'
+          code: |
+            import json, math
+
+            def cosine_sim(a: dict, b: dict) -> float:
+                if not a or not b:
+                    return 0.0
+                keys = set(a) | set(b)
+                dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
+                mag_a = math.sqrt(sum(v * v for v in a.values()))
+                mag_b = math.sqrt(sum(v * v for v in b.values()))
+                return dot / (mag_a * mag_b + 1e-10)
+
+            def archive_search(archive_json: str, query_embedding: str) -> str:
+                try:
+                    archive = json.loads(archive_json) if archive_json.strip() else []
+                    if not archive:
+                        return ""
+                    q_vec = json.loads(query_embedding) if query_embedding.strip() else {}
+                    best_text, best_score = "", -1.0
+                    for entry in archive:
+                        e_vec = json.loads(entry.get("embedding", "{}"))
+                        sim = cosine_sim(q_vec, e_vec)
+                        if sim > best_score:
+                            best_score = sim
+                            best_text = entry.get("text", "")
+                    return best_text
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = archive_search(archive_json, query_embedding)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - archive_json
+          - query_embedding
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_archive_json
+        - in_query_embedding
+        - out_archive_hit
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: window_load
+          backend: kernel
+          arguments:
+          - '@window_json'
+          code: |
+            import json
+
+            def window_load(window_json: str) -> str:
+                try:
+                    window = json.loads(window_json) if window_json.strip() else []
+                    lines = []
+                    for ex in window:
+                        lines.append("User: " + ex.get("user", ""))
+                        lines.append("Assistant: " + ex.get("assistant", ""))
+                    return "\n".join(lines)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = window_load(window_json)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - window_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_window_json
+        - out_window_text
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: build_context
+          backend: kernel
+          arguments:
+          - '@window_text'
+          - '@archive_hit'
+          code: |
+            def build_context(window_text: str, archive_hit: str) -> str:
+                try:
+                    parts = []
+                    if archive_hit.strip():
+                        parts.append("[Relevant past exchange]\n" + archive_hit)
+                    if window_text.strip():
+                        parts.append("[Recent conversation]\n" + window_text)
+                    return "\n\n".join(parts)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = build_context(window_text, archive_hit)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - window_text
+          - archive_hit
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_window_text
+        - in_archive_hit
+        - out_llm_context
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: generate_response
+          params:
+          - llm_context
+          - user_input
+          prompt_inline: |-
+            You are a helpful conversational assistant with access to both recent and archived memory.
+
+            {{in_llm_context}}
+
+            Current user message: {{in_user_input}}
+
+            Generate a concise, helpful response that directly addresses the user''s message.
+            Draw on the relevant past exchange and recent conversation shown above (if any)
+            to maintain continuity and contextual awareness across the conversation.
+          arguments:
+          - '@llm_context'
+          - '@user_input'
+        ports:
+        - trigger
+        - complete
+        - in_llm_context
+        - in_user_input
+        - out_response
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_conversation + ''User: '' + @in_user_input + ''\nAssistant:
+            '' + @in_response + ''\n\n'''
+        ports:
+        - trigger
+        - complete
+        - in_conversation
+        - in_user_input
+        - in_response
+        - out_conversation
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: window_append
+          backend: kernel
+          arguments:
+          - '@window_json'
+          - '@user_input'
+          - '@response'
+          code: |
+            import json
+
+            def window_append(window_json: str, user_msg: str, assistant_msg: str) -> str:
+                try:
+                    window = json.loads(window_json) if window_json.strip() else []
+                    window.append({"user": user_msg, "assistant": assistant_msg})
+                    return json.dumps(window)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = window_append(window_json, user_input, response)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - window_json
+          - user_msg
+          - assistant_msg
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_window_json
+        - in_user_input
+        - in_response
+        - out_window_json
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: window_is_full
+          backend: kernel
+          arguments:
+          - '@window_json'
+          - '@window_max_size'
+          code: |
+            import json
+
+            def window_is_full(window_json: str, max_size: str) -> str:
+                try:
+                    window = json.loads(window_json) if window_json.strip() else []
+                    return "yes" if len(window) > int(max_size) else "no"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = window_is_full(window_json, window_max_size)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - window_json
+          - max_size
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_window_json
+        - in_window_max_size
+        - out_win_full
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'yes')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: window_evict_oldest
+          backend: kernel
+          arguments:
+          - '@window_json'
+          code: |
+            import json
+
+            def window_evict_oldest(window_json: str) -> str:
+                try:
+                    window = json.loads(window_json) if window_json.strip() else []
+                    if not window:
+                        return json.dumps({"window": "[]", "evicted": ""})
+                    evicted = window.pop(0)
+                    evicted_text = ("User: " + evicted.get("user", "") +
+                                    "\nAssistant: " + evicted.get("assistant", ""))
+                    return json.dumps({"window": json.dumps(window), "evicted": evicted_text})
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = window_evict_oldest(window_json)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - window_json
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_window_json
+        - out_evict_result
+      - id: tool_9
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@evict_result'
+          - '''window'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(evict_result, 'window')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_evict_result
+        - out_window_json
+      - id: tool_10
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@evict_result'
+          - '''evicted'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(evict_result, 'evicted')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_evict_result
+        - out_evicted_text
+      - id: tool_11
+        type: SOLVE
+        config:
+          tool: embed_text
+          backend: kernel
+          arguments:
+          - '@evicted_text'
+          code: |
+            import json, re
+            from collections import Counter
+
+            def embed_text(text: str) -> str:
+                try:
+                    words = re.findall(r"\w+", text.lower())
+                    if not words:
+                        return json.dumps({})
+                    counts = Counter(words)
+                    total = sum(counts.values())
+                    vec = {w: round(c / total, 6) for w, c in counts.items()}
+                    return json.dumps(vec)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = embed_text(evicted_text)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_evicted_text
+        - out_evicted_embedding
+      - id: tool_12
+        type: SOLVE
+        config:
+          tool: archive_add
+          backend: kernel
+          arguments:
+          - '@archive_json'
+          - '@evicted_text'
+          - '@evicted_embedding'
+          code: |
+            import json
+
+            def archive_add(archive_json: str, exchange_text: str, embedding: str) -> str:
+                try:
+                    archive = json.loads(archive_json) if archive_json.strip() else []
+                    archive.append({"text": exchange_text, "embedding": embedding})
+                    return json.dumps(archive)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = archive_add(archive_json, evicted_text, evicted_embedding)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - archive_json
+          - exchange_text
+          - embedding
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_archive_json
+        - in_evicted_text
+        - in_evicted_embedding
+        - out_archive_json
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''no'''
+        ports:
+        - trigger
+        - complete
+        - out_win_full
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_turn_idx + 1'
+        ports:
+        - trigger
+        - complete
+        - in_turn_idx
+        - out_turn_idx
+      edges:
+      - source: tool_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_1.out_user_input
+        target: tool_2.in_user_input
+        type: binds
+      - source: tool_2.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: tool_2.out_query_embedding
+        target: tool_3.in_query_embedding
+        type: binds
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_4.out_window_text
+        target: tool_5.in_window_text
+        type: binds
+      - source: tool_3.out_archive_hit
+        target: tool_5.in_archive_hit
+        type: binds
+      - source: tool_5.complete
+        target: gen_1.trigger
+        type: triggers
+      - source: tool_5.out_llm_context
+        target: gen_1.in_llm_context
+        type: binds
+      - source: tool_1.out_user_input
+        target: gen_1.in_user_input
+        type: binds
+      - source: gen_1.complete
+        target: set_5.trigger
+        type: triggers
+      - source: tool_1.out_user_input
+        target: set_5.in_user_input
+        type: binds
+      - source: gen_1.out_response
+        target: set_5.in_response
+        type: binds
+      - source: set_5.complete
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_1.out_user_input
+        target: tool_6.in_user_input
+        type: binds
+      - source: gen_1.out_response
+        target: tool_6.in_response
+        type: binds
+      - source: tool_6.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_6.out_window_json
+        target: tool_7.in_window_json
+        type: binds
+      - source: tool_7.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_7.out_win_full
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: tool_8.trigger
+        type: triggers
+      - source: tool_6.out_window_json
+        target: tool_8.in_window_json
+        type: binds
+      - source: tool_8.complete
+        target: tool_9.trigger
+        type: triggers
+      - source: tool_8.out_evict_result
+        target: tool_9.in_evict_result
+        type: binds
+      - source: tool_9.complete
+        target: tool_10.trigger
+        type: triggers
+      - source: tool_8.out_evict_result
+        target: tool_10.in_evict_result
+        type: binds
+      - source: tool_10.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: tool_10.out_evicted_text
+        target: tool_11.in_evicted_text
+        type: binds
+      - source: tool_11.complete
+        target: tool_12.trigger
+        type: triggers
+      - source: tool_10.out_evicted_text
+        target: tool_12.in_evicted_text
+        type: binds
+      - source: tool_11.out_evicted_embedding
+        target: tool_12.in_evicted_embedding
+        type: binds
+      - source: eval_1.fail
+        target: set_6.trigger
+        type: triggers
+      - source: tool_12.complete
+        target: set_7.trigger
+        type: triggers
+      - source: set_6.complete
+        target: set_7.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_user_queries
+  - in_turn_idx
+  - in_archive_json
+  - in_window_json
+  - in_conversation
+  - in_window_max_size
+  - in_max_turns
+  - out_user_input
+  - out_query_embedding
+  - out_archive_hit
+  - out_window_text
+  - out_llm_context
+  - out_response
+  - out_conversation
+  - out_window_json
+  - out_win_full
+  - out_evict_result
+  - out_evicted_text
+  - out_evicted_embedding
+  - out_archive_json
+  - out_turn_idx
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_conversation
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_user_queries
+  target: loop_1.in_user_queries
+  type: binds
+- source: set_4.out_turn_idx
+  target: loop_1.in_turn_idx
+  type: binds
+- source: set_2.out_archive_json
+  target: loop_1.in_archive_json
+  type: binds
+- source: set_1.out_window_json
+  target: loop_1.in_window_json
+  type: binds
+- source: set_3.out_conversation
+  target: loop_1.in_conversation
+  type: binds
+- source: wf_entry.out_window_max_size
+  target: loop_1.in_window_max_size
+  type: binds
+- source: wf_entry.out_max_turns
+  target: loop_1.in_max_turns
+  type: binds
+- source: loop_1.out_conversation
+  target: wf_exit.in_conversation
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

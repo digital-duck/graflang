@@ -1,0 +1,253 @@
+version: 1.0-graph
+workflow:
+  name: joke_approver
+  inputs:
+  - name: max_iterations
+    type: INTEGER
+    default: 10
+  outputs:
+  - name: joke
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_max_iterations
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: ask_topic
+    backend: kernel
+    arguments: []
+    code: |
+      def ask_topic() -> str:
+          try:
+              topic = input("Enter a topic for the joke: ").strip()
+              return topic if topic else "general humor"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = ask_topic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - out_topic
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_rejected_jokes
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_joke
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      joke:
+        from: gen_1.out_joke
+      approval:
+        from: tool_2.out_approval
+      i:
+        from:
+        - set_4.out_i
+        - set_6.out_i
+      rejected_jokes:
+        from: set_5.out_rejected_jokes
+    subgraph:
+      nodes:
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: generate_joke
+          params:
+          - topic
+          - rejected_jokes
+          prompt_inline: |-
+            Generate a funny, original joke about: {{in_topic}}.
+
+            Previously rejected jokes — do NOT repeat or resemble these:
+            {{in_rejected_jokes}}
+
+            Output only the joke text, no preamble or explanation.
+          arguments:
+          - '@topic'
+          - '@rejected_jokes'
+        ports:
+        - trigger
+        - complete
+        - in_topic
+        - in_rejected_jokes
+        - out_joke
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: ask_user_approval
+          backend: kernel
+          arguments:
+          - '@joke'
+          code: |
+            def ask_user_approval(joke: str) -> str:
+                try:
+                    print(f"\nJoke:\n{joke}\n")
+                    response = input("Approve this joke? (yes/no): ").strip().lower()
+                    return "yes" if response.startswith("y") else "no"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = ask_user_approval(joke)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - joke
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_joke
+        - out_approval
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'yes')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_iterations'
+        ports:
+        - trigger
+        - complete
+        - in_max_iterations
+        - out_i
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_rejected_jokes + ''- '' + @in_joke + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_rejected_jokes
+        - in_joke
+        - out_rejected_jokes
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: gen_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: gen_1.out_joke
+        target: tool_2.in_joke
+        type: binds
+      - source: tool_2.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_2.out_approval
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_4.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: set_5.trigger
+        type: triggers
+      - source: gen_1.out_joke
+        target: set_5.in_joke
+        type: binds
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_topic
+  - in_rejected_jokes
+  - in_max_iterations
+  - in_i
+  - in_joke
+  - out_joke
+  - out_approval
+  - out_i
+  - out_rejected_jokes
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_joke
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: tool_1.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: loop_1.trigger
+  type: triggers
+- source: tool_1.out_topic
+  target: loop_1.in_topic
+  type: binds
+- source: set_1.out_rejected_jokes
+  target: loop_1.in_rejected_jokes
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: set_3.out_i
+  target: loop_1.in_i
+  type: binds
+- source: set_2.out_joke
+  target: loop_1.in_joke
+  type: binds
+- source: loop_1.out_joke
+  target: wf_exit.in_joke
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

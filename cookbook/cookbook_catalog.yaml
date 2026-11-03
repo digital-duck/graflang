@@ -1,0 +1,2522 @@
+# GraphLang cookbook catalog: the single source of truth for every recipe graph.
+#
+# Graph-first: each entry names a *.graph.yaml; what a graph needs and what it takes as input is read from
+# the graph itself (`graf info`), and run_all.py (this folder) runs, validates and documents recipes from this
+# file. The tables in README.md are generated from it (`python cookbook/run_all.py --write-readme`).
+#
+# Fields
+#   id           suite.folder[.graph]   unique; `--ids` filters on it (shell-style globs)
+#   suite        cookbook | pocketflow | solvers
+#   graph        path of the graph, from the repo root
+#   workflow     the workflow's own name (workflow.name in the graph)
+#   category     free label (basics, agentic, retrieval, ... or solver)
+#   description  one line
+#   needs        what a run needs, machine-checked by `run_all.py --check`:
+#                  llm (a model call), kernel (a Jupyter kernel for SOLVE), sagemath (that kernel), spl (SPL.py importable,
+#                  for procedure_ref), stdin (waits for keyboard input: not run by default)
+#   requires     free-text needs, as the recipe readme states them        (optional)
+#   calls        free-text count of model calls                           (optional)
+#   inputs       the workflow inputs, with defaults                       (read from the graph)
+#   params       --param values run_all.py passes                         (optional)
+#   bind         a --bind file                                            (optional)
+#   args         extra `graf run` arguments, e.g. --kernel-name sagemath  (optional)
+#   status       validated  the owner ran it and checked the output
+#                ran        completed under run_all.py; the output is not reviewed
+#                lifted     lifted from SPL, passes `graf validate`, not run yet
+#                new        passes `graf validate`, not run yet
+#                broken     known not to run (see `note`)
+#   validated    who/when/with what, for status: validated
+#   note         anything a user should know before running
+#   active       true = part of the default batch run (`python cookbook/run_all.py --run`)
+entries:
+- id: cookbook.agent_notes
+  suite: cookbook
+  graph: cookbook/agent_notes/agent_notes.graph.yaml
+  workflow: agent_notes
+  requires: claude_cli
+  calls: 2, up to max_steps
+  description: 'an agent loop (decide, act, observe): the model asks to read one note from a fixed list or answers;
+    QUERY is the tool, behind a guard'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: question
+  - name: max_steps
+    default: 4
+  params:
+    question: How much is the Team plan per user, and is single sign-on included?
+  status: validated
+  validated: haiku
+  active: true
+- id: cookbook.assembler
+  suite: cookbook
+  graph: cookbook/assembler/assembler.graph.yaml
+  workflow: assembler
+  requires: claude_cli
+  calls: '3'
+  description: 'a model assembles the workflow: it proposes adding one catalogue recipe, the graph checks and wires
+    it in'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: question
+  params:
+    question: What should I pack for Iceland in March?
+  status: validated
+  validated: 2026-11-04, haiku; picked the wrong recipe once
+  active: true
+- id: cookbook.chain_of_thought
+  suite: cookbook
+  graph: cookbook/chain_of_thought/chain_of_thought.graph.yaml
+  workflow: chain_of_thought
+  requires: claude_cli (or --replay)
+  calls: '3'
+  description: a graph lifted from an SPL workflow; the topic reaches every step; a recorded cassette replays it
+    with no model
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: topic
+    default: distributed AI inference
+  params:
+    topic: solar sails
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.chat_memory
+  suite: cookbook
+  graph: cookbook/chat_memory/chat_memory.graph.yaml
+  workflow: chat_memory
+  requires: claude_cli
+  calls: 1 per turn
+  description: 'a chat with memory kept in a file: QUERY (last lines) in, EMIT (append) out'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: message
+  - name: memory_file
+    default: output/memory.md
+  params:
+    message: My name is Wen and I like Go.
+  status: validated
+  validated: haiku, two turns
+  active: true
+- id: cookbook.code_parts
+  suite: cookbook
+  graph: cookbook/code_parts/code_parts.graph.yaml
+  workflow: code_parts
+  requires: claude_cli; Python for the verification
+  calls: 3 + one per repair round
+  description: 'vibe-coding with a safety net: spec gate, review, a project folder as output (FILES), and a verification
+    loop that runs the generated code'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: spec
+  - name: lang
+    default: python
+  - name: reference
+    default: ''
+  - name: smoke
+    default: ''
+  - name: max_cycles
+    default: 2
+  params:
+    spec: a function is_palindrome(s) that ignores case and punctuation
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.code_pipeline
+  suite: cookbook
+  graph: cookbook/code_pipeline/code_pipeline.graph.yaml
+  workflow: code_pipeline
+  requires: claude_cli or Ollama, SPL.py (it runs .spl procedures)
+  calls: up to 16
+  description: procedures, a Cedar-guarded retry loop, MUTATE, RECOVER
+  category: core
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: spec
+  - name: lang
+    default: python
+  - name: max_cycles
+    default: 3
+  - name: check_closure
+    default: true
+  params:
+    spec: a function is_palindrome(s) that ignores case and punctuation
+    max_cycles: '1'
+    check_closure: 'false'
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.compliance_audit
+  suite: cookbook
+  graph: cookbook/compliance_audit/compliance_audit.graph.yaml
+  workflow: compliance_audit
+  requires: claude_cli
+  calls: 1 if compliant at once, 3 if it must redact
+  description: an LLM lists data types; deterministic rules and a Cedar guard decide the release
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: document
+  - name: destination
+  - name: engine
+    default: stdlib
+  - name: rules_file
+    default: ''
+  params:
+    document: Customer John Doe, SSN 123-45-6789, asks to update his address.
+    destination: external_api
+    rules_file: ./procedures/rules.json
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.compliance_audit.compliance_audit_llm_only
+  suite: cookbook
+  graph: cookbook/compliance_audit/compliance_audit_llm_only.graph.yaml
+  workflow: compliance_audit_llm_only
+  requires: claude_cli
+  calls: 1 if compliant at once, 3 if it must redact
+  description: an LLM lists data types; deterministic rules and a Cedar guard decide the release
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: document
+  - name: destination
+  params:
+    document: ./input/customer_case_file.txt
+    destination: external_api
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.container_demo
+  suite: cookbook
+  graph: cookbook/container_demo/container_demo.graph.yaml
+  workflow: container_demo
+  requires: a running Docker daemon
+  calls: '0'
+  description: a program run inside Docker (no network, read-only)
+  category: core
+  needs: []
+  inputs:
+  - name: numbers
+    default: 1,2,3
+  params:
+    numbers: 4,5,6,10
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.expand_demo
+  suite: cookbook
+  graph: cookbook/expand_demo/expand_demo.graph.yaml
+  workflow: expand_demo
+  requires: claude_cli
+  calls: 1 per concept (4)
+  description: one template (a part) applied to every node of a graph of things
+  category: core
+  needs: []
+  inputs:
+  - name: audience
+    default: curious beginners
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.guardrail
+  suite: cookbook
+  graph: cookbook/guardrail/guardrail.graph.yaml
+  workflow: guardrail
+  requires: claude_cli
+  calls: '2'
+  description: 'a check in front of a model: off-topic questions are declined before the answering prompt sees them'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: question
+  params:
+    question: What should I pack for a week in Iceland in March?
+  status: validated
+  validated: 2026-11-03, haiku
+  active: true
+- id: cookbook.heartbeat
+  suite: cookbook
+  graph: cookbook/heartbeat/heartbeat.graph.yaml
+  workflow: heartbeat
+  requires: claude_cli
+  calls: 0 or 1
+  description: a beat that reports only what is new since the last beat (state in a file), run with graf watch;
+    a quiet beat costs no model call
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: inbox
+    default: input/inbox.md
+  status: validated
+  validated: 2026-11-04, haiku
+  active: true
+- id: cookbook.lifted_tool
+  suite: cookbook
+  graph: cookbook/lifted_tool/lifted_tool.graph.yaml
+  workflow: w
+  requires: 'none: no model is called'
+  calls: '0'
+  description: a Python tool lifted from SPL into a SOLVE node that carries its own source
+  category: core
+  needs: []
+  inputs:
+  - name: word
+    default: hi
+  params:
+    word: hello
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.notes_digest
+  suite: cookbook
+  graph: cookbook/notes_digest/notes_digest.graph.yaml
+  workflow: notes_digest
+  requires: claude_cli
+  calls: '1'
+  description: QUERY reads a file, OBSERVE records it, EMIT writes it, all behind a Cedar GUARD
+  category: core
+  needs:
+  - llm
+  inputs: []
+  status: validated
+  validated: haiku
+  active: true
+- id: cookbook.parts_demo
+  suite: cookbook
+  graph: cookbook/parts_demo/parts_demo.graph.yaml
+  workflow: parts_demo
+  requires: claude_cli, a running Ollama
+  calls: '3'
+  description: 'a named subgraph (part) used twice; steps: shorthand versus nodes and edges; an LLM per step'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: topic
+  params:
+    topic: AI assisted education
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.pocketflow.debate
+  suite: cookbook
+  graph: cookbook/pocketflow/debate.graph.yaml
+  workflow: debate
+  requires: claude_cli (or --replay)
+  calls: 3 (majority_vote), 11 (debate), 0 (text_transformer)
+  description: acceptance samples lifted from SPL's PocketFlow set (majority_vote, debate, text_transformer)
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: claim
+    default: Artificial intelligence will create more jobs than it eliminates
+  - name: max_iterations
+    default: 5
+  params:
+    max_iterations: '2'
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.pocketflow.majority_vote
+  suite: cookbook
+  graph: cookbook/pocketflow/majority_vote.graph.yaml
+  workflow: majority_vote
+  requires: claude_cli (or --replay)
+  calls: 3 (majority_vote), 11 (debate), 0 (text_transformer)
+  description: acceptance samples lifted from SPL's PocketFlow set (majority_vote, debate, text_transformer)
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: question
+    default: What is 15% of 240?
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.pocketflow.text_transformer
+  suite: cookbook
+  graph: cookbook/pocketflow/text_transformer.graph.yaml
+  workflow: text_transformer
+  requires: claude_cli (or --replay)
+  calls: 3 (majority_vote), 11 (debate), 0 (text_transformer)
+  description: acceptance samples lifted from SPL's PocketFlow set (majority_vote, debate, text_transformer)
+  category: core
+  needs: []
+  inputs:
+  - name: commands
+    default: uppercase:hello world|lowercase:HELLO WORLD|reverse:abcdef|collapse whitespace:hello   world   foo|exit
+  - name: max_iterations
+    default: 20
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.recipe_chain
+  suite: cookbook
+  graph: cookbook/recipe_chain/recipe_chain.graph.yaml
+  workflow: recipe_chain
+  requires: claude_cli
+  calls: 5 to 10
+  description: 'guardrail -> agent_notes -> supervisor as parts, none edited: the acceptance test of the part interface'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: question
+  - name: max_steps
+    default: 4
+  - name: max_rounds
+    default: 3
+  status: validated
+  validated: 2026-11-03, haiku; plumbing only
+  active: true
+- id: cookbook.release_approval
+  suite: cookbook
+  graph: cookbook/release_approval/release_approval.graph.yaml
+  workflow: release_approval
+  requires: claude_cli
+  calls: '1'
+  description: a model drafts, a person decides (DECISION), a Cedar guard checks, then the file is written
+  category: core
+  needs:
+  - llm
+  - stdin
+  inputs:
+  - name: topic
+  params:
+    topic: Friday demo moved to 3pm
+  status: validated
+  validated: 2026-11-04, haiku, with `--answer`
+  active: false
+- id: cookbook.self_heal
+  suite: cookbook
+  graph: cookbook/self_heal/self_heal.graph.yaml
+  workflow: self_heal
+  requires: claude_cli
+  calls: 1, plus one per retry
+  description: a rule checks a model's JSON; a failed check sends the model its own rejected answer to fix
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: text
+  - name: max_rounds
+    default: 3
+  params:
+    text: Please send the invoice to Maria Lopez (maria.lopez@acme.example) by Friday.
+  status: validated
+  validated: both paths, haiku
+  active: true
+- id: cookbook.self_refine
+  suite: cookbook
+  graph: cookbook/self_refine/self_refine.graph.yaml
+  workflow: self_refine
+  requires: claude_cli, a running Ollama with gemma3
+  calls: '3'
+  description: three GENERATE nodes in a line, each node choosing its own LLM (ollama:gemma3 → haiku → sonnet)
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: topic
+  params:
+    topic: why ducks float
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.solver_check
+  suite: cookbook
+  graph: cookbook/solver_check/solver_check.graph.yaml
+  workflow: solver_check
+  requires: 'none: no model is called'
+  calls: '0'
+  description: deterministic SOLVE (kernel and subprocess backends) and ASSERT routing
+  category: core
+  needs: []
+  inputs:
+  - name: numbers
+  - name: expected
+  params:
+    numbers: 1,2,3
+    expected: '6'
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.stock_analysis
+  suite: cookbook
+  graph: cookbook/stock_analysis/stock_analysis.graph.yaml
+  workflow: stock_analysis
+  requires: claude_cli, kernel extra, network
+  calls: 1 per ticker + 1
+  description: 'BATCH over a list of tickers: Python (SOLVE kernel) fetches prices and computes metrics, the model
+    comments on each and writes one outlook'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: tickers
+    default: AAPL,META,GOOG,CRM
+  - name: days
+    default: 30
+  bind: cookbook/stock_analysis/stock_analysis.bind.yaml
+  params:
+    tickers: AAPL,MSFT
+    days: '30'
+  status: new
+  active: true
+- id: cookbook.stock_copy
+  suite: cookbook
+  graph: cookbook/stock_copy/stock_copy.graph.yaml
+  workflow: stock_copy
+  description: ''
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: tickers
+    default: AAPL,META,GOOG,CRM
+  - name: days
+    default: 30
+  status: new
+  active: true
+- id: cookbook.supervisor
+  suite: cookbook
+  graph: cookbook/supervisor/supervisor.graph.yaml
+  workflow: supervisor
+  requires: claude_cli
+  calls: 2, at most 1 + 2 per round
+  description: a supervisor approves or rejects a worker's answer in a bounded loop, and the graph says when nothing
+    was approved
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: question
+  - name: max_rounds
+    default: 3
+  params:
+    question: Why is the sky blue?
+  status: validated
+  validated: approve path; reject path by test
+  active: true
+- id: cookbook.ts_verify
+  suite: cookbook
+  graph: cookbook/ts_verify/ts_verify.graph.yaml
+  workflow: ts_verify
+  requires: claude_cli, Node 22.18+
+  calls: up to 3
+  description: an LLM writes TypeScript, real tools (tsc, Node) judge it, and their errors drive the retry
+  category: core
+  needs: []
+  inputs:
+  - name: spec
+  - name: function
+  - name: cases
+  - name: check_types
+    default: true
+  - name: max_cycles
+    default: 3
+  params:
+    function: slugify
+    cases: examples/slugify.cases.json
+    spec: 'slugify(title): lowercase; treat anything that is not an ASCII letter or digit as a separator; join the
+      words with single hyphens; no leading or trailing hyphen'
+  status: validated
+  validated: ''
+  active: true
+- id: cookbook.your_book
+  suite: cookbook
+  graph: cookbook/your_book/your_book.graph.yaml
+  workflow: your_book
+  requires: claude_cli or Ollama
+  calls: 2 + 2 per chapter, plus a revision for each chapter sent back
+  description: 'a book on any subject for a chosen audience (intro … research) and style: a LOOP that writes, reviews
+    and revises one chapter per iteration'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: subject
+  - name: audience
+    default: intro
+  - name: style
+    default: clear and conversational, with concrete examples
+  - name: num_chapters
+    default: 5
+  params:
+    subject: applied AI
+    audience: intermediate
+    style: worked examples, code first
+  status: validated
+  validated: ''
+  active: true
+- id: pocketflow.a2a
+  suite: pocketflow
+  graph: cookbook_pocketflow/a2a/a2a.graph.yaml
+  workflow: react_a2a_agent
+  description: Implements an agent that accepts requests in JSON-RPC 2.0 format and runs a ReAct (Reason + Act)
+    loop to answer them. A `parse_jsonrpc_request` tool extracts the question from the incoming...
+  category: agent
+  needs:
+  - llm
+  inputs:
+  - name: request_json
+    default: '{"jsonrpc":"2.0","method":"tasks/send","id":"1","params":{"question":"What is the capital of France?"}}'
+  - name: max_iterations
+    default: 5
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.agent
+  suite: pocketflow
+  graph: cookbook_pocketflow/agent/web_search_agent.graph.yaml
+  workflow: web_search_agent
+  description: Implements a ReAct (Reason + Act) web-research agent that iterates decide → search → accumulate until
+    it has enough context to answer a question. The LLM decides the next action via structured...
+  category: agentic
+  needs: []
+  inputs:
+  - name: question
+    default: What are the latest breakthroughs in fusion energy research?
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.agent_skills
+  suite: pocketflow
+  graph: cookbook_pocketflow/agent_skills/agent_skills.graph.yaml
+  workflow: skill_dispatcher
+  description: A skill-routing agent that dynamically selects the most appropriate prompt template from a directory
+    of Markdown skill files before answering a task. The workflow scans the skills directory,...
+  category: agent
+  needs:
+  - llm
+  inputs:
+  - name: task
+    default: Write an executive brief summarizing the key advantages of retrieval-augmented generation for enterprise
+      AI
+  - name: skills_dir
+    default: cookbook_pocketflow/agent_skills/skills
+  - name: default_skill
+    default: default.md
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.agentic_rag
+  suite: pocketflow
+  graph: cookbook_pocketflow/agentic_rag/agentic_rag.graph.yaml
+  workflow: agentic_rag
+  description: 'Implements adaptive retrieval: rather than fetching a fixed set of chunks upfront, the LLM decides
+    at each step whether it has enough information to answer or should retrieve one more document. On...'
+  category: retrieval
+  needs:
+  - llm
+  inputs:
+  - name: question
+    default: What is retrieval-augmented generation and when should I use it?
+  - name: store_path
+    default: cookbook_pocketflow/agentic_rag/data/documents.json
+  - name: max_iterations
+    default: 10
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: tool bodies re-lifted after fixing
+    SQL-style quoting in the SPL source; output not reviewed'
+- id: pocketflow.async_basic
+  suite: pocketflow
+  graph: cookbook_pocketflow/async_basic/async_basic.graph.yaml
+  workflow: recipe_recommender
+  description: 'A recipe recommender that demonstrates SPL''s async-capable pipeline: it fetches candidate recipes
+    from an external API, asks the LLM to select the best match for available ingredients, presents a...'
+  category: basics
+  needs: []
+  inputs:
+  - name: ingredients
+    default: chicken, garlic, lemon, fresh herbs
+  - name: api_base
+    default: https://api.spoonacular.com/recipes/search
+  - name: max_iterations
+    default: 3
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.batch
+  suite: pocketflow
+  graph: cookbook_pocketflow/batch/batch_translator.graph.yaml
+  workflow: markdown_translator
+  description: Translates a Markdown document into multiple target languages in a batch, preserving all Markdown
+    formatting (headings, code blocks, tables, lists, links) exactly. For each target language, the...
+  category: basics
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: input_file
+    default: cookbook_pocketflow/batch/document.md
+  - name: output_dir
+    default: cookbook_pocketflow/batch/translations
+  - name: languages
+    default: ''
+  - name: max_iterations
+    default: 3
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: a retry with one worker ran clean
+    (the earlier timeouts came from several kernels starting at once); output not reviewed'
+- id: pocketflow.batch_flow
+  suite: pocketflow
+  graph: cookbook_pocketflow/batch_flow/batch_text_transformer.graph.yaml
+  workflow: batch_image_filter
+  description: Applies a multi-step image transformation workflow to an entire batch of images, iterating over every
+    combination of image and filter via nested WHILE loops. For each (image, filter) pair, a...
+  category: basics
+  needs: []
+  inputs:
+  - name: images
+    default: img1.jpg,img2.jpg,img3.jpg
+  - name: filters
+    default: grayscale,blur,sepia
+  - name: max_images
+    default: 3
+  - name: max_filters
+    default: 3
+  - name: output_dir
+    default: output/
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.batch_node
+  suite: pocketflow
+  graph: cookbook_pocketflow/batch_node/batch_node.graph.yaml
+  workflow: csv_batch_stats
+  description: Processes arbitrarily large CSV files in fixed-size chunks, computing running totals and averages
+    over a numeric column without loading the entire file into memory. The workflow reads one chunk at...
+  category: basics
+  needs: []
+  inputs:
+  - name: csv_path
+    default: cookbook_pocketflow/batch_node/data/sales.csv
+  - name: chunk_size
+    default: '100'
+  - name: column
+    default: sales
+  - name: max_iterations
+    default: 10000
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: tool quoting fixed; defaults now match
+    the data (column amount, chunk_size 500); sums 10,000 rows; output not reviewed'
+- id: pocketflow.chat
+  suite: pocketflow
+  graph: cookbook_pocketflow/chat/chat.graph.yaml
+  workflow: multi_turn_chat
+  description: Implements a multi-turn conversational loop that reads user input at the CLI, maintains a sliding-window
+    JSON message history, and generates a contextually aware reply with each turn. The workflow...
+  category: basics
+  needs:
+  - stdin
+  inputs:
+  - name: max_turns
+    default: 50
+  - name: last_n
+    default: '10'
+  status: lifted
+  active: false
+  note: waits for keyboard input; not run
+- id: pocketflow.chat_guardrail
+  suite: pocketflow
+  graph: cookbook_pocketflow/chat_guardrail/chat_guardrail.graph.yaml
+  workflow: travel_chat_guardrail
+  description: 'Adds a two-tier safety classifier layer to a multi-turn chat loop: a fast deterministic keyword
+    filter runs first, and only messages that pass it are forwarded to an LLM topic classifier before...'
+  category: safety
+  needs: []
+  inputs:
+  - name: user_messages
+    default: 'What are the best beaches to visit in Thailand?
+
+      How do I book a hotel in Paris for two weeks?
+
+      What is the weather like in Tokyo in spring?'
+  - name: max_turns
+    default: 10
+  - name: out_dir
+    default: cookbook_pocketflow/chat_guardrail/output
+  params:
+    user_messages: '"help me plan a trip to Wuhu, Anhui, China"'
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.chat_memory
+  suite: pocketflow
+  graph: cookbook_pocketflow/chat_memory/chat_memory.graph.yaml
+  workflow: chat_memory
+  description: 'Extends a multi-turn chat loop with a two-tier memory architecture: a sliding window holds the most
+    recent messages for immediate context, and a semantic archive stores older messages indexed by a...'
+  category: memory
+  needs: []
+  inputs:
+  - name: user_queries
+    default: 'What is machine learning?
+
+      How does gradient descent work?
+
+      What is overfitting and how do you prevent it?'
+  - name: window_max_size
+    default: '3'
+  - name: max_turns
+    default: 10
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.cli_hitl
+  suite: pocketflow
+  graph: cookbook_pocketflow/cli_hitl/cli_hitl.graph.yaml
+  workflow: joke_approver
+  description: 'Demonstrates the human-in-the-loop pattern via CLI: the workflow prompts the user for a topic interactively,
+    generates a joke about it, displays the joke and asks for approval at the terminal, and...'
+  category: human-in-the-loop
+  needs: []
+  inputs:
+  - name: max_iterations
+    default: 10
+  status: lifted
+  active: false
+  note: waits for keyboard input; not run
+- id: pocketflow.code_generator
+  suite: pocketflow
+  graph: cookbook_pocketflow/code_generator/code_generator.graph.yaml
+  workflow: coding_agent
+  description: 'A test-driven code generation agent: it first generates a test suite for the problem, then generates
+    a solution, and runs a WHILE loop that executes the tests against the solution — analyzing...'
+  category: agent
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: Write a Python function that finds the two numbers in a list that sum to a target value, returning
+      their indices
+  - name: max_iterations
+    default: 5
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.coding_agent
+  suite: pocketflow
+  graph: cookbook_pocketflow/coding_agent/coding_web_search_agent.graph.yaml
+  workflow: coding_agent
+  description: An autonomous coding agent that implements stub functions in a codebase until a failing test suite
+    passes. The agent runs in a WHILE loop, selecting one action per iteration from a fixed...
+  category: agent
+  needs:
+  - llm
+  inputs:
+  - name: project_dir
+    default: cookbook_pocketflow/coding_agent
+  - name: test_dir
+    default: cookbook_pocketflow/coding_agent/tests
+  - name: test_suite
+    default: "def test_basic():\n    from src.solution import two_sum\n    assert two_sum([2, 7, 11, 15], 9) ==\
+      \ [0, 1]\n\ndef test_middle():\n    from src.solution import two_sum\n    assert two_sum([3, 2, 4], 6) ==\
+      \ [1, 2]\n\ndef test_duplicate():\n    from src.solution import two_sum\n    assert two_sum([3, 3], 6) ==\
+      \ [0, 1]"
+  - name: skeleton_file
+    default: cookbook_pocketflow/coding_agent/src/solution.py
+  - name: max_iterations
+    default: 10
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.communication
+  suite: pocketflow
+  graph: cookbook_pocketflow/communication/communication.graph.yaml
+  workflow: word_stats_loop
+  description: Processes a delimited list of text inputs one at a time in a WHILE loop, computing running word-count
+    statistics (count, total words, average words per text) and accumulating a formatted log entry...
+  category: basics
+  needs: []
+  inputs:
+  - name: user_inputs
+    default: Hello world, The quick brown fox jumps over the lazy dog, SPL is great for AI workflows, exit
+  - name: delimiter
+    default: ','
+  - name: max_inputs
+    default: 50
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: int operands wrapped in str() in the
+    string expressions; output not reviewed'
+- id: pocketflow.debate
+  suite: pocketflow
+  graph: cookbook_pocketflow/debate/debate.graph.yaml
+  workflow: debate
+  description: 'Runs a structured two-agent debate: `CALL PARALLEL` dispatches a Proponent and an Opponent LLM simultaneously
+    to generate their opening arguments, then a WHILE loop drives successive rounds where...'
+  category: multi-agent
+  needs:
+  - llm
+  inputs:
+  - name: claim
+    default: Artificial intelligence will create more jobs than it eliminates
+  - name: max_iterations
+    default: 5
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.deep_research
+  suite: pocketflow
+  graph: cookbook_pocketflow/deep_research/deep_research.graph.yaml
+  workflow: deep_research
+  description: 'Runs a recursive multi-iteration research pipeline: a planner generates three search queries per
+    cycle, `CALL PARALLEL` dispatches all three searches and fact extractions concurrently, a...'
+  category: research
+  needs:
+  - llm
+  - stdin
+  inputs:
+  - name: topic
+    default: Recent advances in quantum error correction
+  - name: out
+    default: cookbook_pocketflow/deep_research/output/report.txt
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: eval_1 now reads the loop counter
+    (@in_loop_count); output not reviewed'
+- id: pocketflow.flow
+  suite: pocketflow
+  graph: cookbook_pocketflow/flow/text_transformer.graph.yaml
+  workflow: text_transformer
+  description: An interactive text transformation tool that processes a pipe-delimited list of `type:input` commands
+    in a WHILE loop, applying the selected transformation (uppercase, lowercase, reverse, collapse...
+  category: basics
+  needs: []
+  inputs:
+  - name: commands
+    default: uppercase:hello world|lowercase:HELLO WORLD|reverse:abcdef|collapse whitespace:hello   world   foo|exit
+  - name: max_iterations
+    default: 20
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.heartbeat
+  suite: pocketflow
+  graph: cookbook_pocketflow/heartbeat/heartbeat.graph.yaml
+  workflow: email_monitor
+  description: Implements a long-running polling agent that checks an IMAP inbox on a configurable interval, summarizes
+    new emails, and suggests a prioritized action for each. A WHILE loop drives the monitoring...
+  category: automation
+  needs: []
+  inputs:
+  - name: imap_host
+    default: imap.gmail.com
+  - name: imap_user
+    default: ''
+  - name: imap_pass
+    default: ''
+  - name: interval_seconds
+    default: '60'
+  - name: max_cycles
+    default: 10
+  - name: log_file
+    default: email_monitor.log
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: int operand wrapped in str(); params
+    keep the sleep under the kernel timeout (interval 1 s, 2 cycles); output not reviewed'
+  params:
+    interval_seconds: '1'
+    max_cycles: '2'
+- id: pocketflow.invoice
+  suite: pocketflow
+  graph: cookbook_pocketflow/invoice/invoice.graph.yaml
+  workflow: invoice_processor
+  description: Extracts structured data from PDF invoices and validates the extracted math before committing the
+    result. A deterministic PDF reader converts the invoice to text, the LLM extracts all fields...
+  category: document-intelligence
+  needs:
+  - llm
+  inputs:
+  - name: pdf_path
+    default: invoice.pdf
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.judge
+  suite: pocketflow
+  graph: cookbook_pocketflow/judge/judge.graph.yaml
+  workflow: judge_workflow
+  description: 'Implements the evaluator-optimizer loop: an LLM generates a draft, a second LLM judge scores it
+    against rubric criteria and returns a structured VERDICT, and the workflow retries with the judge''s...'
+  category: quality-control
+  needs:
+  - llm
+  inputs:
+  - name: task
+    default: Write a haiku about artificial intelligence
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.lead_generation
+  suite: pocketflow
+  graph: cookbook_pocketflow/lead_generation/lead_generation.graph.yaml
+  workflow: lead_generation
+  description: 'Processes a CSV list of sales prospects through a three-stage enrichment and scoring pipeline: web-search-based
+    company research, LLM-based lead qualification scoring, and conditional cold email...'
+  category: sales
+  needs: []
+  inputs:
+  - name: lead_list_path
+    default: cookbook_pocketflow/lead_generation/data/leads.csv
+  - name: output_path
+    default: cookbook_pocketflow/lead_generation/output/scored_leads.jsonl
+  - name: max_leads
+    default: 100
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: tool bodies re-lifted after fixing
+    SQL-style quoting; output not reviewed'
+- id: pocketflow.majority_vote
+  suite: pocketflow
+  graph: cookbook_pocketflow/majority_vote/majority_vote.graph.yaml
+  workflow: majority_vote
+  description: Generates three independent answers to a reasoning question in parallel via `CALL PARALLEL`, tallies
+    the answers with a deterministic vote counter, and returns the majority answer — or the first...
+  category: reliability
+  needs:
+  - llm
+  inputs:
+  - name: question
+    default: What is 15% of 240?
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.map_reduce
+  suite: pocketflow
+  graph: cookbook_pocketflow/map_reduce/map_reduce.graph.yaml
+  workflow: resume_screener
+  description: Screens a directory of resumes against a set of criteria by mapping an LLM scoring function over
+    each resume in parallel batches of three, then reducing the scored results into a ranked, filtered...
+  category: basics
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: resume_dir
+    default: ./cookbook_pocketflow/map_reduce/data
+  - name: criteria
+    default: relevant work experience, technical skills, educational background, communication clarity
+  - name: threshold
+    default: '7'
+  - name: max_iterations
+    default: 10
+  - name: out_dir
+    default: cookbook_pocketflow/map_reduce/output
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.mcp
+  suite: pocketflow
+  graph: cookbook_pocketflow/mcp/mcp.graph.yaml
+  workflow: mcp_math_agent
+  description: 'Demonstrates dynamic tool discovery and invocation via the Model Context Protocol: the workflow
+    first discovers available tools from an MCP server (or falls back to built-in math tools when no...'
+  category: tool-use
+  needs:
+  - llm
+  inputs:
+  - name: question
+    default: What is the square root of 144?
+  - name: mcp_mode
+    default: 'false'
+  - name: mcp_server_url
+    default: ''
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.multi_agent
+  suite: pocketflow
+  graph: cookbook_pocketflow/multi_agent/multi_web_search_agent.graph.yaml
+  workflow: taboo_game
+  description: Implements a two-agent Taboo word-guessing game where a Hinter and a Guesser are distinct LLM personas
+    running inside a single WHILE loop. The Hinter must describe the target word without using it...
+  category: multi-agent
+  needs: []
+  inputs:
+  - name: target_word
+    default: ocean
+  - name: forbidden_words
+    default: sea,water,wave,fish,blue
+  - name: max_turns
+    default: 5
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.nodejs_upgrade_agent
+  suite: pocketflow
+  graph: cookbook_pocketflow/nodejs_upgrade_agent/nodejs_upgrade_web_search_agent.graph.yaml
+  workflow: nodejs_upgrade_agent
+  description: 'Fully automated Node.js major-version upgrade pipeline:'
+  category: core
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: project_dir
+  - name: target_node
+    default: '20'
+  - name: max_heal_attempts
+    default: '5'
+  - name: report_path
+    default: upgrade_report.md
+  - name: template_path
+    default: ''
+  params:
+    project_dir: /path/to/your/node/project
+    target_node: '20'
+    report_path: upgrade_report.md
+  status: lifted
+  active: true
+  note: 'needs a real Node project: pass --param project_dir=/path/to/project (the run stopped at the placeholder
+    path)'
+- id: pocketflow.rag
+  suite: pocketflow
+  graph: cookbook_pocketflow/rag/rag.graph.yaml
+  workflow: RAGPipeline
+  description: 'Implements a classic two-phase retrieval-augmented generation pipeline: an offline indexing phase
+    (chunk → embed → FAISS index) followed by an online query phase (embed query → retrieve nearest...'
+  category: retrieval
+  needs:
+  - llm
+  inputs:
+  - name: documents
+    default: '[''cookbook_pocketflow/rag/data/doc1.txt'', ''cookbook_pocketflow/rag/data/doc2.txt'', ''cookbook_pocketflow/rag/data/doc3.txt'']'
+  - name: query
+    default: What is retrieval-augmented generation and when should I use it?
+  - name: output_path
+    default: ''
+  params:
+    documents: '["cookbook_pocketflow/rag/data/doc1.txt"]'
+    query: What is FAISS for?
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: chunk_documents reads the files named
+    in `documents`; needs sentence-transformers and faiss-cpu in the graf env (installed); output not reviewed'
+- id: pocketflow.self_healing
+  suite: pocketflow
+  graph: cookbook_pocketflow/self_healing/self_healing.graph.yaml
+  workflow: mermaid_from_description
+  description: Generates a syntactically valid Mermaid diagram from a natural language description, with automatic
+    self-repair on syntax errors. The LLM first produces a Mermaid definition, a deterministic...
+  category: self-correction
+  needs:
+  - llm
+  inputs:
+  - name: description
+    default: 'A flowchart showing user login: start → enter credentials → validate → if valid go to dashboard else
+      show error → end'
+  - name: max_retries
+    default: 3
+  status: ran
+  active: true
+  note: 'fixed and completed with claude_cli:claude-sonnet-5-5 on 2026-11-03: tool bodies re-lifted after fixing
+    SQL-style quoting; output not reviewed'
+- id: pocketflow.structured_output
+  suite: pocketflow
+  graph: cookbook_pocketflow/structured_output/structured_output.graph.yaml
+  workflow: resume_parser
+  description: Parses an unstructured plain-text resume into a validated YAML candidate record containing contact
+    info, work history, and matched skills. Three LLM extractions (candidate info, work experience,...
+  category: basics
+  needs:
+  - llm
+  inputs:
+  - name: resume_path
+    default: cookbook_pocketflow/structured_output/data/resume.txt
+  - name: skill_list_path
+    default: cookbook_pocketflow/structured_output/data/skills.txt
+  - name: max_yaml_retries
+    default: 3
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.supervisor
+  suite: pocketflow
+  graph: cookbook_pocketflow/supervisor/supervisor.graph.yaml
+  workflow: research_agent_supervisor
+  description: 'Implements a two-level agent architecture: an inner ReAct research agent iterates search → reason
+    until it decides it has enough information, then generates a candidate answer; an outer supervisor...'
+  category: multi-agent
+  needs: []
+  inputs:
+  - name: question
+    default: What are the key differences between transformer and mamba architectures for LLMs?
+  - name: max_search_iterations
+    default: 5
+  - name: max_retries
+    default: 3
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.tao
+  suite: pocketflow
+  graph: cookbook_pocketflow/tao/tao.graph.yaml
+  workflow: react_agent
+  description: 'A general-purpose ReAct (Reason + Act) agent with a multi-tool dispatch layer: the LLM selects a
+    tool from `search_web`, `run_python`, `calculate`, or `none` at each step, generating a JSON...'
+  category: agent
+  needs:
+  - llm
+  inputs:
+  - name: query
+  - name: tools_available
+    default: web_search, run_python, calculate
+  - name: max_iterations
+    default: 10
+  status: lifted
+  active: true
+  note: the model's safeguards flagged the reasoning-extraction prompt (usage-policy filter) on 2026-11-03, with
+    and without parameters fixed; not worked around
+  params:
+    query: What is the population of Wuhu, Anhui?
+- id: pocketflow.text2sql
+  suite: pocketflow
+  graph: cookbook_pocketflow/text2sql/text2sql.graph.yaml
+  workflow: text2sql
+  description: 'Converts natural language questions to SQLite queries with automatic self-repair: the LLM generates
+    SQL from the database schema, a deterministic executor runs it against the live database, and if...'
+  category: data
+  needs:
+  - llm
+  inputs:
+  - name: db_path
+    default: database.db
+  - name: question
+    default: How many rows are in each table?
+  - name: max_attempts
+    default: 3
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.thinking
+  suite: pocketflow
+  graph: cookbook_pocketflow/thinking/chain_of_thought.graph.yaml
+  workflow: ChainOfThought
+  description: Solves complex reasoning problems through multi-step chain-of-thought where each thought step is
+    validated as YAML before being accepted. An outer loop continues as long as the LLM indicates more...
+  category: reasoning
+  needs: []
+  inputs:
+  - name: problem
+    default: How many r's are in the word strawberry?
+  - name: max_iterations
+    default: 5
+  - name: trace_file
+    default: chain_of_thought_trace.md
+  status: lifted
+  active: true
+  note: the model's safeguards flagged the reasoning-extraction prompt (usage-policy filter) on 2026-11-03, with
+    and without parameters fixed; not worked around
+- id: pocketflow.tool_crawler
+  suite: pocketflow
+  graph: cookbook_pocketflow/tool_crawler/tool_crawler.graph.yaml
+  workflow: web_crawler_analyzer
+  description: 'A domain-scoped web crawler: starting from a seed URL, the workflow fetches pages, extracts text
+    and same-domain links, filters out already-visited and already-queued URLs, and adds new links to...'
+  category: tool-use
+  needs:
+  - llm
+  inputs:
+  - name: url
+    default: https://docs.python.org/3/library/os.html
+  - name: batch_size
+    default: '5'
+  - name: max_pages
+    default: 20
+  - name: max_batches
+    default: 50
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.tool_database
+  suite: pocketflow
+  graph: cookbook_pocketflow/tool_database/tool_database.graph.yaml
+  workflow: task_manager
+  description: 'Demonstrates LLM-driven database interaction: the workflow initializes a SQLite schema, has the
+    LLM generate a batch of task records from a seed topic, inserts each generated task into the...'
+  category: tool-use
+  needs: []
+  inputs:
+  - name: title
+    default: web_search
+  - name: description
+    default: Search the web for current information on a given query
+  - name: db_path
+    default: tasks.db
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.tool_embeddings
+  suite: pocketflow
+  graph: cookbook_pocketflow/tool_embeddings/tool_embeddings.graph.yaml
+  workflow: text_to_embedding
+  description: Calls the OpenAI Embeddings API (`text-embedding-3-small`) from a deterministic tool to convert text
+    into a float vector, handling the API response extraction and error routing cleanly. An...
+  category: tool-use
+  needs: []
+  inputs:
+  - name: text
+    default: Machine learning is a branch of artificial intelligence that enables computers to learn from data without
+      being explicitly programmed.
+  - name: api_key
+    default: ''
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.tool_pdf_vision
+  suite: pocketflow
+  graph: cookbook_pocketflow/tool_pdf_vision/tool_pdf_vision.graph.yaml
+  workflow: pdf_ocr_pipeline
+  description: 'A vision-based PDF OCR pipeline: scans a directory for PDF files, converts each page to a 200-DPI
+    PNG image using `pdf2image`, and then uses a multimodal LLM GENERATE call to extract and reformat...'
+  category: tool-use
+  needs: []
+  inputs:
+  - name: input_dir
+    default: cookbook_pocketflow/tool_pdf_vision/data
+  - name: output_file
+    default: cookbook_pocketflow/tool_pdf_vision/output/pocket-flow.md
+  - name: work_dir
+    default: /tmp/pdf_ocr_work
+  - name: max_pdfs
+    default: 100
+  - name: max_pages
+    default: 1000
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.tool_search
+  suite: pocketflow
+  graph: cookbook_pocketflow/tool_search/tool_search.graph.yaml
+  workflow: serpapi_briefer
+  description: Executes a Google search via the SerpAPI and synthesizes the results into a structured research briefing
+    with a summary, key facts, and follow-up queries. A deterministic `call_serpapi` tool...
+  category: tool-use
+  needs:
+  - llm
+  inputs:
+  - name: query
+    default: latest breakthroughs in large language models 2025
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.tracing
+  suite: pocketflow
+  graph: cookbook_pocketflow/tracing/tracing.graph.yaml
+  workflow: pocketflow_langfuse_trace
+  description: 'Demonstrates structured observability for an SPL workflow using Langfuse: a trace decorator generates
+    a distributed `trace_id`, and then a WHILE loop runs each node through three phases (prep →...'
+  category: observability
+  needs: []
+  inputs:
+  - name: flow_name
+    default: pocketflow
+  - name: node_list
+    default: node_a,node_b,node_c
+  - name: flow_inputs
+    default: '{}'
+  - name: max_nodes
+    default: 10
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.visualization
+  suite: pocketflow
+  graph: cookbook_pocketflow/visualization/visualization.graph.yaml
+  workflow: order_fulfillment
+  description: 'Implements a multi-stage order fulfillment pipeline as three composable sub-workflows chained by
+    `CALL`: payment validation and processing (with retry loop), inventory check and reservation, and...'
+  category: basics
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: order_data
+    default: '{"payment":{"card_number":"4111111111111111","expiry":"12/26","cvv":"123","amount":99.99},"items":[{"name":"SPL
+      Book","sku":"SPL-001","qty":1,"available":true}],"shipping_address":"123 Main St, San Francisco, CA 94105"}'
+  - name: max_payment_retries
+    default: 3
+  status: ran
+  active: true
+  note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
+- id: pocketflow.workflow
+  suite: pocketflow
+  graph: cookbook_pocketflow/workflow/article_writer.graph.yaml
+  workflow: article_writer
+  description: 'Produces a polished, publication-ready article on any topic through a three-phase sequential pipeline:
+    outline generation (YAML), section-by-section drafting (iterated with a WHILE loop), and...'
+  category: basics
+  needs:
+  - llm
+  inputs:
+  - name: topic
+    default: The Future of Quantum Computing
+  - name: max_sections
+    default: 5
+  - name: out_dir
+    default: cookbook_pocketflow/workflow/output
+  status: lifted
+  active: true
+- id: solvers.auto_planning
+  suite: solvers
+  graph: cookbook_solvers/auto_planning/auto_planning.graph.yaml
+  workflow: auto_planning
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem_text
+    default: Truck t1 starts at A. Package p1 starts at A, package p2 starts at B. Deliver BOTH packages to location
+      C using t1 (t1 can carry any number of packages at once; it can drive directly between any two locations).
+  - name: problem_json
+    default: '{"truck_at": {"t1": "A"}, "pkg_at": {"p1": "A", "p2": "B"}, "pkg_in": {}, "goal": {"pkg_at": {"p1":
+      "C", "p2": "C"}}}'
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 4
+  - name: out_dir
+    default: ./cookbook/93_auto_planning/output
+  params:
+    enable_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.bayesian_opt
+  suite: solvers
+  graph: cookbook_solvers/bayesian_opt/bayesian_opt.graph.yaml
+  workflow: bayesian_opt
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.code_pytest
+  suite: solvers
+  graph: cookbook_solvers/code_pytest/code_pytest.graph.yaml
+  workflow: code_pytest
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: spec
+    default: Write a Python function merge_sorted(a, b) that merges two sorted lists into one sorted list without
+      using sorted() or list.sort(). Both input lists contain integers and are already sorted ascending. The function
+      must run in O(n+m) time.
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/79_code_pytest/output
+  status: lifted
+  active: true
+- id: solvers.compsci_materials
+  suite: solvers
+  graph: cookbook_solvers/compsci_materials/materials_crystal.graph.yaml
+  workflow: materials_crystal
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: NaCl crystallizes in a cubic (rock-salt) structure with lattice parameter a = 5.640 Angstrom, all angles
+      90 degrees, Z = 4 formula units per unit cell, and molar mass 58.44 g/mol. What is its theoretical density,
+      in g/cm^3?
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/92_compsci_materials/output
+  status: lifted
+  active: true
+- id: solvers.compsci_physics
+  suite: solvers
+  graph: cookbook_solvers/compsci_physics/physics_conservation.graph.yaml
+  workflow: physics_conservation
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: A 2 kg ball moving at 5 m/s strikes a stationary 2 kg ball head-on in a perfectly elastic collision.
+      What is the final velocity of the first ball, in m/s?
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/90_compsci_physics/output
+  status: lifted
+  active: true
+- id: solvers.constraint_opt
+  suite: solvers
+  graph: cookbook_solvers/constraint_opt/constraint_opt.graph.yaml
+  workflow: constraint_opt
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: A bakery produces artisan bread and croissants. Each loaf of bread requires 3 hours of labor and 2
+      kg of flour, earning $12 profit. Each batch of croissants requires 1 hour of labor and 3 kg of flour, earning
+      $8 profit. The bakery has 12 hours of labor and 15 kg of flour available each day. Both products must have
+      non-negative quantities. Maximize daily profit.
+  - name: use_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: lang
+    default: English
+  - name: out_dir
+    default: ./cookbook/78_constraint_opt/output
+  status: lifted
+  active: true
+- id: solvers.constraint_opt.resource_allocation
+  suite: solvers
+  graph: cookbook_solvers/constraint_opt/resource_allocation.graph.yaml
+  workflow: resource_allocation
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: An IT department must select a portfolio of projects for next quarter. Six candidate projects are available.
+      Project P1 costs $120K and requires 3 developer-months, delivering strategic value 8. Project P2 costs $80K
+      and requires 2 developer-months, delivering value 5. Project P3 costs $200K and requires 5 developer-months,
+      delivering value 10. Project P4 costs $150K and requires 3 developer-months, delivering value 9. Project P5
+      costs $60K and requires 2 developer-months, delivering value 4. Project P6 costs $90K and requires 2 developer-months,
+      delivering value 6. The total budget is $500K and the team has 10 developer-months available. Each project
+      is either fully funded or not funded — no partial investment. Select which projects to fund to maximize total
+      strategic value.
+  - name: use_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: lang
+    default: English
+  - name: out_dir
+    default: ./cookbook/78_constraint_opt/output
+  status: lifted
+  active: true
+- id: solvers.constraint_opt.staff_scheduling
+  suite: solvers
+  graph: cookbook_solvers/constraint_opt/staff_scheduling.graph.yaml
+  workflow: staff_scheduling
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A clinic needs to staff one day with 3 shifts: Morning, Afternoon, and Night. Minimum nurse coverage
+      required: Morning needs at least 2 nurses, Afternoon needs at least 2 nurses, Night needs at least 1 nurse.
+      Five nurses are available (Nurse1 through Nurse5). Each nurse can work at most 1 shift today. Wage per nurse-shift:
+      Morning costs $200, Afternoon costs $180, Night costs $320. Assign nurses to shifts to meet all minimum coverage
+      requirements at minimum total wage cost.'
+  - name: use_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: lang
+    default: English
+  - name: out_dir
+    default: ./cookbook/78_constraint_opt/output
+  status: lifted
+  active: true
+- id: solvers.constraint_opt.supply_chain
+  suite: solvers
+  graph: cookbook_solvers/constraint_opt/supply_chain.graph.yaml
+  workflow: supply_chain
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A company has two warehouses and three retail stores. Warehouse W1 has 80 units of inventory; Warehouse
+      W2 has 60 units. Store S1 needs 50 units, Store S2 needs 40 units, Store S3 needs 50 units. Shipping costs
+      per unit: W1 to S1 costs $2, W1 to S2 costs $3, W1 to S3 costs $1; W2 to S1 costs $5, W2 to S2 costs $4, W2
+      to S3 costs $8. All store demand must be met exactly. Minimize total shipping cost.'
+  - name: use_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: lang
+    default: English
+  - name: out_dir
+    default: ./cookbook/78_constraint_opt/output
+  status: lifted
+  active: true
+- id: solvers.data_eng_text2spl
+  suite: solvers
+  graph: cookbook_solvers/data_eng_text2spl/text2sql_quality.graph.yaml
+  workflow: text2sql_quality
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: question
+    default: What is the average order amount for customers in the Enterprise segment?
+  - name: ground_truth_sql
+    default: SELECT AVG(o.amount) FROM orders o JOIN customers c ON o.customer_id = c.id WHERE c.segment = 'Enterprise'
+  - name: stat_sql_a
+    default: SELECT AVG(o.amount) FROM orders o JOIN customers c ON o.customer_id = c.id WHERE c.segment = 'Enterprise'
+  - name: stat_sql_b
+    default: SELECT SUM(o.amount) * 1.0 / COUNT(*) FROM orders o JOIN customers c ON o.customer_id = c.id WHERE
+      c.segment = 'Enterprise'
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/94_data_eng_text2spl/output
+  status: lifted
+  active: true
+- id: solvers.data_quality
+  suite: solvers
+  graph: cookbook_solvers/data_quality/data_quality.graph.yaml
+  workflow: data_quality
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: data_description
+    default: 'Sales transactions dataset: 500 rows, columns transaction_id, amount, customer_id, region, date. Data
+      imported from POS systems across 4 regions over the past 6 months.'
+  - name: data_csv
+    default: demo
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.demand_forecast
+  suite: solvers
+  graph: cookbook_solvers/demand_forecast/demand_forecast.graph.yaml
+  workflow: demand_forecast
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: Use the default 36-month widget sales dataset.
+  - name: use_solver
+    default: 'true'
+  - name: periods
+    default: '6'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.financial_calc_verifier
+  suite: solvers
+  graph: cookbook_solvers/financial_calc_verifier/financial_calc_verifier.graph.yaml
+  workflow: financial_calc_verifier
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: A $10,000 loan has a 6% annual interest rate, compounded monthly, and is paid off in equal monthly
+      installments over 5 years (60 months). What is the fixed monthly payment?
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/86_financial_calc_verifier/output
+  status: lifted
+  active: true
+- id: solvers.gambit_3player
+  suite: solvers
+  graph: cookbook_solvers/gambit_3player/gambit_3player.graph.yaml
+  workflow: gambit_3player
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.global_minlp
+  suite: solvers
+  graph: cookbook_solvers/global_minlp/global_minlp.graph.yaml
+  workflow: global_minlp
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.graph_reasoning
+  suite: solvers
+  graph: cookbook_solvers/graph_reasoning/graph_reasoning.graph.yaml
+  workflow: graph_reasoning
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A logistics network connects 6 warehouses (A, B, C, D, E, F) by roads with these distances in miles:
+      A-B:4, A-C:2, B-C:1, B-D:5, C-D:8, C-E:10, D-E:2, D-F:6, E-F:3. What is the shortest route from warehouse
+      A to warehouse F, and what is its total distance?'
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/81_graph_reasoning/output
+  status: lifted
+  active: true
+- id: solvers.hard_milp_scip
+  suite: solvers
+  graph: cookbook_solvers/hard_milp_scip/hard_milp_scip.graph.yaml
+  workflow: hard_milp_scip
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.insurance_policy_z3
+  suite: solvers
+  graph: cookbook_solvers/insurance_policy_z3/insurance_policy_z3.graph.yaml
+  workflow: insurance_policy_z3
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.job_shop
+  suite: solvers
+  graph: cookbook_solvers/job_shop/job_shop.graph.yaml
+  workflow: job_shop_scheduling
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: '3 jobs, 3 machines. Job1: M1(3)->M2(2)->M3(2). Job2: M2(2)->M1(3)->M3(1). Job3: M3(2)->M2(1)->M1(2).
+      Minimize makespan. Known optimal: 8.'
+  - name: use_solver
+    default: 'true'
+  - name: adapter
+    default: claude_cli
+  - name: model
+    default: ''
+  params:
+    use_solver: 'true'
+    problem: $PROBLEM
+  status: lifted
+  active: true
+- id: solvers.lean_proof
+  suite: solvers
+  graph: cookbook_solvers/lean_proof/lean_proof.graph.yaml
+  workflow: lean_proof
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: claim
+    default: addition of natural numbers is commutative
+  - name: max_tries
+    default: 3
+  status: lifted
+  active: true
+- id: solvers.logic_puzzle_solver
+  suite: solvers
+  graph: cookbook_solvers/logic_puzzle_solver/logic_puzzle_solver.graph.yaml
+  workflow: logic_puzzle_solver
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'There are 3 houses in a row, numbered 1 to 3 from left to right. Each house has a unique color (Red,
+      Green, Blue), is occupied by a person of a unique nationality (Brit, Swede, Dane), and that person drinks
+      a unique beverage (Tea, Coffee, Milk). Clues: (1) The Brit lives in the Red house. (2) The Swede drinks Tea.
+      (3) The Dane lives in house 1. (4) The owner of the Green house drinks Coffee. (5) The Blue house is house
+      2. Who drinks Coffee?'
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/82_logic_puzzle_solver/output
+  status: lifted
+  active: true
+- id: solvers.minizinc_cp
+  suite: solvers
+  graph: cookbook_solvers/minizinc_cp/minizinc_cp.graph.yaml
+  workflow: minizinc_cp
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.nash_game_theory
+  suite: solvers
+  graph: cookbook_solvers/nash_game_theory/nash_game_theory.graph.yaml
+  workflow: nash_game_theory
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.neurosymbolic
+  suite: solvers
+  graph: cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml
+  workflow: neurosymbolic_solver
+  description: ''
+  category: solver
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: problem
+    default: find the Galois group of x**5 - x - 1 over the rationals
+  - name: backend
+    default: sage
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: log_dir
+    default: cookbook/77_neurosymbolic/logs-spl
+  - name: hostname
+    default: ''
+  - name: pid
+    default: ''
+  - name: thinking_note
+    default: ''
+  params:
+    problem: find the Galois group of x**5 - x - 1 over the rationals
+  status: lifted
+  active: true
+- id: solvers.openspiel_cfr
+  suite: solvers
+  graph: cookbook_solvers/openspiel_cfr/openspiel_cfr.graph.yaml
+  workflow: openspiel_cfr
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  - name: n_iterations
+    default: '1000'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.optuna_blackbox
+  suite: solvers
+  graph: cookbook_solvers/optuna_blackbox/optuna_blackbox.graph.yaml
+  workflow: optuna_blackbox
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.pandera_schema
+  suite: solvers
+  graph: cookbook_solvers/pandera_schema/pandera_schema.graph.yaml
+  workflow: pandera_schema
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: schema_description
+    default: 'Employee payroll CSV: 200 rows, columns employee_id (int), name (str), department (str), salary (float),
+      hire_year (int). Imported from HR system monthly export.'
+  - name: data_csv
+    default: demo
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.pii_compliance.compliance_check
+  suite: solvers
+  graph: cookbook_solvers/pii_compliance/compliance_check.graph.yaml
+  workflow: compliance_check
+  description: ''
+  category: solver
+  needs: []
+  inputs:
+  - name: pii_map
+    default: '{"entities": []}'
+  - name: destination
+    default: external_api
+  - name: engine
+    default: stdlib
+  - name: rules_file
+    default: ''
+  params:
+    rules_file: my_rules.json
+    destination: external_api
+    pii_map: '{"entities":[{"type":"SSN","masked":false}]}'
+  status: lifted
+  active: true
+- id: solvers.pii_compliance
+  suite: solvers
+  graph: cookbook_solvers/pii_compliance/pii_compliance.graph.yaml
+  workflow: pii_compliance
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: document
+    default: Customer John Doe, SSN 123-45-6789, asks to update his address.
+  - name: destination
+    default: external_api
+  - name: engine
+    default: stdlib
+  - name: rules_file
+    default: ''
+  - name: use_solver
+    default: 'true'
+  params:
+    engine: stdlib
+    destination: external_api
+  status: lifted
+  active: true
+- id: solvers.platypus_moea
+  suite: solvers
+  graph: cookbook_solvers/platypus_moea/platypus_moea.graph.yaml
+  workflow: platypus_moea
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A service center runs 3 shift types. Day shift: $100/employee, 0.90 service quality, 0.10 fatigue
+      risk, min 10 max 20 staff. Evening shift: $130/employee, 1.00 quality, 0.25 risk, min 10 max 20. Night shift:
+      $160/employee, 0.70 quality, 0.40 risk, min 10 max 20. Total minimum: 30 staff. Find staffing plans that minimize
+      cost, maximize quality, and minimize fatigue risk simultaneously.'
+  - name: use_solver
+    default: 'true'
+  - name: n_eval
+    default: '5000'
+  - name: pop_size
+    default: '100'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.portfolio_opt.portfolio_comparison
+  suite: solvers
+  graph: cookbook_solvers/portfolio_opt/portfolio_comparison.graph.yaml
+  workflow: portfolio_comparison
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: tickers
+    default: AAPL,MSFT,GOOGL,AMZN,NVDA
+  - name: capital
+    default: '10000'
+  - name: period
+    default: 1y
+  - name: target_return
+    default: '0.08'
+  - name: max_weight
+    default: '0.25'
+  - name: adapter
+    default: claude_cli
+  - name: model
+    default: ''
+  - name: log_dir
+    default: ./logs
+  - name: out_dir
+    default: cookbook-solver/099_portfolio_opt/outputs
+  params:
+    tickers: AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA,BRK-B
+    capital: '20000'
+    period: 2y
+    target_return: '0.15'
+    max_weight: '0.25'
+  status: lifted
+  active: true
+- id: solvers.portfolio_opt.portfolio_optimization
+  suite: solvers
+  graph: cookbook_solvers/portfolio_opt/portfolio_optimization.graph.yaml
+  workflow: portfolio_optimization
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: tickers
+    default: AAPL,MSFT,GOOGL,AMZN,NVDA
+  - name: capital
+    default: '10000'
+  - name: period
+    default: 1y
+  - name: target_return
+    default: '0.08'
+  - name: max_weight
+    default: '0.25'
+  - name: adapter
+    default: claude_cli
+  - name: model
+    default: ''
+  - name: log_dir
+    default: ./logs
+  - name: algorithm
+    default: markowitz
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+    algorithm: markowitz
+    tickers: AAPL,MSFT,GOOGL,AMZN,NVDA,GDX,SILJ,WEAT,DBA,XLE
+    capital: '100000'
+    period: 1y
+    target_return: '0.08'
+    max_weight: '0.25'
+  status: lifted
+  active: true
+- id: solvers.production_sustainability
+  suite: solvers
+  graph: cookbook_solvers/production_sustainability/production_sustainability.graph.yaml
+  workflow: production_sustainability
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A factory produces standard product A and green product B. A: $10 profit, 3 kg CO₂, uses 2 hr labor
+      and 3 kg material. B: $6 profit, 1 kg CO₂, uses 1 hr labor and 2 kg material. Available: 20 labor-hours, 30
+      kg material. Find production plans that maximize profit and minimize carbon footprint.'
+  - name: use_solver
+    default: 'true'
+  - name: n_points
+    default: '10'
+  params:
+    use_solver: 'true'
+    n_points: '10'
+  status: lifted
+  active: true
+- id: solvers.progressive_hedging
+  suite: solvers
+  graph: cookbook_solvers/progressive_hedging/progressive_hedging.graph.yaml
+  workflow: progressive_hedging
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  - name: n_scenarios
+    default: '30'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.prolog_inference
+  suite: solvers
+  graph: cookbook_solvers/prolog_inference/prolog_inference.graph.yaml
+  workflow: prolog_inference
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.property_based_code_verify
+  suite: solvers
+  graph: cookbook_solvers/property_based_code_verify/property_based_code_verify.graph.yaml
+  workflow: property_based_code_verify
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: spec
+    default: 'Write a function merge_sorted(a: list[int], b: list[int]) -> list[int] that takes two ALREADY-SORTED
+      lists of integers and returns a single sorted list containing all elements of both (duplicates included).'
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/85_property_based_code_verify/output
+  status: lifted
+  active: true
+- id: solvers.pyomo_stochastic
+  suite: solvers
+  graph: cookbook_solvers/pyomo_stochastic/pyomo_stochastic.graph.yaml
+  workflow: pyomo_stochastic
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.robust_milp
+  suite: solvers
+  graph: cookbook_solvers/robust_milp/robust_milp.graph.yaml
+  workflow: robust_milp
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A manufacturer must decide whether to build its own factory (capacity 300 units, one-time cost $4,000)
+      or lease a smaller facility (capacity 150 units, no fixed cost) for Q2 production. Production cost from either:
+      $8/unit. Emergency spot-market sourcing if demand exceeds capacity: $60/unit. Demand is uncertain: Low demand
+      100 units (30% probability), Normal demand 200 units (50% probability), High demand 300 units (20% probability).
+      Find the capacity investment decision that minimizes expected total cost.'
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.route_optimization
+  suite: solvers
+  graph: cookbook_solvers/route_optimization/route_optimization.graph.yaml
+  workflow: route_optimization
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A delivery driver starts and ends at the depot (location 0) and must visit 5 customer locations (1-5).
+      The distance matrix in miles is: [[0,29,20,21,16,31],[29,0,15,29,28,40],[20,15,0,15,14,25],[21,29,15,0,4,12],[16,28,14,4,0,16],[31,40,25,12,16,0]]
+      (row/col order = depot,1,2,3,4,5). Find the shortest round-trip route visiting every location exactly once.'
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/87_route_optimization/output
+  params:
+    enable_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.sage_math
+  suite: solvers
+  graph: cookbook_solvers/sage_math/basic_sagemath.graph.yaml
+  workflow: sage_solver
+  description: ''
+  category: solver
+  needs:
+  - llm
+  - sagemath
+  inputs:
+  - name: problem
+    default: what is the Galois group of x^5 - x - 1 over the rationals?
+  - name: log_dir
+    default: cookbook/75_sage_math/logs-spl
+  status: lifted
+  active: true
+- id: solvers.scipy_nonlinear
+  suite: solvers
+  graph: cookbook_solvers/scipy_nonlinear/scipy_nonlinear.graph.yaml
+  workflow: nonlinear_opt
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem_type
+    default: pricing
+  - name: demand_scale
+    default: '10000'
+  - name: elasticity
+    default: '1.5'
+  - name: revenue_scale
+    default: '20'
+  - name: saturation
+    default: '0.02'
+  - name: congestion
+    default: '0.05'
+  - name: unit_cost
+    default: '8'
+  - name: fixed_cost
+    default: '200'
+  - name: x_min
+    default: '6'
+  - name: x_max
+    default: '150'
+  - name: min_demand
+    default: '0'
+  - name: method
+    default: SLSQP
+  - name: max_iterations
+    default: '1000'
+  - name: use_solver
+    default: 'true'
+  - name: out_dir
+    default: ./cookbook-solver/114_scipy_nonlinear/output
+  params:
+    problem_type: pricing
+    method: SLSQP
+  status: lifted
+  active: true
+- id: solvers.shapely_geo
+  suite: solvers
+  graph: cookbook_solvers/shapely_geo/shapely_geo.graph.yaml
+  workflow: shapely_geo
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: zones_description
+    default: Maplewood city has 3 delivery zones. Zone A (North, Alice) covers the upper-left. Zone B (South-West,
+      Bob) covers the lower-left. Zone C (East, Carol) covers the right side. The zones appear to cover most of
+      the city but there may be overlaps and gaps near the northeast corner.
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.simpy_des
+  suite: solvers
+  graph: cookbook_solvers/simpy_des/simpy_des.graph.yaml
+  workflow: simpy_des
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  - name: n_patients
+    default: '10000'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.sql_verifier
+  suite: solvers
+  graph: cookbook_solvers/sql_verifier/sql_verifier.graph.yaml
+  workflow: sql_verifier
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: question
+    default: What is the average salary in the Engineering department?
+  - name: ground_truth_sql
+    default: SELECT AVG(salary) AS avg_salary FROM employees WHERE department = 'Engineering';
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/84_sql_verifier/output
+  status: lifted
+  active: true
+- id: solvers.stackelberg_game
+  suite: solvers
+  graph: cookbook_solvers/stackelberg_game/stackelberg_game.graph.yaml
+  workflow: stackelberg_game
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.supply_sourcing
+  suite: solvers
+  graph: cookbook_solvers/supply_sourcing/supply_sourcing.graph.yaml
+  workflow: supply_sourcing
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A manufacturer needs 1000 units from 3 suppliers. S1: $10/unit, 95% fill rate, capacity 400 units.
+      S2: $7/unit, 80% fill rate, capacity 500 units. S3: $5/unit, 60% fill rate, capacity 400 units. Find allocations
+      that minimize cost and maximize fill rate.'
+  - name: use_solver
+    default: 'true'
+  - name: n_points
+    default: '8'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.symbolic_math.hello_symbolic_math
+  suite: solvers
+  graph: cookbook_solvers/symbolic_math/hello_symbolic_math.graph.yaml
+  workflow: math_solver
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: find the roots of x squared minus 5x plus 6
+  - name: log_dir
+    default: cookbook/67_symbolic_math/logs-spl
+  status: lifted
+  active: true
+- id: solvers.symbolic_math.sympy_llm
+  suite: solvers
+  graph: cookbook_solvers/symbolic_math/sympy_llm.graph.yaml
+  workflow: math_solver_ab
+  description: ''
+  category: solver
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: problem
+    default: differentiate 3*x**3 - x, then factor if needed, finally solve for x
+  - name: log_dir
+    default: cookbook/67_symbolic_math/logs-spl
+  - name: enable_solver
+    default: 'true'
+  status: lifted
+  active: true
+- id: solvers.symbolic_math.sympy_llm_v2
+  suite: solvers
+  graph: cookbook_solvers/symbolic_math/sympy_llm_v2.graph.yaml
+  workflow: math_solver_ab_v2
+  description: ''
+  category: solver
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: problem
+    default: differentiate 3*x**3 - x, then factor if needed, finally solve for x
+  - name: log_dir
+    default: cookbook/67_symbolic_math/logs-spl
+  - name: enable_solver
+    default: 'true'
+  status: lifted
+  active: true
+- id: solvers.symbolic_math.sympy_math_multi_step
+  suite: solvers
+  graph: cookbook_solvers/symbolic_math/sympy_math_multi_step.graph.yaml
+  workflow: math_solver_multi_step
+  description: ''
+  category: solver
+  needs:
+  - llm
+  - spl
+  inputs:
+  - name: problem
+    default: differentiate e**x and then simplify the result
+  - name: log_dir
+    default: cookbook/67_symbolic_math/logs-spl
+  status: lifted
+  active: true
+- id: solvers.synthetic_problems
+  suite: solvers
+  graph: cookbook_solvers/synthetic_problems/synthetic_problem_gen.graph.yaml
+  workflow: synthetic_problem_gen
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: sample_problem
+    default: 'A factory produces two products. Product A yields $10 profit per unit, requires 2 labor-hours and
+      3 kg material. Product B yields $6 profit per unit, requires 1 labor-hour and 2 kg material. Available resources:
+      20 labor-hours and 30 kg material per day. All production quantities must be non-negative. Maximize total
+      daily profit. Known optimal: 10 units of A, 0 units of B, profit = $100.'
+  - name: domain
+    default: LP
+  - name: n_variants
+    default: '5'
+  - name: n_size
+    default: '5'
+  params:
+    domain: LP
+    n_variants: '5'
+    n_size: '5'
+  status: lifted
+  active: true
+- id: solvers.trading_rule_z3
+  suite: solvers
+  graph: cookbook_solvers/trading_rule_z3/trading_rule_z3.graph.yaml
+  workflow: trading_rule_z3
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: rules_text
+    default: ''
+  - name: snapshot_json
+    default: ''
+  status: lifted
+  active: true
+- id: solvers.unit_dimensional_check
+  suite: solvers
+  graph: cookbook_solvers/unit_dimensional_check/unit_dimensional_check.graph.yaml
+  workflow: unit_dimensional_check
+  description: ''
+  category: reasoning
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: A car accelerates from rest at 2.5 m/s^2 for 12 seconds. What is its final speed, in km/h?
+  - name: enable_solver
+    default: 'true'
+  - name: max_tries
+    default: 3
+  - name: out_dir
+    default: ./cookbook/83_unit_dimensional_check/output
+  status: lifted
+  active: true
+- id: solvers.workforce_3obj
+  suite: solvers
+  graph: cookbook_solvers/workforce_3obj/workforce_3obj.graph.yaml
+  workflow: workforce_3obj
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: problem
+    default: 'A service center runs 3 shift types. Day shift: $100/employee, 0.90 service quality, 0.10 fatigue
+      risk, min 10 max 20 staff. Evening shift: $130/employee, 1.00 quality, 0.25 risk, min 10 max 20. Night shift:
+      $160/employee, 0.70 quality, 0.40 risk, min 10 max 20. Total minimum: 30 staff. Find staffing plans that minimize
+      cost, maximize quality, and minimize fatigue risk simultaneously.'
+  - name: use_solver
+    default: 'true'
+  - name: n_gen
+    default: '50'
+  - name: pop_size
+    default: '100'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true
+- id: solvers.z3_compliance
+  suite: solvers
+  graph: cookbook_solvers/z3_compliance/z3_compliance.graph.yaml
+  workflow: z3_compliance
+  description: ''
+  category: solver
+  needs:
+  - llm
+  inputs:
+  - name: policy_text
+    default: ''
+  - name: use_solver
+    default: 'true'
+  params:
+    use_solver: 'true'
+  status: lifted
+  active: true

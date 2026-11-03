@@ -1,0 +1,191 @@
+version: 1.0-graph
+workflow:
+  name: serpapi_briefer
+  inputs:
+  - name: query
+    type: TEXT
+    default: latest breakthroughs in large language models 2025
+  outputs:
+  - name: briefing
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_query
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: call_serpapi
+    backend: kernel
+    arguments:
+    - '@query'
+    code: |
+      import os, json, urllib.request, urllib.parse
+
+      def call_serpapi(query: str) -> str:
+          try:
+              api_key = os.environ.get("SERPAPI_KEY", "")
+              if not api_key:
+                  return "ERROR: SERPAPI_KEY environment variable not set"
+              params = urllib.parse.urlencode({
+                  "q": query,
+                  "api_key": api_key,
+                  "engine": "google"
+              })
+              url = f"https://serpapi.com/search?{params}"
+              with urllib.request.urlopen(url, timeout=15) as resp:
+                  data = json.loads(resp.read().decode())
+              results = data.get("organic_results", [])
+              if not results:
+                  return "NO_RESULTS"
+              return json.dumps(results[:10])
+          except Exception as e:
+              return f"ERROR: {e}"
+      _spl_result = call_serpapi(query)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - query
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_query
+  - out_raw_results
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'NO_RESULTS')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''No results returned for query: '' + @in_query'
+  ports:
+  - trigger
+  - complete
+  - in_query
+  - out_briefing
+- id: eval_2
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'ERROR:')
+    branch: 2
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_raw_results'
+  ports:
+  - trigger
+  - complete
+  - in_raw_results
+  - out_briefing
+- id: gen_1
+  type: GENERATE
+  config:
+    function: synthesize_briefing
+    params:
+    - query
+    - raw_results
+    prompt_inline: |-
+      You are a research analyst. Given the user''s search query and the raw search results below,
+      produce a structured briefing with exactly these three sections:
+
+      **Summary**
+      A concise 2-3 sentence overview of what the results reveal about "{{in_query}}".
+
+      **Key Facts**
+      3-5 bullet points of the most important factual findings extracted from the results.
+
+      **Follow-up Queries**
+      3 suggested follow-up search queries that would deepen research on this topic.
+
+      Search results:
+      {{in_raw_results}}
+    arguments:
+    - '@query'
+    - '@raw_results'
+  ports:
+  - trigger
+  - complete
+  - in_query
+  - in_raw_results
+  - out_briefing
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_briefing
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_query
+  target: tool_1.in_query
+  type: binds
+- source: tool_1.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_1.out_raw_results
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: set_1.trigger
+  type: triggers
+- source: wf_entry.out_query
+  target: set_1.in_query
+  type: binds
+- source: eval_1.fail
+  target: eval_2.trigger
+  type: triggers
+- source: tool_1.out_raw_results
+  target: eval_2.in_subject
+  type: binds
+- source: eval_2.pass
+  target: set_2.trigger
+  type: triggers
+- source: tool_1.out_raw_results
+  target: set_2.in_raw_results
+  type: binds
+- source: eval_2.fail
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_query
+  target: gen_1.in_query
+  type: binds
+- source: tool_1.out_raw_results
+  target: gen_1.in_raw_results
+  type: binds
+- source: set_1.out_briefing
+  target: wf_exit.in_briefing
+  type: binds
+- source: set_2.out_briefing
+  target: wf_exit.in_briefing
+  type: binds
+- source: gen_1.out_briefing
+  target: wf_exit.in_briefing
+  type: binds
+- source: set_1.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_2.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: gen_1.complete
+  target: wf_exit.trigger
+  type: triggers

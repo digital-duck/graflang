@@ -1,0 +1,83 @@
+CREATE TOOL_API fetch_candidate_recipes(ingredients TEXT, api_base TEXT) RETURNS TEXT AS PYTHON $$
+import urllib.request, urllib.parse
+
+def fetch_candidate_recipes(ingredients: str, api_base: str) -> str:
+    try:
+        params = urllib.parse.urlencode({"q": ingredients, "number": "5"})
+        url = f"{api_base}?{params}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("utf-8")
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION select_best_recipe(ingredients TEXT, candidates TEXT)
+RETURNS TEXT AS $$
+Given these available ingredients: {ingredients}
+
+Candidate recipes retrieved from the API:
+{candidates}
+
+Select the single best recipe that maximizes use of the available ingredients.
+Return the recipe name, a 2-3 sentence description, and 3-5 key preparation steps.
+$$;
+
+CREATE FUNCTION present_suggestion(ingredients TEXT, recipe TEXT)
+RETURNS TEXT AS $$
+A recipe has been selected for the following ingredients: {ingredients}
+
+Selected recipe:
+{recipe}
+
+Write a friendly, clear presentation of this recipe suggestion to the user.
+Highlight which of their ingredients it uses and why it is a great choice.
+$$;
+
+CREATE FUNCTION evaluate_user_approval(ingredients TEXT, suggestion TEXT)
+RETURNS TEXT AS $$
+Evaluate this recipe suggestion against the user''s available ingredients.
+
+Ingredients: {ingredients}
+Presented suggestion: {suggestion}
+
+Does this suggestion meet high-quality recommendation standards?
+Consider: ingredient coverage, recipe clarity, practicality, and overall appeal.
+Return exactly one token — "approved" if it meets standards, or "rejected" if another attempt is needed.
+$$;
+
+CREATE FUNCTION confirm_recipe_recommendation(suggestion TEXT)
+RETURNS TEXT AS $$
+The following recipe suggestion has been approved by the user:
+
+{suggestion}
+
+Write a warm confirmation message to the user, presenting this as their final recommended recipe
+and encouraging them to enjoy cooking it.
+$$;
+
+WORKFLOW recipe_recommender
+  INPUT @ingredients TEXT := "chicken, garlic, lemon, fresh herbs"
+  INPUT @api_base TEXT := "https://api.spoonacular.com/recipes/search"
+  INPUT @max_iterations INTEGER := 3
+  OUTPUT @final_recommendation TEXT
+DO
+  @i := 0;
+  @final_recommendation := "";
+
+  WHILE @i < @max_iterations DO
+    CALL fetch_candidate_recipes(@ingredients, @api_base) INTO @candidates;
+    GENERATE select_best_recipe(@ingredients, @candidates) INTO @recipe;
+    GENERATE present_suggestion(@ingredients, @recipe) INTO @suggestion;
+    GENERATE evaluate_user_approval(@ingredients, @suggestion) INTO @approval;
+
+    EVALUATE @approval WHEN contains("approved") THEN
+      GENERATE confirm_recipe_recommendation(@suggestion) INTO @final_recommendation;
+      @i := @max_iterations;
+    ELSE
+      @i := @i + 1;
+    END;
+  END;
+
+  RETURN @final_recommendation WITH status = "complete";
+END;

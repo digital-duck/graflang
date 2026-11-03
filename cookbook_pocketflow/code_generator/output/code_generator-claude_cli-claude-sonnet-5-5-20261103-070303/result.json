@@ -1,0 +1,3 @@
+{
+  "result": "def two_sum(nums, target):\n    seen = {}\n    for i, n in enumerate(nums):\n        j = seen.get(target - n)\n        if j is not None:\n            return [j, i]\n        seen[n] = i\n    return None"
+}

@@ -1,0 +1,58 @@
+CREATE FUNCTION generate_draft(task, feedback)
+RETURNS TEXT AS $$
+You are a skilled writer. Generate a high-quality description for the following task: {task}
+If feedback is provided, use it to improve this draft: {feedback}
+Produce a clear, detailed, and well-structured response. Don""t simply repeat the task description verbatim.
+$$;
+
+CREATE FUNCTION evaluate_draft(task, draft)
+RETURNS TEXT AS $$
+You are a strict quality judge. Evaluate the draft below against the task requirements.
+Task: {task}
+Draft: {draft}
+Score the draft on accuracy, clarity, completeness, and overall quality (scale 1-10).
+If the score is 7 or above, respond with: VERDICT: PASS, Score: [score], Feedback: [brief comment]
+If the score is below 7, respond with: VERDICT: FAIL, Score: [score], Feedback: [specific actionable suggestions for improvement]
+$$;
+
+WORKFLOW judge_workflow
+  INPUT @task TEXT := "Write a haiku about artificial intelligence"
+  OUTPUT @final_description TEXT
+DO
+  @feedback := "";
+  @attempts := 0;
+  @final_description := "";
+  @final_score := "";
+
+  GENERATE generate_draft(@task, @feedback) INTO @draft;
+  GENERATE evaluate_draft(@task, @draft) INTO @judgment;
+
+  EVALUATE @judgment
+    WHEN contains("VERDICT: PASS") THEN
+      @final_description := @draft;
+      @final_score := @judgment;
+      RETURN @final_description WITH status = "pass";
+    ELSE
+      @attempts := @attempts + 1;
+      @feedback := @judgment;
+  END;
+
+  WHILE @attempts < 3 DO
+    GENERATE generate_draft(@task, @feedback) INTO @draft;
+    GENERATE evaluate_draft(@task, @draft) INTO @judgment;
+
+    EVALUATE @judgment
+      WHEN contains("VERDICT: PASS") THEN
+        @final_description := @draft;
+        @final_score := @judgment;
+        RETURN @final_description WITH status = "pass";
+      ELSE
+        @attempts := @attempts + 1;
+        @feedback := @judgment;
+    END;
+  END;
+
+  @final_description := @draft;
+  @final_score := @judgment;
+  RETURN @final_description WITH status = "max_attempts";
+END;

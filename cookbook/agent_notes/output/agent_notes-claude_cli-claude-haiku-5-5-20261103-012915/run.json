@@ -1,0 +1,9 @@
+{
+  "graph": "agent_notes",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "question": "How much is the Team plan per user, and is single sign-on included?"
+  },
+  "started": "2026-11-03T01:29:15"
+}

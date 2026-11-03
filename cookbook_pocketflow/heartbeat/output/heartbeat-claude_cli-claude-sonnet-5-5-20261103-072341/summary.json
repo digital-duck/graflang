@@ -1,0 +1,84 @@
+{
+  "steps": 24,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 4,
+    "input_tokens": 577,
+    "output_tokens": 460,
+    "cost_usd": 0.0,
+    "ms": 24345
+  },
+  "nodes": {
+    "loop_1": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 26987
+    },
+    "gen_2": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 12528
+    },
+    "gen_1": {
+      "type": "GENERATE",
+      "n": 2,
+      "ms": 11817
+    },
+    "tool_4": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 2020
+    },
+    "tool_1": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 553
+    },
+    "tool_3": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 22
+    },
+    "tool_2": {
+      "type": "SOLVE",
+      "n": 2,
+      "ms": 14
+    },
+    "set_1": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 1
+    },
+    "set_2": {
+      "type": "CONTEXT",
+      "n": 1,
+      "ms": 0
+    },
+    "eval_1": {
+      "type": "EVALUATE",
+      "n": 2,
+      "ms": 0
+    },
+    "set_4": {
+      "type": "CONTEXT",
+      "n": 2,
+      "ms": 0
+    },
+    "set_5": {
+      "type": "CONTEXT",
+      "n": 2,
+      "ms": 0
+    },
+    "set_6": {
+      "type": "CONTEXT",
+      "n": 2,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "graph": "self_heal",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "text": "Call Tom Baker about the contract, no email on file."
+  },
+  "started": "2026-11-03T01:26:29"
+}

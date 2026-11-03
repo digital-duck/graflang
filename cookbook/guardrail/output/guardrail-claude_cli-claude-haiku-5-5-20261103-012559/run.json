@@ -1,0 +1,9 @@
+{
+  "graph": "guardrail",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "question": "How do I reverse a linked list in Python?"
+  },
+  "started": "2026-11-03T01:25:59"
+}

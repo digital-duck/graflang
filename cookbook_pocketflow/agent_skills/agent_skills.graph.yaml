@@ -1,0 +1,401 @@
+version: 1.0-graph
+workflow:
+  name: skill_dispatcher
+  inputs:
+  - name: task
+    type: TEXT
+    default: Write an executive brief summarizing the key advantages of retrieval-augmented
+      generation for enterprise AI
+  - name: skills_dir
+    type: TEXT
+    default: cookbook_pocketflow/agent_skills/skills
+  - name: default_skill
+    type: TEXT
+    default: default.md
+  outputs:
+  - name: response
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_task
+  - out_skills_dir
+  - out_default_skill
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: scan_skills_dir
+    backend: kernel
+    arguments:
+    - '@skills_dir'
+    code: |
+      import os, glob
+      def scan_skills_dir(skills_dir: str) -> str:
+          try:
+              pattern = os.path.join(skills_dir, "*.md")
+              files = sorted(glob.glob(pattern))
+              return "\n".join(files) if files else ""
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = scan_skills_dir(skills_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - skills_dir
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_skills_dir
+  - out_skill_files_list
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: read_skill_files
+    backend: kernel
+    arguments:
+    - '@skill_files_list'
+    code: |
+      import os
+      def read_skill_files(file_list: str) -> str:
+          try:
+              files = [f.strip() for f in file_list.split("\n") if f.strip()]
+              if not files:
+                  return ""
+              parts = []
+              for f in files:
+                  with open(f, "r", encoding="utf-8") as fh:
+                      content = fh.read()
+                  parts.append("=== " + os.path.basename(f) + " ===\n" + content)
+              return "\n\n".join(parts)
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = read_skill_files(skill_files_list)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_list
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_skill_files_list
+  - out_skill_files_content
+- id: gen_1
+  type: GENERATE
+  config:
+    function: extract_keywords
+    params:
+    - skill_files_content
+    prompt_inline: |-
+      You are given the contents of multiple skill markdown files.
+      Each file is delimited by a header line in the format: === filename.md ===
+
+      For each skill file, identify the key topics, capabilities, and relevant keywords it covers.
+      Return the result as a keyword map — one line per skill file in this exact format:
+      <filename.md>: keyword1, keyword2, keyword3, ...
+
+      Skill file contents:
+      {{in_skill_files_content}}
+    arguments:
+    - '@skill_files_content'
+  ports:
+  - trigger
+  - complete
+  - in_skill_files_content
+  - out_keywords_map
+- id: gen_2
+  type: GENERATE
+  config:
+    function: match_task_to_skills
+    params:
+    - task
+    - keywords_map
+    prompt_inline: |-
+      Determine whether any of the available skill files is a suitable match for the given task.
+
+      Task:
+      {{in_task}}
+
+      Skill keywords map (filename: keywords):
+      {{in_keywords_map}}
+
+      If at least one skill file is relevant to the task, respond with exactly: MATCH
+      If no skill file is relevant to the task, respond with exactly: NO_MATCH
+    arguments:
+    - '@task'
+    - '@keywords_map'
+  ports:
+  - trigger
+  - complete
+  - in_task
+  - in_keywords_map
+  - out_match_result
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'NO_MATCH')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: path_join
+    backend: kernel
+    arguments:
+    - '@skills_dir'
+    - '@default_skill'
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(skills_dir, default_skill)
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_skills_dir
+  - in_default_skill
+  - out_skill_path
+- id: gen_3
+  type: GENERATE
+  config:
+    function: select_best_skill
+    params:
+    - task
+    - skill_files_content
+    prompt_inline: |-
+      Select the single best-matching skill file for the given task.
+
+      Task:
+      {{in_task}}
+
+      Available skill files:
+      {{in_skill_files_content}}
+
+      Respond with ONLY the filename of the best-matching skill (e.g., "coding.md").
+      Do not include any explanation, path prefix, or extra text.
+    arguments:
+    - '@task'
+    - '@skill_files_content'
+  ports:
+  - trigger
+  - complete
+  - in_task
+  - in_skill_files_content
+  - out_selected_skill
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: path_join
+    backend: kernel
+    arguments:
+    - '@skills_dir'
+    - '@selected_skill'
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(skills_dir, selected_skill)
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_skills_dir
+  - in_selected_skill
+  - out_skill_path
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@skill_path'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(skill_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_skill_path
+  - out_skill_template
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: replace
+    backend: kernel
+    arguments:
+    - '@skill_template'
+    - '''{task}'''
+    - '@task'
+    code: |
+      def replace(value: str, old: str, new: str) -> str:
+          """REPLACE(value, old, new) — replace all occurrences of old with new."""
+          return str(value).replace(str(old), str(new))
+      _spl_result = replace(skill_template, '{task}', task)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - old
+    - new
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_skill_template
+  - in_task
+  - out_prompt
+- id: gen_4
+  type: GENERATE
+  config:
+    function: apply_skill_template
+    params:
+    - prompt
+    prompt_inline: '{{in_prompt}}'
+    arguments:
+    - '@prompt'
+  ports:
+  - trigger
+  - complete
+  - in_prompt
+  - out_response
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_response
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_skills_dir
+  target: tool_1.in_skills_dir
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_skill_files_list
+  target: tool_2.in_skill_files_list
+  type: binds
+- source: tool_2.complete
+  target: gen_1.trigger
+  type: triggers
+- source: tool_2.out_skill_files_content
+  target: gen_1.in_skill_files_content
+  type: binds
+- source: gen_1.complete
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_task
+  target: gen_2.in_task
+  type: binds
+- source: gen_1.out_keywords_map
+  target: gen_2.in_keywords_map
+  type: binds
+- source: gen_2.complete
+  target: eval_1.trigger
+  type: triggers
+- source: gen_2.out_match_result
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: tool_3.trigger
+  type: triggers
+- source: wf_entry.out_skills_dir
+  target: tool_3.in_skills_dir
+  type: binds
+- source: wf_entry.out_default_skill
+  target: tool_3.in_default_skill
+  type: binds
+- source: eval_1.fail
+  target: gen_3.trigger
+  type: triggers
+- source: wf_entry.out_task
+  target: gen_3.in_task
+  type: binds
+- source: tool_2.out_skill_files_content
+  target: gen_3.in_skill_files_content
+  type: binds
+- source: gen_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: wf_entry.out_skills_dir
+  target: tool_4.in_skills_dir
+  type: binds
+- source: gen_3.out_selected_skill
+  target: tool_4.in_selected_skill
+  type: binds
+- source: tool_3.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_3.out_skill_path
+  target: tool_5.in_skill_path
+  type: binds
+- source: tool_4.out_skill_path
+  target: tool_5.in_skill_path
+  type: binds
+- source: tool_5.complete
+  target: tool_6.trigger
+  type: triggers
+- source: tool_5.out_skill_template
+  target: tool_6.in_skill_template
+  type: binds
+- source: wf_entry.out_task
+  target: tool_6.in_task
+  type: binds
+- source: tool_6.complete
+  target: gen_4.trigger
+  type: triggers
+- source: tool_6.out_prompt
+  target: gen_4.in_prompt
+  type: binds
+- source: gen_4.out_response
+  target: wf_exit.in_response
+  type: binds
+- source: gen_4.complete
+  target: wf_exit.trigger
+  type: triggers

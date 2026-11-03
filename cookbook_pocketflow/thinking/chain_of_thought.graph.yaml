@@ -1,0 +1,794 @@
+version: 1.0-graph
+workflow:
+  name: ChainOfThought
+  inputs:
+  - name: problem
+    type: TEXT
+    default: How many r's are in the word strawberry?
+  - name: max_iterations
+    type: INT
+    default: 5
+  - name: trace_file
+    type: TEXT
+    default: chain_of_thought_trace.md
+  outputs:
+  - name: solution
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_problem
+  - out_max_iterations
+  - out_trace_file
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''[]'''
+  ports:
+  - trigger
+  - complete
+  - out_thoughts
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_thought_number
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_solution
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''true'''
+  ports:
+  - trigger
+  - complete
+  - out_next_thought_needed
+- id: set_5
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_current_thinking
+- id: set_6
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_updated_plan
+- id: set_7
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_iteration
+- id: loop_2
+  type: LOOP
+  config:
+    condition: latest(@in_next_thought_needed, @next_thought_needed) == 'true' AND
+      latest(@in_iteration, @iteration) < @in_max_iterations
+    outputs:
+      thought_number:
+        from: set_8.out_thought_number
+      iteration:
+        from: set_9.out_iteration
+      thoughts_text:
+        from: tool_1.out_thoughts_text
+      last_plan_text:
+        from: tool_2.out_last_plan_text
+      retry_count:
+        from: loop_1.out_retry_count
+      yaml_valid:
+        from: loop_1.out_yaml_valid
+      thought_data:
+        from: loop_1.out_thought_data
+      _:
+        from: tool_9.out__
+      thoughts:
+        from: tool_5.out_thoughts
+      next_thought_needed:
+        from: tool_6.out_next_thought_needed
+      current_thinking:
+        from: tool_7.out_current_thinking
+      updated_plan:
+        from: tool_8.out_updated_plan
+      print_result:
+        from: tool_10.out_print_result
+    subgraph:
+      nodes:
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_thought_number + 1'
+        ports:
+        - trigger
+        - complete
+        - in_thought_number
+        - out_thought_number
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_iteration + 1'
+        ports:
+        - trigger
+        - complete
+        - in_iteration
+        - out_iteration
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: format_thoughts_to_text
+          backend: kernel
+          arguments:
+          - '@thoughts'
+          code: |
+            import json
+
+            def format_thoughts_to_text(thoughts):
+                """Convert JSON list of thought dicts to a readable numbered text block."""
+                try:
+                    items = json.loads(thoughts)
+                except (json.JSONDecodeError, TypeError):
+                    return str(thoughts)
+                if not items:
+                    return ""
+                lines = []
+                for i, t in enumerate(items, 1):
+                    if isinstance(t, dict):
+                        thinking = t.get("current_thinking", "")
+                        plan = t.get("next_action_plan", "")
+                        lines.append(f"Thought {i}: {thinking}")
+                        if plan:
+                            lines.append(f"  Plan: {plan}")
+                    else:
+                        lines.append(f"Thought {i}: {t}")
+                return "\n".join(lines)
+            _spl_result = format_thoughts_to_text(thoughts)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - thoughts
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_thoughts
+        - out_thoughts_text
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: extract_last_plan
+          backend: kernel
+          arguments:
+          - '@thoughts'
+          code: |
+            import json
+
+            def extract_last_plan(thoughts):
+                """Return the next_action_plan from the last entry in the thoughts list."""
+                try:
+                    items = json.loads(thoughts)
+                except (json.JSONDecodeError, TypeError):
+                    return ""
+                if not items:
+                    return ""
+                last = items[-1]
+                if isinstance(last, dict):
+                    return last.get("next_action_plan", "")
+                return ""
+            _spl_result = extract_last_plan(thoughts)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - thoughts
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_thoughts
+        - out_last_plan_text
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: '0'
+        ports:
+        - trigger
+        - complete
+        - out_retry_count
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''false'''
+        ports:
+        - trigger
+        - complete
+        - out_yaml_valid
+      - id: loop_1
+        type: LOOP
+        config:
+          condition: latest(@in_yaml_valid, @yaml_valid) == 'false' AND latest(@in_retry_count,
+            @retry_count) < 3
+          outputs:
+            thought_data:
+              from: gen_1.out_thought_data
+            yaml_valid:
+              from: tool_3.out_yaml_valid
+            retry_count:
+              from: set_12.out_retry_count
+          subgraph:
+            nodes:
+            - id: gen_1
+              type: GENERATE
+              config:
+                function: ChainOfThoughtStep
+                params:
+                - problem
+                - thoughts_text
+                - last_plan_text
+                - thought_number
+                prompt_inline: |-
+                  You are performing step-by-step chain of thought reasoning.
+
+                  Problem: {{in_problem}}
+
+                  Previous thoughts:
+                  {{in_thoughts_text}}
+
+                  Last plan: {{in_last_plan_text}}
+
+                  This is thought number {{in_thought_number}}.
+
+                  Respond with PLAIN YAML only — do NOT wrap in code fences or markdown blocks.
+                  Output exactly these required fields and nothing else:
+                    current_thinking: your detailed analysis for this reasoning step
+                    next_action_plan: your updated plan for the next step
+                    next_thought_needed: true if more reasoning is needed, false if you have reached a complete conclusion
+                arguments:
+                - '@problem'
+                - '@thoughts_text'
+                - '@last_plan_text'
+                - '@thought_number'
+              ports:
+              - trigger
+              - complete
+              - in_problem
+              - in_thoughts_text
+              - in_last_plan_text
+              - in_thought_number
+              - out_thought_data
+            - id: tool_3
+              type: SOLVE
+              config:
+                tool: validate_yaml_fields
+                backend: kernel
+                arguments:
+                - '@thought_data'
+                code: |
+                  import re, yaml
+
+                  _REQUIRED = {"current_thinking", "next_action_plan", "next_thought_needed"}
+
+                  def validate_yaml_fields(thought_data):
+                      """Return 'true' if all required fields present and parseable, else 'false'."""
+                      try:
+                          data = yaml.safe_load(thought_data)
+                          if not isinstance(data, dict):
+                              return "false"
+                          missing = _REQUIRED - set(data.keys())
+                          return "false" if missing else "true"
+                      except yaml.YAMLError:
+                          return "false"
+                  _spl_result = validate_yaml_fields(thought_data)
+                result: _spl_result
+                out_type: TEXT
+                tool_params:
+                - thought_data
+                tool_returns: TEXT
+              ports:
+              - trigger
+              - complete
+              - in_thought_data
+              - out_yaml_valid
+            - id: set_12
+              type: CONTEXT
+              config:
+                action: set
+                expression: '@in_retry_count + 1'
+              ports:
+              - trigger
+              - complete
+              - in_retry_count
+              - out_retry_count
+            edges:
+            - source: gen_1.complete
+              target: tool_3.trigger
+              type: triggers
+            - source: gen_1.out_thought_data
+              target: tool_3.in_thought_data
+              type: binds
+            - source: tool_3.complete
+              target: set_12.trigger
+              type: triggers
+        ports:
+        - trigger
+        - loop
+        - exit
+        - in_problem
+        - in_thoughts_text
+        - in_last_plan_text
+        - in_thought_number
+        - in_retry_count
+        - in_yaml_valid
+        - out_thought_data
+        - out_yaml_valid
+        - out_retry_count
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: write_file
+          backend: kernel
+          arguments:
+          - '@trace_file'
+          - f'--- Thought {@thought_number} (yaml_valid={@yaml_valid}) ---\n{@thought_data}\n'
+          - '''a'''
+          code: |
+            import pathlib
+
+            def write_file(file_path: str, content: str, mode: str='w') -> str:
+                """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+                mode: 'w' (overwrite, default) or 'a' (append).
+                Creates parent directories automatically.
+                Returns the absolute path written.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                p.parent.mkdir(parents=True, exist_ok=True)
+                m = str(mode).strip().lower()
+                if m not in ('w', 'a'):
+                    m = 'w'
+                with p.open(m, encoding='utf-8') as fh:
+                    fh.write(str(content))
+                return str(p.resolve())
+            _spl_result = write_file(trace_file, f'--- Thought {thought_number} (yaml_valid={yaml_valid}) ---\n{thought_data}\n', 'a')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          - content
+          - mode
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_trace_file
+        - in_thought_number
+        - in_yaml_valid
+        - in_thought_data
+        - out__
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: append_thought
+          backend: kernel
+          arguments:
+          - '@thoughts'
+          - '@thought_data'
+          code: |
+            import json, yaml
+
+            def append_thought(thoughts, thought_data):
+                """Append a YAML thought record to the JSON thought list; return updated list."""
+                try:
+                    items = json.loads(thoughts)
+                except (json.JSONDecodeError, TypeError):
+                    items = []
+                try:
+                    record = yaml.safe_load(thought_data)
+                except yaml.YAMLError:
+                    record = {"raw": thought_data}
+                items.append(record)
+                return json.dumps(items)
+            _spl_result = append_thought(thoughts, thought_data)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - thoughts
+          - thought_data
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_thoughts
+        - in_thought_data
+        - out_thoughts
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: extract_yaml_field
+          backend: kernel
+          arguments:
+          - '@thought_data'
+          - '''next_thought_needed'''
+          code: |
+            import yaml
+
+            def extract_yaml_field(thought_data, field):
+                """Parse YAML and return the value of the given field as a string."""
+                try:
+                    data = yaml.safe_load(thought_data)
+                    if isinstance(data, dict):
+                        val = data.get(field, "")
+                        return str(val).lower() if isinstance(val, bool) else str(val)
+                except yaml.YAMLError:
+                    pass
+                return ""
+            _spl_result = extract_yaml_field(thought_data, 'next_thought_needed')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - thought_data
+          - field
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_thought_data
+        - out_next_thought_needed
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: extract_yaml_field
+          backend: kernel
+          arguments:
+          - '@thought_data'
+          - '''current_thinking'''
+          code: |
+            import yaml
+
+            def extract_yaml_field(thought_data, field):
+                """Parse YAML and return the value of the given field as a string."""
+                try:
+                    data = yaml.safe_load(thought_data)
+                    if isinstance(data, dict):
+                        val = data.get(field, "")
+                        return str(val).lower() if isinstance(val, bool) else str(val)
+                except yaml.YAMLError:
+                    pass
+                return ""
+            _spl_result = extract_yaml_field(thought_data, 'current_thinking')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - thought_data
+          - field
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_thought_data
+        - out_current_thinking
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: extract_yaml_field
+          backend: kernel
+          arguments:
+          - '@thought_data'
+          - '''next_action_plan'''
+          code: |
+            import yaml
+
+            def extract_yaml_field(thought_data, field):
+                """Parse YAML and return the value of the given field as a string."""
+                try:
+                    data = yaml.safe_load(thought_data)
+                    if isinstance(data, dict):
+                        val = data.get(field, "")
+                        return str(val).lower() if isinstance(val, bool) else str(val)
+                except yaml.YAMLError:
+                    pass
+                return ""
+            _spl_result = extract_yaml_field(thought_data, 'next_action_plan')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - thought_data
+          - field
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_thought_data
+        - out_updated_plan
+      - id: tool_9
+        type: SOLVE
+        config:
+          tool: write_file
+          backend: kernel
+          arguments:
+          - '@trace_file'
+          - f'next_thought_needed={@next_thought_needed}\ncurrent_thinking={@current_thinking}\n\n'
+          - '''a'''
+          code: |
+            import pathlib
+
+            def write_file(file_path: str, content: str, mode: str='w') -> str:
+                """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+                mode: 'w' (overwrite, default) or 'a' (append).
+                Creates parent directories automatically.
+                Returns the absolute path written.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                p.parent.mkdir(parents=True, exist_ok=True)
+                m = str(mode).strip().lower()
+                if m not in ('w', 'a'):
+                    m = 'w'
+                with p.open(m, encoding='utf-8') as fh:
+                    fh.write(str(content))
+                return str(p.resolve())
+            _spl_result = write_file(trace_file, f'next_thought_needed={next_thought_needed}\ncurrent_thinking={current_thinking}\n\n', 'a')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          - content
+          - mode
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_trace_file
+        - in_next_thought_needed
+        - in_current_thinking
+        - out__
+      - id: tool_10
+        type: SOLVE
+        config:
+          tool: print_thought_progress
+          backend: kernel
+          arguments:
+          - '@current_thinking'
+          - '@updated_plan'
+          code: |
+            def print_thought_progress(thinking, plan):
+                """Print current thinking and plan to stdout; returns empty string."""
+                print(f"[thinking] {thinking[:200]}{'...' if len(thinking) > 200 else ''}")
+                print(f"[plan]     {plan[:200]}{'...' if len(plan) > 200 else ''}")
+                return ""
+            _spl_result = print_thought_progress(current_thinking, updated_plan)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - thinking
+          - plan
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_thinking
+        - in_updated_plan
+        - out_print_result
+      edges:
+      - source: set_8.complete
+        target: set_9.trigger
+        type: triggers
+      - source: set_9.complete
+        target: tool_1.trigger
+        type: triggers
+      - source: tool_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_2.complete
+        target: set_10.trigger
+        type: triggers
+      - source: set_10.complete
+        target: set_11.trigger
+        type: triggers
+      - source: set_11.complete
+        target: loop_1.trigger
+        type: triggers
+      - source: tool_1.out_thoughts_text
+        target: loop_1.in_thoughts_text
+        type: binds
+      - source: tool_2.out_last_plan_text
+        target: loop_1.in_last_plan_text
+        type: binds
+      - source: set_8.out_thought_number
+        target: loop_1.in_thought_number
+        type: binds
+      - source: set_10.out_retry_count
+        target: loop_1.in_retry_count
+        type: binds
+      - source: set_11.out_yaml_valid
+        target: loop_1.in_yaml_valid
+        type: binds
+      - source: loop_1.exit
+        target: tool_4.trigger
+        type: triggers
+      - source: set_8.out_thought_number
+        target: tool_4.in_thought_number
+        type: binds
+      - source: loop_1.out_yaml_valid
+        target: tool_4.in_yaml_valid
+        type: binds
+      - source: loop_1.out_thought_data
+        target: tool_4.in_thought_data
+        type: binds
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: loop_1.out_thought_data
+        target: tool_5.in_thought_data
+        type: binds
+      - source: tool_5.complete
+        target: tool_6.trigger
+        type: triggers
+      - source: loop_1.out_thought_data
+        target: tool_6.in_thought_data
+        type: binds
+      - source: tool_6.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: loop_1.out_thought_data
+        target: tool_7.in_thought_data
+        type: binds
+      - source: tool_7.complete
+        target: tool_8.trigger
+        type: triggers
+      - source: loop_1.out_thought_data
+        target: tool_8.in_thought_data
+        type: binds
+      - source: tool_8.complete
+        target: tool_9.trigger
+        type: triggers
+      - source: tool_6.out_next_thought_needed
+        target: tool_9.in_next_thought_needed
+        type: binds
+      - source: tool_7.out_current_thinking
+        target: tool_9.in_current_thinking
+        type: binds
+      - source: tool_9.complete
+        target: tool_10.trigger
+        type: triggers
+      - source: tool_7.out_current_thinking
+        target: tool_10.in_current_thinking
+        type: binds
+      - source: tool_8.out_updated_plan
+        target: tool_10.in_updated_plan
+        type: binds
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_thought_number
+  - in_iteration
+  - in_thoughts
+  - in_problem
+  - in_trace_file
+  - in_next_thought_needed
+  - in_current_thinking
+  - in_updated_plan
+  - in_max_iterations
+  - out_thought_number
+  - out_iteration
+  - out_thoughts_text
+  - out_last_plan_text
+  - out_retry_count
+  - out_yaml_valid
+  - out_thought_data
+  - out__
+  - out_thoughts
+  - out_next_thought_needed
+  - out_current_thinking
+  - out_updated_plan
+  - out_print_result
+- id: set_13
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_current_thinking'
+  ports:
+  - trigger
+  - complete
+  - in_current_thinking
+  - out_solution
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_solution
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: set_5.trigger
+  type: triggers
+- source: set_5.complete
+  target: set_6.trigger
+  type: triggers
+- source: set_6.complete
+  target: set_7.trigger
+  type: triggers
+- source: set_7.complete
+  target: loop_2.trigger
+  type: triggers
+- source: set_2.out_thought_number
+  target: loop_2.in_thought_number
+  type: binds
+- source: set_7.out_iteration
+  target: loop_2.in_iteration
+  type: binds
+- source: set_1.out_thoughts
+  target: loop_2.in_thoughts
+  type: binds
+- source: wf_entry.out_problem
+  target: loop_2.in_problem
+  type: binds
+- source: wf_entry.out_trace_file
+  target: loop_2.in_trace_file
+  type: binds
+- source: set_4.out_next_thought_needed
+  target: loop_2.in_next_thought_needed
+  type: binds
+- source: set_5.out_current_thinking
+  target: loop_2.in_current_thinking
+  type: binds
+- source: set_6.out_updated_plan
+  target: loop_2.in_updated_plan
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_2.in_max_iterations
+  type: binds
+- source: loop_2.exit
+  target: set_13.trigger
+  type: triggers
+- source: loop_2.out_current_thinking
+  target: set_13.in_current_thinking
+  type: binds
+- source: set_13.out_solution
+  target: wf_exit.in_solution
+  type: binds
+- source: set_13.complete
+  target: wf_exit.trigger
+  type: triggers

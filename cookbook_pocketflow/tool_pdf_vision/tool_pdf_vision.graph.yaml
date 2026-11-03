@@ -1,0 +1,685 @@
+version: 1.0-graph
+workflow:
+  name: pdf_ocr_pipeline
+  inputs:
+  - name: input_dir
+    type: TEXT
+    default: cookbook_pocketflow/tool_pdf_vision/data
+  - name: output_file
+    type: TEXT
+    default: cookbook_pocketflow/tool_pdf_vision/output/pocket-flow.md
+  - name: work_dir
+    type: TEXT
+    default: /tmp/pdf_ocr_work
+  - name: max_pdfs
+    type: INTEGER
+    default: 100
+  - name: max_pages
+    type: INTEGER
+    default: 1000
+  outputs:
+  - name: combined_markdown
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_input_dir
+  - out_output_file
+  - out_work_dir
+  - out_max_pdfs
+  - out_max_pages
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: scan_pdfs
+    backend: kernel
+    arguments:
+    - '@input_dir'
+    code: |
+      import os, glob
+      def scan_pdfs(input_dir: str) -> str:
+          try:
+              pattern = os.path.join(input_dir, "**", "*.pdf")
+              pdf_files = sorted(glob.glob(pattern, recursive=True))
+              return ",".join(pdf_files) if pdf_files else ""
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = scan_pdfs(input_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - input_dir
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_input_dir
+  - out_pdf_list
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: isblank
+    backend: kernel
+    arguments:
+    - '@pdf_list'
+    code: |
+      def isblank(value: str) -> str:
+          """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+          return 'true' if str(value).strip() == '' else 'false'
+      _spl_result = isblank(pdf_list)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_pdf_list
+  - out_no_pdfs
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_combined_markdown
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'true')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_combined_markdown
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_pdf_idx
+- id: loop_2
+  type: LOOP
+  config:
+    condition: latest(@in_pdf_idx, @pdf_idx) < @in_max_pdfs
+    outputs:
+      pdf_path:
+        from: tool_3.out_pdf_path
+      pdf_done:
+        from: tool_4.out_pdf_done
+      pdf_idx:
+        from:
+        - set_4.out_pdf_idx
+        - set_11.out_pdf_idx
+      page_images:
+        from: tool_5.out_page_images
+      page_idx:
+        from: loop_1.out_page_idx
+      pdf_text:
+        from: loop_1.out_pdf_text
+      image_path:
+        from: loop_1.out_image_path
+      page_done:
+        from: loop_1.out_page_done
+      page_text_part:
+        from: loop_1.out_page_text_part
+      combined_markdown:
+        from: set_10.out_combined_markdown
+    subgraph:
+      nodes:
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@pdf_list'
+          - '@pdf_idx'
+          - ''','''
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(pdf_list, pdf_idx, ',')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_pdf_list
+        - in_pdf_idx
+        - out_pdf_path
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: isblank
+          backend: kernel
+          arguments:
+          - '@pdf_path'
+          code: |
+            def isblank(value: str) -> str:
+                """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+                return 'true' if str(value).strip() == '' else 'false'
+            _spl_result = isblank(pdf_path)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_pdf_path
+        - out_pdf_done
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_pdfs'
+        ports:
+        - trigger
+        - complete
+        - in_max_pdfs
+        - out_pdf_idx
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: pdf_to_images
+          backend: kernel
+          arguments:
+          - '@pdf_path'
+          - '@work_dir'
+          code: |
+            import os
+            from pdf2image import convert_from_path
+            def pdf_to_images(pdf_path: str, work_dir: str) -> str:
+                try:
+                    pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+                    out_dir = os.path.join(work_dir, pdf_name)
+                    os.makedirs(out_dir, exist_ok=True)
+                    pages = convert_from_path(pdf_path, dpi=200)
+                    image_paths = []
+                    for i, page in enumerate(pages):
+                        img_path = os.path.join(out_dir, f"page_{i+1:04d}.png")
+                        page.save(img_path, "PNG")
+                        image_paths.append(img_path)
+                    return ",".join(image_paths) if image_paths else ""
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = pdf_to_images(pdf_path, work_dir)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - pdf_path
+          - work_dir
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_pdf_path
+        - in_work_dir
+        - out_page_images
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '0'
+        ports:
+        - trigger
+        - complete
+        - out_page_idx
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: ''''''
+        ports:
+        - trigger
+        - complete
+        - out_pdf_text
+      - id: loop_1
+        type: LOOP
+        config:
+          condition: latest(@in_page_idx, @page_idx) < @in_max_pages
+          outputs:
+            image_path:
+              from: tool_6.out_image_path
+            page_done:
+              from: tool_7.out_page_done
+            page_idx:
+              from:
+              - set_7.out_page_idx
+              - set_9.out_page_idx
+            page_text_part:
+              from: gen_1.out_page_text_part
+            pdf_text:
+              from: set_8.out_pdf_text
+          subgraph:
+            nodes:
+            - id: tool_6
+              type: SOLVE
+              config:
+                tool: list_get
+                backend: kernel
+                arguments:
+                - '@page_images'
+                - '@page_idx'
+                - ''','''
+                code: |
+                  import json
+
+                  def list_get(value: str, index: str, delimiter: str=',') -> str:
+                      """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                      or, if value isn't valid JSON, a delimited list."""
+                      s = str(value).strip()
+                      idx = int(index) - 1
+                      if s.startswith('[') and s.endswith(']'):
+                          try:
+                              parts = json.loads(s)
+                              return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                          except (json.JSONDecodeError, TypeError):
+                              pass
+                      parts = s.split(str(delimiter))
+                      return parts[idx].strip() if 0 <= idx < len(parts) else ''
+                  _spl_result = list_get(page_images, page_idx, ',')
+                result: _spl_result
+                out_type: TEXT
+                tool_params:
+                - value
+                - index
+                - delimiter
+                tool_returns: TEXT
+                tool_builtin: true
+              ports:
+              - trigger
+              - complete
+              - in_page_images
+              - in_page_idx
+              - out_image_path
+            - id: tool_7
+              type: SOLVE
+              config:
+                tool: isblank
+                backend: kernel
+                arguments:
+                - '@image_path'
+                code: |
+                  def isblank(value: str) -> str:
+                      """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+                      return 'true' if str(value).strip() == '' else 'false'
+                  _spl_result = isblank(image_path)
+                result: _spl_result
+                out_type: TEXT
+                tool_params:
+                - value
+                tool_returns: TEXT
+                tool_builtin: true
+              ports:
+              - trigger
+              - complete
+              - in_image_path
+              - out_page_done
+            - id: eval_3
+              type: EVALUATE
+              config:
+                condition: contains(@in_subject, 'true')
+                branch: 1
+              ports:
+              - trigger
+              - pass
+              - fail
+              - in_subject
+            - id: set_7
+              type: CONTEXT
+              config:
+                action: set
+                expression: '@in_max_pages'
+              ports:
+              - trigger
+              - complete
+              - in_max_pages
+              - out_page_idx
+            - id: gen_1
+              type: GENERATE
+              config:
+                function: ocr_page_to_markdown
+                params:
+                - image_path
+                prompt_inline: |-
+                  You are an expert OCR assistant. Analyze the document page image at {{in_image_path}}.
+                    Extract all visible text and format it as clean Markdown, preserving headings,
+                    paragraphs, bullet points, numbered lists, and tables exactly as they appear on the page.
+                    Return only the extracted Markdown text with no additional commentary or explanation.
+                arguments:
+                - '@image_path'
+              ports:
+              - trigger
+              - complete
+              - in_image_path
+              - out_page_text_part
+            - id: set_8
+              type: CONTEXT
+              config:
+                action: set
+                expression: '@in_pdf_text + @in_page_text_part + ''\n\n'''
+              ports:
+              - trigger
+              - complete
+              - in_pdf_text
+              - in_page_text_part
+              - out_pdf_text
+            - id: set_9
+              type: CONTEXT
+              config:
+                action: set
+                expression: '@in_page_idx + 1'
+              ports:
+              - trigger
+              - complete
+              - in_page_idx
+              - out_page_idx
+            edges:
+            - source: tool_6.complete
+              target: tool_7.trigger
+              type: triggers
+            - source: tool_6.out_image_path
+              target: tool_7.in_image_path
+              type: binds
+            - source: tool_7.complete
+              target: eval_3.trigger
+              type: triggers
+            - source: tool_7.out_page_done
+              target: eval_3.in_subject
+              type: binds
+            - source: eval_3.pass
+              target: set_7.trigger
+              type: triggers
+            - source: eval_3.fail
+              target: gen_1.trigger
+              type: triggers
+            - source: tool_6.out_image_path
+              target: gen_1.in_image_path
+              type: binds
+            - source: gen_1.complete
+              target: set_8.trigger
+              type: triggers
+            - source: gen_1.out_page_text_part
+              target: set_8.in_page_text_part
+              type: binds
+            - source: set_8.complete
+              target: set_9.trigger
+              type: triggers
+        ports:
+        - trigger
+        - loop
+        - exit
+        - in_page_images
+        - in_page_idx
+        - in_max_pages
+        - in_pdf_text
+        - out_image_path
+        - out_page_done
+        - out_page_idx
+        - out_page_text_part
+        - out_pdf_text
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_combined_markdown + ''## '' + @in_pdf_path + ''\n\n'' +
+            @in_pdf_text'
+        ports:
+        - trigger
+        - complete
+        - in_combined_markdown
+        - in_pdf_path
+        - in_pdf_text
+        - out_combined_markdown
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_pdf_idx + 1'
+        ports:
+        - trigger
+        - complete
+        - in_pdf_idx
+        - out_pdf_idx
+      edges:
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_3.out_pdf_path
+        target: tool_4.in_pdf_path
+        type: binds
+      - source: tool_4.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_4.out_pdf_done
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: set_4.trigger
+        type: triggers
+      - source: eval_2.fail
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_3.out_pdf_path
+        target: tool_5.in_pdf_path
+        type: binds
+      - source: tool_5.complete
+        target: set_5.trigger
+        type: triggers
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+      - source: set_6.complete
+        target: loop_1.trigger
+        type: triggers
+      - source: tool_5.out_page_images
+        target: loop_1.in_page_images
+        type: binds
+      - source: set_5.out_page_idx
+        target: loop_1.in_page_idx
+        type: binds
+      - source: set_6.out_pdf_text
+        target: loop_1.in_pdf_text
+        type: binds
+      - source: loop_1.exit
+        target: set_10.trigger
+        type: triggers
+      - source: tool_3.out_pdf_path
+        target: set_10.in_pdf_path
+        type: binds
+      - source: loop_1.out_pdf_text
+        target: set_10.in_pdf_text
+        type: binds
+      - source: set_10.complete
+        target: set_11.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_pdf_list
+  - in_pdf_idx
+  - in_max_pdfs
+  - in_work_dir
+  - in_max_pages
+  - in_combined_markdown
+  - out_pdf_path
+  - out_pdf_done
+  - out_pdf_idx
+  - out_page_images
+  - out_page_idx
+  - out_pdf_text
+  - out_image_path
+  - out_page_done
+  - out_page_text_part
+  - out_combined_markdown
+- id: tool_8
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@output_file'
+    - '@combined_markdown'
+    - '''w'''
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(output_file, combined_markdown, 'w')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_output_file
+  - in_combined_markdown
+  - out_write_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_combined_markdown
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_input_dir
+  target: tool_1.in_input_dir
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_pdf_list
+  target: tool_2.in_pdf_list
+  type: binds
+- source: tool_2.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_2.out_no_pdfs
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: set_2.trigger
+  type: triggers
+- source: eval_1.fail
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: loop_2.trigger
+  type: triggers
+- source: tool_1.out_pdf_list
+  target: loop_2.in_pdf_list
+  type: binds
+- source: set_3.out_pdf_idx
+  target: loop_2.in_pdf_idx
+  type: binds
+- source: wf_entry.out_max_pdfs
+  target: loop_2.in_max_pdfs
+  type: binds
+- source: wf_entry.out_work_dir
+  target: loop_2.in_work_dir
+  type: binds
+- source: wf_entry.out_max_pages
+  target: loop_2.in_max_pages
+  type: binds
+- source: set_1.out_combined_markdown
+  target: loop_2.in_combined_markdown
+  type: binds
+- source: loop_2.exit
+  target: tool_8.trigger
+  type: triggers
+- source: wf_entry.out_output_file
+  target: tool_8.in_output_file
+  type: binds
+- source: loop_2.out_combined_markdown
+  target: tool_8.in_combined_markdown
+  type: binds
+- source: set_2.out_combined_markdown
+  target: wf_exit.in_combined_markdown
+  type: binds
+- source: loop_2.out_combined_markdown
+  target: wf_exit.in_combined_markdown
+  type: binds
+- source: set_2.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: tool_8.complete
+  target: wf_exit.trigger
+  type: triggers

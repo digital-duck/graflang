@@ -1,0 +1,604 @@
+version: 1.0-graph
+workflow:
+  name: article_writer
+  inputs:
+  - name: topic
+    type: TEXT
+    default: The Future of Quantum Computing
+  - name: max_sections
+    type: INTEGER
+    default: 5
+  - name: out_dir
+    type: TEXT
+    default: cookbook_pocketflow/workflow/output
+  outputs:
+  - name: article
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_topic
+  - out_max_sections
+  - out_out_dir
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: topic_to_filename
+    backend: kernel
+    arguments:
+    - '@topic'
+    code: |
+      import re
+      def topic_to_filename(topic: str) -> str:
+          slug = topic.lower().strip()
+          slug = re.sub(r'[^\w\s-]', '', slug)
+          slug = re.sub(r'[\s-]+', '_', slug)
+          return slug[:40].strip('_')
+      _spl_result = topic_to_filename(topic)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - topic
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_topic
+  - out_slug
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: make_dir
+    backend: kernel
+    arguments:
+    - '@out_dir'
+    code: |
+      import pathlib
+
+      def make_dir(dir_path: str) -> str:
+          """MAKE_DIR(dir_path) — create directory (and parents) if not present.
+
+          Returns the absolute path of the directory.
+          """
+          p = pathlib.Path(str(dir_path).strip())
+          p.mkdir(parents=True, exist_ok=True)
+          return str(p.resolve())
+      _spl_result = make_dir(out_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - dir_path
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out_dir
+  - out__
+- id: gen_1
+  type: GENERATE
+  config:
+    function: generate_outline
+    params:
+    - topic
+    prompt_inline: |-
+      Generate a structured article outline for the topic: "{{in_topic}}"
+
+      Return ONLY a YAML document in this exact format:
+      sections:
+        - <section title>
+        - <section title>
+
+      Include 4-6 sections covering introduction, key points, and conclusion.
+      Output ONLY valid YAML — no extra text, no code fences.
+    arguments:
+    - '@topic'
+  ports:
+  - trigger
+  - complete
+  - in_topic
+  - out_yaml_outline
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: path_join
+    backend: kernel
+    arguments:
+    - '@out_dir'
+    - '@slug + ''_outline.yaml'''
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(out_dir, slug + '_outline.yaml')
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out_dir
+  - in_slug
+  - out_outline_path
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@outline_path'
+    - '@yaml_outline'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(outline_path, yaml_outline)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_outline_path
+  - in_yaml_outline
+  - out__
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_all_drafts
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_sections
+    outputs:
+      section_title:
+        from: tool_5.out_section_title
+      is_blank:
+        from: tool_7.out_is_blank
+      i:
+        from:
+        - set_3.out_i
+        - set_5.out_i
+      section_draft:
+        from: gen_2.out_section_draft
+      all_drafts:
+        from: set_4.out_all_drafts
+    subgraph:
+      nodes:
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: get_yaml_section
+          backend: kernel
+          arguments:
+          - '@yaml_outline'
+          - '@i'
+          code: |
+            import yaml
+            def get_yaml_section(yaml_outline: str, idx: str) -> str:
+                try:
+                    raw = yaml_outline.strip().removeprefix("```yaml").removeprefix("```").removesuffix("```").strip()
+                    data = yaml.safe_load(raw)
+                    sections = data.get("sections", data.get("outline", [])) if isinstance(data, dict) else data
+                    i = int(idx)
+                    return str(sections[i]) if 0 <= i < len(sections) else ""
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = get_yaml_section(yaml_outline, i)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - yaml_outline
+          - idx
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_yaml_outline
+        - in_i
+        - out_section_title
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: isblank
+          backend: kernel
+          arguments:
+          - '@section_title'
+          code: |
+            def isblank(value: str) -> str:
+                """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+                return 'true' if str(value).strip() == '' else 'false'
+            _spl_result = isblank(section_title)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_section_title
+        - out_is_blank
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: lower
+          backend: kernel
+          arguments:
+          - '@is_blank'
+          code: |
+            def lower(value: str) -> str:
+                """LOWER(value) — convert to lowercase."""
+                return str(value).lower()
+            _spl_result = lower(is_blank)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_is_blank
+        - out_is_blank
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_sections'
+        ports:
+        - trigger
+        - complete
+        - in_max_sections
+        - out_i
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: draft_section
+          params:
+          - topic
+          - section_title
+          - yaml_outline
+          prompt_inline: |-
+            Write a detailed draft for the section "{{in_section_title}}" in an article about {{in_topic}}.
+
+            Full outline for context:
+            {{in_yaml_outline}}
+
+            Write 2-4 well-structured paragraphs for this section only. Do not include other sections.
+          arguments:
+          - '@topic'
+          - '@section_title'
+          - '@yaml_outline'
+        ports:
+        - trigger
+        - complete
+        - in_topic
+        - in_section_title
+        - in_yaml_outline
+        - out_section_draft
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_all_drafts + ''## '' + @in_section_title + ''\n'' + @in_section_draft
+            + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_all_drafts
+        - in_section_title
+        - in_section_draft
+        - out_all_drafts
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_5.complete
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_5.out_section_title
+        target: tool_6.in_section_title
+        type: binds
+      - source: tool_6.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_6.out_is_blank
+        target: tool_7.in_is_blank
+        type: binds
+      - source: tool_7.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_7.out_is_blank
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_3.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: gen_2.trigger
+        type: triggers
+      - source: tool_5.out_section_title
+        target: gen_2.in_section_title
+        type: binds
+      - source: gen_2.complete
+        target: set_4.trigger
+        type: triggers
+      - source: tool_5.out_section_title
+        target: set_4.in_section_title
+        type: binds
+      - source: gen_2.out_section_draft
+        target: set_4.in_section_draft
+        type: binds
+      - source: set_4.complete
+        target: set_5.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_yaml_outline
+  - in_i
+  - in_max_sections
+  - in_topic
+  - in_all_drafts
+  - out_section_title
+  - out_is_blank
+  - out_i
+  - out_section_draft
+  - out_all_drafts
+- id: gen_3
+  type: GENERATE
+  config:
+    function: polish_article
+    params:
+    - topic
+    - all_drafts
+    prompt_inline: |-
+      Rewrite the following article draft about {{in_topic}} with a polished, conversational style.
+      Ensure smooth transitions between sections, a consistent voice, and a compelling narrative flow.
+
+      Draft:
+      {{in_all_drafts}}
+
+      Output the complete, publication-ready article.
+    arguments:
+    - '@topic'
+    - '@all_drafts'
+  ports:
+  - trigger
+  - complete
+  - in_topic
+  - in_all_drafts
+  - out_article
+- id: tool_8
+  type: SOLVE
+  config:
+    tool: path_join
+    backend: kernel
+    arguments:
+    - '@out_dir'
+    - '@slug + ''.md'''
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(out_dir, slug + '.md')
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out_dir
+  - in_slug
+  - out_article_path
+- id: tool_9
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@article_path'
+    - '@article'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(article_path, article)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_article_path
+  - in_article
+  - out__
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_article
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_topic
+  target: tool_1.in_topic
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: wf_entry.out_out_dir
+  target: tool_2.in_out_dir
+  type: binds
+- source: tool_2.complete
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_topic
+  target: gen_1.in_topic
+  type: binds
+- source: gen_1.complete
+  target: tool_3.trigger
+  type: triggers
+- source: wf_entry.out_out_dir
+  target: tool_3.in_out_dir
+  type: binds
+- source: tool_1.out_slug
+  target: tool_3.in_slug
+  type: binds
+- source: tool_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: tool_3.out_outline_path
+  target: tool_4.in_outline_path
+  type: binds
+- source: gen_1.out_yaml_outline
+  target: tool_4.in_yaml_outline
+  type: binds
+- source: tool_4.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: gen_1.out_yaml_outline
+  target: loop_1.in_yaml_outline
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_max_sections
+  target: loop_1.in_max_sections
+  type: binds
+- source: wf_entry.out_topic
+  target: loop_1.in_topic
+  type: binds
+- source: set_2.out_all_drafts
+  target: loop_1.in_all_drafts
+  type: binds
+- source: loop_1.exit
+  target: gen_3.trigger
+  type: triggers
+- source: wf_entry.out_topic
+  target: gen_3.in_topic
+  type: binds
+- source: loop_1.out_all_drafts
+  target: gen_3.in_all_drafts
+  type: binds
+- source: gen_3.complete
+  target: tool_8.trigger
+  type: triggers
+- source: wf_entry.out_out_dir
+  target: tool_8.in_out_dir
+  type: binds
+- source: tool_1.out_slug
+  target: tool_8.in_slug
+  type: binds
+- source: tool_8.complete
+  target: tool_9.trigger
+  type: triggers
+- source: tool_8.out_article_path
+  target: tool_9.in_article_path
+  type: binds
+- source: gen_3.out_article
+  target: tool_9.in_article
+  type: binds
+- source: gen_3.out_article
+  target: wf_exit.in_article
+  type: binds
+- source: tool_9.complete
+  target: wf_exit.trigger
+  type: triggers

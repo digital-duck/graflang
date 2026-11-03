@@ -1,0 +1,344 @@
+version: 1.0-graph
+workflow:
+  name: multi_turn_chat
+  inputs:
+  - name: max_turns
+    type: INTEGER
+    default: 50
+  - name: last_n
+    type: TEXT
+    default: '10'
+  outputs:
+  - name: history
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_max_turns
+  - out_last_n
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''[]'''
+  ports:
+  - trigger
+  - complete
+  - out_history
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_turns
+    outputs:
+      user_input:
+        from: tool_1.out_user_input
+      is_exit:
+        from: tool_2.out_is_exit
+      i:
+        from:
+        - set_3.out_i
+        - set_4.out_i
+      history:
+        from: tool_5.out_history
+      trimmed:
+        from: tool_4.out_trimmed
+      reply:
+        from: gen_1.out_reply
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: read_user_input
+          backend: kernel
+          arguments: []
+          code: |
+            def read_user_input() -> str:
+                try:
+                    return input("You: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    return "exit"
+            _spl_result = read_user_input()
+          result: _spl_result
+          out_type: TEXT
+          tool_params: []
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - out_user_input
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: is_exit_command
+          backend: kernel
+          arguments:
+          - '@user_input'
+          code: |
+            def is_exit_command(user_input: str) -> str:
+                keywords = {"exit", "quit", "bye", "goodbye"}
+                return "true" if user_input.strip().lower() in keywords else "false"
+            _spl_result = is_exit_command(user_input)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - user_input
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_user_input
+        - out_is_exit
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_turns'
+        ports:
+        - trigger
+        - complete
+        - in_max_turns
+        - out_i
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: append_turn
+          backend: kernel
+          arguments:
+          - '@history'
+          - '''user'''
+          - '@user_input'
+          code: |
+            import json
+            def append_turn(history: str, role: str, content: str) -> str:
+                try:
+                    turns = json.loads(history) if history.strip() else []
+                    turns.append({"role": role, "content": content})
+                    return json.dumps(turns)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = append_turn(history, 'user', user_input)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - history
+          - role
+          - content
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_history
+        - in_user_input
+        - out_history
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: trim_turns
+          backend: kernel
+          arguments:
+          - '@history'
+          - '@last_n'
+          code: |
+            def trim_turns(history: str, max_turns: str) -> str:
+                """TRIM_TURNS(history, max_turns) — keep the last N User/Assistant turn pairs.
+
+                Expects history in the format: \\nUser: <text>\\nAssistant: <text>\\nUser: ...
+                Returns trimmed history in the same format (zero LLM cost, deterministic).
+                """
+                n = max(1, int(str(max_turns).strip() or '10'))
+                parts = str(history).split('\nUser: ')
+                turns = [p for p in parts if p.strip()]
+                last_n = turns[-n:] if len(turns) > n else turns
+                if not last_n:
+                    return ''
+                return '\nUser: ' + '\nUser: '.join(last_n)
+            _spl_result = trim_turns(history, last_n)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - history
+          - max_turns
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_history
+        - in_last_n
+        - out_trimmed
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: chat_reply
+          params:
+          - trimmed
+          prompt_inline: |-
+            You are a helpful assistant engaged in a multi-turn conversation.
+              The conversation history is a JSON array of {"role", "content"} pairs:
+              {{in_trimmed}}
+              Reply to the most recent user message concisely and helpfully.
+          arguments:
+          - '@trimmed'
+        ports:
+        - trigger
+        - complete
+        - in_trimmed
+        - out_reply
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: append_turn
+          backend: kernel
+          arguments:
+          - '@history'
+          - '''assistant'''
+          - '@reply'
+          code: |
+            import json
+            def append_turn(history: str, role: str, content: str) -> str:
+                try:
+                    turns = json.loads(history) if history.strip() else []
+                    turns.append({"role": role, "content": content})
+                    return json.dumps(turns)
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = append_turn(history, 'assistant', reply)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - history
+          - role
+          - content
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_history
+        - in_reply
+        - out_history
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_1.out_user_input
+        target: tool_2.in_user_input
+        type: binds
+      - source: tool_2.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_2.out_is_exit
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_3.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_3.trigger
+        type: triggers
+      - source: tool_1.out_user_input
+        target: tool_3.in_user_input
+        type: binds
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_3.out_history
+        target: tool_4.in_history
+        type: binds
+      - source: tool_4.complete
+        target: gen_1.trigger
+        type: triggers
+      - source: tool_4.out_trimmed
+        target: gen_1.in_trimmed
+        type: binds
+      - source: gen_1.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_3.out_history
+        target: tool_5.in_history
+        type: binds
+      - source: gen_1.out_reply
+        target: tool_5.in_reply
+        type: binds
+      - source: tool_5.complete
+        target: set_4.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_max_turns
+  - in_history
+  - in_last_n
+  - in_i
+  - out_user_input
+  - out_is_exit
+  - out_i
+  - out_history
+  - out_trimmed
+  - out_reply
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_history
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_max_turns
+  target: loop_1.in_max_turns
+  type: binds
+- source: set_1.out_history
+  target: loop_1.in_history
+  type: binds
+- source: wf_entry.out_last_n
+  target: loop_1.in_last_n
+  type: binds
+- source: set_2.out_i
+  target: loop_1.in_i
+  type: binds
+- source: loop_1.out_history
+  target: wf_exit.in_history
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

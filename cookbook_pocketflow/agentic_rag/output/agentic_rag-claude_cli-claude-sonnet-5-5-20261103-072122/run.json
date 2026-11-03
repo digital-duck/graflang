@@ -1,0 +1,7 @@
+{
+  "graph": "agentic_rag",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {},
+  "started": "2026-11-03T07:21:22"
+}

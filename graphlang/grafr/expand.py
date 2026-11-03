@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Tuple
 import networkx as nx
 from ruamel.yaml import YAML
 
-from .parts import PartError, _interface, _load_part
+from .parts import PartError, _interface, _load_part, part_file
 
 ID = re.compile(r"^[A-Za-z0-9_]+$")
 ENTRY, EXIT, START, DONE = "wf_entry", "wf_exit", "elab_start", "elab_done"
@@ -74,8 +74,8 @@ def expand_things(graph_data: Dict[str, Any]) -> None:
     rel = (graph_data.get("resources", {}).get("parts") or {}).get(pname)
     if not cfg.get("part", "").startswith("parts.") or rel is None:
         raise PartError(f"expand.part {cfg.get('part')!r} is not listed under resources.parts")
-    part_inputs, out_map, in_map, _, _ = _interface(_load_part((base / rel).resolve(), ()), pname)
-    part_outs = sorted(set(out_map.values()))
+    part_inputs, out_map, in_map, _, _ = _interface(_load_part(part_file(rel, base), ()), pname)
+    part_outs = sorted({o for m in out_map.values() for o in m.values()})
     result = cfg.get("result") or part_outs[0]
     if result not in part_outs:
         raise PartError(f"expand.result {result!r} is not an output of the part (it has {part_outs})")

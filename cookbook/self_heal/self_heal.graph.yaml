@@ -1,0 +1,37 @@
+version: "1.0-graph"
+
+# Self-healing extraction: ask for JSON, check it with a rule (not another model), and when the check fails show the model its own
+# rejected answer and ask again, at most `max_rounds` times. A deterministic check in front of a retry loop keeps the model honest.
+# The check reads the reply with json_get, so a reply that is not valid JSON (a code fence, a comment) fails like a missing field.
+
+workflow:
+  name: "self_heal"
+  inputs:
+    - {name: "text", type: "TEXT"}
+    - {name: "max_rounds", type: "INTEGER", default: 3}
+  outputs:
+    - {name: "record", type: "TEXT"}
+    - {name: "status", type: "TEXT"}
+
+resources:
+  prompts:
+    extract: "./prompts/extract.md"
+    fix: "./prompts/fix.md"
+
+steps:
+  - extract: {generate: prompts.extract, in: {text: $in.text}, out: raw}
+  - heal:
+      loop: "@in_max_rounds"
+      while: "NOT @valid"
+      in: {max_rounds: $in.max_rounds, text: $in.text, raw: extract.raw}
+      out:
+        raw: {from: again.raw}
+        valid: {fired: check.pass}
+      steps:
+        - check: {evaluate: "json_get(@in_raw, 'name') != '' AND json_get(@in_raw, 'email') != ''", in: {raw: $loop.raw}}
+        - again: {generate: prompts.fix, on: check.fail, in: {text: $loop.text, raw: $loop.raw}, out: raw}
+  - passed:   {evaluate: "@in_valid == TRUE", in: {valid: heal.valid}}
+  - good:     {solve: "'valid'", on: passed.pass, out: status}
+  - good_out: {output: {record: heal.raw, status: good.status}}
+  - bad:      {solve: "'still invalid after ' + str(@in_n) + ' rounds; the last attempt is shown'", on: passed.fail, in: {n: $in.max_rounds}, out: status}
+  - bad_out:  {output: {record: heal.raw, status: bad.status}, on: bad}

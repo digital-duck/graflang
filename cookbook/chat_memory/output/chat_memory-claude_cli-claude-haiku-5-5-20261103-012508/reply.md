@@ -1,0 +1,1 @@
+Nice to meet you, Wen, and Go is a great language to enjoy, especially for its simplicity and concurrency model.

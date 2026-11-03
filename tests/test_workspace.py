@@ -32,9 +32,10 @@ def make_recipe(root: Path, name="r", graphs=("r",), extra=None):
     return folder
 
 
-def test_default_roots_are_apps_cookbook_solvers_and_only_apps_is_writable(home):
+def test_default_roots_are_apps_cookbook_solvers_pocketflow_and_only_apps_is_writable(home):
     roots = ws.Workspace().roots
-    assert [(r.name, r.path, r.writable) for r in roots] == [("apps", home / "apps", True), ("cookbook", home / "cookbook", False), ("solvers", home / "solvers", False)]
+    assert [(r.name, r.path, r.writable) for r in roots] == [("apps", home / "apps", True), ("cookbook", home / "cookbook", False), ("solvers", home / "solvers", False),
+                                                                     ("pocketflow", home / "pocketflow", False)]
     assert ws.Workspace().write_root == home / "apps"
 
 
@@ -252,8 +253,8 @@ def test_every_shipped_recipe_validates_from_a_copy_elsewhere(tmp_path):
 
 def test_the_solvers_folder_is_a_third_read_only_root(home):
     w = ws.Workspace()
-    assert [(r.name, r.writable) for r in w.roots] == [("apps", True), ("cookbook", False), ("solvers", False)]
-    assert ws.solvers_dir() == home / "solvers" and w.write_root == home / "apps"
+    assert [(r.name, r.writable) for r in w.roots] == [("apps", True), ("cookbook", False), ("solvers", False), ("pocketflow", False)]
+    assert ws.solvers_dir() == home / "solvers" and ws.pocketflow_dir() == home / "pocketflow" and w.write_root == home / "apps"
     graph = home / "solvers" / "z3_compliance" / "z3_compliance.graph.yaml"
     graph.parent.mkdir(parents=True)
     graph.write_text("version: 1.0-graph\nworkflow: {name: z, inputs: [], outputs: []}\nnodes: []\nedges: []\n")
@@ -264,3 +265,12 @@ def test_the_solvers_folder_is_a_third_read_only_root(home):
 
 def test_a_src_dir_replaces_all_three_roots(tmp_path):
     assert [r.name for r in ws.Workspace(tmp_path).roots] == ["src"]
+
+
+def test_a_pocketflow_recipe_is_found_by_the_app_and_by_a_part_reference(home):
+    from graphlang.grafr.parts import named_part
+    graph = home / "pocketflow" / "rag" / "rag.graph.yaml"
+    graph.parent.mkdir(parents=True)
+    graph.write_text((Path(__file__).resolve().parent.parent / "cookbook" / "self_refine" / "self_refine.graph.yaml").read_text())
+    assert [r.label for r in ws.Workspace().recipes() if r.root == "pocketflow"] == ["pocketflow/rag/rag"]
+    assert named_part("pocketflow:rag") == graph

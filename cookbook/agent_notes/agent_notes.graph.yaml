@@ -1,0 +1,44 @@
+version: "1.0-graph"
+
+# A small agent: decide, act, observe, repeat. Each round the model either asks to read one note (a tool call) or answers.
+# The graph, not the model, decides what a tool call may do: the note must be on a fixed list, the whole loop sits behind a Cedar GUARD
+# (a loop that holds a risky node is itself risky), and the loop has a cap. What the agent read is added to its history (observe) and recorded (OBSERVE).
+
+workflow:
+  name: "agent_notes"
+  inputs:
+    - {name: "question", type: "TEXT"}
+    - {name: "max_steps", type: "INTEGER", default: 4}
+  outputs:
+    - {name: "answer", type: "TEXT"}
+
+resources:
+  prompts:
+    decide: "./prompts/decide.md"
+  policies:
+    read: "./policies/read.cedar"
+
+steps:
+  - allowed: {guard: policies.read, principal: 'Service::"agent-notes"', action: 'Action::"read_note"', resource: 'File::"notes"', context_mapping: {}}
+  - seed: {solve: '"(nothing read yet)"', on: allowed.allow, out: history}
+  - agent:
+      loop: "@in_max_steps"
+      while: "NOT @done"
+      in: {max_steps: $in.max_steps, question: $in.question, history: seed.history, answer: ""}
+      out:
+        history: {from: add.history}
+        answer: {from: finish.answer}
+        done: {fired: wants_read.fail}
+      steps:
+        - decide: {generate: prompts.decide, in: {question: $loop.question, history: $loop.history}, out: decision}
+        - wants_read: {evaluate: "json_get(@in_decision, 'action') == 'read' AND json_get(@in_decision, 'file') in ['pricing.md', 'holidays.md', 'contacts.md']", in: {decision: decide.decision}}
+        - path: {solve: "'notes/' + json_get(@in_decision, 'file')", on: wants_read.pass, in: {decision: decide.decision}, out: file}
+        - look: {node: QUERY, in: {file: path.file}, ports: [in_file, out_note], out: note, format: text, max_bytes: 20000, default: "(no such note)"}
+        - seen: {node: OBSERVE, in: {note: look.note}, ports: [in_note, out_note], out: note, label: "note read"}
+        - add: {solve: '@in_history + "\n--- " + json_get(@in_decision, "file") + " ---\n" + @in_note', in: {history: $loop.history, decision: decide.decision, note: seen.note}, out: history}
+        - finish: {solve: "json_get(@in_decision, 'text')", on: wants_read.fail, in: {decision: decide.decision}, out: answer}
+  - answered: {evaluate: "NOT is_empty(@in_answer)", in: {answer: agent.answer}}
+  - found:    {solve: "@in_answer", on: answered.pass, in: {answer: agent.answer}, out: answer}
+  - found_out: {output: found.answer}
+  - gave_up:  {solve: "'(no answer within ' + str(@in_n) + ' steps)'", on: answered.fail, in: {n: $in.max_steps}, out: answer}
+  - gave_up_out: {output: gave_up.answer, on: gave_up}

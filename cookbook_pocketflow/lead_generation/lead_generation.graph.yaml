@@ -1,0 +1,759 @@
+version: 1.0-graph
+workflow:
+  name: lead_generation
+  inputs:
+  - name: lead_list_path
+    type: TEXT
+    default: cookbook_pocketflow/lead_generation/data/leads.csv
+  - name: output_path
+    type: TEXT
+    default: cookbook_pocketflow/lead_generation/output/scored_leads.jsonl
+  - name: max_leads
+    type: INTEGER
+    default: 100
+  outputs:
+  - name: final_output
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_lead_list_path
+  - out_output_path
+  - out_max_leads
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@lead_list_path'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(lead_list_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_lead_list_path
+  - out_raw_csv
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: parse_leads
+    backend: kernel
+    arguments:
+    - '@raw_csv'
+    code: |
+      def parse_leads(raw_csv: str) -> str:
+          try:
+              lines = [l.strip() for l in raw_csv.strip().split('\n') if l.strip()]
+              if not lines:
+                  return ""
+              header = lines[0].lower()
+              if any(h in header for h in ('name', 'email', 'company', 'contact')):
+                  lines = lines[1:]
+              return '\n'.join(lines)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = parse_leads(raw_csv)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - raw_csv
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_raw_csv
+  - out_leads
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_scored_leads
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_ready_emails
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_leads
+    outputs:
+      lead:
+        from: tool_3.out_lead
+      is_empty:
+        from: tool_4.out_is_empty
+      i:
+        from:
+        - set_4.out_i
+        - set_8.out_i
+      company_name:
+        from: tool_5.out_company_name
+      company_info:
+        from: tool_6.out_company_info
+      enrichment:
+        from: gen_1.out_enrichment
+      score_text:
+        from: gen_2.out_score_text
+      fit_gate:
+        from: gen_3.out_fit_gate
+      email:
+        from: gen_4.out_email
+      entry:
+        from: tool_7.out_entry
+      _:
+        from:
+        - tool_8.out__
+        - set_7.out__
+      scored_leads:
+        from: set_5.out_scored_leads
+      ready_emails:
+        from: set_6.out_ready_emails
+    subgraph:
+      nodes:
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@leads'
+          - '@i + 1'
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(leads, i + 1)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_leads
+        - in_i
+        - out_lead
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: isblank
+          backend: kernel
+          arguments:
+          - '@lead'
+          code: |
+            def isblank(value: str) -> str:
+                """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+                return 'true' if str(value).strip() == '' else 'false'
+            _spl_result = isblank(lead)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_lead
+        - out_is_empty
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_leads'
+        ports:
+        - trigger
+        - complete
+        - in_max_leads
+        - out_i
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: extract_company_name
+          backend: kernel
+          arguments:
+          - '@lead'
+          code: |
+            def extract_company_name(lead: str) -> str:
+                try:
+                    # Expects CSV row: "Full Name, Company, email, ..."
+                    parts = [p.strip() for p in lead.split(',')]
+                    return parts[1] if len(parts) > 1 else parts[0]
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = extract_company_name(lead)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - lead
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_lead
+        - out_company_name
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: web_search
+          backend: kernel
+          arguments:
+          - '@company_name'
+          code: |
+            import re
+
+            def web_search(query: str) -> str:
+                """WEB_SEARCH(query) — search the web via DuckDuckGo, return top-5 results.
+
+                Accepts a plain query string or a YAML/prefixed decision block:
+                    'search: what is quantum computing'   → extracts the query after 'search:'
+                    'search_query: ...'                   → extracts the search_query field
+
+                Usage in SPL:
+                    CALL web_search(@query) INTO @results;
+                    CALL web_search(@decision) INTO @results;
+
+                Requires: pip install ddgs   (or pip install duckduckgo_search)
+                """
+                import warnings
+                try:
+                    from ddgs import DDGS
+                except ImportError:
+                    try:
+                        from duckduckgo_search import DDGS
+                    except ImportError:
+                        return 'web_search unavailable: install ddgs (pip install ddgs)'
+                q = str(query).strip()
+                m = re.search('search_query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if not m:
+                    m = re.search('^search\\s*:\\s*(.+)$', q, re.MULTILINE | re.IGNORECASE)
+                if not m:
+                    m = re.search('(?<!\\w)query\\s*:\\s*["\\\']?([^"\\\'\\n]+)["\\\']?', q)
+                if m:
+                    q = m.group(1).strip()
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('ignore', RuntimeWarning)
+                        results = DDGS().text(q, max_results=5)
+                    if not results:
+                        return f'No results found for: {q}'
+                    lines = []
+                    for i, r in enumerate(results, 1):
+                        title = r.get('title', '')
+                        url = r.get('href', '')
+                        body = r.get('body', '')
+                        lines.append(f'[{i}] {title}\n    URL: {url}\n    {body}')
+                    return '\n\n'.join(lines)
+                except Exception as e:
+                    return f'Search error: {e}'
+            _spl_result = web_search(company_name)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - query
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_company_name
+        - out_company_info
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: enrich_lead_context
+          params:
+          - lead
+          - company_info
+          prompt_inline: |-
+            You are a sales intelligence analyst. Synthesize a concise company context profile (3-5 sentences).
+
+              Prospect record: {{in_lead}}
+              Web research: {{in_company_info}}
+
+              Cover: what the company does, its target market, company size or funding stage,
+              recent notable developments, and likely pain points relevant to outreach.
+              Be specific and factual — avoid generic filler.
+          arguments:
+          - '@lead'
+          - '@company_info'
+        ports:
+        - trigger
+        - complete
+        - in_lead
+        - in_company_info
+        - out_enrichment
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: score_lead_fit
+          params:
+          - lead
+          - enrichment
+          prompt_inline: |-
+            You are a B2B sales qualification expert. Evaluate this prospect''s fit.
+
+              Prospect: {{in_lead}}
+              Company context: {{in_enrichment}}
+
+              Score from 0-10 based on:
+              - Strategic alignment with typical SaaS or service offerings
+              - Signals of budget authority or decision-making power
+              - Timing and urgency indicators
+
+              Provide 2 sentences of rationale, then end your response with exactly:
+              {"score": <0-10>, "tier": "<high|medium|low>"}
+          arguments:
+          - '@lead'
+          - '@enrichment'
+        ports:
+        - trigger
+        - complete
+        - in_lead
+        - in_enrichment
+        - out_score_text
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: classify_fit_score
+          params:
+          - score_text
+          prompt_inline: |-
+            Given this lead scoring result: {{in_score_text}}
+
+              Return exactly one word: "high" if the numeric score is 7 or above, or "low" if below 7.
+              Output only that single word with no punctuation or explanation.
+          arguments:
+          - '@score_text'
+        ports:
+        - trigger
+        - complete
+        - in_score_text
+        - out_fit_gate
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'high')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: generate_cold_email
+          params:
+          - lead
+          - enrichment
+          - score_text
+          prompt_inline: |-
+            You are an expert B2B copywriter. Write a personalized cold outreach email for this prospect.
+
+              Lead: {{in_lead}}
+              Company context: {{in_enrichment}}
+              Fit analysis: {{in_score_text}}
+
+              Requirements:
+              - Under 150 words
+              - Reference one specific, researched detail about the company
+              - Lead with value delivered to them, not features of your product
+              - Close with a single low-friction call to action
+
+              Format:
+              Subject: <subject line>
+
+              <email body>
+          arguments:
+          - '@lead'
+          - '@enrichment'
+          - '@score_text'
+        ports:
+        - trigger
+        - complete
+        - in_lead
+        - in_enrichment
+        - in_score_text
+        - out_email
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: format_result_entry
+          backend: kernel
+          arguments:
+          - '@lead'
+          - '@enrichment'
+          - '@score_text'
+          - '@email'
+          code: |
+            import json
+            def format_result_entry(lead: str, enrichment: str, score: str, email: str) -> str:
+                try:
+                    return json.dumps(
+                        {"lead": lead, "enrichment": enrichment, "score": score, "email": email},
+                        ensure_ascii=False
+                    )
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = format_result_entry(lead, enrichment, score_text, email)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - lead
+          - enrichment
+          - score
+          - email
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_lead
+        - in_enrichment
+        - in_score_text
+        - in_email
+        - out_entry
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: append_to_file
+          backend: kernel
+          arguments:
+          - '@output_path'
+          - '@entry'
+          code: |
+            import os
+            def append_to_file(path: str, content: str) -> str:
+                try:
+                    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+                    with open(path, 'a', encoding='utf-8') as f:
+                        f.write(content + '\n')
+                    return "ok"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = append_to_file(output_path, entry)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - path
+          - content
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_output_path
+        - in_entry
+        - out__
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_scored_leads + @in_lead + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_scored_leads
+        - in_lead
+        - out_scored_leads
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_ready_emails + @in_email + ''\n---\n'''
+        ports:
+        - trigger
+        - complete
+        - in_ready_emails
+        - in_email
+        - out_ready_emails
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''skipped'''
+        ports:
+        - trigger
+        - complete
+        - out__
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_3.out_lead
+        target: tool_4.in_lead
+        type: binds
+      - source: tool_4.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_4.out_is_empty
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_4.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_3.out_lead
+        target: tool_5.in_lead
+        type: binds
+      - source: tool_5.complete
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_5.out_company_name
+        target: tool_6.in_company_name
+        type: binds
+      - source: tool_6.complete
+        target: gen_1.trigger
+        type: triggers
+      - source: tool_3.out_lead
+        target: gen_1.in_lead
+        type: binds
+      - source: tool_6.out_company_info
+        target: gen_1.in_company_info
+        type: binds
+      - source: gen_1.complete
+        target: gen_2.trigger
+        type: triggers
+      - source: tool_3.out_lead
+        target: gen_2.in_lead
+        type: binds
+      - source: gen_1.out_enrichment
+        target: gen_2.in_enrichment
+        type: binds
+      - source: gen_2.complete
+        target: gen_3.trigger
+        type: triggers
+      - source: gen_2.out_score_text
+        target: gen_3.in_score_text
+        type: binds
+      - source: gen_3.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: gen_3.out_fit_gate
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: gen_4.trigger
+        type: triggers
+      - source: tool_3.out_lead
+        target: gen_4.in_lead
+        type: binds
+      - source: gen_1.out_enrichment
+        target: gen_4.in_enrichment
+        type: binds
+      - source: gen_2.out_score_text
+        target: gen_4.in_score_text
+        type: binds
+      - source: gen_4.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_3.out_lead
+        target: tool_7.in_lead
+        type: binds
+      - source: gen_1.out_enrichment
+        target: tool_7.in_enrichment
+        type: binds
+      - source: gen_2.out_score_text
+        target: tool_7.in_score_text
+        type: binds
+      - source: gen_4.out_email
+        target: tool_7.in_email
+        type: binds
+      - source: tool_7.complete
+        target: tool_8.trigger
+        type: triggers
+      - source: tool_7.out_entry
+        target: tool_8.in_entry
+        type: binds
+      - source: tool_8.complete
+        target: set_5.trigger
+        type: triggers
+      - source: tool_3.out_lead
+        target: set_5.in_lead
+        type: binds
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+      - source: gen_4.out_email
+        target: set_6.in_email
+        type: binds
+      - source: eval_2.fail
+        target: set_7.trigger
+        type: triggers
+      - source: set_6.complete
+        target: set_8.trigger
+        type: triggers
+      - source: set_7.complete
+        target: set_8.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_leads
+  - in_i
+  - in_max_leads
+  - in_output_path
+  - in_scored_leads
+  - in_ready_emails
+  - out_lead
+  - out_is_empty
+  - out_i
+  - out_company_name
+  - out_company_info
+  - out_enrichment
+  - out_score_text
+  - out_fit_gate
+  - out_email
+  - out_entry
+  - out__
+  - out_scored_leads
+  - out_ready_emails
+- id: set_9
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''=== SCORED LEADS ===\n'' + @in_scored_leads + ''\n=== READY-TO-SEND
+      EMAILS ===\n'' + @in_ready_emails'
+  ports:
+  - trigger
+  - complete
+  - in_scored_leads
+  - in_ready_emails
+  - out_final_output
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_final_output
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_lead_list_path
+  target: tool_1.in_lead_list_path
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_raw_csv
+  target: tool_2.in_raw_csv
+  type: binds
+- source: tool_2.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: loop_1.trigger
+  type: triggers
+- source: tool_2.out_leads
+  target: loop_1.in_leads
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_max_leads
+  target: loop_1.in_max_leads
+  type: binds
+- source: wf_entry.out_output_path
+  target: loop_1.in_output_path
+  type: binds
+- source: set_2.out_scored_leads
+  target: loop_1.in_scored_leads
+  type: binds
+- source: set_3.out_ready_emails
+  target: loop_1.in_ready_emails
+  type: binds
+- source: loop_1.exit
+  target: set_9.trigger
+  type: triggers
+- source: loop_1.out_scored_leads
+  target: set_9.in_scored_leads
+  type: binds
+- source: loop_1.out_ready_emails
+  target: set_9.in_ready_emails
+  type: binds
+- source: set_9.out_final_output
+  target: wf_exit.in_final_output
+  type: binds
+- source: set_9.complete
+  target: wf_exit.trigger
+  type: triggers

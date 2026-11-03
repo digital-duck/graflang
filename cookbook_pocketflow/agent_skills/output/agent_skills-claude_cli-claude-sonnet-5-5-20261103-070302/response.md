@@ -1,0 +1,9 @@
+I don't see a request in your message, only the project context and the Executive Brief format (3-bullet summary, risks, recommended next action).
+
+What would you like me to cover? A few options based on the current repo state:
+
+- **Status brief:** where GraphLang stands today. Many files are modified or untracked (new cookbook recipes, `decision.py`, `compactify.py`, `trace.py`, `outside.py`, and several test files), and none of it is committed.
+- **Gap review:** a summary of open vs. resolved items from the gap table in `readme-design.md`.
+- **Specific task:** code, tests, or docs work, such as running the offline test suite and reporting results.
+
+Tell me which, and I'll write it up in the brief format if you want that.

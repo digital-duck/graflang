@@ -1,0 +1,114 @@
+-- ─────────────────────────────────────────────
+-- TOOL_API: deterministic SQLite tools
+-- ─────────────────────────────────────────────
+
+CREATE TOOL_API read_db_schema(db_path TEXT) RETURNS TEXT AS PYTHON $$
+import sqlite3
+def read_db_schema(db_path: str) -> str:
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT name, sql FROM sqlite_master WHERE type=''table'' ORDER BY name")
+        rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return "error: no tables found"
+        return "\n\n".join(sql for _, sql in rows if sql)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API execute_sql(db_path TEXT, sql TEXT) RETURNS TEXT AS PYTHON $$
+import sqlite3, json
+def execute_sql(db_path: str, sql: str) -> str:
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(sql)
+        cols = [d[0] for d in cur.description] if cur.description else []
+        if cols:
+            rows = cur.fetchall()
+            result = json.dumps([dict(zip(cols, r)) for r in rows], default=str)
+        else:
+            result = json.dumps({"rows_affected": cur.rowcount})
+        conn.commit()
+        conn.close()
+        return result
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+-- ─────────────────────────────────────────────
+-- CREATE FUNCTION: probabilistic LLM steps
+-- ─────────────────────────────────────────────
+
+CREATE FUNCTION sql_from_nl(schema TEXT, question TEXT)
+RETURNS TEXT AS $$
+  You are a SQL expert. Given the SQLite database schema below, write a single SQL query
+  that answers the user''s question. Return only the raw SQL — no markdown, no explanation.
+
+  Schema:
+  {schema}
+
+  Question: {question}
+$$;
+
+CREATE FUNCTION debug_sql(sql TEXT, error_msg TEXT, schema TEXT)
+RETURNS TEXT AS $$
+  You are a SQL debugging expert. The SQLite query below failed with an error.
+  Rewrite the query to fix the problem. Return only the corrected SQL — no markdown, no explanation.
+
+  Schema:
+  {schema}
+
+  Failing SQL:
+  {sql}
+
+  Error:
+  {error_msg}
+$$;
+
+-- ─────────────────────────────────────────────
+-- WORKFLOW
+-- ─────────────────────────────────────────────
+
+WORKFLOW text2sql
+  INPUT @db_path TEXT := "database.db"
+  INPUT @question TEXT := "How many rows are in each table?"
+  INPUT @max_attempts INTEGER := 3
+  OUTPUT @result TEXT
+DO
+  @attempt    := 0;
+  @result     := "";
+  @exec_ok    := "false";
+  @exec_result := "";
+
+  -- B: Read DB Schema
+  CALL read_db_schema(@db_path) INTO @schema;
+
+  -- C: Generate initial SQL from NL question
+  GENERATE sql_from_nl(@schema, @question) INTO @sql;
+
+  -- D→E→G→H loop: execute, check, debug if needed
+  WHILE @attempt < @max_attempts DO
+    CALL execute_sql(@db_path, @sql) INTO @exec_result;
+    EVALUATE @exec_result WHEN contains("error:") THEN
+      -- execution failed: increment attempt counter, then debug (G→H)
+      @attempt := @attempt + 1;
+      GENERATE debug_sql(@sql, @exec_result, @schema) INTO @sql;
+    ELSE
+      -- E→F: execution succeeded
+      @result  := @exec_result;
+      @exec_ok := "true";
+      @attempt := @max_attempts;    -- force-exit loop
+    END;
+  END;
+
+  -- F: return results on success; I: surface failure message on exhaustion
+  EVALUATE @exec_ok WHEN contains("true") THEN
+    @result := @result;
+  ELSE
+    @result := "SQL generation failed after all attempts. Last error: " + @exec_result;
+  END;
+  RETURN @result WITH status = "complete";
+END;

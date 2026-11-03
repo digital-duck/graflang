@@ -121,25 +121,26 @@ def test_slice_stats():
 
 
 def test_slice_by_context_keys():
-    """Test slicing by context key usage."""
+    """The slicer drops a policy only when its scope (principal, action, resource) cannot match the guard's question; context keys never
+    drop one (a `forbid` that reads other keys must still run), so a guard that asks the PII question keeps the PII policy and drops
+    the scopes that differ."""
     lexer = CedarLexer(MULTI_POLICY)
     tokens = lexer.tokenize()
     parser = CedarParser(tokens)
     policy_set = parser.parse()
-    
+
     slicer = PolicySlicer(policy_set)
-    
-    # Guard node that uses contains_pii context key
+
     guard_config = GuardNodeConfig(
         node_id="pii_guard",
         config={
             'action': 'Action::"generate"',
+            'resource': 'Model::"public-api"',
             'context_mapping': {'contains_pii': 'check_pii(@data)'},
         }
     )
-    
+
     sliced = slicer.slice_for_guard(guard_config)
-    
-    # Should include pii-policy
-    assert len(sliced.policies) >= 1
-    assert any(p.annotations[0].value == "pii-policy" for p in sliced.policies if p.annotations)
+
+    names = [p.annotations[0].value for p in sliced.policies if p.annotations]
+    assert names == ["pii-policy"]

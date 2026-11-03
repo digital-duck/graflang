@@ -1,0 +1,7 @@
+{
+  "graph": "notes_digest",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {},
+  "started": "2026-11-03T01:24:42"
+}

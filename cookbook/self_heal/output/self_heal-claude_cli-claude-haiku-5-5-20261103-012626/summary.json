@@ -1,0 +1,44 @@
+{
+  "steps": 6,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 79,
+    "output_tokens": 15,
+    "cost_usd": 0.0,
+    "ms": 2200
+  },
+  "nodes": {
+    "extract": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2201
+    },
+    "heal": {
+      "type": "LOOP",
+      "n": 1,
+      "ms": 1
+    },
+    "check": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "passed": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "good": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "good_out": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

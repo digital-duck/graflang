@@ -71,6 +71,19 @@ def browse_page() -> None:
             if b.button("Use in Create", key=f"browse_seed_{i}", help="start a new app from this one: the Create chat shows it to the model as an example"):
                 st.session_state["create_seed"] = e.key
                 st.switch_page(st.session_state["pages"]["create"])
+            with st.expander("Use as a part of another workflow"):
+                try:
+                    from graphlang.grafr.partinfo import describe, part_summary, use_snippet
+                    info = part_summary(e.graph)
+                    root = str(e.key).partition("/")[0] if "/" in str(e.key) else "cookbook"
+                    root = root if root in ("apps", "cookbook", "solvers", "pocketflow") else "cookbook"
+                    st.caption("It would " + describe(info["capabilities"]).replace("touches nothing outside", "touch nothing outside the graph"))
+                    for io_ in info["inputs"] + info["outputs"]:
+                        if io_.get("description"):
+                            st.caption(f"`{io_['name']}`: {io_['description']}")
+                    st.code(use_snippet(f"{root}:{e.graph.parent.name}", e.graph.parent.name, info), language="yaml")
+                except (ValueError, OSError) as err:
+                    st.caption(f"cannot read it as a part: {err}")
             with c.expander("Look inside"):
                 if e.readme:
                     st.markdown(e.readme[:3000])

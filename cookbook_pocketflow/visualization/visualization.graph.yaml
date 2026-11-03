@@ -1,0 +1,201 @@
+version: 1.0-graph
+workflow:
+  name: order_fulfillment
+  inputs:
+  - name: order_data
+    type: TEXT
+    default: '{"payment":{"card_number":"4111111111111111","expiry":"12/26","cvv":"123","amount":99.99},"items":[{"name":"SPL
+      Book","sku":"SPL-001","qty":1,"available":true}],"shipping_address":"123 Main
+      St, San Francisco, CA 94105"}'
+  - name: max_payment_retries
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: order_status
+    type: TEXT
+resources:
+  procedures:
+    payment_workflow: ./visualization.spl
+    inventory_workflow: ./visualization.spl
+    shipping_workflow: ./visualization.spl
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_order_data
+  - out_max_payment_retries
+- id: call_1
+  type: GENERATE
+  config:
+    procedure_ref: procedures.payment_workflow
+    arguments:
+    - '@order_data'
+    - '@max_payment_retries'
+  ports:
+  - trigger
+  - complete
+  - in_order_data
+  - in_max_payment_retries
+  - out_payment_result
+- id: call_2
+  type: GENERATE
+  config:
+    procedure_ref: procedures.inventory_workflow
+    arguments:
+    - '@order_data'
+  ports:
+  - trigger
+  - complete
+  - in_order_data
+  - out_inventory_result
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@inventory_result'
+    - '''reservation_id'''
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(inventory_result, 'reservation_id')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_inventory_result
+  - out_reservation_id
+- id: call_3
+  type: GENERATE
+  config:
+    procedure_ref: procedures.shipping_workflow
+    arguments:
+    - '@order_data'
+    - '@reservation_id'
+  ports:
+  - trigger
+  - complete
+  - in_order_data
+  - in_reservation_id
+  - out_shipping_result
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: build_order_status
+    backend: kernel
+    arguments:
+    - '@payment_result'
+    - '@inventory_result'
+    - '@shipping_result'
+    code: |
+      import json
+      def build_order_status(payment_result: str, inventory_result: str, shipping_result: str) -> str:
+          def safe_parse(s):
+              try:
+                  return json.loads(s)
+              except Exception:
+                  return {"raw": s}
+          try:
+              return json.dumps({
+                  "payment": safe_parse(payment_result),
+                  "inventory": safe_parse(inventory_result),
+                  "shipping": safe_parse(shipping_result),
+                  "order_status": "complete"
+              }, indent=2)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = build_order_status(payment_result, inventory_result, shipping_result)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - payment_result
+    - inventory_result
+    - shipping_result
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_payment_result
+  - in_inventory_result
+  - in_shipping_result
+  - out_order_status
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_order_status
+edges:
+- source: wf_entry.entry
+  target: call_1.trigger
+  type: triggers
+- source: wf_entry.out_order_data
+  target: call_1.in_order_data
+  type: binds
+- source: wf_entry.out_max_payment_retries
+  target: call_1.in_max_payment_retries
+  type: binds
+- source: call_1.complete
+  target: call_2.trigger
+  type: triggers
+- source: wf_entry.out_order_data
+  target: call_2.in_order_data
+  type: binds
+- source: call_2.complete
+  target: tool_1.trigger
+  type: triggers
+- source: call_2.out_inventory_result
+  target: tool_1.in_inventory_result
+  type: binds
+- source: tool_1.complete
+  target: call_3.trigger
+  type: triggers
+- source: wf_entry.out_order_data
+  target: call_3.in_order_data
+  type: binds
+- source: tool_1.out_reservation_id
+  target: call_3.in_reservation_id
+  type: binds
+- source: call_3.complete
+  target: tool_2.trigger
+  type: triggers
+- source: call_1.out_payment_result
+  target: tool_2.in_payment_result
+  type: binds
+- source: call_2.out_inventory_result
+  target: tool_2.in_inventory_result
+  type: binds
+- source: call_3.out_shipping_result
+  target: tool_2.in_shipping_result
+  type: binds
+- source: tool_2.out_order_status
+  target: wf_exit.in_order_status
+  type: binds
+- source: tool_2.complete
+  target: wf_exit.trigger
+  type: triggers

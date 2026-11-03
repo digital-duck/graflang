@@ -1,0 +1,10 @@
+{
+  "graph": "rag",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "documents": "[\"cookbook_pocketflow/rag/data/doc1.txt\"]",
+    "query": "What is FAISS for?"
+  },
+  "started": "2026-11-03T07:17:58"
+}

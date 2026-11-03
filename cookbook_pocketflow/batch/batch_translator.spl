@@ -1,0 +1,113 @@
+CREATE TOOL_API parse_target_languages(markdown_content TEXT) RETURNS TEXT AS PYTHON $$
+import re
+def parse_target_languages(markdown_content: str) -> str:
+    try:
+        match = re.match(r'^---\s*\n(.*?)\n---\s*\n', markdown_content, re.DOTALL)
+        if match:
+            fm = match.group(1)
+            m = re.search(r'target_languages\s*:\s*\[([^\]]+)\]', fm)
+            if m:
+                return ','.join(l.strip().strip('"\'') for l in m.group(1).split(','))
+            m = re.search(r'target_languages\s*:\s*\n((?:[ \t]+-[ \t]+\S+\n?)+)', fm)
+            if m:
+                return ','.join(re.findall(r'-\s+(\S+)', m.group(1)))
+        return "error: no target_languages in front matter"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API build_output_path(output_dir TEXT, language TEXT) RETURNS TEXT AS PYTHON $$
+import os, re
+def build_output_path(output_dir: str, language: str) -> str:
+    try:
+        safe = re.sub(r'[^\w\-]', '_', language.strip().lower())
+        return os.path.join(output_dir, safe + ".md")
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION translate_markdown(content TEXT, target_language TEXT)
+RETURNS TEXT AS $$
+  Translate the following Markdown document into {target_language}.
+  Preserve all Markdown formatting exactly: headings (#, ##, ###), bold (**),
+  italic (*), code spans (`), fenced code blocks (```), tables (|), bullet lists (-),
+  numbered lists, blockquotes (>), and hyperlinks ([text](url)).
+  Translate only natural-language prose. Do not translate code, URLs, or variable names.
+  Return the complete translated document with no preamble or explanation.
+  Document:
+  {content}
+$$;
+
+CREATE FUNCTION check_format_preserved(original TEXT, translation TEXT)
+RETURNS TEXT AS $$
+  Compare the Markdown structure of the original document and its translation.
+  Verify that every heading level, fenced code block, table, bullet list, numbered list,
+  bold/italic marker, blockquote, and hyperlink present in the original also appears in
+  the translation in the same relative positions and quantities.
+  Respond with exactly one word: "yes" if all formatting is preserved, "no" otherwise.
+  Original:
+  {original}
+  Translation:
+  {translation}
+$$;
+
+WORKFLOW translate_and_save
+  INPUT @content TEXT := "Machine learning is transforming every industry. Models trained on large datasets can now perform tasks that once required human expertise, from image recognition to natural language understanding."
+  INPUT @target_language TEXT := "French"
+  INPUT @output_dir TEXT := "cookbook-pocketflow/052_batch/output"
+  INPUT @max_iterations INTEGER := 3
+  OUTPUT @result TEXT
+DO
+  @i := 0;
+  @translation := "";
+  @gate := "no";
+  @saved_path := "";
+  WHILE @i < @max_iterations DO
+    GENERATE translate_markdown(@content, @target_language) INTO @translation;
+    GENERATE check_format_preserved(@content, @translation) INTO @gate;
+    EVALUATE @gate WHEN contains("yes") THEN
+      CALL build_output_path(@output_dir, @target_language) INTO @saved_path;
+      CALL write_file(@saved_path, @translation, "w") INTO @write_status;
+      @i := @max_iterations;
+    ELSE
+      @i := @i + 1;
+    END;
+  END;
+  @result := @target_language + ": " + @saved_path;
+  RETURN @result WITH status = "complete";
+END;
+
+WORKFLOW markdown_translator
+  INPUT @input_file TEXT := "cookbook-pocketflow/052_batch/document.md"
+  INPUT @output_dir TEXT := "cookbook-pocketflow/052_batch/translations"
+  INPUT @languages TEXT := ""
+  INPUT @max_iterations INTEGER := 3
+  OUTPUT @report TEXT
+DO
+  CALL read_file(@input_file) INTO @content;
+
+  CALL parse_target_languages(@content) INTO @parsed_langs;
+  EVALUATE @parsed_langs WHEN contains("error:") THEN
+    @lang_list := @languages;
+  ELSE
+    @lang_list := @parsed_langs;
+  END;
+
+  CALL split_part(@lang_list, ",", "1", "true") INTO @lang1;
+  CALL split_part(@lang_list, ",", "2", "true") INTO @lang2;
+  CALL split_part(@lang_list, ",", "3", "true") INTO @lang3;
+
+  CALL make_dir(@output_dir) INTO @dir_status;
+
+  CALL PARALLEL
+    translate_and_save(@content, @lang1, @output_dir, @max_iterations) INTO @result1,
+    translate_and_save(@content, @lang2, @output_dir, @max_iterations) INTO @result2,
+    translate_and_save(@content, @lang3, @output_dir, @max_iterations) INTO @result3
+  END;
+
+  @report := "Translation complete:" + "
+" + @result1 + "
+" + @result2 + "
+" + @result3;
+  RETURN @report WITH status = "complete";
+END;

@@ -1,0 +1,408 @@
+version: 1.0-graph
+workflow:
+  name: mcp_math_agent
+  inputs:
+  - name: question
+    type: TEXT
+    default: What is the square root of 144?
+  - name: mcp_mode
+    type: TEXT
+    default: 'false'
+  - name: mcp_server_url
+    type: TEXT
+    default: ''
+  outputs:
+  - name: answer
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_question
+  - out_mcp_mode
+  - out_mcp_server_url
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: discover_mcp_tools
+    backend: kernel
+    arguments:
+    - '@mcp_server_url'
+    code: |
+      import json, urllib.request
+
+      def discover_mcp_tools(mcp_server_url: str) -> str:
+          try:
+              if not mcp_server_url.strip():
+                  tools = [
+                      {"name": "calculator", "description": "Evaluates arithmetic expressions", "params": ["expression"]},
+                      {"name": "sqrt",       "description": "Computes square root of a number",  "params": ["value"]},
+                      {"name": "power",      "description": "Raises base to exponent",            "params": ["base", "exponent"]},
+                      {"name": "factorial",  "description": "Computes n factorial",               "params": ["n"]}
+                  ]
+                  return json.dumps(tools)
+              url = mcp_server_url.rstrip("/") + "/tools/list"
+              req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  data = json.loads(resp.read().decode())
+                  return json.dumps(data.get("tools", []))
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = discover_mcp_tools(mcp_server_url)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - mcp_server_url
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_mcp_server_url
+  - out_tool_list
+- id: gen_1
+  type: GENERATE
+  config:
+    function: select_tool_and_params
+    params:
+    - question
+    - tool_list
+    prompt_inline: |-
+      You are a math assistant. Given the user''s question and the list of available tools,
+        select the single most appropriate tool and extract all required parameters from the question.
+
+        User question: {{in_question}}
+
+        Available tools (JSON array): {{in_tool_list}}
+
+        Respond with ONLY a valid JSON object in exactly this format:
+        {{"tool": "<tool_name>", "params": {{<param_key>: "<param_value>"}}}}
+
+        Output the JSON object only — no explanation, no markdown fences.
+    arguments:
+    - '@question'
+    - '@tool_list'
+  ports:
+  - trigger
+  - complete
+  - in_question
+  - in_tool_list
+  - out_tool_selection
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''tool'''
+  ports:
+  - trigger
+  - complete
+  - out_key_tool
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''params'''
+  ports:
+  - trigger
+  - complete
+  - out_key_params
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tool_selection'
+    - '@key_tool'
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tool_selection, key_tool)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_tool_selection
+  - in_key_tool
+  - out_tool_name
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tool_selection'
+    - '@key_params'
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tool_selection, key_params)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_tool_selection
+  - in_key_params
+  - out_tool_params
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'true')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: invoke_mcp_tool
+    backend: kernel
+    arguments:
+    - '@tool_name'
+    - '@tool_params'
+    - '@mcp_server_url'
+    code: |
+      import json, urllib.request
+
+      def invoke_mcp_tool(tool_name: str, params_json: str, mcp_server_url: str) -> str:
+          try:
+              params = json.loads(params_json) if params_json.strip() else {}
+              payload = json.dumps({"name": tool_name, "arguments": params}).encode()
+              url = mcp_server_url.rstrip("/") + "/tools/call"
+              req = urllib.request.Request(
+                  url, data=payload,
+                  headers={"Content-Type": "application/json"},
+                  method="POST"
+              )
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  data = json.loads(resp.read().decode())
+                  content = data.get("content", [])
+                  if isinstance(content, list) and content:
+                      return str(content[0].get("text", ""))
+                  return json.dumps(data)
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = invoke_mcp_tool(tool_name, tool_params, mcp_server_url)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tool_name
+    - params_json
+    - mcp_server_url
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_tool_name
+  - in_tool_params
+  - in_mcp_server_url
+  - out_tool_result
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: invoke_local_tool
+    backend: kernel
+    arguments:
+    - '@tool_name'
+    - '@tool_params'
+    code: |
+      import json, math
+
+      def invoke_local_tool(tool_name: str, params_json: str) -> str:
+          try:
+              params = json.loads(params_json) if params_json.strip() else {}
+              name = tool_name.lower().strip()
+              if name == "calculator":
+                  expr = params.get("expression", "")
+                  safe_ns = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
+                  return str(eval(expr, {"__builtins__": {}}, safe_ns))
+              elif name == "sqrt":
+                  return str(math.sqrt(float(params.get("value", 0))))
+              elif name == "power":
+                  return str(math.pow(float(params.get("base", 0)), float(params.get("exponent", 1))))
+              elif name == "factorial":
+                  return str(math.factorial(int(params.get("n", 0))))
+              else:
+                  return "error: unknown local tool " + tool_name
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = invoke_local_tool(tool_name, tool_params)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tool_name
+    - params_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_tool_name
+  - in_tool_params
+  - out_tool_result
+- id: gen_2
+  type: GENERATE
+  config:
+    function: format_final_answer
+    params:
+    - question
+    - tool_result
+    prompt_inline: |-
+      You are a helpful math assistant. A user asked the following question:
+        {{in_question}}
+
+        The computation tool returned this result: {{in_tool_result}}
+
+        Write a clear, concise answer to the user''s question using the computation result.
+        If the result starts with "error:", explain that the computation could not be completed
+        and suggest how the user might rephrase or simplify the question.
+    arguments:
+    - '@question'
+    - '@tool_result'
+  ports:
+  - trigger
+  - complete
+  - in_question
+  - in_tool_result
+  - out_answer
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_answer
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_mcp_server_url
+  target: tool_1.in_mcp_server_url
+  type: binds
+- source: tool_1.complete
+  target: gen_1.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: gen_1.in_question
+  type: binds
+- source: tool_1.out_tool_list
+  target: gen_1.in_tool_list
+  type: binds
+- source: gen_1.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: tool_2.trigger
+  type: triggers
+- source: gen_1.out_tool_selection
+  target: tool_2.in_tool_selection
+  type: binds
+- source: set_1.out_key_tool
+  target: tool_2.in_key_tool
+  type: binds
+- source: tool_2.complete
+  target: tool_3.trigger
+  type: triggers
+- source: gen_1.out_tool_selection
+  target: tool_3.in_tool_selection
+  type: binds
+- source: set_2.out_key_params
+  target: tool_3.in_key_params
+  type: binds
+- source: tool_3.complete
+  target: eval_1.trigger
+  type: triggers
+- source: wf_entry.out_mcp_mode
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: tool_4.trigger
+  type: triggers
+- source: tool_2.out_tool_name
+  target: tool_4.in_tool_name
+  type: binds
+- source: tool_3.out_tool_params
+  target: tool_4.in_tool_params
+  type: binds
+- source: wf_entry.out_mcp_server_url
+  target: tool_4.in_mcp_server_url
+  type: binds
+- source: eval_1.fail
+  target: tool_5.trigger
+  type: triggers
+- source: tool_2.out_tool_name
+  target: tool_5.in_tool_name
+  type: binds
+- source: tool_3.out_tool_params
+  target: tool_5.in_tool_params
+  type: binds
+- source: tool_4.complete
+  target: gen_2.trigger
+  type: triggers
+- source: tool_5.complete
+  target: gen_2.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: gen_2.in_question
+  type: binds
+- source: tool_4.out_tool_result
+  target: gen_2.in_tool_result
+  type: binds
+- source: tool_5.out_tool_result
+  target: gen_2.in_tool_result
+  type: binds
+- source: gen_2.out_answer
+  target: wf_exit.in_answer
+  type: binds
+- source: gen_2.complete
+  target: wf_exit.trigger
+  type: triggers

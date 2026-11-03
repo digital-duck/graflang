@@ -1,0 +1,1 @@
+Nice to meet you, Wen, and Go is a great choice for clean, fast, readable code.

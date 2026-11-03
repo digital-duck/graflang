@@ -1,0 +1,1012 @@
+version: 1.0-graph
+workflow:
+  name: web_crawler_analyzer
+  inputs:
+  - name: url
+    type: TEXT
+    default: https://docs.python.org/3/library/os.html
+  - name: batch_size
+    type: TEXT
+    default: '5'
+  - name: max_pages
+    type: INTEGER
+    default: 20
+  - name: max_batches
+    type: INTEGER
+    default: 50
+  outputs:
+  - name: report
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_url
+  - out_batch_size
+  - out_max_pages
+  - out_max_batches
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: extract_domain
+    backend: kernel
+    arguments:
+    - '@url'
+    code: |
+      from urllib.parse import urlparse
+      def extract_domain(url: str) -> str:
+          try:
+              return urlparse(url.strip()).netloc or "error: no domain"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = extract_domain(url)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - url
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_url
+  - out_domain
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_url'
+  ports:
+  - trigger
+  - complete
+  - in_url
+  - out_queue
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_visited
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_page_collection
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_crawler_i
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_crawler_i, @crawler_i) < @in_max_pages
+    outputs:
+      q_status:
+        from: tool_2.out_q_status
+      crawler_i:
+        from:
+        - set_5.out_crawler_i
+        - set_7.out_crawler_i
+      current_url:
+        from: tool_3.out_current_url
+      queue:
+        from:
+        - tool_12.out_queue
+        - set_6.out_queue
+      visited:
+        from: tool_5.out_visited
+      html:
+        from: tool_6.out_html
+      page_data:
+        from: tool_7.out_page_data
+      page_text:
+        from: tool_8.out_page_text
+      found_links:
+        from: tool_9.out_found_links
+      page_collection:
+        from: tool_10.out_page_collection
+      new_links:
+        from: tool_11.out_new_links
+    subgraph:
+      nodes:
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: queue_is_empty
+          backend: kernel
+          arguments:
+          - '@queue'
+          code: |
+            def queue_is_empty(queue: str) -> str:
+                return "empty" if not any(u.strip() for u in queue.split("|||")) else "has_items"
+            _spl_result = queue_is_empty(queue)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - queue
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_queue
+        - out_q_status
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'empty')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_pages'
+        ports:
+        - trigger
+        - complete
+        - in_max_pages
+        - out_crawler_i
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: queue_pop_url
+          backend: kernel
+          arguments:
+          - '@queue'
+          code: |
+            def queue_pop_url(queue: str) -> str:
+                items = [u.strip() for u in queue.split("|||") if u.strip()]
+                return items[0] if items else ""
+            _spl_result = queue_pop_url(queue)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - queue
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_queue
+        - out_current_url
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: queue_remove_first
+          backend: kernel
+          arguments:
+          - '@queue'
+          code: |
+            def queue_remove_first(queue: str) -> str:
+                items = [u.strip() for u in queue.split("|||") if u.strip()]
+                return "|||".join(items[1:])
+            _spl_result = queue_remove_first(queue)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - queue
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_queue
+        - out_queue
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: visited_add
+          backend: kernel
+          arguments:
+          - '@visited'
+          - '@current_url'
+          code: |
+            def visited_add(visited: str, url: str) -> str:
+                items = set(u.strip() for u in visited.split("|||") if u.strip())
+                items.add(url.strip())
+                return "|||".join(sorted(items))
+            _spl_result = visited_add(visited, current_url)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - visited
+          - url
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_visited
+        - in_current_url
+        - out_visited
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: http_get
+          backend: kernel
+          arguments:
+          - '@current_url'
+          - '''15'''
+          code: |
+            def http_get(url: str, timeout: str='10') -> str:
+                """HTTP_GET(url [, timeout]) — fetch a URL and return response body as text.
+
+                Returns the HTTP response body on success, or an error message on failure.
+                Timeout is in seconds (default 10).
+
+                Usage in SPL:
+                    CALL http_get(@url) INTO @html;
+                    CALL http_get(@url, '30') INTO @response;
+
+                Requires: pip install requests
+
+                Deprecated: use CREATE TOOL_API with `import requests` in the kernel instead.
+                Scheduled for removal in spl-llm v3.2.
+                """
+                try:
+                    import requests
+                except ImportError:
+                    return 'http_get unavailable: install requests (pip install requests)'
+                try:
+                    resp = requests.get(str(url).strip(), timeout=float(timeout))
+                    resp.raise_for_status()
+                    return resp.text
+                except Exception as e:
+                    return f'HTTP error: {e}'
+            _spl_result = http_get(current_url, '15')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - url
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_current_url
+        - out_html
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: extract_text_and_links
+          backend: kernel
+          arguments:
+          - '@html'
+          - '@current_url'
+          - '@domain'
+          code: |
+            import json, re
+            from urllib.parse import urljoin, urlparse
+            def extract_text_and_links(html: str, base_url: str, domain: str) -> str:
+                try:
+                    if html.startswith("error:"):
+                        return json.dumps({"text": "", "links": ""})
+                    text = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html)).strip()[:2000]
+                    hrefs = re.findall(r'href=["\']([^"\']+)["\']', html, re.IGNORECASE)
+                    seen, links = set(), []
+                    for href in hrefs:
+                        abs_url = urljoin(base_url, href).split('#')[0].rstrip('/')
+                        parsed = urlparse(abs_url)
+                        if parsed.netloc == domain and parsed.scheme in ("http", "https") and abs_url not in seen:
+                            seen.add(abs_url)
+                            links.append(abs_url)
+                    return json.dumps({"text": text, "links": ",".join(links)})
+                except Exception as e:
+                    return json.dumps({"text": "", "links": ""})
+            _spl_result = extract_text_and_links(html, current_url, domain)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - html
+          - base_url
+          - domain
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_html
+        - in_current_url
+        - in_domain
+        - out_page_data
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@page_data'
+          - '''text'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(page_data, 'text')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_page_data
+        - out_page_text
+      - id: tool_9
+        type: SOLVE
+        config:
+          tool: json_get
+          backend: kernel
+          arguments:
+          - '@page_data'
+          - '''links'''
+          code: |
+            import json
+
+            def json_get(json_str: str, key: str) -> str:
+                """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+                Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+                ```json code fences before parsing, so raw LLM output works directly.
+                Returns '' if key not found or input is not valid JSON.
+                """
+                try:
+                    clean = str(json_str).replace('```json', '').replace('```', '').strip()
+                    obj = json.loads(clean)
+                    for part in str(key).split('.'):
+                        if isinstance(obj, dict):
+                            obj = obj.get(part, '')
+                        else:
+                            return ''
+                    return str(obj) if obj != '' else ''
+                except (json.JSONDecodeError, TypeError):
+                    return ''
+            _spl_result = json_get(page_data, 'links')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - json_str
+          - key
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_page_data
+        - out_found_links
+      - id: tool_10
+        type: SOLVE
+        config:
+          tool: pages_append
+          backend: kernel
+          arguments:
+          - '@page_collection'
+          - '@current_url'
+          - '@page_text'
+          code: |
+            def pages_append(collection: str, url: str, text: str) -> str:
+                entry = f"URL: {url}\nCONTENT: {text}"
+                return entry if not collection.strip() else collection + "\n|||PAGE|||\n" + entry
+            _spl_result = pages_append(page_collection, current_url, page_text)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - collection
+          - url
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_page_collection
+        - in_current_url
+        - in_page_text
+        - out_page_collection
+      - id: tool_11
+        type: SOLVE
+        config:
+          tool: filter_new_links
+          backend: kernel
+          arguments:
+          - '@found_links'
+          - '@visited'
+          - '@queue'
+          - '@domain'
+          code: |
+            from urllib.parse import urlparse
+            def filter_new_links(links: str, visited: str, queue: str, domain: str) -> str:
+                if not links.strip():
+                    return ""
+                seen = set(u.strip() for u in visited.split("|||") if u.strip())
+                queued = set(u.strip() for u in queue.split("|||") if u.strip())
+                result = []
+                for link in [l.strip() for l in links.split(",") if l.strip()]:
+                    if urlparse(link).netloc == domain and link not in seen and link not in queued:
+                        result.append(link)
+                return ",".join(result)
+            _spl_result = filter_new_links(found_links, visited, queue, domain)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - links
+          - visited
+          - queue
+          - domain
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_found_links
+        - in_visited
+        - in_queue
+        - in_domain
+        - out_new_links
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'http')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_12
+        type: SOLVE
+        config:
+          tool: queue_add_links
+          backend: kernel
+          arguments:
+          - '@queue'
+          - '@new_links'
+          code: |
+            def queue_add_links(queue: str, new_links: str) -> str:
+                existing = [u.strip() for u in queue.split("|||") if u.strip()]
+                additions = [l.strip() for l in new_links.split(",") if l.strip()]
+                seen = set(existing)
+                for a in additions:
+                    if a not in seen:
+                        existing.append(a)
+                        seen.add(a)
+                return "|||".join(existing)
+            _spl_result = queue_add_links(queue, new_links)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - queue
+          - new_links
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_queue
+        - in_new_links
+        - out_queue
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_queue'
+        ports:
+        - trigger
+        - complete
+        - in_queue
+        - out_queue
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_crawler_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_crawler_i
+        - out_crawler_i
+      edges:
+      - source: tool_2.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_2.out_q_status
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_5.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_3.trigger
+        type: triggers
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_3.out_current_url
+        target: tool_5.in_current_url
+        type: binds
+      - source: tool_5.complete
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_3.out_current_url
+        target: tool_6.in_current_url
+        type: binds
+      - source: tool_6.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_6.out_html
+        target: tool_7.in_html
+        type: binds
+      - source: tool_3.out_current_url
+        target: tool_7.in_current_url
+        type: binds
+      - source: tool_7.complete
+        target: tool_8.trigger
+        type: triggers
+      - source: tool_7.out_page_data
+        target: tool_8.in_page_data
+        type: binds
+      - source: tool_8.complete
+        target: tool_9.trigger
+        type: triggers
+      - source: tool_7.out_page_data
+        target: tool_9.in_page_data
+        type: binds
+      - source: tool_9.complete
+        target: tool_10.trigger
+        type: triggers
+      - source: tool_3.out_current_url
+        target: tool_10.in_current_url
+        type: binds
+      - source: tool_8.out_page_text
+        target: tool_10.in_page_text
+        type: binds
+      - source: tool_10.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: tool_9.out_found_links
+        target: tool_11.in_found_links
+        type: binds
+      - source: tool_5.out_visited
+        target: tool_11.in_visited
+        type: binds
+      - source: tool_4.out_queue
+        target: tool_11.in_queue
+        type: binds
+      - source: tool_11.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_11.out_new_links
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: tool_12.trigger
+        type: triggers
+      - source: tool_4.out_queue
+        target: tool_12.in_queue
+        type: binds
+      - source: tool_11.out_new_links
+        target: tool_12.in_new_links
+        type: binds
+      - source: eval_2.fail
+        target: set_6.trigger
+        type: triggers
+      - source: tool_4.out_queue
+        target: set_6.in_queue
+        type: binds
+      - source: tool_12.complete
+        target: set_7.trigger
+        type: triggers
+      - source: set_6.complete
+        target: set_7.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_queue
+  - in_max_pages
+  - in_visited
+  - in_domain
+  - in_page_collection
+  - in_crawler_i
+  - out_q_status
+  - out_crawler_i
+  - out_current_url
+  - out_queue
+  - out_visited
+  - out_html
+  - out_page_data
+  - out_page_text
+  - out_found_links
+  - out_page_collection
+  - out_new_links
+- id: tool_13
+  type: SOLVE
+  config:
+    tool: pages_to_batches
+    backend: kernel
+    arguments:
+    - '@page_collection'
+    - '@batch_size'
+    code: |
+      def pages_to_batches(pages: str, batch_size: str) -> str:
+          try:
+              size = max(1, int(batch_size))
+              page_list = [p.strip() for p in pages.split("|||PAGE|||") if p.strip()]
+              batches = ["\n---\n".join(page_list[i:i+size]) for i in range(0, len(page_list), size)]
+              return "|||BATCH|||".join(batches)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = pages_to_batches(page_collection, batch_size)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - pages
+    - batch_size
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_page_collection
+  - in_batch_size
+  - out_batches
+- id: set_8
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_batch_i
+- id: set_9
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_all_analyses
+- id: loop_2
+  type: LOOP
+  config:
+    condition: latest(@in_batch_i, @batch_i) < @in_max_batches
+    outputs:
+      batch:
+        from: tool_14.out_batch
+      batch_empty:
+        from: tool_15.out_batch_empty
+      batch_i:
+        from:
+        - set_10.out_batch_i
+        - set_11.out_batch_i
+      analysis:
+        from: gen_1.out_analysis
+      all_analyses:
+        from: tool_16.out_all_analyses
+    subgraph:
+      nodes:
+      - id: tool_14
+        type: SOLVE
+        config:
+          tool: batch_get
+          backend: kernel
+          arguments:
+          - '@batches'
+          - '@batch_i'
+          code: |
+            def batch_get(batches: str, idx: str) -> str:
+                try:
+                    items = [b.strip() for b in batches.split("|||BATCH|||") if b.strip()]
+                    i = int(idx)
+                    return items[i] if i < len(items) else ""
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = batch_get(batches, batch_i)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - batches
+          - idx
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_batches
+        - in_batch_i
+        - out_batch
+      - id: tool_15
+        type: SOLVE
+        config:
+          tool: isblank
+          backend: kernel
+          arguments:
+          - '@batch'
+          code: |
+            def isblank(value: str) -> str:
+                """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+                return 'true' if str(value).strip() == '' else 'false'
+            _spl_result = isblank(batch)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_batch
+        - out_batch_empty
+      - id: eval_3
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_batches'
+        ports:
+        - trigger
+        - complete
+        - in_max_batches
+        - out_batch_i
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: analyze_page_batch
+          params:
+          - batch
+          prompt_inline: |-
+            You are a web content analyst. Analyze the following web pages and for each provide:
+              1. A 2-3 sentence summary of the page's content and purpose
+              2. Content type classification (article, product page, documentation, blog post, FAQ, landing page, etc.)
+              3. Key topics and tags (comma-separated)
+
+              Format your response as structured markdown with a clearly labeled section per page.
+
+              Pages:
+              {{in_batch}}
+          arguments:
+          - '@batch'
+        ports:
+        - trigger
+        - complete
+        - in_batch
+        - out_analysis
+      - id: tool_16
+        type: SOLVE
+        config:
+          tool: results_append
+          backend: kernel
+          arguments:
+          - '@all_analyses'
+          - '@analysis'
+          code: |
+            def results_append(results: str, analysis: str) -> str:
+                return analysis if not results.strip() else results + "\n\n---\n\n" + analysis
+            _spl_result = results_append(all_analyses, analysis)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - results
+          - analysis
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_all_analyses
+        - in_analysis
+        - out_all_analyses
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_batch_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_batch_i
+        - out_batch_i
+      edges:
+      - source: tool_14.complete
+        target: tool_15.trigger
+        type: triggers
+      - source: tool_14.out_batch
+        target: tool_15.in_batch
+        type: binds
+      - source: tool_15.complete
+        target: eval_3.trigger
+        type: triggers
+      - source: tool_15.out_batch_empty
+        target: eval_3.in_subject
+        type: binds
+      - source: eval_3.pass
+        target: set_10.trigger
+        type: triggers
+      - source: eval_3.fail
+        target: gen_1.trigger
+        type: triggers
+      - source: tool_14.out_batch
+        target: gen_1.in_batch
+        type: binds
+      - source: gen_1.complete
+        target: tool_16.trigger
+        type: triggers
+      - source: gen_1.out_analysis
+        target: tool_16.in_analysis
+        type: binds
+      - source: tool_16.complete
+        target: set_11.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_batches
+  - in_batch_i
+  - in_max_batches
+  - in_all_analyses
+  - out_batch
+  - out_batch_empty
+  - out_batch_i
+  - out_analysis
+  - out_all_analyses
+- id: gen_2
+  type: GENERATE
+  config:
+    function: build_site_report
+    params:
+    - all_analyses
+    - url
+    prompt_inline: |-
+      You are a web intelligence analyst. Given the per-page analyses below from a crawl of {{in_url}},
+        produce a structured final report containing:
+        - Executive Summary (3-5 sentences on the site's overall purpose, audience, and content strategy)
+        - Content Types Found (list each type with approximate page count)
+        - Main Topics Covered (top 10 topics ranked by frequency across pages)
+        - Page-by-Page Summaries (one-line summary per page, grouped by content type)
+
+        Analyses:
+        {{in_all_analyses}}
+    arguments:
+    - '@all_analyses'
+    - '@url'
+  ports:
+  - trigger
+  - complete
+  - in_all_analyses
+  - in_url
+  - out_report
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_url
+  target: tool_1.in_url
+  type: binds
+- source: tool_1.complete
+  target: set_1.trigger
+  type: triggers
+- source: wf_entry.out_url
+  target: set_1.in_url
+  type: binds
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_1.out_queue
+  target: loop_1.in_queue
+  type: binds
+- source: wf_entry.out_max_pages
+  target: loop_1.in_max_pages
+  type: binds
+- source: set_2.out_visited
+  target: loop_1.in_visited
+  type: binds
+- source: tool_1.out_domain
+  target: loop_1.in_domain
+  type: binds
+- source: set_3.out_page_collection
+  target: loop_1.in_page_collection
+  type: binds
+- source: set_4.out_crawler_i
+  target: loop_1.in_crawler_i
+  type: binds
+- source: loop_1.exit
+  target: tool_13.trigger
+  type: triggers
+- source: loop_1.out_page_collection
+  target: tool_13.in_page_collection
+  type: binds
+- source: wf_entry.out_batch_size
+  target: tool_13.in_batch_size
+  type: binds
+- source: tool_13.complete
+  target: set_8.trigger
+  type: triggers
+- source: set_8.complete
+  target: set_9.trigger
+  type: triggers
+- source: set_9.complete
+  target: loop_2.trigger
+  type: triggers
+- source: tool_13.out_batches
+  target: loop_2.in_batches
+  type: binds
+- source: set_8.out_batch_i
+  target: loop_2.in_batch_i
+  type: binds
+- source: wf_entry.out_max_batches
+  target: loop_2.in_max_batches
+  type: binds
+- source: set_9.out_all_analyses
+  target: loop_2.in_all_analyses
+  type: binds
+- source: loop_2.exit
+  target: gen_2.trigger
+  type: triggers
+- source: loop_2.out_all_analyses
+  target: gen_2.in_all_analyses
+  type: binds
+- source: wf_entry.out_url
+  target: gen_2.in_url
+  type: binds
+- source: gen_2.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: gen_2.complete
+  target: wf_exit.trigger
+  type: triggers

@@ -1,0 +1,150 @@
+CREATE TOOL_API parse_leads(raw_csv TEXT) RETURNS TEXT AS PYTHON $$
+def parse_leads(raw_csv: str) -> str:
+    try:
+        lines = [l.strip() for l in raw_csv.strip().split('\n') if l.strip()]
+        if not lines:
+            return ""
+        header = lines[0].lower()
+        if any(h in header for h in ('name', 'email', 'company', 'contact')):
+            lines = lines[1:]
+        return '\n'.join(lines)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API extract_company_name(lead TEXT) RETURNS TEXT AS PYTHON $$
+def extract_company_name(lead: str) -> str:
+    try:
+        # Expects CSV row: "Full Name, Company, email, ..."
+        parts = [p.strip() for p in lead.split(',')]
+        return parts[1] if len(parts) > 1 else parts[0]
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API format_result_entry(lead TEXT, enrichment TEXT, score TEXT, email TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def format_result_entry(lead: str, enrichment: str, score: str, email: str) -> str:
+    try:
+        return json.dumps(
+            {"lead": lead, "enrichment": enrichment, "score": score, "email": email},
+            ensure_ascii=False
+        )
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API append_to_file(path TEXT, content TEXT) RETURNS TEXT AS PYTHON $$
+import os
+def append_to_file(path: str, content: str) -> str:
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(content + '\n')
+        return "ok"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION enrich_lead_context(lead TEXT, company_info TEXT)
+RETURNS TEXT AS $$
+  You are a sales intelligence analyst. Synthesize a concise company context profile (3-5 sentences).
+
+  Prospect record: {lead}
+  Web research: {company_info}
+
+  Cover: what the company does, its target market, company size or funding stage,
+  recent notable developments, and likely pain points relevant to outreach.
+  Be specific and factual — avoid generic filler.
+$$;
+
+CREATE FUNCTION score_lead_fit(lead TEXT, enrichment TEXT)
+RETURNS TEXT AS $$
+  You are a B2B sales qualification expert. Evaluate this prospect''s fit.
+
+  Prospect: {lead}
+  Company context: {enrichment}
+
+  Score from 0-10 based on:
+  - Strategic alignment with typical SaaS or service offerings
+  - Signals of budget authority or decision-making power
+  - Timing and urgency indicators
+
+  Provide 2 sentences of rationale, then end your response with exactly:
+  {"score": <0-10>, "tier": "<high|medium|low>"}
+$$;
+
+CREATE FUNCTION classify_fit_score(score_text TEXT)
+RETURNS TEXT AS $$
+  Given this lead scoring result: {score_text}
+
+  Return exactly one word: "high" if the numeric score is 7 or above, or "low" if below 7.
+  Output only that single word with no punctuation or explanation.
+$$;
+
+CREATE FUNCTION generate_cold_email(lead TEXT, enrichment TEXT, score_text TEXT)
+RETURNS TEXT AS $$
+  You are an expert B2B copywriter. Write a personalized cold outreach email for this prospect.
+
+  Lead: {lead}
+  Company context: {enrichment}
+  Fit analysis: {score_text}
+
+  Requirements:
+  - Under 150 words
+  - Reference one specific, researched detail about the company
+  - Lead with value delivered to them, not features of your product
+  - Close with a single low-friction call to action
+
+  Format:
+  Subject: <subject line>
+
+  <email body>
+$$;
+
+WORKFLOW lead_generation
+  INPUT @lead_list_path TEXT := "cookbook-pocketflow/030_lead_generation/data/leads.csv"
+  INPUT @output_path TEXT := "cookbook-pocketflow/030_lead_generation/output/scored_leads.jsonl"
+  INPUT @max_leads INTEGER := 100
+  OUTPUT @final_output TEXT
+DO
+  CALL read_file(@lead_list_path) INTO @raw_csv;
+  CALL parse_leads(@raw_csv) INTO @leads;
+
+  @i := 0;
+  @scored_leads := "";
+  @ready_emails := "";
+
+  WHILE @i < @max_leads DO
+    CALL list_get(@leads, @i + 1) INTO @lead;
+    CALL isblank(@lead) INTO @is_empty;
+
+    EVALUATE @is_empty
+      WHEN contains("true") THEN
+        @i := @max_leads;
+      ELSE
+        CALL extract_company_name(@lead) INTO @company_name;
+        CALL web_search(@company_name) INTO @company_info;
+        GENERATE enrich_lead_context(@lead, @company_info) INTO @enrichment;
+
+        GENERATE score_lead_fit(@lead, @enrichment) INTO @score_text;
+        GENERATE classify_fit_score(@score_text) INTO @fit_gate;
+
+        EVALUATE @fit_gate
+          WHEN contains("high") THEN
+            GENERATE generate_cold_email(@lead, @enrichment, @score_text) INTO @email;
+            CALL format_result_entry(@lead, @enrichment, @score_text, @email) INTO @entry;
+            CALL append_to_file(@output_path, @entry) INTO @_;
+            @scored_leads := @scored_leads + @lead + "\n";
+            @ready_emails := @ready_emails + @email + "\n---\n";
+          ELSE
+            @_ := "skipped";
+        END;
+
+        @i := @i + 1;
+    END;
+  END;
+
+  @final_output := "=== SCORED LEADS ===\n" + @scored_leads + "\n=== READY-TO-SEND EMAILS ===\n" + @ready_emails;
+  RETURN @final_output WITH status = "complete";
+END;

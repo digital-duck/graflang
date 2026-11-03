@@ -1,0 +1,83 @@
+# A model assembles the workflow at run time: it proposes `add_part` for one recipe of the catalogue (the MUTATE node's `catalogue`),
+# and the graph checks the proposal (schema, Cedar, budget, parts_policy, invariants) before the recipe is wired in and run.
+version: 1.0-graph
+workflow:
+  name: assembler
+  inputs:
+  - name: question
+    type: TEXT
+    description: what the user asks
+  outputs:
+  - name: reply
+    type: TEXT
+    description: the answer from whichever recipe the model chose
+  - name: why
+    type: TEXT
+    description: what the graph did with the model's proposal
+  parts_policy:
+    forbid:
+    - email
+    - webhook
+    - program
+    - write
+    max_llm_calls: 6
+resources:
+  prompts:
+    choose: ./prompts/choose.md
+  policies:
+    assemble: ./policies/assemble.cedar
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_question
+- id: choose
+  type: GENERATE
+  config:
+    prompt_ref: prompts.choose
+  ports:
+  - trigger
+  - complete
+  - in_question
+  - out_delta
+- id: pick
+  type: MUTATE
+  ports:
+  - trigger
+  - applied
+  - rejected
+  - in_delta
+  - out_reason
+  config:
+    policy_ref: policies.assemble
+    max_mutations: 1
+    catalogue:
+      guardrail: cookbook:guardrail
+      agent_notes: cookbook:agent_notes
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_reply
+  - in_why
+edges:
+- source: wf_entry.entry
+  target: choose.trigger
+  type: triggers
+- source: wf_entry.out_question
+  target: choose.in_question
+  type: binds
+- source: choose.complete
+  target: pick.trigger
+  type: triggers
+- source: choose.out_delta
+  target: pick.in_delta
+  type: binds
+- source: pick.rejected
+  target: wf_exit.trigger
+  type: triggers
+- source: pick.out_reason
+  target: wf_exit.in_why
+  type: binds

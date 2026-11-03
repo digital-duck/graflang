@@ -1,0 +1,49 @@
+{
+  "steps": 7,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 189,
+    "output_tokens": 145,
+    "cost_usd": 0.0,
+    "ms": 5947
+  },
+  "nodes": {
+    "summarise": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 5947
+    },
+    "allowed": {
+      "type": "GUARD",
+      "n": 1,
+      "ms": 2
+    },
+    "read_notes": {
+      "type": "QUERY",
+      "n": 1,
+      "ms": 0
+    },
+    "watch": {
+      "type": "OBSERVE",
+      "n": 1,
+      "ms": 0
+    },
+    "save": {
+      "type": "EMIT",
+      "n": 1,
+      "ms": 0
+    },
+    "show": {
+      "type": "EMIT",
+      "n": 1,
+      "ms": 0
+    },
+    "wf_exit": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

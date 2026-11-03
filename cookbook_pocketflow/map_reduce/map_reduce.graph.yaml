@@ -1,0 +1,939 @@
+version: 1.0-graph
+workflow:
+  name: resume_screener
+  inputs:
+  - name: resume_dir
+    type: TEXT
+    default: ./cookbook_pocketflow/map_reduce/data
+  - name: criteria
+    type: TEXT
+    default: relevant work experience, technical skills, educational background, communication
+      clarity
+  - name: threshold
+    type: TEXT
+    default: '7'
+  - name: max_iterations
+    type: INTEGER
+    default: 10
+  - name: out_dir
+    type: TEXT
+    default: cookbook_pocketflow/map_reduce/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  procedures:
+    evaluate_single_resume: ./map_reduce.spl
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_resume_dir
+  - out_criteria
+  - out_threshold
+  - out_max_iterations
+  - out_out_dir
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: list_resume_files
+    backend: kernel
+    arguments:
+    - '@resume_dir'
+    code: |
+      import os
+      def list_resume_files(directory: str) -> str:
+          try:
+              if not os.path.isdir(directory):
+                  return f"error: directory not found: {directory}"
+              exts = {".txt", ".pdf", ".docx", ".md", ".rtf"}
+              files = sorted(
+                  os.path.join(directory, f)
+                  for f in os.listdir(directory)
+                  if os.path.splitext(f)[1].lower() in exts
+              )
+              return "\n".join(files) if files else "error: no resume files found"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = list_resume_files(resume_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - directory
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_resume_dir
+  - out_resume_files
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_all_evaluations
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      i2:
+        from: set_3.out_i2
+      i3:
+        from: set_4.out_i3
+      path1:
+        from: tool_2.out_path1
+      path2:
+        from: tool_3.out_path2
+      path3:
+        from: tool_4.out_path3
+      eval1:
+        from: call_1.out_eval1
+      eval2:
+        from: call_2.out_eval2
+      eval3:
+        from: call_3.out_eval3
+      all_evaluations:
+        from: set_7.out_all_evaluations
+      i:
+        from: set_8.out_i
+    subgraph:
+      nodes:
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i2
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 2'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i3
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@resume_files'
+          - '@i'
+          - '''\n'''
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(resume_files, i, '\n')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_resume_files
+        - in_i
+        - out_path1
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@resume_files'
+          - '@i2'
+          - '''\n'''
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(resume_files, i2, '\n')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_resume_files
+        - in_i2
+        - out_path2
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@resume_files'
+          - '@i3'
+          - '''\n'''
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(resume_files, i3, '\n')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_resume_files
+        - in_i3
+        - out_path3
+      - id: fork_1
+        type: FORK
+        ports:
+        - trigger
+        - branch_1
+        - branch_2
+        - branch_3
+      - id: call_1
+        type: GENERATE
+        config:
+          procedure_ref: procedures.evaluate_single_resume
+          arguments:
+          - '@path1'
+          - '@criteria'
+        ports:
+        - trigger
+        - complete
+        - in_path1
+        - in_criteria
+        - out_eval1
+      - id: call_2
+        type: GENERATE
+        config:
+          procedure_ref: procedures.evaluate_single_resume
+          arguments:
+          - '@path2'
+          - '@criteria'
+        ports:
+        - trigger
+        - complete
+        - in_path2
+        - in_criteria
+        - out_eval2
+      - id: call_3
+        type: GENERATE
+        config:
+          procedure_ref: procedures.evaluate_single_resume
+          arguments:
+          - '@path3'
+          - '@criteria'
+        ports:
+        - trigger
+        - complete
+        - in_path3
+        - in_criteria
+        - out_eval3
+      - id: join_1
+        type: JOIN
+        ports:
+        - trigger
+        - complete
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_all_evaluations + @in_path1 + ''|||'' + @in_eval1 + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_all_evaluations
+        - in_path1
+        - in_eval1
+        - out_all_evaluations
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_all_evaluations + @in_path2 + ''|||'' + @in_eval2 + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_all_evaluations
+        - in_path2
+        - in_eval2
+        - out_all_evaluations
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_all_evaluations + @in_path3 + ''|||'' + @in_eval3 + ''\n'''
+        ports:
+        - trigger
+        - complete
+        - in_all_evaluations
+        - in_path3
+        - in_eval3
+        - out_all_evaluations
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 3'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: set_3.complete
+        target: set_4.trigger
+        type: triggers
+      - source: set_4.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_2.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: set_3.out_i2
+        target: tool_3.in_i2
+        type: binds
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: set_4.out_i3
+        target: tool_4.in_i3
+        type: binds
+      - source: tool_4.complete
+        target: fork_1.trigger
+        type: triggers
+      - source: fork_1.branch_1
+        target: call_1.trigger
+        type: triggers
+      - source: tool_2.out_path1
+        target: call_1.in_path1
+        type: binds
+      - source: fork_1.branch_2
+        target: call_2.trigger
+        type: triggers
+      - source: tool_3.out_path2
+        target: call_2.in_path2
+        type: binds
+      - source: fork_1.branch_3
+        target: call_3.trigger
+        type: triggers
+      - source: tool_4.out_path3
+        target: call_3.in_path3
+        type: binds
+      - source: call_1.complete
+        target: join_1.trigger
+        type: triggers
+      - source: call_2.complete
+        target: join_1.trigger
+        type: triggers
+      - source: call_3.complete
+        target: join_1.trigger
+        type: triggers
+      - source: join_1.complete
+        target: set_5.trigger
+        type: triggers
+      - source: tool_2.out_path1
+        target: set_5.in_path1
+        type: binds
+      - source: call_1.out_eval1
+        target: set_5.in_eval1
+        type: binds
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+      - source: set_5.out_all_evaluations
+        target: set_6.in_all_evaluations
+        type: binds
+      - source: tool_3.out_path2
+        target: set_6.in_path2
+        type: binds
+      - source: call_2.out_eval2
+        target: set_6.in_eval2
+        type: binds
+      - source: set_6.complete
+        target: set_7.trigger
+        type: triggers
+      - source: set_6.out_all_evaluations
+        target: set_7.in_all_evaluations
+        type: binds
+      - source: tool_4.out_path3
+        target: set_7.in_path3
+        type: binds
+      - source: call_3.out_eval3
+        target: set_7.in_eval3
+        type: binds
+      - source: set_7.complete
+        target: set_8.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_i
+  - in_resume_files
+  - in_criteria
+  - in_all_evaluations
+  - in_max_iterations
+  - out_i2
+  - out_i3
+  - out_path1
+  - out_path2
+  - out_path3
+  - out_eval1
+  - out_eval2
+  - out_eval3
+  - out_all_evaluations
+  - out_i
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: aggregate_scores
+    backend: kernel
+    arguments:
+    - '@all_evaluations'
+    code: |
+      import re
+
+      def _parse_records(text):
+          records = []
+          cur_path, cur_eval = None, []
+          for line in text.split("\n"):
+              if "|||" in line:
+                  if cur_path is not None:
+                      records.append((cur_path, "\n".join(cur_eval)))
+                  p, e = line.split("|||", 1)
+                  cur_path, cur_eval = p.strip(), [e]
+              elif cur_path is not None:
+                  cur_eval.append(line)
+          if cur_path is not None:
+              records.append((cur_path, "\n".join(cur_eval)))
+          return records
+
+      def aggregate_scores(all_evaluations: str) -> str:
+          try:
+              scores = []
+              for _, evaluation in _parse_records(all_evaluations):
+                  if not evaluation.strip():
+                      continue
+                  m = re.search(r"score[:\s]+(\d+(?:\.\d+)?)", evaluation, re.IGNORECASE)
+                  if not m:
+                      m = re.search(r"(\d+(?:\.\d+)?)\s*/\s*10", evaluation)
+                  if m:
+                      scores.append(float(m.group(1)))
+              if not scores:
+                  return "total: 0, average: N/A, min: N/A, max: N/A"
+              avg = sum(scores) / len(scores)
+              return f"total: {len(scores)}, average: {avg:.2f}, min: {min(scores):.2f}, max: {max(scores):.2f}"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = aggregate_scores(all_evaluations)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - all_evaluations
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_all_evaluations
+  - out_scores_summary
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: rank_candidates
+    backend: kernel
+    arguments:
+    - '@all_evaluations'
+    code: |
+      import re, os
+
+      def _parse_records(text):
+          records = []
+          cur_path, cur_eval = None, []
+          for line in text.split("\n"):
+              if "|||" in line:
+                  if cur_path is not None:
+                      records.append((cur_path, "\n".join(cur_eval)))
+                  p, e = line.split("|||", 1)
+                  cur_path, cur_eval = p.strip(), [e]
+              elif cur_path is not None:
+                  cur_eval.append(line)
+          if cur_path is not None:
+              records.append((cur_path, "\n".join(cur_eval)))
+          return records
+
+      def rank_candidates(all_evaluations: str) -> str:
+          try:
+              entries = []
+              for path, evaluation in _parse_records(all_evaluations):
+                  if not evaluation.strip():
+                      continue
+                  m = re.search(r"score[:\s]+(\d+(?:\.\d+)?)", evaluation, re.IGNORECASE)
+                  if not m:
+                      m = re.search(r"(\d+(?:\.\d+)?)\s*/\s*10", evaluation)
+                  score = float(m.group(1)) if m else 0.0
+                  entries.append((score, os.path.basename(path), evaluation))
+              entries.sort(key=lambda x: x[0], reverse=True)
+              ranked = []
+              for rank, (score, name, evaluation) in enumerate(entries, 1):
+                  ranked.append(f"rank={rank}|score={score}|name={name}|{evaluation}")
+              return "\n".join(ranked) if ranked else "error: no candidates to rank"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = rank_candidates(all_evaluations)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - all_evaluations
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_all_evaluations
+  - out_ranked_candidates
+- id: tool_7
+  type: SOLVE
+  config:
+    tool: filter_candidates
+    backend: kernel
+    arguments:
+    - '@ranked_candidates'
+    - '@threshold'
+    - '''qualified'''
+    code: |
+      import re
+      def filter_candidates(ranked_candidates: str, threshold: str, filter_type: str) -> str:
+          try:
+              thresh = float(threshold)
+              result = []
+              for line in ranked_candidates.strip().split("\n"):
+                  if not line.strip():
+                      continue
+                  m = re.search(r"score=(\d+(?:\.\d+)?)", line)
+                  if not m:
+                      continue
+                  score = float(m.group(1))
+                  is_qualified = score >= thresh
+                  if filter_type.lower() == "qualified" and is_qualified:
+                      result.append(line)
+                  elif filter_type.lower() == "rejected" and not is_qualified:
+                      result.append(line)
+              return "\n".join(result) if result else ""
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = filter_candidates(ranked_candidates, threshold, 'qualified')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - ranked_candidates
+    - threshold
+    - filter_type
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_ranked_candidates
+  - in_threshold
+  - out_qualified_list
+- id: tool_8
+  type: SOLVE
+  config:
+    tool: filter_candidates
+    backend: kernel
+    arguments:
+    - '@ranked_candidates'
+    - '@threshold'
+    - '''rejected'''
+    code: |
+      import re
+      def filter_candidates(ranked_candidates: str, threshold: str, filter_type: str) -> str:
+          try:
+              thresh = float(threshold)
+              result = []
+              for line in ranked_candidates.strip().split("\n"):
+                  if not line.strip():
+                      continue
+                  m = re.search(r"score=(\d+(?:\.\d+)?)", line)
+                  if not m:
+                      continue
+                  score = float(m.group(1))
+                  is_qualified = score >= thresh
+                  if filter_type.lower() == "qualified" and is_qualified:
+                      result.append(line)
+                  elif filter_type.lower() == "rejected" and not is_qualified:
+                      result.append(line)
+              return "\n".join(result) if result else ""
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = filter_candidates(ranked_candidates, threshold, 'rejected')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - ranked_candidates
+    - threshold
+    - filter_type
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_ranked_candidates
+  - in_threshold
+  - out_rejected_list
+- id: tool_9
+  type: SOLVE
+  config:
+    tool: merge_evaluation_lists
+    backend: kernel
+    arguments:
+    - '@qualified_list'
+    - '@rejected_list'
+    code: |
+      def merge_evaluation_lists(qualified: str, rejected: str) -> str:
+          try:
+              q_lines = [l for l in qualified.strip().split("\n") if l.strip()]
+              r_lines = [l for l in rejected.strip().split("\n") if l.strip()]
+              sections = []
+              if q_lines:
+                  sections.append(f"=== QUALIFIED ({len(q_lines)} candidates) ===")
+                  sections.extend(q_lines)
+              if r_lines:
+                  sections.append(f"=== REJECTED ({len(r_lines)} candidates) ===")
+                  sections.extend(r_lines)
+              return "\n".join(sections) if sections else "no candidates"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = merge_evaluation_lists(qualified_list, rejected_list)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - qualified
+    - rejected
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_qualified_list
+  - in_rejected_list
+  - out_merged_list
+- id: gen_1
+  type: GENERATE
+  config:
+    function: generate_summary_report
+    params:
+    - ranked_candidates
+    - merged_list
+    - scores_summary
+    prompt_inline: |-
+      You are an HR analytics specialist preparing an executive candidate screening report.
+
+      Score Statistics:
+      {{in_scores_summary}}
+
+      Ranked Candidates (highest score first):
+      {{in_ranked_candidates}}
+
+      Candidate Classification:
+      {{in_merged_list}}
+
+      Write a professional executive summary report with these sections:
+      1. Overview: total candidates screened, qualified vs rejected counts, and qualification rate
+      2. Top 3 candidates: name, score, and one-sentence differentiator for each
+      3. Qualification patterns: common strengths among qualified candidates; common gaps among rejected
+      4. Recommended next steps: interview shortlist recommendation and suggested timeline
+      5. Methodology: brief note on the LLM-based evaluation approach and score threshold applied
+
+      Format the report for executive review. Be concise and action-oriented.
+    arguments:
+    - '@ranked_candidates'
+    - '@merged_list'
+    - '@scores_summary'
+  ports:
+  - trigger
+  - complete
+  - in_ranked_candidates
+  - in_merged_list
+  - in_scores_summary
+  - out_report
+- id: tool_10
+  type: SOLVE
+  config:
+    tool: make_dir
+    backend: kernel
+    arguments:
+    - '@out_dir'
+    code: |
+      import pathlib
+
+      def make_dir(dir_path: str) -> str:
+          """MAKE_DIR(dir_path) — create directory (and parents) if not present.
+
+          Returns the absolute path of the directory.
+          """
+          p = pathlib.Path(str(dir_path).strip())
+          p.mkdir(parents=True, exist_ok=True)
+          return str(p.resolve())
+      _spl_result = make_dir(out_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - dir_path
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out_dir
+  - out__
+- id: tool_11
+  type: SOLVE
+  config:
+    tool: path_join
+    backend: kernel
+    arguments:
+    - '@out_dir'
+    - '''screening_report.md'''
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(out_dir, 'screening_report.md')
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out_dir
+  - out_report_path
+- id: tool_12
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@report_path'
+    - '@report'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(report_path, report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_report_path
+  - in_report
+  - out__
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_resume_dir
+  target: tool_1.in_resume_dir
+  type: binds
+- source: tool_1.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: tool_1.out_resume_files
+  target: loop_1.in_resume_files
+  type: binds
+- source: wf_entry.out_criteria
+  target: loop_1.in_criteria
+  type: binds
+- source: set_2.out_all_evaluations
+  target: loop_1.in_all_evaluations
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: loop_1.exit
+  target: tool_5.trigger
+  type: triggers
+- source: loop_1.out_all_evaluations
+  target: tool_5.in_all_evaluations
+  type: binds
+- source: tool_5.complete
+  target: tool_6.trigger
+  type: triggers
+- source: loop_1.out_all_evaluations
+  target: tool_6.in_all_evaluations
+  type: binds
+- source: tool_6.complete
+  target: tool_7.trigger
+  type: triggers
+- source: tool_6.out_ranked_candidates
+  target: tool_7.in_ranked_candidates
+  type: binds
+- source: wf_entry.out_threshold
+  target: tool_7.in_threshold
+  type: binds
+- source: tool_7.complete
+  target: tool_8.trigger
+  type: triggers
+- source: tool_6.out_ranked_candidates
+  target: tool_8.in_ranked_candidates
+  type: binds
+- source: wf_entry.out_threshold
+  target: tool_8.in_threshold
+  type: binds
+- source: tool_8.complete
+  target: tool_9.trigger
+  type: triggers
+- source: tool_7.out_qualified_list
+  target: tool_9.in_qualified_list
+  type: binds
+- source: tool_8.out_rejected_list
+  target: tool_9.in_rejected_list
+  type: binds
+- source: tool_9.complete
+  target: gen_1.trigger
+  type: triggers
+- source: tool_6.out_ranked_candidates
+  target: gen_1.in_ranked_candidates
+  type: binds
+- source: tool_9.out_merged_list
+  target: gen_1.in_merged_list
+  type: binds
+- source: tool_5.out_scores_summary
+  target: gen_1.in_scores_summary
+  type: binds
+- source: gen_1.complete
+  target: tool_10.trigger
+  type: triggers
+- source: wf_entry.out_out_dir
+  target: tool_10.in_out_dir
+  type: binds
+- source: tool_10.complete
+  target: tool_11.trigger
+  type: triggers
+- source: wf_entry.out_out_dir
+  target: tool_11.in_out_dir
+  type: binds
+- source: tool_11.complete
+  target: tool_12.trigger
+  type: triggers
+- source: tool_11.out_report_path
+  target: tool_12.in_report_path
+  type: binds
+- source: gen_1.out_report
+  target: tool_12.in_report
+  type: binds
+- source: gen_1.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: tool_12.complete
+  target: wf_exit.trigger
+  type: triggers

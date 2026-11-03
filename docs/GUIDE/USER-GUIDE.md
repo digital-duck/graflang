@@ -11,8 +11,13 @@ graf validate FILE      # static checks, nothing executes
 graf info     FILE      # name, node/edge counts, inputs, outputs, resources
 graf run      FILE [options]
 graf expand   FILE      # a compact, parts or expand file in its long nodes/edges form
+graf run ... --answer NODE=VALUE   # an answer for a DECISION node (otherwise the terminal is asked)
+graf parts    FILE      # the parts a workflow uses: pin, interface, what each touches, model calls
+graf compact  FILE      # the inverse: a long-form file written as steps: (checked by expanding it again; -o FILE)
 graf compile  FILE --lang spl|rust [-o OUT] [--dry-run]   # SPL script, or a Rust project (stub)
 graf vis      FILE [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o OUT] [--no-open]
+graf trace    [LOG] [--format tree|otlp] [-o FILE]                  # a run's .jsonl log as a timeline, or as OpenTelemetry spans
+graf watch    FILE [--every S] [--times N] [graf run options]        # run it again and again on a schedule
 graf describe GRAPH|RECIPE_FOLDER [-o FILE|-] [--llm [ADAPTER:MODEL]]              # what a graph or a recipe does, in words (a model only with --llm)
 graf create   --name NAME --spec TEXT|@FILE [--out-dir DIR] [--llm ADAPTER:MODEL] [--from RECIPE|--no-examples]   # an app from a plain-language spec
 ```
@@ -159,6 +164,14 @@ A `procedure_ref` node runs an SPL.py workflow. When logging is on, SPL.py write
 
 Used as a Python library (`GraphLangRuntime(...).execute(...)`), the runtime logs nothing until `graphlang.logging_config.setup_logging(...)` is called; the CLI calls it for you.
 
+### `graf run --stream`, `graf trace`, `graf watch`
+
+**`--stream`** prints each node's result as soon as the node finishes (`✓ GENERATE draft (1080 ms)` and its outputs, long text cut), instead of only the final output. It is node by node, not token by token: the model adapters return a whole answer. A program that runs the workflow itself (a web service, say) gets the same events from `GraphLangRuntime(..., on_node=callback)`: the callback receives `{node, type, step, ms, depth, route, outputs}` for every finished node, and a callback that raises is logged and ignored.
+
+**`graf trace [LOG]`** reads a run's `.jsonl` log (default the newest in the log folder) as a trace: one span per node firing under one run span, with a model call's model and sizes attached. `--format tree` (default) draws a timeline in the terminal; `--format otlp -o trace.json` writes OpenTelemetry's OTLP/JSON, which Jaeger, Tempo, a collector or Langfuse's OTLP endpoint can take (`curl -H 'Content-Type: application/json' --data @trace.json http://localhost:4318/v1/traces`). Nothing is sent for you, and prompt and response text are not in the log at the default level, so they are not in the trace.
+
+**`graf watch FILE`** runs a workflow every `--every` seconds (default 60), `--times` times (default 10; 0 means until Ctrl-C), stopping after `--max-failures` failures in a row (default 3). Everything after its own options goes to `graf run`: `graf watch check.graph.yaml --every 300 --times 12 --llm claude_cli:claude-haiku-5-5 --bind limits.bind.yaml`. Each run is its own process with its own log and output folder. The limits in the bind file apply to every run, so a watcher on a real model is billed every tick: keep `--times` small until the graph is right.
+
 ### `graf validate`
 
 Checks edges point to real nodes and ports, `triggers`/`binds` join the right kinds of port, resources exist, conditions parse and use only available variables, and `GUARD`/`MUTATE`/`LOOP` configs are complete. Errors fail the command; warnings (an input nothing feeds, a node nothing triggers) do not.
@@ -245,7 +258,7 @@ Schema: `graphlang/schema/graflang-ir.json`. Node ids match `[a-zA-Z0-9_]+`.
 
 `pip install 'graflang[edit]'`, then `graf vis --edit` opens a browser app with six pages (Welcome, Create, Edit, Import / Export, Browse, Settings). It opens on Welcome, which says what GraphLang is, what each page does and what the work area holds; with a file argument it opens straight on Edit. `graf vis --edit flow.graph.yaml` opens that file on the Edit page; `graf vis --edit --src-dir DIR` works on your own folder of recipes. `graf ui` is the same command.
 
-**The work area.** A pip install has no repository to point at, so recipes live in `~/.graflang/` (`$GRAFLANG_HOME` moves it): `cookbook/` holds the shipped recipes and `solvers/` the solver recipes ported from SPL.py (both read-only: editing one first copies it) and `apps/` holds yours (created, cloned or imported). A recipe is a folder with its `*.graph.yaml`, `prompts/` and any procedures. With `--src-dir DIR` that folder is the only root and it is writable. Nothing is ever overwritten: a taken name is refused.
+**The work area.** A pip install has no repository to point at, so recipes live in `~/.graflang/` (`$GRAFLANG_HOME` moves it): `cookbook/` holds the shipped recipes, `solvers/` the solver recipes and `pocketflow/` the PocketFlow recipes, both ported from SPL.py (all three read-only: editing one first copies it) and `apps/` holds yours (created, cloned or imported). A recipe is a folder with its `*.graph.yaml`, `prompts/` and any procedures. With `--src-dir DIR` that folder is the only root and it is writable. Nothing is ever overwritten: a taken name is refused.
 
 **Where it listens.** The app has no login and holds your API keys, so `graf vis --edit` listens on this computer only (`--host 127.0.0.1`); `--host 0.0.0.0` opens it to your network and prints a warning. **Unsaved changes.** On the Edit page, Open, Reload, Copy and the like are off until you save or undo. **Run.** A graph that runs programs lists them and waits for you to tick the box; "dry run" answers model steps with placeholder text.
 
@@ -261,7 +274,7 @@ Schema: `graphlang/schema/graflang-ir.json`. Node ids match `[a-zA-Z0-9_]+`.
 
 ## Compact form: `steps:`
 
-A short way to write a workflow. `steps:` replaces `nodes:` and `edges:`; `graf expand FILE` prints the long form that runs.
+A short way to write a workflow. `steps:` replaces `nodes:` and `edges:`; `graf expand FILE` prints the long form that runs; `graf compact FILE` goes the other way (a long-form file as `steps:`). `compact` re-expands its own result and compares it with the input, so the graph is always the same one; what it cannot say as a step (a back edge, a node with unusual ports, a loop body of another shape) stays in `nodes:` / `edges:` beside the steps. Not kept: comments, the order of nodes and edges, and `expand`/`compact`/`expand` is a fixed point only after the first `compact` (several spellings of `steps:` give one long form).
 
 ```yaml
 steps:
@@ -295,7 +308,7 @@ The body is its own list of steps: the first starts every iteration and the othe
 
 ## Parts: a workflow used as a node
 
-A workflow file with one `INPUT` and one `OUTPUT` node can be reused inside another. List it under `resources.parts`, then use it:
+A workflow file with one `INPUT` node and one or more `OUTPUT` nodes can be reused inside another (a branching recipe ends each branch in its own `OUTPUT`; the use node's `complete` fires from whichever one was reached, and an output that several of them declare takes the value of the one that ran). List it under `resources.parts`, then use it:
 
 ```yaml
 resources:
@@ -306,6 +319,10 @@ steps:
 ```
 
 The part's `workflow.inputs` and `outputs` are its interface: `in:` names must be inputs of the part, `out:` names its outputs, an input with no default must be bound, and types must be assignable. A literal in `in:` overrides the part's default. Each use is its own copy (`first__rewrite`, `second__rewrite`), so state is not shared; parts may use parts, but not themselves. To choose the LLM, write `llm: "adapter:model"` as one more key of the step: on a `generate` step it is that node's LLM (`- draft: {generate: "...", llm: "ollama:gemma3", in: {...}}`); on a `use` step it is the LLM of the part's `GENERATE` nodes that name none of their own (a node's own `llm:` in the part file wins). Any key of a step other than `in`, `out`, `on`, `ports`, `config` and the kind goes into the node's `config`. In long form the use is a `SUBGRAPH` node with `config: {part: parts.polish}` and ports `trigger`, `complete`, `in_<name>`, `out_<name>`. `graf expand` shows the expanded graph. See `cookbook/parts_demo`.
+
+**Parts by name, pinned, with limits.** Instead of a path, `resources.parts` may name a recipe of the work area: `guard: "cookbook:guardrail"` (roots `apps:`, `cookbook:`, `solvers:`). Add `@<hash>` (`graf parts FILE` prints it) to pin the recipe's files: if the recipe changes, `graf validate` refuses it and shows the new hash. `description:` on a part's `workflow.inputs` / `outputs` says what each is (shown by `graf parts` and on the Browse page, where "Use as a part of another workflow" gives a snippet to paste); `schema:` on an output is a JSON Schema its value must meet (checked where the part makes it, so the node must produce only that result, and the value is the parsed JSON). The using graph can limit its parts in the header: `workflow: {parts_policy: {forbid: [email, webhook, program, write, read, stdout], max_llm_calls: 20}}`; `forbid` is checked for each part, `max_llm_calls` against the sum of the upper bounds of all uses (a loop counts its body once per iteration when the bound is a number). **A model can add a part at run time**: a `MUTATE` node with `catalogue: {name: ref}` accepts the delta `{"action": "add_part", "payload": {"id": "step1", "part": "name", "after": "pick.applied", "before": "wf_exit.trigger", "binds": {"input": "node.out_port"}, "feeds": {"output": ["node.in_port"]}}}`: the part must be in the catalogue (graph-file text a delta cannot change), meet its interface and `parts_policy`, and pass the usual delta checks. See `cookbook/assembler`.
+
+**Paths in a part belong to the part.** A `file` of a `QUERY` or `EMIT` inside a part is read from (and written to) the *part's* folder, so the data and output folder that ship with a recipe stay with it; at expansion the path is made absolute and the part's folder is added to the node's `allow_dirs`. A path that resolves anywhere else (outside the part's folder and the using graph's folder) fails `graf validate`, so composing never gives a part more reach than its own folder plus what the using graph allows. A path that comes in on a port (`in_file`, for example from a part input such as `memory_file`) is the using graph's business and is read relative to the using graph: put the paths that should follow the user (a memory file, an output folder) on inputs, and the ones that ship with the recipe in `file`. Other paths inside a part (a subprocess command, a parser file) are still read relative to the using graph. A part's optional inputs (declared with a default) are filled in even when a `LOOP` or `BATCH` is what reads them.
 
 ## The `expand:` block: a part for every node of a graph
 
@@ -386,6 +403,57 @@ limits: {max_steps: 200, wall_time_s: 300}
 | `http` | posts `{"inputs": {...}}` as JSON to `url`, reads JSON back | `url`, `allow_hosts` (required), `method`, `headers`, `timeout`, `out_type`, `on_error` |
 
 An http answer is `{"result": value}` or the value itself, or `{"error": {"code": "...", "message": "...", "retryable": true}}`. A 5xx, a 429 or `retryable: true` counts as a transient failure, so `phases: {exec: {retry: {max: 3, on: [transient]}}}` tries again; any other error is permanent. The host must be in `allow_hosts`, and redirects are not followed.
+
+## QUERY, EMIT and OBSERVE: the world outside the graph
+
+Three nodes reach out of the workflow. `QUERY` reads something in, `EMIT` sends something out, `OBSERVE` records what passes by.
+
+| Node | Config | Does |
+|---|---|---|
+| `QUERY` | `file` (or an `in_file` port), `format`: `text` (default), `json`, `yaml`, `lines`; `tail` (keep only the last N lines: a sliding window); `max_bytes`; `default` (used when the file is missing); `allow_dirs` | reads a file in the graph's folder and puts it on its `out_*` port |
+| `EMIT` | `channel`: `file`, `stdout`, `webhook`, `email` | sends the `in_content` port (and `in_subject`, or `subject`) out; the `out_*` port gets a receipt |
+| `OBSERVE` | `label` | logs every `in_*` value, adds it to `observations.jsonl` in the run's output folder, and hands it on to the `out_*` port of the same name. It never fails or stops a run |
+
+`EMIT` channels: `file` (`file`, `mode: write|append`), `stdout`, `webhook` (`url`, `allow_hosts`, `timeout`; posts `{"subject", "content"}` as JSON, no redirects) and `email` (`recipients`, `sender`, `smtp_host`, `smtp_port`, `subject`; the SMTP user and password come from `GRAF_SMTP_USER` and `GRAF_SMTP_PASSWORD`, never from the graph).
+
+```yaml
+- {id: read_notes, type: QUERY, config: {file: notes.md}, ports: [trigger, complete, out_text]}
+- {id: tell_me, type: EMIT,
+   config: {channel: email, recipients: [me@example.com], sender: graf@example.com, smtp_host: smtp.example.com, subject: "Run finished"},
+   ports: [trigger, complete, in_content, out_receipt]}
+```
+
+Rules that keep them safe:
+
+- **They are risky.** `graf validate` accepts a `QUERY` or an `EMIT` only behind a `GUARD`'s `allow` port, like any node marked `risky`.
+- **Paths stay inside the graph's folder** (links are followed before the check). A `..` or an absolute path elsewhere is refused unless its folder is listed in `allow_dirs`.
+- **A model cannot change them.** `file`, `channel`, `recipients`, `sender`, `smtp_host`, `smtp_port` and `allow_dirs` (and `url`, `allow_hosts`) are code keys: a `MUTATE` delta can never add or change them, and `graf create` needs `--allow-code` to write them.
+- **A dry run changes nothing.** With the `mock` adapter (the editor's dry run) an `EMIT` only reports what it would have done. The runtime's `effects=True` makes it real.
+- **A retried `EMIT` or `RUN` may repeat its effect.** `graf validate` warns when one has `phases.exec.retry`; make the effect safe to repeat.
+
+## DECISION: a person as a node
+
+A `DECISION` node stops the run until a person answers. It is a step like any other: ports in and out, `phases`, a span in the trace. Its decider is a person (the name is neutral on purpose).
+
+```yaml
+- approve:
+    node: DECISION
+    question: "Release this announcement to the team?"      # or an in_question port
+    answers: [yes, no]            # allowed answers; omit for free text
+    default: "no"                 # used when nobody answers (one of answers)
+    timeout_s: 600                # how long to wait at the terminal
+    safe_default: true            # says the default is the safe answer (silences the validate warning)
+    max_asks: 3                   # asks again after an answer that is not allowed
+    ports: [answered, timeout]
+    in: {context: draft.text}     # shown under the question
+    out: [answer, note, by]
+```
+
+The answer comes from `--answer approve=yes|a note` (repeatable; `--by NAME` records who), else from the terminal (`yes | a note`), else from `default`; with none of them the run stops and says so. The token leaves by `answered` (with `out_answer`, `out_note`, `out_by`), or by `timeout` when the wait ran out and the node has that port. The answer is data and is never run. A timeout does not approve unless `default` says so, and `graf validate` warns when a defaulted `DECISION` can reach a risky node. A person's yes does not replace a `GUARD`: feed the answer to one (`context_mapping: {human_approval: "@in_answer == 'yes'"}`). A `MUTATE` delta can neither remove nor change a `DECISION`. Only the interactive mode exists; a parked run is designed in `docs/DEV/DESIGN/graflang-hitl.md`. See `cookbook/release_approval`.
+
+## How a node is built: the three steps
+
+A node does three things in this order, and `config.phases` names them: `pre` (check and default the inputs), `exec` (the computation: a model call, a solver, a program) and `post` (check the result, route on it). The same idea runs through PocketFlow (`prep`, `exec`, `post`). The reason to keep them apart: **`exec` should only compute.** It reads its inputs and returns a value; the runtime does the reading and writing of the data around it. That makes `exec` safe to retry (a timeout or a bad answer simply runs it again) and easy to test. If a step has an effect on the world (it writes a file, sends a message, calls an API that changes something), a retry repeats the effect, so make it idempotent, or do not retry it. `graf validate` warns when a retried node is an `EMIT` or a `RUN`.
 
 ## Nodes and ports
 
@@ -533,7 +601,38 @@ Safety is Cedar policy. Policies live in `graphlang/policies/` (`graph_safety.ce
 
 Actions: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `update_config` (schema: `graphlang/schema/graph_delta.schema.json`). A delta is applied only if it parses, matches the schema, keeps the graph well formed (known nodes and ports, no duplicates, `INPUT`/`OUTPUT` not removable, `id`/`type`/`ports` not editable), Cedar allows it under `config.policy_ref`, and the count is under `config.max_mutations` (default 3). No `policy_ref` means no mutation. The reason goes on `out_reason`. A `MUTATE` inside a `LOOP` body changes only that iteration's copy of the body, unless the LOOP sets `persist_mutations: true`: then the changed body is the start of the next iteration (the `max_mutations` count is shared across iterations). A `MUTATE` cannot add another `MUTATE` node.
 
-## Bundled workflows
+## The cookbook
+
+The repository holds 120+ recipe graphs in three folders, all listed in one file, `cookbook/cookbook_catalog.yaml`, the single source of truth for what each recipe needs, which parameters it takes and how far it has been tried:
+
+| Suite | Folder | Recipes | What it is |
+|---|---|---|---|
+| `cookbook` | `cookbook/` | about 30 | written for GraphLang: language features one at a time, agents, guards, parts, human approval |
+| `pocketflow` | `cookbook_pocketflow/` | 42 | SPL.py's PocketFlow patterns (chat, RAG, agents, supervisor, debate, batch, MCP, text-to-SQL, tools) lifted with `spl3 util spl2graph` |
+| `solvers` | `cookbook_solvers/` | 55 | SPL.py's solver recipes (SymPy, Sage, Lean, Z3, MILP, constraint and game solvers, verifiers) lifted the same way |
+
+A catalog entry has an `id` (`suite.folder`), the `graph` path, a `category`, `needs` (`llm`, `kernel`, `sagemath`, `spl`, `stdin`), optional `params`, `bind` and `args`, and a `status`:
+
+- **validated**: the owner ran it and checked the output.
+- **ran**: it completed under the batch runner; nobody has read the output. A run that completes does not show the answer is right.
+- **lifted**: lifted from SPL.py and passes `graf validate`, not run successfully yet.
+- **new**: passes `graf validate`, not run yet. **broken**: known not to run (the `note` says why).
+
+`cookbook/run_all.py` reads the catalog:
+
+```bash
+python cookbook/run_all.py --list --suite pocketflow                  # what is there, with filters
+python cookbook/run_all.py --check --suite solvers                    # does this machine have what they need?
+python cookbook/run_all.py --validate                                 # graf validate every selected graph: offline, free
+python cookbook/run_all.py --run --ids 'pocketflow.rag' --llm claude_cli:claude-sonnet-5-5   # graf run: calls a model
+python cookbook/run_all.py --write-readme                             # regenerate the tables in cookbook/README.md
+```
+
+To review a suite in the app, copy its folder into the work area (`cp -r cookbook_pocketflow/* ~/.graflang/pocketflow/`, likewise `cookbook_solvers` to `solvers/`), leaving out `output/`; Browse and Edit then list it under that root. A graph can use one as a part with `pocketflow:<recipe>`.
+
+Filters are `--suite`, `--category`, `--status`, `--needs` and `--ids` (shell-style globs on the id); `--all` adds the entries marked `active: false` (those that wait for keyboard input or are known broken). A run writes one log per recipe and a `results.yaml` to `cookbook/logs/<timestamp>/`. Use `--workers 1` for recipes that start Python kernels: several kernels starting at once can pass the 60 s start limit.
+
+## Bundled workflows (a few of the core recipes)
 
 | Graph | What it does |
 |---|---|

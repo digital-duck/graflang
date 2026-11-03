@@ -1,0 +1,77 @@
+-- collapse_whitespace is the only transformation not covered by stdlib
+CREATE TOOL_API collapse_whitespace(text TEXT) RETURNS TEXT AS PYTHON $$
+import re
+def collapse_whitespace(text: str) -> str:
+    try:
+        return re.sub(r'\s+', ' ', text).strip()
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- WORKFLOW: text_transformer
+--
+-- Models the interactive menu loop from the Mermaid diagram.
+-- @commands encodes each user turn as "transform_type:input_text", pipe-delimited.
+-- The last entry must be "exit" to terminate the loop.
+--
+-- Example:
+--   uppercase:hello world|reverse:abcdef|collapse whitespace:foo   bar|exit
+-- ─────────────────────────────────────────────────────────────────────────────
+WORKFLOW text_transformer
+  INPUT @commands TEXT := "uppercase:hello world|lowercase:HELLO WORLD|reverse:abcdef|collapse whitespace:hello   world   foo|exit"
+  INPUT @max_iterations INTEGER := 20
+  OUTPUT @session_log TEXT
+DO
+  @menu := "=== Text Transformation Tool ===\nOptions: uppercase | lowercase | reverse | collapse whitespace | exit\n";
+  @session_log := "";
+  @i := 0;
+
+  WHILE @i < @max_iterations DO
+    -- [B] Display Menu
+    @session_log := @session_log + @menu;
+
+    -- [C] Accept User Input — read the next command from the pre-supplied list
+    CALL list_get(@commands, @i, "|") INTO @command;
+    CALL trim(@command) INTO @command;
+
+    -- [D] Exit?
+    CALL contains(@command, "exit") INTO @is_exit;
+
+    EVALUATE @is_exit WHEN contains("true") THEN
+      -- [E] End
+      @session_log := @session_log + "[exit] Session ended.\n";
+      @i := @max_iterations;
+    ELSE
+      -- [F] Transformation? — parse type and payload from "type:text" format
+      CALL split_part(@command, ":", "1", "true") INTO @transform_type;
+      CALL split_part(@command, ":", "2", "true") INTO @input_text;
+      @result := "";
+
+      -- Branch to the appropriate deterministic transformation
+      EVALUATE @transform_type WHEN contains("uppercase") THEN
+        -- [G] Convert to Uppercase
+        CALL upper(@input_text) INTO @result;
+      ELSE
+        EVALUATE @transform_type WHEN contains("lowercase") THEN
+          -- [H] Convert to Lowercase
+          CALL lower(@input_text) INTO @result;
+        ELSE
+          EVALUATE @transform_type WHEN contains("reverse") THEN
+            -- [I] Reverse String
+            CALL reverse(@input_text) INTO @result;
+          ELSE
+            -- [J] Collapse Whitespace
+            CALL collapse_whitespace(@input_text) INTO @result;
+          END;
+        END;
+      END;
+
+      -- [K] Display Result — append to running session log, then loop back to [B]
+      @session_log := @session_log + "[" + @transform_type + "] '" + @input_text + "' => '" + @result + "'\n";
+      @i := @i + 1;
+    END;
+  END;
+
+  RETURN @session_log WITH status = "complete";
+END;

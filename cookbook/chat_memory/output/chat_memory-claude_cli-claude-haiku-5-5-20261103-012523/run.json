@@ -1,0 +1,9 @@
+{
+  "graph": "chat_memory",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "message": "My name is Wen and I like Go."
+  },
+  "started": "2026-11-03T01:25:23"
+}

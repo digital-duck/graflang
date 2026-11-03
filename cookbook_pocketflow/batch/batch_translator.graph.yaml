@@ -1,0 +1,516 @@
+version: 1.0-graph
+workflow:
+  name: markdown_translator
+  inputs:
+  - name: input_file
+    type: TEXT
+    default: cookbook_pocketflow/batch/document.md
+  - name: output_dir
+    type: TEXT
+    default: cookbook_pocketflow/batch/translations
+  - name: languages
+    type: TEXT
+    default: ''
+  - name: max_iterations
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  procedures:
+    translate_and_save: ./batch_translator.spl
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_input_file
+  - out_output_dir
+  - out_languages
+  - out_max_iterations
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@input_file'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(input_file)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_input_file
+  - out_content
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: parse_target_languages
+    backend: kernel
+    arguments:
+    - '@content'
+    code: |
+      import re
+      def parse_target_languages(markdown_content: str) -> str:
+          try:
+              match = re.match(r'^---\s*\n(.*?)\n---\s*\n', markdown_content, re.DOTALL)
+              if match:
+                  fm = match.group(1)
+                  m = re.search(r'target_languages\s*:\s*\[([^\]]+)\]', fm)
+                  if m:
+                      return ','.join(l.strip().strip('"\'') for l in m.group(1).split(','))
+                  m = re.search(r'target_languages\s*:\s*\n((?:[ \t]+-[ \t]+\S+\n?)+)', fm)
+                  if m:
+                      return ','.join(re.findall(r'-\s+(\S+)', m.group(1)))
+              return "error: no target_languages in front matter"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = parse_target_languages(content)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - markdown_content
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_content
+  - out_parsed_langs
+- id: eval_1
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'error:')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_languages'
+  ports:
+  - trigger
+  - complete
+  - in_languages
+  - out_lang_list
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_parsed_langs'
+  ports:
+  - trigger
+  - complete
+  - in_parsed_langs
+  - out_lang_list
+- id: tool_3
+  type: SOLVE
+  config:
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@lang_list'
+    - ''','''
+    - '''1'''
+    - '''true'''
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(lang_list, ',', '1', 'true')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_lang_list
+  - out_lang1
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@lang_list'
+    - ''','''
+    - '''2'''
+    - '''true'''
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(lang_list, ',', '2', 'true')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_lang_list
+  - out_lang2
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@lang_list'
+    - ''','''
+    - '''3'''
+    - '''true'''
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(lang_list, ',', '3', 'true')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_lang_list
+  - out_lang3
+- id: tool_6
+  type: SOLVE
+  config:
+    tool: make_dir
+    backend: kernel
+    arguments:
+    - '@output_dir'
+    code: |
+      import pathlib
+
+      def make_dir(dir_path: str) -> str:
+          """MAKE_DIR(dir_path) — create directory (and parents) if not present.
+
+          Returns the absolute path of the directory.
+          """
+          p = pathlib.Path(str(dir_path).strip())
+          p.mkdir(parents=True, exist_ok=True)
+          return str(p.resolve())
+      _spl_result = make_dir(output_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - dir_path
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_output_dir
+  - out_dir_status
+- id: fork_1
+  type: FORK
+  ports:
+  - trigger
+  - branch_1
+  - branch_2
+  - branch_3
+- id: call_1
+  type: GENERATE
+  config:
+    procedure_ref: procedures.translate_and_save
+    arguments:
+    - '@content'
+    - '@lang1'
+    - '@output_dir'
+    - '@max_iterations'
+  ports:
+  - trigger
+  - complete
+  - in_content
+  - in_lang1
+  - in_output_dir
+  - in_max_iterations
+  - out_result1
+- id: call_2
+  type: GENERATE
+  config:
+    procedure_ref: procedures.translate_and_save
+    arguments:
+    - '@content'
+    - '@lang2'
+    - '@output_dir'
+    - '@max_iterations'
+  ports:
+  - trigger
+  - complete
+  - in_content
+  - in_lang2
+  - in_output_dir
+  - in_max_iterations
+  - out_result2
+- id: call_3
+  type: GENERATE
+  config:
+    procedure_ref: procedures.translate_and_save
+    arguments:
+    - '@content'
+    - '@lang3'
+    - '@output_dir'
+    - '@max_iterations'
+  ports:
+  - trigger
+  - complete
+  - in_content
+  - in_lang3
+  - in_output_dir
+  - in_max_iterations
+  - out_result3
+- id: join_1
+  type: JOIN
+  ports:
+  - trigger
+  - complete
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''Translation complete:'' + ''\n'' + @in_result1 + ''\n'' + @in_result2
+      + ''\n'' + @in_result3'
+  ports:
+  - trigger
+  - complete
+  - in_result1
+  - in_result2
+  - in_result3
+  - out_report
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_input_file
+  target: tool_1.in_input_file
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: tool_1.out_content
+  target: tool_2.in_content
+  type: binds
+- source: tool_2.complete
+  target: eval_1.trigger
+  type: triggers
+- source: tool_2.out_parsed_langs
+  target: eval_1.in_subject
+  type: binds
+- source: eval_1.pass
+  target: set_1.trigger
+  type: triggers
+- source: wf_entry.out_languages
+  target: set_1.in_languages
+  type: binds
+- source: eval_1.fail
+  target: set_2.trigger
+  type: triggers
+- source: tool_2.out_parsed_langs
+  target: set_2.in_parsed_langs
+  type: binds
+- source: set_1.complete
+  target: tool_3.trigger
+  type: triggers
+- source: set_2.complete
+  target: tool_3.trigger
+  type: triggers
+- source: set_1.out_lang_list
+  target: tool_3.in_lang_list
+  type: binds
+- source: set_2.out_lang_list
+  target: tool_3.in_lang_list
+  type: binds
+- source: tool_3.complete
+  target: tool_4.trigger
+  type: triggers
+- source: set_1.out_lang_list
+  target: tool_4.in_lang_list
+  type: binds
+- source: set_2.out_lang_list
+  target: tool_4.in_lang_list
+  type: binds
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: set_1.out_lang_list
+  target: tool_5.in_lang_list
+  type: binds
+- source: set_2.out_lang_list
+  target: tool_5.in_lang_list
+  type: binds
+- source: tool_5.complete
+  target: tool_6.trigger
+  type: triggers
+- source: wf_entry.out_output_dir
+  target: tool_6.in_output_dir
+  type: binds
+- source: tool_6.complete
+  target: fork_1.trigger
+  type: triggers
+- source: fork_1.branch_1
+  target: call_1.trigger
+  type: triggers
+- source: tool_1.out_content
+  target: call_1.in_content
+  type: binds
+- source: tool_3.out_lang1
+  target: call_1.in_lang1
+  type: binds
+- source: wf_entry.out_output_dir
+  target: call_1.in_output_dir
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: call_1.in_max_iterations
+  type: binds
+- source: fork_1.branch_2
+  target: call_2.trigger
+  type: triggers
+- source: tool_1.out_content
+  target: call_2.in_content
+  type: binds
+- source: tool_4.out_lang2
+  target: call_2.in_lang2
+  type: binds
+- source: wf_entry.out_output_dir
+  target: call_2.in_output_dir
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: call_2.in_max_iterations
+  type: binds
+- source: fork_1.branch_3
+  target: call_3.trigger
+  type: triggers
+- source: tool_1.out_content
+  target: call_3.in_content
+  type: binds
+- source: tool_5.out_lang3
+  target: call_3.in_lang3
+  type: binds
+- source: wf_entry.out_output_dir
+  target: call_3.in_output_dir
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: call_3.in_max_iterations
+  type: binds
+- source: call_1.complete
+  target: join_1.trigger
+  type: triggers
+- source: call_2.complete
+  target: join_1.trigger
+  type: triggers
+- source: call_3.complete
+  target: join_1.trigger
+  type: triggers
+- source: join_1.complete
+  target: set_3.trigger
+  type: triggers
+- source: call_1.out_result1
+  target: set_3.in_result1
+  type: binds
+- source: call_2.out_result2
+  target: set_3.in_result2
+  type: binds
+- source: call_3.out_result3
+  target: set_3.in_result3
+  type: binds
+- source: set_3.out_report
+  target: wf_exit.in_report
+  type: binds
+- source: set_3.complete
+  target: wf_exit.trigger
+  type: triggers

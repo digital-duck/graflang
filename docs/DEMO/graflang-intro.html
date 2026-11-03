@@ -185,6 +185,7 @@
     <tr><td><span class="tag t-sol">SOLVE</span></td><td>exact computation: an expression, a Python kernel, or a program run as a subprocess (optionally in a container)</td></tr>
     <tr><td><span class="tag t-ctl">LOOP</span> <span class="tag t-ctl">FORK</span> <span class="tag t-ctl">JOIN</span> <span class="tag t-ctl">BATCH</span></td><td>repeat a sub-graph; fan out; wait for all; run once per item</td></tr>
     <tr><td><span class="tag t-safe">GUARD</span> <span class="tag t-safe">MUTATE</span></td><td>a Cedar policy check; a model-proposed change to the graph, validated before it is applied</td></tr>
+    <tr><td><span class="tag t-io">QUERY</span> <span class="tag t-io">EMIT</span> <span class="tag t-io">OBSERVE</span></td><td>read a file; write, post or e-mail; record what passes by. QUERY and EMIT are risky, so each sits behind a guard</td></tr>
     <tr><td><span class="tag t-io">RUN</span> <span class="tag t-io">CONTEXT</span></td><td>work done by an external program; shared state</td></tr>
   </table>
   <aside class="notes">Point at the split: the model does the fuzzy part (GENERATE), exact things go to SOLVE, decisions go to EVALUATE and GUARD.</aside>
@@ -429,6 +430,38 @@ edges:
   <aside class="notes">Cookbook and solver recipes are read-only: editing one first copies it to apps/. A short steps: file of your own is converted to the long form when opened on Edit.</aside>
 </section>
 
+<!-- Cookbook ---------------------------------------------------------------------------------------------------- -->
+<section class="slide">
+  <h2>Cookbook recipes: 125 graphs</h2>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:2.5%;flex:1;min-height:0;font-size:.7em">
+    <div class="card stack">
+      <h3>Core <span class="tag t-gen">28</span></h3>
+      <div><b>The language, one feature at a time:</b> parts, <code>LOOP</code>, Cedar <code>GUARD</code>, <code>MUTATE</code>, human <code>DECISION</code>, containers.</div>
+      <div><b>Small agents and apps:</b> agent loop, supervisor, guardrail, self-heal, heartbeat, a book writer, a code pipeline with tests.</div>
+    </div>
+    <div class="card stack">
+      <h3>PocketFlow patterns <span class="tag t-ctl">42</span></h3>
+      <div><b>Basics (11):</b> chat, structured output, workflow, batch, map-reduce, flow.</div>
+      <div><b>Agents (9):</b> ReAct, supervisor, multi-agent, debate, A2A, MCP.</div>
+      <div><b>Tools, retrieval, memory (9):</b> search, crawler, database, embeddings, PDF vision, RAG, chat memory.</div>
+      <div><b>Apps and quality (13):</b> deep research, text-to-SQL, invoices, leads, coding agent, self-healing, guardrails, tracing.</div>
+    </div>
+    <div class="card stack">
+      <h3>Solvers <span class="tag t-sol">55</span></h3>
+      <div><b>Math and proof:</b> SymPy, SageMath, Lean.</div>
+      <div><b>Optimisation:</b> LP / MILP, constraints, scheduling, portfolios, black-box search.</div>
+      <div><b>Games:</b> Nash, Stackelberg, CFR.</div>
+      <div><b>Verification:</b> Z3 policies, SQL, units, schemas, pytest, properties.</div>
+      <div><b>Science:</b> physics, materials, geometry, simulation.</div>
+    </div>
+  </div>
+  <div class="card" style="font-size:.64em;margin-top:.4em">
+    One file lists them all: <code>cookbook/cookbook_catalog.yaml</code> (needs, parameters, status). <code>python cookbook/run_all.py --validate | --run</code> checks or runs any slice.
+    <span class="good">26 validated</span> by hand, <b>36 ran</b> end to end with a real model (outputs still to be read), the rest lifted from SPL.py and structurally valid.
+  </div>
+  <aside class="notes">Counts come from the catalog: 28 core, 42 PocketFlow, 55 solvers. "Validated" means the owner ran it and read the output; "ran" means it completed, nothing more. The PocketFlow and solver sets are lifted from SPL.py with spl3 util spl2graph, no model involved. Six PocketFlow recipes still do not complete: two wait for keyboard input, one needs a real Node project, and two (tao, thinking) are stopped by the model's safeguards.</aside>
+</section>
+
 <!-- 17 ----------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
   <h2>Keep graphs logical and readable</h2>
@@ -510,32 +543,6 @@ edges:
 
 <!-- 19c ---------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
-  <h2>Idea and plan</h2>
-  <div class="cols">
-    <ul>
-      <li><b>Safer self-editing agents:</b> a model reshapes its own workflow while the guard, budget and policy stay out of its reach (the experiment is not done).</li>
-      <li><b>Stronger isolation</b> for the programs a graph runs.</li>
-      <li><b>Formal checks</b> beyond races and deadlocks, on the same graph.</li>
-    </ul>
-    <ul>
-      <li><b>More targets:</b> a real Rust runtime, and export to other frameworks, if the graph stays the single source.</li>
-      <li><b>Lifting existing workflows</b> into graphs, so older code and scripts get the same checks.</li>
-      <li><b>A shared recipe library</b> you search by meaning, copy and adapt.</li>
-    </ul>
-  </div>
-  <div class="card" style="font-size:.78em;margin-top:.3em">
-    <b>New node types:</b>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3%;margin-top:.2em">
-      <div><b>OBSERVE</b>: observability; record what happens without slowing the run.</div>
-      <div><b>QUERY</b>: read from the world outside the graph.</div>
-      <div><b>EMIT</b>: act on it, e.g. write a file or send a notification (email, text).</div>
-    </div>
-  </div>
-  <aside class="notes">Label this as speculation out loud. The one piece of evidence that points the right way: migrating 47 solver recipes, the new check found prompts that went to the model unfilled in four recipes that a placeholder-model run had passed.</aside>
-</section>
-
-<!-- 21 ----------------------------------------------------------------------------------------------------------- -->
-<section class="slide">
   <h2>Try it - Apache 2 licensed</h2>
   <div class="cols">
 <pre><span class="k">git</span> clone https://github.com/digital-duck/graflang.git
@@ -556,6 +563,32 @@ edges:
     </div>
   </div>
   <aside class="notes">Remind people to set a call cap before running anything with a loop.</aside>
+</section>
+
+<!-- 21 ----------------------------------------------------------------------------------------------------------- -->
+<section class="slide">
+  <h2>Idea and plan</h2>
+  <div class="cols">
+    <ul>
+      <li><b>Safer self-editing agents:</b> a model reshapes its own workflow while the guard, budget and policy stay out of its reach (the experiment is not done).</li>
+      <li><b>Stronger isolation</b> for the programs a graph runs.</li>
+      <li><b>Formal checks</b> beyond races and deadlocks, on the same graph.</li>
+    </ul>
+    <ul>
+      <li><b>More targets:</b> a real Rust runtime, and export to other frameworks, if the graph stays the single source.</li>
+      <li><b>Lifting existing workflows</b> into graphs, so older code and scripts get the same checks.</li>
+      <li><b>A shared recipe library</b> you search by meaning, copy and adapt.</li>
+    </ul>
+  </div>
+  <div class="card" style="font-size:.78em;margin-top:.3em">
+    <b>Next:</b>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3%;margin-top:.2em">
+      <div><b>DECISION</b>: a person as a node; the graph waits for an answer and keeps going.</div>
+      <div><b>Recipes as parts</b>: use a whole recipe as one node of another graph (built; naming and cost limits to come).</div>
+      <div><b>Model-assembled graphs</b>: a model picks parts from a catalogue, under the same guards.</div>
+    </div>
+  </div>
+  <aside class="notes">Label this as speculation out loud. The one piece of evidence that points the right way: migrating 47 solver recipes, the new check found prompts that went to the model unfilled in four recipes that a placeholder-model run had passed.</aside>
 </section>
 
 <!-- 22 ----------------------------------------------------------------------------------------------------------- -->

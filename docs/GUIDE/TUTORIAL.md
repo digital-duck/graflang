@@ -229,6 +229,8 @@ The default rules are an illustration, not legal advice and not a real GDPR or P
 ## Where next
 
 - [USER-GUIDE.md](USER-GUIDE.md): every command, node type, port convention, `GUARD` and `MUTATE`.
+- [PATTERNS.md](PATTERNS.md): which pattern fits (chain, branch, loop, agent, supervisor, self-healing, guardrail, memory ...) and a recipe to start from.
 - `cookbook/compliance_audit/`: deterministic rules, redact and re-check, and a Cedar release guard (section 8).
 - `cookbook/code_pipeline/`: the flagship, with a test-gated `LOOP`, a Cedar `GUARD` on retries, and SPL procedures.
+- `cookbook/cookbook_catalog.yaml` and `python cookbook/run_all.py --list`: all 120+ recipes (core, PocketFlow patterns, solvers) with what each needs and whether it has been run; `cookbook/README.md` has the tables.
 - [contributor-guide.md](contributor-guide.md): how the runtime is built and how to extend it.

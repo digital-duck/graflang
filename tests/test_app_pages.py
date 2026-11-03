@@ -655,12 +655,12 @@ def test_a_picture_that_cannot_be_drawn_is_a_warning_even_for_a_missing_program(
 
 
 def test_the_browse_files_box_can_be_filtered_by_folder(home):
-    for root in ("apps", "cookbook", "solvers"):
+    for root in ("apps", "cookbook", "solvers", "pocketflow"):
         shutil.copytree(ROOT / "cookbook" / "self_refine", home / root / f"{root}_refine", ignore=shutil.ignore_patterns("output"))
     at = page("edit").run()
     assert not at.exception, at.exception
-    assert at.sidebar.multiselect(key="open_roots").value == ["apps", "cookbook", "solvers"]        # all of them to begin with
-    assert [o.split("/")[0] for o in at.sidebar.selectbox(key="open_pick").options] == ["apps", "cookbook", "solvers"]
+    assert at.sidebar.multiselect(key="open_roots").value == ["apps", "cookbook", "solvers", "pocketflow"]        # all of them to begin with
+    assert [o.split("/")[0] for o in at.sidebar.selectbox(key="open_pick").options] == ["apps", "cookbook", "solvers", "pocketflow"]
     at.sidebar.multiselect(key="open_roots").set_value(["solvers"]).run()
     assert [o.split("/")[0] for o in at.sidebar.selectbox(key="open_pick").options] == ["solvers"]
     at.sidebar.multiselect(key="open_roots").set_value(["apps", "solvers"]).run()

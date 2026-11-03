@@ -1,0 +1,3 @@
+{
+  "result": "{\n  \"vendor\": null,\n  \"customer\": null,\n  \"invoice_number\": null,\n  \"invoice_date\": null,\n  \"line_items\": [],\n  \"tax\": null,\n  \"total\": null,\n  \"validation_status\": \"invalid\",\n  \"validation_notes\": \"error: float() argument must be a string or a real number, not 'NoneType'\"\n}"
+}

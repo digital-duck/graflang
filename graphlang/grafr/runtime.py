@@ -26,7 +26,7 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import networkx as nx
 from jsonschema import ValidationError, validate
@@ -43,7 +43,7 @@ from ..logging_config import DEBUG, ERROR, INFO, WARNING, get_logger, log_event
 from .kernel import KernelPool
 from .lifecycle import run_phases
 from .output import RunOutput
-from .parts import flatten_parts
+from .parts import PartError, _interface, _load_part, _expand_use, flatten_parts, part_file
 from .ports import apply_input_types, check_value, normalize_ports
 from .resolver import ResourceResolver
 from .run_node import run_run
@@ -57,7 +57,7 @@ SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "graflang-ir.j
 DELTA_SCHEMA_PATH = SCHEMA_PATH.with_name("graph_delta.schema.json")
 IMMUTABLE_KEYS = {"id", "type", "ports"}            # update_config may not touch these
 PROTECTED_TYPES = {"INPUT", "OUTPUT"}               # remove_node may not remove the workflow's ends
-SAFETY_TYPES = {"GUARD", "MUTATE"}                  # the safety layer: a delta may not remove these nor change their config
+SAFETY_TYPES = {"GUARD", "MUTATE", "DECISION"}                  # the safety layer: a delta may not remove these nor change their config
 SAFETY_KEYS = {"risky"}                             # nor mark or unmark any node as risky
 DEFAULT_MAX_MUTATIONS = 3
 DEFAULT_EMIT = ("complete", "exit", "entry")
@@ -147,7 +147,7 @@ class GraphLangRuntime:
 
     def __init__(self, graph_data: Dict, adapter: str = "mock", max_steps: int = DEFAULT_MAX_STEPS,
                  verbose: bool = True, model: Optional[str] = None, llm=None,
-                 node_output: Optional[RunOutput] = None, wall_time_s: Optional[float] = None, workers: int = 1, kernel_name: str = "python3", *,
+                 node_output: Optional[RunOutput] = None, wall_time_s: Optional[float] = None, workers: int = 1, kernel_name: str = "python3", effects: Optional[bool] = None, on_node: Optional[Callable[[Dict[str, Any]], None]] = None, *,
                  _parent: "GraphLangRuntime | None" = None, _nodes: Optional[List[Dict]] = None,
                  _edges: Optional[List[Dict]] = None, _boundary: Optional[Dict[str, Any]] = None,
                  _scope: Optional[Dict[str, Any]] = None):
@@ -178,15 +178,26 @@ class GraphLangRuntime:
             self.workers = max(1, int(workers))         # >1: nodes released together run concurrently (_drain_waves)
             self.resolver = ResourceResolver(Path(graph_data.get("_source_dir", ".")), graph_data.get("resources"))
             self.depth = 0
+            self.answers: Dict[str, str] = {}              # DECISION answers given up front (--answer node=value)
+            self.ask: Optional[Callable[..., Optional[str]]] = None   # how a DECISION asks (None: the terminal when there is one)
+            self.answered_by: Optional[str] = None
+            self.parts_policy = (graph_data.get("workflow") or {}).get("parts_policy")
+            self.parts_calls = int(graph_data.get("_parts_calls", 0))      # model calls the parts used so far could make, for the cap
             self.node_output = node_output              # --save-nodes: where each node's outputs are written
             self.kernels = KernelPool(kernel_name)               # kernel SOLVE nodes' Python kernels, closed when the run ends
+            self.on_node = on_node                      # called with {node, type, step, ms, route, outputs} as each node finishes (streaming progress)
+            self.effects = (getattr(self.llm, "name", "") != "mock") if effects is None else bool(effects)   # EMIT really sends only when true; a dry run (mock) reports instead
         else:
             self.llm, self.context, self.budget = _parent.llm, _parent.context, _parent.budget
             self.workers = _parent.workers
             self.stats, self._stats_lock = _parent.stats, _parent._stats_lock
             self.resolver, self.depth = _parent.resolver, _parent.depth + 1
+            self.parts_policy, self.parts_calls = _parent.parts_policy, _parent.parts_calls
+            self.answers, self.ask, self.answered_by = _parent.answers, _parent.ask, _parent.answered_by
             self.node_output = _parent.node_output
             self.kernels = _parent.kernels
+            self.effects = _parent.effects
+            self.on_node = _parent.on_node
         self.mutated = False                            # a MUTATE changed this runtime's graph (a LOOP can carry it on)
         self._build_graph(_nodes if _nodes is not None else graph_data["nodes"],
                           _edges if _edges is not None else graph_data["edges"])
@@ -432,6 +443,12 @@ class GraphLangRuntime:
                 self._write(node, port, value)
         if self.node_output:
             self.node_output.save_node(self.steps, node, result)
+        if self.on_node:
+            try:
+                self.on_node({"node": node, "type": data["type"], "step": self.steps, "ms": ms, "depth": self.depth, "route": result.get("_route"),
+                              "outputs": {p: v for p, v in result.items() if not p.startswith("_")}})
+            except Exception as e:                      # a broken listener must not stop the run
+                log_event(_log, "on_node.failed", level=WARNING, node=node, error=f"{type(e).__name__}: {e}")
         if data["type"] == "OUTPUT":
             self._collect_outputs(in_data)
         self._emit(node, result, queue)
@@ -499,6 +516,9 @@ class GraphLangRuntime:
                 self.outputs[port.removeprefix("in_")] = value
 
     def _execute_node(self, node_type: str, node_data: Dict, in_data: Dict) -> Dict:
+        if node_type in ("LOOP", "BATCH", "MUTATE"):      # these skip run_phases, so an input's default (a part's optional input) is filled here
+            defaults = (((node_data.get("config") or {}).get("phases") or {}).get("pre") or {}).get("defaults") or {}
+            in_data = {**in_data, **{p: v for p, v in defaults.items() if in_data.get(p) is None}}
         if node_type == "LOOP":                       # control structures: they need the runtime, not an executor
             return self._run_loop(node_data, in_data)
         if node_type == "BATCH":
@@ -512,7 +532,10 @@ class GraphLangRuntime:
         else:
             from .nodes import get_node_executor
             executor = get_node_executor(node_type)
-            run = lambda data: executor.execute(node_data, data, self.context, self.resolver, self.llm)
+            if hasattr(executor, "execute_with"):          # QUERY, EMIT, OBSERVE: they need the run (folder, effects, output folder)
+                run = lambda data: executor.execute_with(self, node_data, data)
+            else:
+                run = lambda data: executor.execute(node_data, data, self.context, self.resolver, self.llm)
         return run_phases(node_data, in_data, run)
 
     # ---- LOOP ---------------------------------------------------------------------------------
@@ -683,6 +706,8 @@ class GraphLangRuntime:
         try:
             delta = self._parse_delta(in_data.get("in_delta"))
             validate(instance=delta, schema=json.loads(DELTA_SCHEMA_PATH.read_text(encoding="utf-8")))
+            if delta["action"] == "add_part":
+                delta = {**delta, "_expanded": self._expand_added_part(delta["payload"], cfg)}
             self._check_delta(delta)
         except ValidationError as e:
             return outcome(False, f"delta does not match the schema: {e.message}")
@@ -723,6 +748,35 @@ class GraphLangRuntime:
             raise ValueError("delta must be a JSON object")
         return value
 
+    def _expand_added_part(self, p: Dict, cfg: Dict) -> tuple:
+        """(nodes, edges, resources) a part from this MUTATE node's `catalogue` adds, wired as the delta says. The catalogue is graph
+        file text (a delta cannot change it); the part is checked against its interface and the workflow's `parts_policy` like any use."""
+        from .partinfo import capabilities, check_policy
+        catalogue = cfg.get("catalogue") or {}
+        if p["part"] not in catalogue:
+            raise ValueError(f"part {p['part']!r} is not in the catalogue (it has {sorted(catalogue)})")
+        base = self.resolver.base_dir
+        try:
+            path = part_file(catalogue[p["part"]], base)
+            part = _load_part(path, ())
+            self.parts_calls = check_policy(capabilities(part["nodes"]), self.parts_policy, f"part {p['part']!r}", self.parts_calls)
+            uid = p["id"]
+            binds, feeds = p.get("binds") or {}, p.get("feeds") or {}
+            use = {"id": uid, "type": "SUBGRAPH", "config": {"part": f"parts.{p['part']}"},
+                   "ports": ["trigger", "complete", *[f"in_{n}" for n in binds], *[f"out_{n}" for n in feeds]]}
+            edges = [{"source": src, "target": f"{uid}.in_{n}", "type": "binds"} for n, src in binds.items()]
+            edges += [{"source": f"{uid}.out_{n}", "target": t, "type": "binds"} for n, ts in feeds.items() for t in ts]
+            if p.get("after"):
+                edges.append({"source": p["after"], "target": f"{uid}.trigger", "type": "triggers"})
+            if p.get("before"):
+                edges.append({"source": f"{uid}.complete", "target": p["before"], "type": "triggers"})
+            mini = {"workflow": {"name": "added"}, "resources": {"parts": {p["part"]: str(path)}}, "nodes": [use], "edges": edges}
+            nodes, new_edges = _expand_use(mini, [use], edges, use, base, ())
+        except PartError as e:
+            raise ValueError(str(e)) from None
+        res = {k: v for k, v in mini["resources"].items() if k != "parts"}
+        return nodes, new_edges, res
+
     def _port_kind_ok(self, edge_type: str, sport: str, tport: str) -> Optional[str]:
         if edge_type == "triggers":
             if sport == "trigger" or sport.startswith(("in_", "out_")) or tport != "trigger":
@@ -743,7 +797,27 @@ class GraphLangRuntime:
         if smuggled:
             raise ValueError(f"a delta may not add or change what runs ({', '.join(sorted(set(smuggled)))}); "
                              f"code comes only from the graph file")
-        if a == "add_node":
+        if a == "add_part":
+            new_nodes, new_edges, _ = delta["_expanded"]
+            if p["id"] in self.G:
+                raise ValueError(f"node {p['id']!r} already exists")
+            for n in new_nodes:
+                if n["id"] in self.G:
+                    raise ValueError(f"node {n['id']!r} already exists")
+                if n["type"] == "MUTATE":
+                    raise ValueError("a part that holds a MUTATE node cannot be added by a delta")
+            ids = {n["id"] for n in new_nodes}
+            for e in new_edges:
+                (src, sport), (tgt, tport) = split_ref(e["source"]), split_ref(e["target"])
+                for n, port in ((src, sport), (tgt, tport)):
+                    if n not in ids and n not in self.G:
+                        raise ValueError(f"no node {n!r}")
+                    ports = [x["ports"] for x in new_nodes if x["id"] == n] or [self.G.nodes[n]["ports"]]
+                    if port not in ports[0]:
+                        raise ValueError(f"node {n!r} has no port {port!r}")
+                if (src in ids) != (tgt in ids) and (why := self._port_kind_ok(e["type"], sport, tport)):
+                    raise ValueError(why)
+        elif a == "add_node":
             if p["id"] in self.G:
                 raise ValueError(f"node {p['id']!r} already exists")
         elif a == "remove_node":
@@ -788,6 +862,8 @@ class GraphLangRuntime:
                 "source": {"id": "", "type": "", "port": ""}, "target": {"id": "", "type": "", "port": ""}}
         if a == "add_node":
             info.update(node_id=p["id"], node_type=p["type"])
+        elif a == "add_part":
+            info.update(node_id=p["id"], node_type="SUBGRAPH")
         elif a == "remove_node":
             info.update(node_id=p["id"], node_type=self.G.nodes[p["id"]]["type"])
         elif a in ("add_edge", "remove_edge"):
@@ -819,7 +895,17 @@ class GraphLangRuntime:
     def _apply_delta(self, delta: Dict, G: Optional["nx.MultiDiGraph"] = None) -> None:
         G = self.G if G is None else G
         a, p = delta["action"], delta["payload"]
-        if a == "add_node":
+        if a == "add_part":
+            new_nodes, new_edges, res = delta["_expanded"]
+            for n in new_nodes:
+                G.add_node(n["id"], **copy.deepcopy({**n, "ports": list(n["ports"])}))
+            for e in new_edges:
+                (src, sport), (tgt, tport) = split_ref(e["source"]), split_ref(e["target"])
+                G.add_edge(src, tgt, source_port=sport, target_port=tport, type=e["type"])
+            if G is self.G:                                          # the part's prompts and policies, under their prefixed names
+                for kind, names in res.items():
+                    self.resolver.resources.setdefault(kind, {}).update(names)
+        elif a == "add_node":
             G.add_node(p["id"], id=p["id"], type=p["type"], ports=list(p["ports"]), config=dict(p.get("config", {})))
         elif a == "remove_node":
             G.remove_node(p["id"])

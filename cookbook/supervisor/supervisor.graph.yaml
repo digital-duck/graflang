@@ -1,0 +1,37 @@
+version: "1.0-graph"
+
+# A supervisor over a worker. The worker answers; the supervisor approves it or says what to fix; the worker tries again, at most
+# `max_rounds` times. If nothing was approved, the graph says so instead of passing off the last attempt as good.
+
+workflow:
+  name: "supervisor"
+  inputs:
+    - {name: "question", type: "TEXT"}
+    - {name: "max_rounds", type: "INTEGER", default: 3}
+  outputs:
+    - {name: "answer", type: "TEXT"}
+    - {name: "status", type: "TEXT"}
+
+resources:
+  prompts:
+    worker: "./prompts/worker.md"
+    supervise: "./prompts/supervise.md"
+
+steps:
+  - first: {generate: prompts.worker, in: {question: $in.question, notes: "(no earlier attempt)"}, out: answer}
+  - rounds:
+      loop: "@in_max_rounds"
+      while: "NOT @approved"
+      in: {max_rounds: $in.max_rounds, question: $in.question, answer: first.answer}
+      out:
+        answer: {from: retry.answer}
+        approved: {fired: ok.pass}
+      steps:
+        - review: {generate: prompts.supervise, in: {question: $loop.question, answer: $loop.answer}, out: notes}
+        - ok:     {evaluate: "contains(@in_notes, 'APPROVED')", in: {notes: review.notes}}
+        - retry:  {generate: prompts.worker, on: ok.fail, in: {question: $loop.question, notes: review.notes}, out: answer}
+  - passed:   {evaluate: "@in_approved == TRUE", in: {approved: rounds.approved}}
+  - good:     {solve: "'approved by the supervisor'", on: passed.pass, out: status}
+  - good_out: {output: {answer: rounds.answer, status: good.status}}
+  - bad:      {solve: "'not approved after ' + str(@in_n) + ' rounds; the last attempt is shown'", on: passed.fail, in: {n: $in.max_rounds}, out: status}
+  - bad_out:  {output: {answer: rounds.answer, status: bad.status}, on: bad}

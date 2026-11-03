@@ -1,0 +1,3 @@
+{
+  "output": "FAILURE: max retries reached without valid syntax. Last errors: \u001b[31m\u001b[39m\n\u001b[31mInput file \"/tmp/tmp07wtf8ej.mmd\" doesn't exist\u001b[39m\n\u001b[31m\u001b[39m\n"
+}

@@ -1,0 +1,527 @@
+version: 1.0-graph
+workflow:
+  name: travel_chat_guardrail
+  inputs:
+  - name: user_messages
+    type: TEXT
+    default: |-
+      What are the best beaches to visit in Thailand?
+      How do I book a hotel in Paris for two weeks?
+      What is the weather like in Tokyo in spring?
+  - name: max_turns
+    type: INTEGER
+    default: 10
+  - name: out_dir
+    type: TEXT
+    default: cookbook_pocketflow/chat_guardrail/output
+  outputs:
+  - name: conversation_log
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_user_messages
+  - out_max_turns
+  - out_out_dir
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: '1'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_conversation_log
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_turns
+    outputs:
+      current_message:
+        from: tool_1.out_current_message
+      is_blank:
+        from: tool_2.out_is_blank
+      i:
+        from:
+        - set_3.out_i
+        - set_5.out_i
+      heuristic_result:
+        from: tool_3.out_heuristic_result
+      llm_verdict:
+        from: gen_1.out_llm_verdict
+      response:
+        from:
+        - gen_2.out_response
+        - gen_3.out_response
+        - gen_4.out_response
+      conversation_log:
+        from: set_4.out_conversation_log
+    subgraph:
+      nodes:
+      - id: tool_1
+        type: SOLVE
+        config:
+          tool: list_get
+          backend: kernel
+          arguments:
+          - '@user_messages'
+          - '@i'
+          - '''\n'''
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(user_messages, i, '\n')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - index
+          - delimiter
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_user_messages
+        - in_i
+        - out_current_message
+      - id: tool_2
+        type: SOLVE
+        config:
+          tool: isblank
+          backend: kernel
+          arguments:
+          - '@current_message'
+          code: |
+            def isblank(value: str) -> str:
+                """ISBLANK(value) — returns 'true' if value is empty or only whitespace."""
+                return 'true' if str(value).strip() == '' else 'false'
+            _spl_result = isblank(current_message)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_current_message
+        - out_is_blank
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_3
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_turns'
+        ports:
+        - trigger
+        - complete
+        - in_max_turns
+        - out_i
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: heuristic_travel_check
+          backend: kernel
+          arguments:
+          - '@current_message'
+          code: |
+            def heuristic_travel_check(message: str) -> str:
+                travel_keywords = [
+                    "travel", "trip", "vacation", "flight", "hotel", "destination",
+                    "tour", "visit", "passport", "visa", "itinerary", "booking",
+                    "airline", "resort", "cruise", "hostel", "airport", "luggage",
+                    "tourist", "sightseeing", "adventure", "backpack", "journey",
+                    "road trip", "beach", "mountain", "abroad", "country", "city"
+                ]
+                text = message.lower()
+                for kw in travel_keywords:
+                    if kw in text:
+                        return "travel"
+                return "not_travel"
+            _spl_result = heuristic_travel_check(current_message)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - message
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_current_message
+        - out_heuristic_result
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'not_travel')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: validate_travel_topic
+          params:
+          - current_message
+          prompt_inline: |-
+            You are a strict topic classifier for a travel advisory service.
+            Determine whether the following user message is travel-related.
+
+            Travel-related topics include: destinations, flights, hotels, car rentals, visas,
+            passports, itineraries, packing, transportation, tourism, travel safety, cultural tips,
+            local cuisine recommendations, and any question about visiting or exploring places.
+
+            User message: {{in_current_message}}
+
+            Reply with exactly one token: "travel" if travel-related, or "not_travel" if not.
+          arguments:
+          - '@current_message'
+        ports:
+        - trigger
+        - complete
+        - in_current_message
+        - out_llm_verdict
+      - id: eval_3
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'not_travel')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: reject_off_topic
+          params:
+          - current_message
+          prompt_inline: |-
+            You are a friendly travel advisor assistant. The user has sent a message outside your
+            area of expertise. Politely decline and guide them back to travel-related questions.
+            Keep your response to 2-3 sentences.
+
+            Off-topic user message: {{in_current_message}}
+          arguments:
+          - '@current_message'
+        ports:
+        - trigger
+        - complete
+        - in_current_message
+        - out_response
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: generate_travel_advice
+          params:
+          - current_message
+          prompt_inline: |-
+            You are an expert travel advisor with comprehensive knowledge of world destinations,
+            logistics, culture, safety, and trip planning. Provide helpful, accurate, and practical
+            travel advice. Include relevant tips about safety, local customs, logistics, or
+            destination highlights as appropriate.
+
+            User question: {{in_current_message}}
+          arguments:
+          - '@current_message'
+        ports:
+        - trigger
+        - complete
+        - in_current_message
+        - out_response
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: generate_travel_advice
+          params:
+          - current_message
+          prompt_inline: |-
+            You are an expert travel advisor with comprehensive knowledge of world destinations,
+            logistics, culture, safety, and trip planning. Provide helpful, accurate, and practical
+            travel advice. Include relevant tips about safety, local customs, logistics, or
+            destination highlights as appropriate.
+
+            User question: {{in_current_message}}
+          arguments:
+          - '@current_message'
+        ports:
+        - trigger
+        - complete
+        - in_current_message
+        - out_response
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_conversation_log + ''User: '' + @in_current_message + ''\nAssistant:
+            '' + @in_response + ''\n\n'''
+        ports:
+        - trigger
+        - complete
+        - in_conversation_log
+        - in_current_message
+        - in_response
+        - out_conversation_log
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_1.complete
+        target: tool_2.trigger
+        type: triggers
+      - source: tool_1.out_current_message
+        target: tool_2.in_current_message
+        type: binds
+      - source: tool_2.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_2.out_is_blank
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: set_3.trigger
+        type: triggers
+      - source: eval_1.fail
+        target: tool_3.trigger
+        type: triggers
+      - source: tool_1.out_current_message
+        target: tool_3.in_current_message
+        type: binds
+      - source: tool_3.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_3.out_heuristic_result
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: gen_1.trigger
+        type: triggers
+      - source: tool_1.out_current_message
+        target: gen_1.in_current_message
+        type: binds
+      - source: gen_1.complete
+        target: eval_3.trigger
+        type: triggers
+      - source: gen_1.out_llm_verdict
+        target: eval_3.in_subject
+        type: binds
+      - source: eval_3.pass
+        target: gen_2.trigger
+        type: triggers
+      - source: tool_1.out_current_message
+        target: gen_2.in_current_message
+        type: binds
+      - source: eval_3.fail
+        target: gen_3.trigger
+        type: triggers
+      - source: tool_1.out_current_message
+        target: gen_3.in_current_message
+        type: binds
+      - source: eval_2.fail
+        target: gen_4.trigger
+        type: triggers
+      - source: tool_1.out_current_message
+        target: gen_4.in_current_message
+        type: binds
+      - source: gen_2.complete
+        target: set_4.trigger
+        type: triggers
+      - source: gen_3.complete
+        target: set_4.trigger
+        type: triggers
+      - source: gen_4.complete
+        target: set_4.trigger
+        type: triggers
+      - source: tool_1.out_current_message
+        target: set_4.in_current_message
+        type: binds
+      - source: gen_2.out_response
+        target: set_4.in_response
+        type: binds
+      - source: gen_3.out_response
+        target: set_4.in_response
+        type: binds
+      - source: gen_4.out_response
+        target: set_4.in_response
+        type: binds
+      - source: set_4.complete
+        target: set_5.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_user_messages
+  - in_i
+  - in_max_turns
+  - in_conversation_log
+  - out_current_message
+  - out_is_blank
+  - out_i
+  - out_heuristic_result
+  - out_llm_verdict
+  - out_response
+  - out_conversation_log
+- id: tool_4
+  type: SOLVE
+  config:
+    tool: path_join
+    backend: kernel
+    arguments:
+    - '@out_dir'
+    - '''chat_log.md'''
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(out_dir, 'chat_log.md')
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out_dir
+  - out_chat_path
+- id: tool_5
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@chat_path'
+    - '@conversation_log'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(chat_path, conversation_log)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_chat_path
+  - in_conversation_log
+  - out__
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_conversation_log
+edges:
+- source: wf_entry.entry
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: wf_entry.out_user_messages
+  target: loop_1.in_user_messages
+  type: binds
+- source: set_1.out_i
+  target: loop_1.in_i
+  type: binds
+- source: wf_entry.out_max_turns
+  target: loop_1.in_max_turns
+  type: binds
+- source: set_2.out_conversation_log
+  target: loop_1.in_conversation_log
+  type: binds
+- source: loop_1.exit
+  target: tool_4.trigger
+  type: triggers
+- source: wf_entry.out_out_dir
+  target: tool_4.in_out_dir
+  type: binds
+- source: tool_4.complete
+  target: tool_5.trigger
+  type: triggers
+- source: tool_4.out_chat_path
+  target: tool_5.in_chat_path
+  type: binds
+- source: loop_1.out_conversation_log
+  target: tool_5.in_conversation_log
+  type: binds
+- source: loop_1.out_conversation_log
+  target: wf_exit.in_conversation_log
+  type: binds
+- source: tool_5.complete
+  target: wf_exit.trigger
+  type: triggers

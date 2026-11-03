@@ -81,6 +81,12 @@ class RunOutput:
             log_event(_log, "node.saved", node=node, port=port, file=str(path), chars=len(text))
         return paths
 
+    def observe(self, step: int, node: str, label: str, values: Dict[str, Any]) -> None:
+        """Append one OBSERVE record to observations.jsonl in the run's folder."""
+        self.dir.mkdir(parents=True, exist_ok=True)
+        with open(self.dir / "observations.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"step": step, "node": node, "label": label, "values": values}, ensure_ascii=False, default=str) + "\n")
+
     def save_error(self, message: str) -> Path:
         """run.json with the reason a run failed, so the run shows up in a history of runs."""
         self.dir.mkdir(parents=True, exist_ok=True)

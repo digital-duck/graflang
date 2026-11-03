@@ -1,0 +1,99 @@
+CREATE TOOL_API get_yaml_section(yaml_outline TEXT, idx TEXT) RETURNS TEXT AS PYTHON $$
+import yaml
+def get_yaml_section(yaml_outline: str, idx: str) -> str:
+    try:
+        raw = yaml_outline.strip().removeprefix("```yaml").removeprefix("```").removesuffix("```").strip()
+        data = yaml.safe_load(raw)
+        sections = data.get("sections", data.get("outline", [])) if isinstance(data, dict) else data
+        i = int(idx)
+        return str(sections[i]) if 0 <= i < len(sections) else ""
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API topic_to_filename(topic TEXT) 
+RETURNS TEXT AS PYTHON $$
+import re
+def topic_to_filename(topic: str) -> str:
+    slug = topic.lower().strip()
+    slug = re.sub(r'[^\w\s-]', '', slug)
+    slug = re.sub(r'[\s-]+', '_', slug)
+    return slug[:40].strip('_')
+$$;
+
+
+CREATE FUNCTION generate_outline(topic TEXT)
+RETURNS TEXT AS $$
+Generate a structured article outline for the topic: "{topic}"
+
+Return ONLY a YAML document in this exact format:
+sections:
+  - <section title>
+  - <section title>
+
+Include 4-6 sections covering introduction, key points, and conclusion.
+Output ONLY valid YAML — no extra text, no code fences.
+$$;
+
+CREATE FUNCTION draft_section(topic TEXT, section_title TEXT, outline TEXT)
+RETURNS TEXT AS $$
+Write a detailed draft for the section "{section_title}" in an article about {topic}.
+
+Full outline for context:
+{outline}
+
+Write 2-4 well-structured paragraphs for this section only. Do not include other sections.
+$$;
+
+CREATE FUNCTION polish_article(topic TEXT, full_draft TEXT)
+RETURNS TEXT AS $$
+Rewrite the following article draft about {topic} with a polished, conversational style.
+Ensure smooth transitions between sections, a consistent voice, and a compelling narrative flow.
+
+Draft:
+{full_draft}
+
+Output the complete, publication-ready article.
+$$;
+
+WORKFLOW article_writer
+  INPUT @topic TEXT := "The Future of Quantum Computing"
+  INPUT @max_sections INTEGER := 5
+  INPUT @out_dir TEXT := "cookbook-pocketflow/003_workflow/output"
+  OUTPUT @article TEXT
+DO
+  CALL topic_to_filename(@topic) INTO @slug;
+  CALL make_dir(@out_dir) INTO @_;
+
+  -- Step 1: generate YAML outline
+  GENERATE generate_outline(@topic) INTO @yaml_outline;
+  LOGGING f'=== Outline ===\n{@yaml_outline}';
+  CALL path_join(@out_dir, @slug + "_outline.yaml") INTO @outline_path;
+  CALL write_file(@outline_path, @yaml_outline) INTO @_;
+
+  -- Step 2: draft each section directly from the YAML outline
+  @i := 0;
+  @all_drafts := "";
+  WHILE @i < @max_sections DO
+    CALL get_yaml_section(@yaml_outline, @i) INTO @section_title;
+    CALL isblank(@section_title) INTO @is_blank;
+    CALL lower(@is_blank) INTO @is_blank;
+    EVALUATE @is_blank WHEN contains("true") THEN
+      @i := @max_sections;
+    ELSE
+      GENERATE draft_section(@topic, @section_title, @yaml_outline) INTO @section_draft;
+      @all_drafts := @all_drafts + "## " + @section_title + "
+" + @section_draft + "
+";
+      @i := @i + 1;
+    END;
+  END;
+
+  -- Step 3: style rewriting
+  GENERATE polish_article(@topic, @all_drafts) INTO @article;
+  LOGGING f'=== Article ===\n{@article}';
+  CALL path_join(@out_dir, @slug + ".md") INTO @article_path;
+  CALL write_file(@article_path, @article) INTO @_;
+
+  RETURN @article WITH status = "complete";
+END;

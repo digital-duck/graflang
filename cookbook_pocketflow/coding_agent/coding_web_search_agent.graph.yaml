@@ -1,0 +1,1117 @@
+version: 1.0-graph
+workflow:
+  name: coding_agent
+  inputs:
+  - name: project_dir
+    type: TEXT
+    default: cookbook_pocketflow/coding_agent
+  - name: test_dir
+    type: TEXT
+    default: cookbook_pocketflow/coding_agent/tests
+  - name: test_suite
+    type: TEXT
+    default: |-
+      def test_basic():
+          from src.solution import two_sum
+          assert two_sum([2, 7, 11, 15], 9) == [0, 1]
+
+      def test_middle():
+          from src.solution import two_sum
+          assert two_sum([3, 2, 4], 6) == [1, 2]
+
+      def test_duplicate():
+          from src.solution import two_sum
+          assert two_sum([3, 3], 6) == [0, 1]
+  - name: skeleton_file
+    type: TEXT
+    default: cookbook_pocketflow/coding_agent/src/solution.py
+  - name: max_iterations
+    type: INTEGER
+    default: 10
+  outputs:
+  - name: final_report
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_project_dir
+  - out_test_dir
+  - out_test_suite
+  - out_skeleton_file
+  - out_max_iterations
+- id: tool_1
+  type: SOLVE
+  config:
+    tool: list_project_files
+    backend: kernel
+    arguments:
+    - '@project_dir'
+    code: |
+      import os
+
+      def list_project_files(directory: str) -> str:
+          try:
+              if not directory or directory.lower() in ('none', ''):
+                  directory = '.'
+              result = []
+              for root, dirs, files in os.walk(directory):
+                  dirs[:] = [d for d in dirs if not d.startswith('.')]
+                  level = root.replace(directory, '').count(os.sep)
+                  indent = '  ' * level
+                  result.append(f"{indent}{os.path.basename(root)}/")
+                  subindent = '  ' * (level + 1)
+                  for fname in files:
+                      result.append(f"{subindent}{os.path.join(root, fname)}")
+              return '\n'.join(result) or "empty directory"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = list_project_files(project_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - directory
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_project_dir
+  - out_codebase_structure
+- id: tool_2
+  type: SOLVE
+  config:
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@skeleton_file'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(skeleton_file)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_skeleton_file
+  - out_skeleton_functions
+- id: set_1
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_action_history
+- id: set_2
+  type: CONTEXT
+  config:
+    action: set
+    expression: '0'
+  ports:
+  - trigger
+  - complete
+  - out_i
+- id: set_3
+  type: CONTEXT
+  config:
+    action: set
+    expression: '''incomplete'''
+  ports:
+  - trigger
+  - complete
+  - out_status
+- id: set_4
+  type: CONTEXT
+  config:
+    action: set
+    expression: ''''''
+  ports:
+  - trigger
+  - complete
+  - out_last_test_output
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_iterations
+    outputs:
+      action_decision:
+        from: gen_1.out_action_decision
+      action_type:
+        from: tool_3.out_action_type
+      action_file:
+        from: tool_4.out_action_file
+      action_args:
+        from: tool_5.out_action_args
+      ran_tests:
+        from:
+        - set_5.out_ran_tests
+        - set_7.out_ran_tests
+      action_result:
+        from:
+        - tool_6.out_action_result
+        - tool_7.out_action_result
+        - tool_9.out_action_result
+        - tool_10.out_action_result
+        - set_8.out_action_result
+      current_content:
+        from: tool_8.out_current_content
+      patched_content:
+        from: gen_2.out_patched_content
+      last_test_output:
+        from: set_6.out_last_test_output
+      action_history:
+        from: tool_11.out_action_history
+      tests_gate:
+        from: tool_12.out_tests_gate
+      status:
+        from: set_9.out_status
+      i:
+        from:
+        - set_10.out_i
+        - set_11.out_i
+        - set_12.out_i
+    subgraph:
+      nodes:
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: select_action
+          params:
+          - action_history
+          - codebase_structure
+          - skeleton_functions
+          - test_suite
+          prompt_inline: |-
+            You are an autonomous coding agent implementing missing functions so a failing test suite passes.
+
+            Codebase structure:
+            {{in_codebase_structure}}
+
+            Skeleton functions (stubs to implement):
+            {{in_skeleton_functions}}
+
+            Test suite (must all pass):
+            {{in_test_suite}}
+
+            Action history so far:
+            {{in_action_history}}
+
+            Select the single most useful next action. Available actions:
+              inspect   — list files in a directory to explore the codebase
+              read      — read a specific file''s contents
+              patch     — write a corrected implementation to a file
+              run_tests — execute the test suite to check progress
+
+            Respond in exactly this format:
+            ACTION: <inspect|read|patch|run_tests>
+            FILE: <file path, or none>
+            ARGS: <directory path for inspect, or none>
+            REASON: <one-line justification>
+          arguments:
+          - '@action_history'
+          - '@codebase_structure'
+          - '@skeleton_functions'
+          - '@test_suite'
+        ports:
+        - trigger
+        - complete
+        - in_action_history
+        - in_codebase_structure
+        - in_skeleton_functions
+        - in_test_suite
+        - out_action_decision
+      - id: tool_3
+        type: SOLVE
+        config:
+          tool: parse_field
+          backend: kernel
+          arguments:
+          - '@action_decision'
+          - '''ACTION'''
+          code: |
+            def parse_field(text: str, field: str) -> str:
+                try:
+                    for line in text.split('\n'):
+                        stripped = line.strip()
+                        if stripped.upper().startswith(field.upper() + ':'):
+                            return stripped.split(':', 1)[1].strip()
+                    return ""
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = parse_field(action_decision, 'ACTION')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          - field
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_action_decision
+        - out_action_type
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: parse_field
+          backend: kernel
+          arguments:
+          - '@action_decision'
+          - '''FILE'''
+          code: |
+            def parse_field(text: str, field: str) -> str:
+                try:
+                    for line in text.split('\n'):
+                        stripped = line.strip()
+                        if stripped.upper().startswith(field.upper() + ':'):
+                            return stripped.split(':', 1)[1].strip()
+                    return ""
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = parse_field(action_decision, 'FILE')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          - field
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_action_decision
+        - out_action_file
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: parse_field
+          backend: kernel
+          arguments:
+          - '@action_decision'
+          - '''ARGS'''
+          code: |
+            def parse_field(text: str, field: str) -> str:
+                try:
+                    for line in text.split('\n'):
+                        stripped = line.strip()
+                        if stripped.upper().startswith(field.upper() + ':'):
+                            return stripped.split(':', 1)[1].strip()
+                    return ""
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = parse_field(action_decision, 'ARGS')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          - field
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_action_decision
+        - out_action_args
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''false'''
+        ports:
+        - trigger
+        - complete
+        - out_ran_tests
+      - id: eval_1
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'inspect')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: list_project_files
+          backend: kernel
+          arguments:
+          - '@action_args'
+          code: |
+            import os
+
+            def list_project_files(directory: str) -> str:
+                try:
+                    if not directory or directory.lower() in ('none', ''):
+                        directory = '.'
+                    result = []
+                    for root, dirs, files in os.walk(directory):
+                        dirs[:] = [d for d in dirs if not d.startswith('.')]
+                        level = root.replace(directory, '').count(os.sep)
+                        indent = '  ' * level
+                        result.append(f"{indent}{os.path.basename(root)}/")
+                        subindent = '  ' * (level + 1)
+                        for fname in files:
+                            result.append(f"{subindent}{os.path.join(root, fname)}")
+                    return '\n'.join(result) or "empty directory"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = list_project_files(action_args)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - directory
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_action_args
+        - out_action_result
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'read')
+          branch: 2
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: read_file
+          backend: kernel
+          arguments:
+          - '@action_file'
+          code: |
+            import pathlib
+
+            def read_file(file_path: str) -> str:
+                """READ_FILE(file_path) — read entire text file and return its content.
+
+                Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                return p.read_text(encoding='utf-8')
+            _spl_result = read_file(action_file)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_action_file
+        - out_action_result
+      - id: eval_3
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'patch')
+          branch: 3
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: read_file
+          backend: kernel
+          arguments:
+          - '@action_file'
+          code: |
+            import pathlib
+
+            def read_file(file_path: str) -> str:
+                """READ_FILE(file_path) — read entire text file and return its content.
+
+                Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                return p.read_text(encoding='utf-8')
+            _spl_result = read_file(action_file)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_action_file
+        - out_current_content
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: generate_patch
+          params:
+          - action_file
+          - current_content
+          - test_suite
+          - action_history
+          prompt_inline: |-
+            You are implementing missing or stub functions in a Python source file so that a test suite passes.
+
+            File: {{in_action_file}}
+
+            Current file content:
+            {{in_current_content}}
+
+            Test suite that must pass:
+            {{in_test_suite}}
+
+            Prior action history (what you''ve tried):
+            {{in_action_history}}
+
+            Write the complete, corrected content for {{in_action_file}}.
+            Implement every stub or missing function. Do not truncate the file.
+            Return ONLY the raw file content — no markdown fences, no explanation.
+          arguments:
+          - '@action_file'
+          - '@current_content'
+          - '@test_suite'
+          - '@action_history'
+        ports:
+        - trigger
+        - complete
+        - in_action_file
+        - in_current_content
+        - in_test_suite
+        - in_action_history
+        - out_patched_content
+      - id: tool_9
+        type: SOLVE
+        config:
+          tool: write_file
+          backend: kernel
+          arguments:
+          - '@action_file'
+          - '@patched_content'
+          - '''w'''
+          code: |
+            import pathlib
+
+            def write_file(file_path: str, content: str, mode: str='w') -> str:
+                """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+                mode: 'w' (overwrite, default) or 'a' (append).
+                Creates parent directories automatically.
+                Returns the absolute path written.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                p.parent.mkdir(parents=True, exist_ok=True)
+                m = str(mode).strip().lower()
+                if m not in ('w', 'a'):
+                    m = 'w'
+                with p.open(m, encoding='utf-8') as fh:
+                    fh.write(str(content))
+                return str(p.resolve())
+            _spl_result = write_file(action_file, patched_content, 'w')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          - content
+          - mode
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_action_file
+        - in_patched_content
+        - out_action_result
+      - id: eval_4
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'run_tests')
+          branch: 4
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_10
+        type: SOLVE
+        config:
+          tool: run_test_suite
+          backend: kernel
+          arguments:
+          - '@test_dir'
+          code: |
+            import subprocess
+
+            def run_test_suite(test_dir: str) -> str:
+                try:
+                    result = subprocess.run(
+                        ['python', '-m', 'pytest', test_dir, '-v', '--tb=short'],
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+                    output = result.stdout + result.stderr
+                    return output.strip() or "no output"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = run_test_suite(test_dir)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - test_dir
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_test_dir
+        - out_action_result
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_action_result'
+        ports:
+        - trigger
+        - complete
+        - in_action_result
+        - out_last_test_output
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''true'''
+        ports:
+        - trigger
+        - complete
+        - out_ran_tests
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''unknown action: '' + @in_action_type'
+        ports:
+        - trigger
+        - complete
+        - in_action_type
+        - out_action_result
+      - id: tool_11
+        type: SOLVE
+        config:
+          tool: append_history
+          backend: kernel
+          arguments:
+          - '@action_history'
+          - '@action_type'
+          - '@action_result'
+          code: |
+            def append_history(history: str, action: str, result: str) -> str:
+                try:
+                    snippet = result[:600] + ('...' if len(result) > 600 else '')
+                    entry = f"\n[{action}]\n{snippet}\n"
+                    return history + entry
+                except Exception as e:
+                    return history + f"\n[error appending history: {e}]\n"
+            _spl_result = append_history(action_history, action_type, action_result)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - history
+          - action
+          - result
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_action_history
+        - in_action_type
+        - in_action_result
+        - out_action_history
+      - id: eval_5
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'true')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: tool_12
+        type: SOLVE
+        config:
+          tool: check_tests_pass
+          backend: kernel
+          arguments:
+          - '@last_test_output'
+          code: |
+            import re
+
+            def check_tests_pass(test_output: str) -> str:
+                try:
+                    if re.search(r'\d+ failed', test_output):
+                        return "fail"
+                    if re.search(r'\d+ error', test_output):
+                        return "fail"
+                    if re.search(r'\d+ passed', test_output):
+                        return "pass"
+                    return "fail"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = check_tests_pass(last_test_output)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - test_output
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_last_test_output
+        - out_tests_gate
+      - id: eval_6
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'pass')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '''success'''
+        ports:
+        - trigger
+        - complete
+        - out_status
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_iterations'
+        ports:
+        - trigger
+        - complete
+        - in_max_iterations
+        - out_i
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      - id: set_12
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: gen_1.complete
+        target: tool_3.trigger
+        type: triggers
+      - source: gen_1.out_action_decision
+        target: tool_3.in_action_decision
+        type: binds
+      - source: tool_3.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: gen_1.out_action_decision
+        target: tool_4.in_action_decision
+        type: binds
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: gen_1.out_action_decision
+        target: tool_5.in_action_decision
+        type: binds
+      - source: tool_5.complete
+        target: set_5.trigger
+        type: triggers
+      - source: set_5.complete
+        target: eval_1.trigger
+        type: triggers
+      - source: tool_3.out_action_type
+        target: eval_1.in_subject
+        type: binds
+      - source: eval_1.pass
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_5.out_action_args
+        target: tool_6.in_action_args
+        type: binds
+      - source: eval_1.fail
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_3.out_action_type
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: tool_7.trigger
+        type: triggers
+      - source: tool_4.out_action_file
+        target: tool_7.in_action_file
+        type: binds
+      - source: eval_2.fail
+        target: eval_3.trigger
+        type: triggers
+      - source: tool_3.out_action_type
+        target: eval_3.in_subject
+        type: binds
+      - source: eval_3.pass
+        target: tool_8.trigger
+        type: triggers
+      - source: tool_4.out_action_file
+        target: tool_8.in_action_file
+        type: binds
+      - source: tool_8.complete
+        target: gen_2.trigger
+        type: triggers
+      - source: tool_4.out_action_file
+        target: gen_2.in_action_file
+        type: binds
+      - source: tool_8.out_current_content
+        target: gen_2.in_current_content
+        type: binds
+      - source: gen_2.complete
+        target: tool_9.trigger
+        type: triggers
+      - source: tool_4.out_action_file
+        target: tool_9.in_action_file
+        type: binds
+      - source: gen_2.out_patched_content
+        target: tool_9.in_patched_content
+        type: binds
+      - source: eval_3.fail
+        target: eval_4.trigger
+        type: triggers
+      - source: tool_3.out_action_type
+        target: eval_4.in_subject
+        type: binds
+      - source: eval_4.pass
+        target: tool_10.trigger
+        type: triggers
+      - source: tool_10.complete
+        target: set_6.trigger
+        type: triggers
+      - source: tool_10.out_action_result
+        target: set_6.in_action_result
+        type: binds
+      - source: set_6.complete
+        target: set_7.trigger
+        type: triggers
+      - source: eval_4.fail
+        target: set_8.trigger
+        type: triggers
+      - source: tool_3.out_action_type
+        target: set_8.in_action_type
+        type: binds
+      - source: tool_6.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: tool_7.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: tool_9.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: set_7.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: set_8.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: tool_3.out_action_type
+        target: tool_11.in_action_type
+        type: binds
+      - source: tool_6.out_action_result
+        target: tool_11.in_action_result
+        type: binds
+      - source: tool_7.out_action_result
+        target: tool_11.in_action_result
+        type: binds
+      - source: tool_9.out_action_result
+        target: tool_11.in_action_result
+        type: binds
+      - source: tool_10.out_action_result
+        target: tool_11.in_action_result
+        type: binds
+      - source: set_8.out_action_result
+        target: tool_11.in_action_result
+        type: binds
+      - source: tool_11.complete
+        target: eval_5.trigger
+        type: triggers
+      - source: set_5.out_ran_tests
+        target: eval_5.in_subject
+        type: binds
+      - source: set_7.out_ran_tests
+        target: eval_5.in_subject
+        type: binds
+      - source: eval_5.pass
+        target: tool_12.trigger
+        type: triggers
+      - source: set_6.out_last_test_output
+        target: tool_12.in_last_test_output
+        type: binds
+      - source: tool_12.complete
+        target: eval_6.trigger
+        type: triggers
+      - source: tool_12.out_tests_gate
+        target: eval_6.in_subject
+        type: binds
+      - source: eval_6.pass
+        target: set_9.trigger
+        type: triggers
+      - source: set_9.complete
+        target: set_10.trigger
+        type: triggers
+      - source: eval_6.fail
+        target: set_11.trigger
+        type: triggers
+      - source: eval_5.fail
+        target: set_12.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_action_history
+  - in_codebase_structure
+  - in_skeleton_functions
+  - in_test_suite
+  - in_test_dir
+  - in_max_iterations
+  - in_i
+  - in_last_test_output
+  - in_status
+  - out_action_decision
+  - out_action_type
+  - out_action_file
+  - out_action_args
+  - out_ran_tests
+  - out_action_result
+  - out_current_content
+  - out_patched_content
+  - out_last_test_output
+  - out_action_history
+  - out_tests_gate
+  - out_status
+  - out_i
+- id: eval_7
+  type: EVALUATE
+  config:
+    condition: contains(@in_subject, 'success')
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_subject
+- id: gen_3
+  type: GENERATE
+  config:
+    function: report_success
+    params:
+    - action_history
+    - last_test_output
+    prompt_inline: |-
+      The coding agent successfully made all tests pass.
+
+      Action history:
+      {{in_action_history}}
+
+      Final test output:
+      {{in_last_test_output}}
+
+      Write a concise success report covering: what was implemented, how many steps it took, and the final test result.
+    arguments:
+    - '@action_history'
+    - '@last_test_output'
+  ports:
+  - trigger
+  - complete
+  - in_action_history
+  - in_last_test_output
+  - out_final_report
+- id: tool_13
+  type: SOLVE
+  config:
+    tool: to_text
+    backend: kernel
+    arguments:
+    - '@max_iterations'
+    code: |
+      from typing import Any
+
+      def to_text(value: Any) -> str:
+          """CAST(value AS TEXT) — convert any value to its string representation."""
+          if value is None:
+              return ''
+          return str(value)
+      _spl_result = to_text(max_iterations)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_max_iterations
+  - out_max_iter_str
+- id: gen_4
+  type: GENERATE
+  config:
+    function: report_failure
+    params:
+    - action_history
+    - max_iter_str
+    prompt_inline: |-
+      The coding agent exhausted all {{in_max_iter_str}} iterations without making all tests pass.
+
+      Action history:
+      {{in_action_history}}
+
+      Write a concise failure report covering: what was attempted, what remains unimplemented, and recommended next steps for a human developer.
+    arguments:
+    - '@action_history'
+    - '@max_iter_str'
+  ports:
+  - trigger
+  - complete
+  - in_action_history
+  - in_max_iter_str
+  - out_final_report
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_final_report
+edges:
+- source: wf_entry.entry
+  target: tool_1.trigger
+  type: triggers
+- source: wf_entry.out_project_dir
+  target: tool_1.in_project_dir
+  type: binds
+- source: tool_1.complete
+  target: tool_2.trigger
+  type: triggers
+- source: wf_entry.out_skeleton_file
+  target: tool_2.in_skeleton_file
+  type: binds
+- source: tool_2.complete
+  target: set_1.trigger
+  type: triggers
+- source: set_1.complete
+  target: set_2.trigger
+  type: triggers
+- source: set_2.complete
+  target: set_3.trigger
+  type: triggers
+- source: set_3.complete
+  target: set_4.trigger
+  type: triggers
+- source: set_4.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_1.out_action_history
+  target: loop_1.in_action_history
+  type: binds
+- source: tool_1.out_codebase_structure
+  target: loop_1.in_codebase_structure
+  type: binds
+- source: tool_2.out_skeleton_functions
+  target: loop_1.in_skeleton_functions
+  type: binds
+- source: wf_entry.out_test_suite
+  target: loop_1.in_test_suite
+  type: binds
+- source: wf_entry.out_test_dir
+  target: loop_1.in_test_dir
+  type: binds
+- source: wf_entry.out_max_iterations
+  target: loop_1.in_max_iterations
+  type: binds
+- source: set_2.out_i
+  target: loop_1.in_i
+  type: binds
+- source: set_4.out_last_test_output
+  target: loop_1.in_last_test_output
+  type: binds
+- source: set_3.out_status
+  target: loop_1.in_status
+  type: binds
+- source: loop_1.exit
+  target: eval_7.trigger
+  type: triggers
+- source: loop_1.out_status
+  target: eval_7.in_subject
+  type: binds
+- source: eval_7.pass
+  target: gen_3.trigger
+  type: triggers
+- source: loop_1.out_action_history
+  target: gen_3.in_action_history
+  type: binds
+- source: loop_1.out_last_test_output
+  target: gen_3.in_last_test_output
+  type: binds
+- source: eval_7.fail
+  target: tool_13.trigger
+  type: triggers
+- source: wf_entry.out_max_iterations
+  target: tool_13.in_max_iterations
+  type: binds
+- source: tool_13.complete
+  target: gen_4.trigger
+  type: triggers
+- source: loop_1.out_action_history
+  target: gen_4.in_action_history
+  type: binds
+- source: tool_13.out_max_iter_str
+  target: gen_4.in_max_iter_str
+  type: binds
+- source: gen_3.out_final_report
+  target: wf_exit.in_final_report
+  type: binds
+- source: gen_4.out_final_report
+  target: wf_exit.in_final_report
+  type: binds
+- source: gen_3.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: gen_4.complete
+  target: wf_exit.trigger
+  type: triggers

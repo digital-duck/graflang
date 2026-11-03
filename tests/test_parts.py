@@ -135,7 +135,7 @@ def test_a_part_without_an_input_node_is_refused(demo):
     part["nodes"] = [n for n in part["nodes"] if n["type"] != "INPUT"]
     part["edges"] = [e for e in part["edges"] if not e["source"].startswith("wf_entry")]
     dump(demo / "sub_graph" / "polish.graph.yaml", part)
-    with pytest.raises(PartError, match="exactly one INPUT and one OUTPUT"):
+    with pytest.raises(PartError, match="exactly one INPUT node and at least one OUTPUT"):
         load_graph(demo / "parts_demo.graph.yaml")
 
 

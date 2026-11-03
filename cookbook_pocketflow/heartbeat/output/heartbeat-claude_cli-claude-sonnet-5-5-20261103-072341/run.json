@@ -1,0 +1,10 @@
+{
+  "graph": "heartbeat",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "interval_seconds": "1",
+    "max_cycles": "2"
+  },
+  "started": "2026-11-03T07:23:41"
+}
