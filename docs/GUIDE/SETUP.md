@@ -14,11 +14,18 @@ Install GraphLang, check that it works, and (optionally) connect a real LLM. Nex
 From the repository root:
 
 ```bash
+# create venv using conda
 conda create -n graf python=3.11
 conda activate graf
 
+# create venv using python -m venv for Linux/Windows/MacOS
+python -m venv .venv
+source .venv/bin/activate        # Linux / macOS
+.venv\Scripts\activate           # Windows (cmd or PowerShell)
+
 pip install -e ".[dev]"     # runtime + pytest; dd-llm, dd-logging and zinet (all >=0.2.0) come from PyPI
 
+# optional
 pip install -e ../SPL.py
 ```
 
