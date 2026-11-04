@@ -4,6 +4,7 @@
 
 GraphLang flips the script on agentic AI. Where LangGraph and AutoGen use Python code to *describe* a graph, GraphLang treats the graph as the **primary, executable source of truth**. The topology is the program. The LLM doesn't write code — it mutates the graph.
 
+> **What it is for:** multi-step, agentic work with branches, loops, risky actions, policy, audit or a person in the loop. It is **not a general-purpose language**: for one model call or a script, write the call or the script. See [what GraphLang is for](docs/DEV/DESIGN/graflang-use-cases.md), including how to write Hello World.  
 > **Status:** Early prototype. Private development repository.  
 > **Companion:** [SPL.py](https://github.com/digital-duck/SPL.py) — the declarative workflow language that GraphLang elevates.  
 > **Paper:** *GraphLang: A Physics-Inspired, Topologically Grounded Language for Self-Revising Agentic Workflows* (in preparation; no draft in this repository yet)

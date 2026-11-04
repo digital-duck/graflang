@@ -299,13 +299,13 @@ def test_a_shipped_recipe_is_read_only_until_it_is_copied_to_my_apps(home, monke
     assert (home / "cookbook" / "self_refine" / "self_refine.graph.yaml").read_bytes() == (ROOT / "cookbook" / "self_refine" / "self_refine.graph.yaml").read_bytes()
 
 
-def test_a_compact_graph_of_your_own_is_converted_in_place_to_edit(home, monkeypatch):
+def test_a_compact_graph_of_your_own_is_edited_and_stays_compact(home, monkeypatch):
     folder = home / "apps" / "app"
     shutil.copytree(ROOT / "graphlang" / "grafc" / "create_examples" / "linear", folder)
     monkeypatch.setenv("GRAF_EDIT_FILE", str(folder / "summarizer.graph.yaml"))
     at = AppTest.from_file(str(APP), default_timeout=30).run()
     assert not at.exception and at.sidebar.markdown[0].value == "### summarizer.graph.yaml"
-    assert "steps:" not in (folder / "summarizer.graph.yaml").read_text() and not (folder / "summarizer.long.graph.yaml").exists()
+    assert "steps:" in (folder / "summarizer.graph.yaml").read_text() and not (folder / "summarizer.long.graph.yaml").exists()     # untouched, still short
 
 
 def test_vis_edit_with_no_graph_and_a_src_dir_starts_the_app_there(tmp_path, monkeypatch):
@@ -703,12 +703,12 @@ def test_an_unusable_name_is_named_in_the_reply_not_just_called_missing(home):
     assert "`1st app` is not a usable name" in reply
 
 
-def test_the_picture_starts_on_the_grid_arrangement(tmp_path):
+def test_the_picture_starts_on_the_dot_arrangement(tmp_path):
     from graphlang.grafv.engines import render
     g = {"version": "1.0-graph", "workflow": {"name": "t", "inputs": [], "outputs": []},
          "nodes": [{"id": "a", "type": "INPUT", "ports": ["out_x"]}], "edges": []}
     html = render(g, tmp_path / "a.html", "cytoscape", default_layout=ui.PICTURE_LAYOUT)[0].read_text()
-    assert "<option selected>grid</option>" in html
+    assert "<option selected>dot</option>" in html
     assert "<option selected>" not in render(g, tmp_path / "b.html", "cytoscape")[0].read_text()      # `graf vis` keeps its own default
 
 

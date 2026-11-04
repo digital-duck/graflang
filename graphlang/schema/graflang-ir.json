@@ -36,7 +36,7 @@
               "INPUT", "EMIT", "GENERATE", "SOLVE", "QUERY", 
               "EVALUATE", "FORK", "JOIN", "LOOP", "BATCH", "SUBGRAPH", 
               "ASSERT", "RUN", "RECOVER", "CONTEXT", "MUTATE", 
-              "GUARD", "OBSERVE", "OUTPUT", "DECISION"
+              "GUARD", "OBSERVE", "OUTPUT", "DECISION", "RUN_CODE"
             ] 
           },
           "ports": {

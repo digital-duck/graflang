@@ -109,10 +109,46 @@ def test_delete_config_drops_an_emptied_config_block(work):
     assert "config" not in ed.node("t")
 
 
-def test_a_compact_file_is_pointed_to_graf_expand(tmp_path):
+SHORT = """version: "1.0-graph"
+workflow:
+  name: t
+  inputs: [{name: q, type: TEXT}]
+  outputs: [{name: r, type: TEXT}]
+steps:
+  - a: {solve: "@in_q + '!'", in: {q: $in.q}, out: r}
+  - done: {output: a.r}
+"""
+
+
+def test_a_compact_file_is_edited_as_long_form_and_saved_short(tmp_path):
     path = tmp_path / "c.graph.yaml"
-    path.write_text('version: "1.0-graph"\nworkflow: {name: t, inputs: [], outputs: []}\nsteps:\n  - a: {solve: "1"}\n')
-    with pytest.raises(EditError, match="graf expand"):
+    path.write_text(SHORT)
+    ed = GraphEditor(path)
+    assert ed.compact_origin and "steps:" in ed.source() and not ed.changed            # the Source tab shows the short form
+    assert [n["id"] for n in ed.data()["nodes"]][:2] == ["wf_entry", "a"]               # the graph is the expanded one
+    ed.set_config("a", "expression", "@in_q + '?'")
+    assert ed.changed
+    ed.save()
+    text = path.read_text()
+    assert "steps:" in text and "nodes:" not in text and "'?'" in text or "?" in text
+    again = GraphEditor(path)
+    assert again.node("a")["config"]["expression"] == "@in_q + '?'" and not again.changed
+
+
+def test_the_short_form_can_be_typed_in_the_source_tab(tmp_path):
+    path = tmp_path / "c.graph.yaml"
+    path.write_text(SHORT)
+    ed = GraphEditor(path)
+    ed.set_source(SHORT.replace("'!'", "'#'"))
+    assert ed.changed and ed.node("a")["config"]["expression"] == "@in_q + '#'"
+    ed.undo()
+    assert not ed.changed
+
+
+def test_a_compact_file_that_does_not_expand_is_refused(tmp_path):
+    path = tmp_path / "c.graph.yaml"
+    path.write_text('version: "1.0-graph"\nworkflow: {name: t, inputs: [], outputs: []}\nsteps:\n  - a: {frobnicate: 1}\n')
+    with pytest.raises(EditError, match="does not expand"):
         GraphEditor(path)
 
 

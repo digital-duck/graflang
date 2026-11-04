@@ -160,3 +160,56 @@ def test_heartbeat_reports_new_lines_once_and_then_stays_quiet(tmp_path):
     assert _beat(path, llm).startswith("new:") and llm.calls == 2
     assert (tmp_path / "h" / "output" / "state.txt").read_text().strip() == "3"
     assert len((tmp_path / "h" / "output" / "alerts.md").read_text().splitlines()) >= 2
+
+
+# ---- hello_world: a program is written (by a model or a solver), then run behind a guard --------------------------------
+def _hello(tmp_path):
+    shutil.copytree(COOKBOOK / "hello_world", tmp_path / "hw", dirs_exist_ok=True)
+    return tmp_path / "hw" / "hello_world.graph.yaml"
+
+
+class Writer:
+    name, adapter_name, model_override = "scripted", "echo", None
+
+    def __init__(self, reply):
+        self.reply = reply
+
+    def generate(self, prompt, model=None, **opts):
+        return self.reply
+
+
+def _go(path, reply="", **params):
+    graph = load_graph(path)
+    errors, warnings = check(graph)
+    assert errors == [], errors
+    return GraphLangRuntime(graph, llm=Writer(reply), verbose=False, effects=True).execute({"name": "Wen", **params})
+
+
+def test_hello_llm_mode_runs_the_code_block_the_model_wrote(tmp_path):
+    out = _go(_hello(tmp_path), "Here:\n```python\nprint('Hello, Wen!')\n```\nEnjoy.")
+    assert out == {"program": "print('Hello, Wen!')\n", "result": "Hello, Wen!"}
+
+
+def test_hello_llm_mode_without_a_code_block_does_not_error(tmp_path):
+    ok = _go(_hello(tmp_path), "print('Hello, Wen!')")                       # bare code is run as it is
+    assert ok["result"] == "Hello, Wen!"
+    prose = _go(_hello(tmp_path), "Sure! Here is a friendly program for you.")      # prose is not code: a note, not an error
+    assert prose["result"] == "(not run: the reply has no code block and is not valid python)"
+    mock = _go(_hello(tmp_path), "[Mock LLM response from mock for prompt: Write a minimal program ...]")      # the mock adapter's reply
+    assert mock["result"].startswith("(not run:")
+    empty = _go(_hello(tmp_path), "")
+    assert empty["result"] == "(not run: no code to run)"
+
+
+def test_hello_solver_mode_writes_and_runs_the_program(tmp_path):
+    assert _go(_hello(tmp_path), mode="solver") == {"program": 'print("Hello, Wen!")\n', "result": "Hello, Wen!"}
+
+
+def test_hello_only_runs_the_languages_the_policy_allows(tmp_path):
+    out = _go(_hello(tmp_path), mode="solver", language="go")
+    assert out["result"].startswith("(not run: only Python and JavaScript") and "package main" in out["program"]
+
+
+def test_hello_a_crashing_program_is_reported_not_raised(tmp_path):
+    out = _go(_hello(tmp_path), "```python\nraise SystemExit(3)\n```")      # a fenced block is run even when it fails
+    assert out["result"].startswith("(it failed with exit code 3)")

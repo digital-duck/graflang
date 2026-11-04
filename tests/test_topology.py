@@ -183,3 +183,12 @@ def test_a_prompt_placeholder_that_nothing_fills_is_an_error():
     assert any("{{in_problem}}" in m and "has no port" in m for m in renamed)
     braces = errs([src, gen('Return {{ "k": 1 }} for {{in_problem}}')], [*trig, bind("in_problem")])      # a JSON example is not a placeholder
     assert braces == []
+
+
+def test_an_unwired_gate_branch_is_reported():
+    """The generated hello_world wired its else-branch from the wrong node: `is_solver.fail` led nowhere, so mode=llm ended without an OUTPUT."""
+    from graphlang.grafr.topology import gate_dead_ends
+    nodes = [{"id": "gate", "type": "EVALUATE", "ports": ["trigger", "pass", "fail"]}, {"id": "g", "type": "GUARD", "ports": ["trigger", "allow", "deny"]}]
+    edges = [{"source": "gate.pass", "target": "g.trigger", "type": "triggers"}]
+    found = gate_dead_ends(nodes, edges)
+    assert len(found) == 2 and "'fail'" in found[0] and "'allow'" in found[1]            # a guard's unwired deny is the normal way to stop

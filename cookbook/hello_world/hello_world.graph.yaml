@@ -1,0 +1,32 @@
+version: "1.0-graph"
+# Writes a Hello, <name>! program (a model, or a deterministic tool), then runs it behind a Cedar guard.
+workflow:
+  name: hello_world
+  inputs:
+    - {name: language, type: TEXT, default: Python}
+    - {name: name, type: TEXT, default: World}
+    - {name: mode, type: TEXT, default: llm, description: "llm: a model writes the program; solver: a deterministic tool does"}
+  outputs:
+    - {name: program, type: TEXT, description: "the source code of the hello-world program"}
+    - {name: result, type: TEXT, description: "what the program printed, or why it was not run"}
+resources:
+  prompts: {hello: ./prompts/hello.md}
+  policies: {run: ./policies/run.cedar}
+steps:
+  - is_solver: {evaluate: "@in_mode == 'solver'", in: {mode: $in.mode}}
+  - solver: {node: SOLVE, on: is_solver.pass, backend: subprocess, command: [python3, -I, tools/hello_world.py], out_type: JSON, timeout: 30,
+             in: {language: $in.language, name: $in.name}, out: result}
+  - solver_program: {solve: "json_get(@in_result, 'program')", in: {result: solver.result}, out: program}
+  - hello: {generate: prompts.hello, on: is_solver.fail, in: {language: $in.language, name: $in.name}, out: program}
+  - allowed:
+      guard: policies.run
+      on: [solver_program, hello]
+      principal: 'Service::"hello-world"'
+      action: 'Action::"run_program"'
+      resource: 'File::"program"'
+      context_mapping: {language: "lower(strip(@in_language))"}
+      in: {language: $in.language}
+  - run: {run_code: [python, javascript], on: allowed.allow, in: {language: $in.language, text: [solver_program, hello]}}
+  - ran: {output: {program: run.program, result: run.output}}
+  - skipped: {solve: "'(not run: only Python and JavaScript are run, not ' + @in_language + ')'", on: allowed.deny, in: {language: $in.language}, out: result}
+  - not_run: {output: {program: [solver_program, hello], result: skipped.result}, on: skipped}

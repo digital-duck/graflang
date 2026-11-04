@@ -17,7 +17,7 @@ from . import attachments
 from .engines import render
 
 
-PICTURE_LAYOUT = "grid"          # the arrangement the picture starts on (the selector above it offers the others)
+PICTURE_LAYOUT = "dot"          # the arrangement the picture starts on (the selector above it offers the others)
 CHAT_ERRORS = (RuntimeError, ValueError, ImportError, OSError)     # what a model call or a missing package raises (LLMUnavailable, LimitExceeded are RuntimeErrors)
 
 
@@ -80,8 +80,53 @@ def _graph_html(graph_json: str) -> str:
         return path.read_text(encoding="utf-8")
 
 
+_CAPTURE_JS = """
+export default function ({ setTriggerValue }) {
+  const h = (e) => {
+    const d = e.data;
+    if (d && d.graf === 'capture' && typeof d.pdf === 'string') {
+      setTriggerValue('capture', { name: String(d.name || 'graph'), pdf: d.pdf });
+      if (e.source) e.source.postMessage({ graf: 'got' }, '*');
+    }
+  };
+  window.addEventListener('message', h);
+  return () => window.removeEventListener('message', h);
+}
+"""
+
+
+def _listen_for_capture() -> None:
+    """Once per script run: listen for the picture's Capture button (it posts a PDF) and save the file under ~/.graflang/images/."""
+    comps = getattr(st, "components", None)
+    if not hasattr(getattr(comps, "v2", None), "component"):        # an older Streamlit: the button downloads instead
+        return
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        run_id = getattr(ctx, "script_run_id", None)
+    except Exception:                                              # noqa: BLE001 - no script context (a test): mount nothing
+        return
+    if run_id is None or st.session_state.get("_capture_run") == run_id:
+        return
+    st.session_state["_capture_run"] = run_id
+    global _CAPTURE
+    if _CAPTURE is None:
+        _CAPTURE = comps.v2.component("graf_capture", js=_CAPTURE_JS)
+    result = _CAPTURE(key="graf_capture", on_capture_change=lambda: None, height=1)
+    got = getattr(result, "capture", None)
+    if got:
+        try:
+            st.toast(f"Saved the picture to {ws.save_capture(got['name'], got['pdf'])}")
+        except ws.WorkspaceError as e:
+            st.toast(f"Could not save the picture: {e}")
+
+
+_CAPTURE = None
+
+
 def show_graph(graph: Dict, height: "int | None" = None) -> None:
     height = height or canvas_height()
+    _listen_for_capture()
     try:
         html = _graph_html(json.dumps(graph, sort_keys=True, default=str))
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as e:      # also a missing graphviz program

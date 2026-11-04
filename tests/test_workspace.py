@@ -274,3 +274,25 @@ def test_a_pocketflow_recipe_is_found_by_the_app_and_by_a_part_reference(home):
     graph.write_text((Path(__file__).resolve().parent.parent / "cookbook" / "self_refine" / "self_refine.graph.yaml").read_text())
     assert [r.label for r in ws.Workspace().recipes() if r.root == "pocketflow"] == ["pocketflow/rag/rag"]
     assert named_part("pocketflow:rag") == graph
+
+
+# ---- Capture: the canvas sends a PDF, the app saves it under ~/.graflang/images ----------------------------------------
+def test_save_capture_writes_a_pdf_and_refuses_anything_else(tmp_path, monkeypatch):
+    import base64
+    from graphlang import workspace as ws
+    monkeypatch.setenv("GRAFLANG_HOME", str(tmp_path))
+    pdf = base64.b64encode(b"%PDF-1.4\nx").decode()
+    path = ws.save_capture("hello world/../x.pdf", pdf)
+    assert path.parent == tmp_path / "images" and path.name.startswith("hello_world_x-") and path.read_bytes().startswith(b"%PDF-")
+    assert ws.save_capture("hello world/../x.pdf", pdf) != path                   # never overwrites
+    with pytest.raises(ws.WorkspaceError, match="not a PDF"):
+        ws.save_capture("x", base64.b64encode(b"<html>").decode())
+    with pytest.raises(ws.WorkspaceError, match="base64"):
+        ws.save_capture("x", "%%%")
+
+
+def test_the_picture_starts_on_dot_and_has_a_capture_button():
+    from graphlang.grafv import ui
+    html = ui._graph_html('{"version": "1.0-graph", "workflow": {"name": "w", "inputs": [], "outputs": []}, "nodes": [{"id": "a", "type": "SOLVE", "ports": ["trigger", "complete"], "config": {"expression": "1"}}], "edges": []}')
+    assert ui.PICTURE_LAYOUT == "dot"
+    assert 'id="capture"' in html and html.index('id="reset"') < html.index('id="capture"')

@@ -175,7 +175,9 @@ def check_app(name: str, files: Dict[str, str], allow_code: bool = False) -> tup
         except Exception as e:                              # a schema, compact, parts or resource error: the model gets the message
             return problems + [f"{name}.graph.yaml does not load: {type(e).__name__}: {e}"], warnings
         problems += [str(e) for e in errors]
-        warnings += [str(w) for w in warns]
+        dead = [str(w) for w in warns if "port goes nowhere" in str(w)]      # a gate branch left unwired: a generated app is not meant to have one
+        problems += dead
+        warnings += [str(w) for w in warns if str(w) not in dead]
         problems += _problems_of_graph(name, graph, allow_code)
         if not problems and not _has_code(graph):
             try:
@@ -304,6 +306,9 @@ def write_app(name: str, spec: str, created: Created, out_dir: Path, llm_spec: s
     for rel, text in files.items():
         path = out_dir / rel
         path.parent.mkdir(parents=True, exist_ok=True)
+        if rel.endswith((".graph.yaml", ".graph.yml")):
+            from ..yamlfmt import readable
+            text = readable(text)                       # a condition with quotes as a `|` block, not a quoted string with doubled quotes
         path.write_text(text, encoding="utf-8")
         written.append(path)
     meta = out_dir / "create.json"

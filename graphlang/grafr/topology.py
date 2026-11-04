@@ -153,6 +153,11 @@ def _check_scope(nodes: List[Dict], edges: List[Dict], prefix: str, resolver: Re
             out_errors, out_warnings = check_outside(n, resolver.base_dir)
             errors += [f"{where}: {m}" for m in out_errors]
             warnings += [f"{where}: {m}" for m in out_warnings]
+        elif typ == "RUN_CODE":
+            from .run_code import check_run_code
+            r_errors, r_warnings = check_run_code(n)
+            errors += [f"{where}: {m}" for m in r_errors]
+            warnings += [f"{where}: {m}" for m in r_warnings]
         elif typ == "DECISION":
             from .decision import check_decision
             d_errors, d_warnings = check_decision(n)
@@ -333,7 +338,7 @@ def _check_batch(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[
     _check_scope(body["nodes"], body["edges"], f"{prefix}{nid}/", resolver, scope, set(ins), errors, warnings)
 
 
-RISKY_TYPES = ("EMIT", "QUERY")       # reach outside the workflow; anything else is risky only when marked `risky: true`
+RISKY_TYPES = ("EMIT", "QUERY", "RUN_CODE")       # reach outside the workflow; anything else is risky only when marked `risky: true`
 
 
 def _risky(node: Dict) -> bool:
@@ -349,6 +354,17 @@ def _contains_risky(node: Dict) -> List[str]:
         if b["type"] in ("LOOP", "BATCH"):
             found += [f"{node['id']}/{f}" for f in _contains_risky(b)]
     return found
+
+
+GATE_PORTS = {"EVALUATE": ("pass", "fail"), "ASSERT": ("pass", "fail"), "GUARD": ("allow",)}      # an unwired `deny` is the normal way to stop
+
+
+def gate_dead_ends(nodes: List[Dict], edges: List[Dict]) -> List[str]:
+    """Gate ports (pass/fail; a guard's allow) that no trigger edge leaves: a token routed there stops, and a run that ends there reaches no OUTPUT.
+    Only the ports the node declares are looked at. Usually a wire is missing (the else-branch was wired from the wrong node)."""
+    wired = {e["source"] for e in edges if e["type"] == "triggers"}
+    return [f"{n['type']} {n['id']!r}: the {p!r} port goes nowhere, so a run routed there ends without an OUTPUT"
+            for n in nodes for p in GATE_PORTS.get(n["type"], ()) if p in n["ports"] and f"{n['id']}.{p}" not in wired]
 
 
 def _check_guarded(nodes: List[Dict], edges: List[Dict], errors: List[str]) -> None:
@@ -448,6 +464,7 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     _check_ids(nodes, {use for use, _ in (graph_data.get("_part_of") or {}).values()}, "", errors)
     _check_scope(nodes, edges, "", resolver, set(), set(), errors, warnings)
     _check_guarded(nodes, edges, errors)
+    warnings += gate_dead_ends(nodes, edges)
     from .decision import default_warnings
     warnings += default_warnings(nodes, edges, _risky)
     from .capabilities import capability_errors          # imported here: capabilities uses _risky from this module

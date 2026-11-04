@@ -20,10 +20,15 @@ A step is a one-key mapping: the step id, then a mapping whose first key names t
   node      a node type (LOOP, MUTATE, ...)           trigger  complete   (plus any `ports:` given)
   use       parts.<name>, a part file (see parts.py)  trigger  complete   (`out:` must list the part's outputs you read)
   loop      max iterations (number or @expr)           trigger  exit       (`steps:` is its body; see below)
+  run_code  [languages it may run]                     trigger  complete   `in: {language, text}`; gives program, output, ran (see run_code.py;
+                                                                            risky: a guard must come first)
 
 Other keys of a step: `in` maps input names to values; `out` names the result port(s) (default `result`; a node's
 first one is what a bare reference means); `on` says what triggers the step; every other key goes into the node's
 `config` (model, phases, temperature, context_mapping, ...).
+
+A value in `in` may also be a list of references, `in: {program: [solver_program, hello]}`: the value of whichever of those steps ran
+(for branches that exclude each other and then meet; if more than one ran, the last to finish wins).
 
 A value in `in` is a reference when it is `$in.<workflow input>`, a step id, or `<step id>.<out name>`; anything else is
 a literal, which becomes the input's default (`phases.pre.defaults`). Wrap a literal that looks like a reference in
@@ -62,10 +67,11 @@ KINDS = {
     "generate": ("trigger", "complete"), "solve": ("trigger", "complete"), "assert": ("trigger", "pass", "fail"),
     "evaluate": ("trigger", "pass", "fail"), "guard": ("trigger", "allow", "deny"), "join": ("trigger", "complete"),
     "output": ("trigger", "exit"), "fork": ("trigger",), "node": ("trigger", "complete"), "use": ("trigger", "complete"),
-    "loop": ("trigger", "exit"),
+    "loop": ("trigger", "exit"), "run_code": ("trigger", "complete"),
 }
 TYPES = {"generate": "GENERATE", "solve": "SOLVE", "assert": "ASSERT", "evaluate": "EVALUATE", "guard": "GUARD",
-         "join": "JOIN", "output": "OUTPUT", "fork": "FORK", "use": "SUBGRAPH", "loop": "LOOP"}
+         "join": "JOIN", "output": "OUTPUT", "fork": "FORK", "use": "SUBGRAPH", "loop": "LOOP", "run_code": "RUN_CODE"}
+RUN_CODE_OUTS = ["program", "output", "ran"]             # what a run_code step gives when `out:` is not written
 RESERVED = {"in", "out", "on", "ports", "config"}
 LOOP_KEYS = {"steps", "while", "index"}                # keys of a `loop` step that are not node config
 ID = re.compile(r"^[a-zA-Z0-9_]+$")
@@ -128,7 +134,7 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
 
     outs: Dict[str, List[str]] = {}
     for sid, kind, body in parsed:
-        o = body.get("out", ["result"])
+        o = body.get("out", RUN_CODE_OUTS if kind == "run_code" else ["result"])
         outs[sid] = [o] if isinstance(o, str) else list(o)
 
     nodes: List[Dict] = [{"id": ENTRY, "type": "INPUT", "ports": ["entry", *[f"out_{i}" for i in inputs]]}] if root else []
@@ -203,6 +209,10 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
             cfg["condition"] = arg
         elif kind == "guard":
             cfg["policy_ref"] = arg
+        elif kind == "run_code":
+            if not isinstance(arg, list) or not arg:
+                raise CompactError(f"step {sid!r}: run_code needs the list of languages it may run, e.g. [python, javascript]")
+            cfg["languages"] = arg
         elif kind == "fork":
             if not isinstance(arg, list) or not arg:
                 raise CompactError(f"step {sid!r}: fork needs a list of branch names")
@@ -227,6 +237,12 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
             else:
                 literal = False
             port = f"in_{name}"
+            if not literal and isinstance(value, list):              # `[a, b]`: whichever of these steps ran (exclusive branches that meet)
+                if not value or any(not isinstance(v, str) or ref(sid, v) is None for v in value):
+                    raise CompactError(f"step {sid!r}: input {name!r}: a list names the steps whose result to take, e.g. [a, b.result]")
+                ports.append(port)
+                in_edges += [(ref(sid, v), port) for v in value]
+                continue
             if not literal and isinstance(value, str) and value.startswith("$loop."):
                 if root:
                     raise CompactError(f"step {sid!r}: {value} is only meaningful inside a loop body")

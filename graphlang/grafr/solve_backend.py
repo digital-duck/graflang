@@ -33,7 +33,7 @@ SCOPES = ("run", "node")
 # Config keys that decide what runs. They come from the graph file, never from a model: a MUTATE delta that adds or changes
 # one is refused before any policy is consulted (see `code_keys_in`).
 CODE_KEYS = frozenset({"backend", "code", "result", "command", "parse", "env_passthrough", "executor", "url", "allow_hosts", "headers", "method", "container",
-                       "file", "channel", "recipients", "sender", "smtp_host", "smtp_port", "allow_dirs"})   # where QUERY reads and where EMIT writes or sends   # env can change what runs (NODE_OPTIONS, PYTHONPATH)
+                       "file", "channel", "recipients", "sender", "smtp_host", "smtp_port", "allow_dirs", "languages"})   # where QUERY reads and where EMIT writes or sends   # env can change what runs (NODE_OPTIONS, PYTHONPATH)
 
 
 class SolveError(RuntimeError):

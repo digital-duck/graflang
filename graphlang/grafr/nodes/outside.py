@@ -25,3 +25,9 @@ class ObserveExecutor(NodeExecutor):
 class DecisionExecutor(NodeExecutor):
     def execute_with(self, rt, node_data: Dict, in_data: Dict[str, Any]) -> Dict:
         return run_decision(node_data, in_data, rt.answers, rt.ask, rt.answered_by)
+
+
+class RunCodeExecutor(NodeExecutor):
+    def execute_with(self, rt, node_data: Dict, in_data: Dict[str, Any]) -> Dict:
+        from ..run_code import run_code_node
+        return run_code_node(node_data, in_data)

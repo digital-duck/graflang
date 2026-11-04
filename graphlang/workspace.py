@@ -58,6 +58,36 @@ def pocketflow_dir() -> Path:
     return home() / "pocketflow"
 
 
+def images_dir() -> Path:
+    return home() / "images"
+
+
+def save_capture(name: str, pdf_b64: str) -> Path:
+    """Write a picture the canvas sent (a base64 PDF) to ~/.graflang/images/<name>-<time>.pdf and return the path. Refuses anything that is
+    not a PDF or is over 25 MB; the name is reduced to letters, digits, `_` and `-`."""
+    import base64
+    import re
+    import time
+    if len(pdf_b64) > 34_000_000:
+        raise WorkspaceError("the picture is too large to save")
+    try:
+        data = base64.b64decode(pdf_b64, validate=True)
+    except ValueError:
+        raise WorkspaceError("the picture is not valid base64") from None
+    if not data.startswith(b"%PDF-"):
+        raise WorkspaceError("the picture is not a PDF")
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "_", str(name).removesuffix(".pdf"))[:60].strip("_") or "graph"
+    folder = images_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{stem}-{time.strftime('%Y%m%d-%H%M%S')}.pdf"
+    n = 1
+    while path.exists():
+        n += 1
+        path = folder / f"{stem}-{time.strftime('%Y%m%d-%H%M%S')}-{n}.pdf"
+    path.write_bytes(data)
+    return path
+
+
 def settings_path() -> Path:
     return home() / "settings.json"
 
@@ -442,7 +472,8 @@ def long_form_in_place(path: Path) -> Path:
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not is_compact(doc):
         raise WorkspaceError(f"{path.name} is not in the compact `steps:` form")
-    path.write_text(yaml.safe_dump(expand(doc), sort_keys=False, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+    from .yamlfmt import dump_readable
+    path.write_text(dump_readable(expand(doc)), encoding="utf-8")
     return path
 
 
@@ -457,5 +488,6 @@ def long_form_copy(path: Path) -> Path:
     target = path.with_name(path.name.removesuffix(GRAPH_SUFFIX) + ".long" + GRAPH_SUFFIX)
     if target.exists():
         return target
-    target.write_text(yaml.safe_dump(expand(doc), sort_keys=False, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+    from .yamlfmt import dump_readable
+    target.write_text(dump_readable(expand(doc)), encoding="utf-8")
     return target

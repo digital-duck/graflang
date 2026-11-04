@@ -84,3 +84,26 @@ def test_cli(tmp_path):
     res = CliRunner().invoke(main, ["compact", str(src), "-o", str(out)])
     assert res.exit_code == 0, res.output
     assert "steps" in _load(out.read_text())
+
+
+def test_alternatives_and_run_code_round_trip():
+    text = """version: 1.0-graph
+workflow: {name: t, inputs: [{name: m, type: TEXT}], outputs: [{name: r, type: TEXT}]}
+steps:
+  - gate: {evaluate: "@in_m == 'a'", in: {m: $in.m}}
+  - one: {solve: "'print(1)'", on: gate.pass, out: program}
+  - two: {solve: "'print(2)'", on: gate.fail, out: program}
+  - ok: {guard: policies.p, on: [one, two], principal: 'Service::"x"', action: 'Action::"y"', resource: 'File::"z"', context_mapping: {}}
+  - run: {run_code: [python], on: ok.allow, in: {language: "python", text: [one.program, two.program]}}
+  - done: {output: run.output}
+resources: {policies: {p: ./p.cedar}}
+"""
+    data = _load(text)
+    long = expand(data)
+    assert sum(1 for e in long["edges"] if e["target"] == "run.in_text") == 2       # both writers are wired
+    node = next(n for n in long["nodes"] if n["id"] == "run")
+    assert node["type"] == "RUN_CODE" and node["config"]["languages"] == ["python"] and "out_ran" in node["ports"]
+    out, report = compactify(long)
+    run_step = next(s["run"] for s in out["steps"] if "run" in s)
+    assert run_step["run_code"] == ["python"] and run_step["in"]["text"] == ["one", "two"] and "out" not in run_step
+    assert _canon(expand(out)) == _canon(long)

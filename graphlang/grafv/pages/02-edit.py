@@ -413,24 +413,7 @@ def edit_page() -> None:
         try:
             st.session_state["editor"], st.session_state["file"] = GraphEditor(path), target
         except EditError as e:
-            if "compact" in str(e) and not ui.unsaved():        # a file of your own (the read-only branch returned above): convert it where it is
-                try:
-                    ws.long_form_in_place(path)
-                except (ws.WorkspaceError, OSError, ValueError) as err:
-                    st.error(str(err))
-                else:
-                    open_graph(str(path))
-                    st.session_state["flash"] = ("success", "the file was in the short `steps:` form; it is now in the long form the editor takes (same workflow, comments dropped)")
-                    st.rerun()
             st.error(str(e))
-            if "compact" in str(e) and st.button("Make an editable long-form copy", key="make_long", disabled=ui.unsaved()):
-                try:
-                    open_graph(str(ws.long_form_copy(path)))
-                except (ws.WorkspaceError, OSError, ValueError) as err:
-                    st.error(str(err))
-                else:
-                    st.session_state["flash"] = ("success", "the long-form copy is open; the short file is untouched")
-                    st.rerun()
             with st.sidebar:
                 open_box(workspace, path)
             return
@@ -441,14 +424,24 @@ def edit_page() -> None:
     with st.sidebar:
         st.markdown(f"### {path.name}")
         st.caption(("unsaved changes" if dirty else "saved") + " · " + str(path.resolve().parent))
+        if getattr(editor, "compact_origin", False):
+            st.caption("short `steps:` form: it stays short when you save (comments in the file are not kept)")
         errors, _ = editor.problems()
-        if st.button("Save", type="primary", disabled=not dirty or bool(errors), key="save"):
+        save_col, undo_col, reload_col = st.columns([1, 1, 2.2])
+        if save_col.button("Save", type="primary", disabled=not dirty or bool(errors), key="save"):
             def save_all():
                 editor.save()
                 chat_ops.write_staged(path.parent, staged)
                 staged.clear()
             if attempt(save_all, "saved"):
                 st.rerun()
+        if undo_col.button("Undo", key="undo", disabled=not editor.can_undo):
+            editor.undo()
+            forget_widgets()
+            st.rerun()
+        if reload_col.button("Reload", key="reload", disabled=dirty, help="Reload from disk. Off while there are unsaved edits: save or undo them first." if dirty else "Reload from disk"):
+            st.session_state.pop("file")
+            st.rerun()
         if errors:
             st.caption(f"{len(errors)} error(s): fix them to save")
         if staged:
@@ -456,13 +449,6 @@ def edit_page() -> None:
             if st.button("Discard the prompt changes", key="discard_staged"):
                 staged.clear()
                 st.rerun()
-        if st.button("Undo", key="undo", disabled=not editor.can_undo):
-            editor.undo()
-            forget_widgets()
-            st.rerun()
-        if st.button("Reload from disk", key="reload", disabled=dirty, help="Off while there are unsaved edits: save or undo them first." if dirty else None):
-            st.session_state.pop("file")
-            st.rerun()
         clone_box(editor, opened, dirty)
         open_box(workspace, path)
         edit_chat(editor, path.parent, f"edit_{target}", staged)

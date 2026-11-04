@@ -2,6 +2,8 @@
 
 Reference for running and writing GraphLang workflows. New here? Start with [SETUP.md](SETUP.md) and [TUTORIAL.md](TUTORIAL.md).
 
+**When not to use it.** GraphLang describes, checks and controls multi-step work (branches, loops, risky actions, policy, audit, a person in the loop). It is not a general-purpose language. For a single model call, a script, a calculation or a task of fewer than about five steps with no policy or audit need, write the call or the script: the graph would be longer than the program. Hello World is one `generate` step and an `output`; see `docs/DEV/DESIGN/graflang-use-cases.md`.
+
 A GraphLang program is a YAML file, `*.graph.yaml`. The topology is the program: nodes do work, edges say what fires next and where data flows. `graf` runs it, checks it, compiles it and draws it.
 
 ## Commands
@@ -272,9 +274,13 @@ Schema: `graphlang/schema/graflang-ir.json`. Node ids match `[a-zA-Z0-9_]+`.
 
 **Import / Export.** *Install the cookbook* copies the recipes of a folder (such as `cookbook/` in a checkout) into the cookbook root, leaving ones already there. *Import* takes a zip made by Export (or a whole cookbook zip) or a single `*.graph.yaml`, never overwrites, refuses unsafe paths, and lists any programs the recipe holds so you can read them before you run it; nothing is run on import. *Export* gives a recipe as a zip or just its graph file, leaving out run output and caches, and warns about files that look like they hold a key.
 
+## RUN_CODE: run the program a step produced
+
+`run_code: [python, javascript]` (long form: a `RUN_CODE` node with `config.languages`) runs the program text its `text` input holds and gives `program`, `output` and `ran`. The program is the first fenced code block of a model reply, or the whole text when there is no block (then only if it parses as a program, so prose is not run as code). It runs in a throwaway folder with an empty environment, no input and a time limit (`timeout`, 10 s by default); a language not in the list is returned, not run; no code, a crash or a timeout come back as a note on `output` with `ran` false, never as an error. It runs code a model wrote, so it is risky: a `GUARD` must precede it (`graf validate` enforces this), and a delta can never add it or change `languages`. There is no sandbox beyond that; for stronger isolation use a `subprocess` SOLVE with `container:`. See `cookbook/hello_world`.
+
 ## Compact form: `steps:`
 
-A short way to write a workflow. `steps:` replaces `nodes:` and `edges:`; `graf expand FILE` prints the long form that runs; `graf compact FILE` goes the other way (a long-form file as `steps:`). `compact` re-expands its own result and compares it with the input, so the graph is always the same one; what it cannot say as a step (a back edge, a node with unusual ports, a loop body of another shape) stays in `nodes:` / `edges:` beside the steps. Not kept: comments, the order of nodes and edges, and `expand`/`compact`/`expand` is a fixed point only after the first `compact` (several spellings of `steps:` give one long form).
+A short way to write a workflow (the editor opens, shows and saves a `steps:` file as it is; `graf compact` writes a long file this way, and `in: {x: [a, b]}` takes the value of whichever of the exclusive steps `a` or `b` ran). `steps:` replaces `nodes:` and `edges:`; `graf expand FILE` prints the long form that runs; `graf compact FILE` goes the other way (a long-form file as `steps:`). `compact` re-expands its own result and compares it with the input, so the graph is always the same one; what it cannot say as a step (a back edge, a node with unusual ports, a loop body of another shape) stays in `nodes:` / `edges:` beside the steps. Not kept: comments, the order of nodes and edges, and `expand`/`compact`/`expand` is a fixed point only after the first `compact` (several spellings of `steps:` give one long form).
 
 ```yaml
 steps:

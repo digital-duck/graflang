@@ -21,7 +21,9 @@ from jsonschema import ValidationError, validate
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from ..grafr.compact import is_compact
+from ..grafr.compact import CompactError, expand as expand_compact, is_compact
+from ..grafr.compactify import NotCompactable, compactify
+from ..yamlfmt import dump_readable, readable
 from ..grafr.ports import apply_input_types, normalize_ports
 from ..grafr.runtime import SCHEMA_PATH, split_ref
 from ..grafr.topology import check
@@ -53,9 +55,14 @@ class GraphEditor:
         text = self.path.read_text(encoding="utf-8")
         self._yaml.indent(mapping=2, sequence=self._dash_offset(text) + 2, offset=self._dash_offset(text))   # write lists the way the file does
         self.doc = self._yaml.load(text)
+        self.compact_origin = False                 # a short `steps:` file: edited as the long form it expands to, shown and saved as steps
+        if isinstance(self.doc, dict) and is_compact(self.doc) and "expand" not in self.doc and "elaborate" not in self.doc:
+            try:
+                self.doc = self._yaml.load(dump_readable(expand_compact(_plain(self.doc))))
+            except (CompactError, YAMLError) as e:
+                raise EditError(f"this file uses the compact `steps:` form and does not expand: {e}") from None
+            self.compact_origin = True
         if not isinstance(self.doc, dict) or "nodes" not in self.doc or "workflow" not in self.doc:
-            if is_compact(self.doc):
-                raise EditError("this file uses the compact `steps:` form; edit the YAML text, or run `graf expand` to get the long form")
             if isinstance(self.doc, dict) and ("expand" in self.doc or "elaborate" in self.doc):
                 raise EditError("this file uses an `expand:` block; edit the YAML text, or run `graf expand` to get the long form")
             raise EditError("not a GraphLang workflow (needs workflow:, nodes: and edges:)")
@@ -180,8 +187,20 @@ class GraphEditor:
         return len(self._undo)
 
     def source(self) -> str:
-        """The whole file as it is now (saved or not), the text the Source tab shows."""
-        return self._dump()
+        """The whole file as it is now (saved or not), the text the Source tab shows: the `steps:` form for a file that was written so
+        (what does not fit a step stays as `nodes:`/`edges:` beside the steps)."""
+        text = self._dump()
+        if not self.compact_origin:
+            return text
+        try:
+            return readable(dump_readable(compactify(_plain(self.doc))[0]))
+        except (NotCompactable, CompactError, ValueError, TypeError):
+            return text                                   # cannot be written short right now (a half-finished edit): the long form
+
+    def _same_as_now(self, doc: Any) -> bool:
+        buf = io.StringIO()
+        self._yaml.dump(doc, buf)
+        return buf.getvalue() == self._dump()
 
     def set_source(self, text: str) -> None:
         """Replace the whole file with `text`, typed by a person. It must be YAML in the long workflow form; whether the graph is valid is for
@@ -192,13 +211,18 @@ class GraphEditor:
             mark = getattr(e, "problem_mark", None)
             where = f" (line {mark.line + 1}, column {mark.column + 1})" if mark is not None else ""
             raise EditError(f"not valid YAML{where}: {getattr(e, 'problem', None) or e}")
+        if self.compact_origin and isinstance(doc, dict) and is_compact(doc):          # typed in the short form: take its long form
+            try:
+                doc = self._yaml.load(dump_readable(expand_compact(_plain(doc))))
+            except CompactError as e:
+                raise EditError(f"the steps do not expand: {e}") from None
         if not isinstance(doc, dict) or "nodes" not in doc or "workflow" not in doc:
             if is_compact(doc):
                 raise EditError("this is the compact `steps:` form, which this editor does not take; use the long `nodes:`/`edges:` form")
             raise EditError("a workflow needs `workflow:`, `nodes:` and (optionally) `edges:` at the top level")
         if not isinstance(doc["nodes"], list) or not all(isinstance(n, dict) and "id" in n for n in doc["nodes"]):
             raise EditError("`nodes:` must be a list of mappings that each have an `id`")
-        if text == self._dump():
+        if self._same_as_now(doc):
             return
 
         def change():
@@ -325,10 +349,11 @@ class GraphEditor:
         if errors:
             raise EditError(f"not saved: {len(errors)} problem(s), first: {errors[0]}")
         text = self._dump()
+        written = self.source() if self.compact_origin else text           # a short file stays short (verified by compactify; comments are not kept)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=f".{self.path.name}.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(text)
+                f.write(written)
             os.replace(tmp, self.path)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)

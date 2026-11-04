@@ -164,6 +164,51 @@ Without the package the run stops at the rule check with an error that names it 
 
 `procedures/rules_extended.json` is a larger example with eight rules and four external destinations. It checks masking per data type: besides `has_<type>` the check derives `masked_<type>` (every reported item of that type is masked; true when there is none) for ssn, ccn, email, phone, address, name, dob and other, so one stray unmasked item no longer blocks everything else. The rules: everything except an SSN masked before it goes outside (R1), an SSN never goes outside (R2), card numbers always masked (R3), an exposed card with an exposed name or birth date never goes outside (R4), name + birth date + address masked even internally (R5), contact details with a name (R6), birth date with an address (R7), unclassified data (R8). The demo `rules.json` keeps the simple all-or-nothing `is_masked`. Use the extended file as a starting point for your own policy: `--param rules_file="./procedures/rules_extended.json"`. Like the demo rules it is an illustration, not legal advice.
 
+## Batch Experiment
+
+One document run again and again mostly measures sampling noise, and extraction varies from model to model and from document to document. The realistic test is **many different documents, each scored against its own answer key**, for each variant and model. `batch_test.py` runs that grid over the 18 documents in `input/batch-test/` (see its `README.md`).
+
+**The documents** (all invented data): four with no personal data (`clean_status_report`, `clean_company_contacts`, `already_masked`, `borderline_ids`), one per kind of personal data (SSN plain and already masked, obfuscated e-mail, phone in five formats, one-line address, date of birth in three spellings, names with titles only, three card brands), and four that are hard for another reason (`injection_override`, `spanish_incident`, `csv_table`, `chat_log_long`), plus `customer_case_file` and `hard_case_file`.
+
+**The answer key** (`input/batch-test/manifest.json`), per document:
+- `must_mask`: strings that must not appear in a released text. One left behind is a **false release**, the costly error.
+- `must_keep`: strings that should survive (ids, amounts the study needs). One missing is **over-redaction**.
+- `ambiguous`: items a policy has to rule on (company contacts, an employee id, an IP address). Reported, never scored.
+- `expect`: `released` (default) or `escalated`. A document that should be released but is escalated is a **false escalation**.
+
+The keys are my reading of what counts as personal data under the demo policy; read them critically, because the scores are only as good as the keys. `tests/test_batch_test.py` checks that every key string is in its document.
+
+**Run it**
+
+```bash
+conda activate graf
+# the plan only: runs, and the upper bound of model calls (nothing is sent)
+python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,baseline --llm claude_cli:claude-haiku-5-5
+
+# make the calls. A run makes at most 3 model calls and is capped at 4; --max-calls refuses a bigger plan
+python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,baseline \
+    --llm claude_cli:claude-haiku-5-5 --max-calls 90 --yes
+```
+
+Results go to `output/batch_test-<time>/`: `results.jsonl` (one line per run, as it arrives), `summary.md` (a table per variant and model, and one per document: R released, E escalated, `!` leak, `x` false escalation, `o` over-redaction, `?` error) and every run's full output folder. Continue a stopped batch with `--resume --out <that folder>`. A full run of both variants on all 18 documents with one model is 36 runs, at most 108 model calls.
+
+**What to vary**
+
+| dimension | how |
+|---|---|
+| solver on/off | `--variants recipe-z3,recipe-stdlib,recipe-sympy,baseline` (the three engines must agree; `baseline` has no solver) |
+| model | `--llm claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5,ollama:gemma4` |
+| rules | `--rules-file ./procedures/rules.json` or `rules_extended.json` |
+| destination | `--destination internal_crm` (external against internal handling) |
+| kind of document | `--docs clean`, `--docs ssn,card`, `--docs injection` (ids or tags) |
+| prompts | edit `prompts/extract_pii.md` or `prompts/redact.md`, run again with another `--out` |
+| policy | edit `procedures/rules_extended.json` (for example a rule for company contacts) |
+| the key | edit `manifest.json` (how sensitive the scores are to the judgement calls) |
+
+**What has been run so far:** a smoke test only, haiku-5-5 on two documents, both variants (4 runs). No false release. On `clean_status_report` the recipe **falsely escalated**: haiku's extraction reported three leftover `OTHER` items as unmasked personal data (the first check says `violated: [R1, R8]`, `masked_other: false`), so the rules stopped a document that has no personal data; the baseline released it. On `ssn_plain` both graphs removed the new hire's start date, which I moved from `must_keep` to `ambiguous`. That is two documents and one model: it is the over-flagging of company ids and the like that the hard-case runs also pointed to, not a result. **The full batch has not been run.**
+
+**Not built:** a `--repeat N` for the same cell (variety is the point, but the sampling noise per cell is worth knowing once); a key for *which items* were found (today only what remains in the released text is scored); a way to judge how useful the redacted text is for the study beyond `must_keep`; a short non-value hint on each extracted item (a kind such as `company_contact`, and where) so that an escalation shows what was flagged.
+
 ## Where things are
 
 | File | Role |
@@ -173,6 +218,8 @@ Without the package the run stops at the rule check with an error that names it 
 | `procedures/compliance_check.py` | the deterministic check as a program: JSON in on stdin, the verdict as one JSON line on stdout, exit 1 when it cannot run. The two `SOLVE` nodes (`check`, `recheck`) run it with `backend: subprocess` |
 | `compliance_audit_llm_only.graph.yaml`, `prompts/judge.md` | the LLM-only baseline to compare with |
 | `procedures/tools.py`, `procedures/rules.json` | the rule engines (stdlib, sympy, z3) and the demo rules, plain Python |
+| `batch_test.py`, `input/batch-test/` | the multi-document experiment: 18 documents with answer keys, a runner over documents x variants x models, and the scoring (see Batch Experiment) |
+| `repeat_runs.py` | the same document run several times on both graphs (a quick check of consistency) |
 | `policies/release_policy.cedar` | permit only a compliant release; anything else is denied |
 
 The check started as SPL.py's recipe `cookbook-solver/127_pii_compliance` and is now independent of it: plain Python, no SPL.py. (The folder is still called `procedures/`.) Each firing starts a Python process, about 20 ms for `stdlib` and 165 ms for `sympy` on one machine; the interpreter on your PATH (`python3`) must be the one that has sympy or z3 if you choose those engines.

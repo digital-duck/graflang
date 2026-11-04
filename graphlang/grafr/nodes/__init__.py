@@ -10,7 +10,7 @@ from .context import ContextExecutor
 from .mutate import MutateExecutor
 from .recover import RecoverExecutor
 from .join import JoinExecutor
-from .outside import DecisionExecutor, EmitExecutor, ObserveExecutor, QueryExecutor
+from .outside import DecisionExecutor, EmitExecutor, ObserveExecutor, QueryExecutor, RunCodeExecutor
 
 _EXECUTORS = {
     "INPUT": NodeExecutor(),
@@ -30,6 +30,7 @@ _EXECUTORS = {
     "EMIT": EmitExecutor(),
     "QUERY": QueryExecutor(),
     "DECISION": DecisionExecutor(),
+    "RUN_CODE": RunCodeExecutor(),
 }
 
 def register_executor(node_type: str, executor: NodeExecutor) -> None:

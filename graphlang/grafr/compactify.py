@@ -16,7 +16,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from .compact import ENTRY, ID, KINDS, RESERVED, TYPES, CompactError, _build, expand, is_compact
+from .compact import ENTRY, ID, KINDS, RESERVED, RUN_CODE_OUTS, TYPES, CompactError, _build, expand, is_compact
 
 UNTYPES = {v: k for k, v in TYPES.items() if k != "loop"}      # GENERATE -> generate; LOOP is handled apart
 
@@ -75,6 +75,8 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
                 kind = "node"
             if kind == "use" and "part" not in cfg:
                 kind = "node"
+            if kind == "run_code" and not (isinstance(cfg.get("languages"), list) and cfg["languages"]):
+                kind = "node"
         else:
             kind = "node"
         kinds[n["id"]] = kind
@@ -122,9 +124,6 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
 
     # nodes whose step cannot be written go raw, with all their edges (done by the verify loop, but catch the obvious)
     bad: set = set()
-    for (tn, tp), srcs in in_src.items():
-        if len(srcs) > 1:
-            bad.add(tn)
     steps: List[Dict] = []
     used_edges: List[Dict] = []
     for idx, n in enumerate(cand):
@@ -144,6 +143,8 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
             arg = cfg.pop("policy_ref")
         elif kind == "use":
             arg = cfg.pop("part")
+        elif kind == "run_code":
+            arg = cfg.pop("languages")
         elif kind == "fork":
             arg = [p for p in _ctrl(n) if p != "trigger"]
         elif kind == "join":
@@ -188,7 +189,7 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
             name = p[3:]
             srcs = in_src.get((sid, p))
             if srcs:
-                in_map[name] = srcs[0]
+                in_map[name] = srcs[0] if len(srcs) == 1 else list(dict.fromkeys(srcs))     # several writers: `[a, b]`
                 used_edges += in_edges[(sid, p)]
                 if p in defaults:                         # an edge and a default on one port: not expressible
                     bad.add(sid)
@@ -229,7 +230,7 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
             if kind == "loop":
                 if outputs_spec:
                     body["out"] = _loop_out(outputs_spec)
-            elif outs[sid] == ["result"]:
+            elif outs[sid] == (RUN_CODE_OUTS if kind == "run_code" else ["result"]):
                 pass
             else:
                 body["out"] = outs[sid][0] if len(outs[sid]) == 1 else list(outs[sid])
