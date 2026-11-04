@@ -1,0 +1,49 @@
+{
+  "steps": 7,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 56,
+    "output_tokens": 12,
+    "cost_usd": 0.0,
+    "ms": 2089
+  },
+  "nodes": {
+    "hello": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2089
+    },
+    "run": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 66
+    },
+    "allowed": {
+      "type": "GUARD",
+      "n": 1,
+      "ms": 1
+    },
+    "is_solver": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "code": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "printed": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "ran_out": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

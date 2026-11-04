@@ -1,0 +1,34 @@
+{
+  "steps": 4,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0,
+    "ms": 0
+  },
+  "nodes": {
+    "solver": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 22
+    },
+    "is_solver": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "solver_program": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "solver_out": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

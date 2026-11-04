@@ -1,0 +1,9 @@
+{
+  "graph": "hello_world",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "language": "Python"
+  },
+  "started": "2026-11-04T01:55:43"
+}

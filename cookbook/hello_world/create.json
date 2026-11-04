@@ -1,0 +1,8 @@
+{
+  "name": "hello_world",
+  "spec": "create a simple \"Hello World\" program\n\nChange: you misunderstood, the output is a program, but I want the output to be \"Hello World\" in a target language e.g. \"--param language=python\", can you also support passing input text, e.g. \"--param name=Wen\", \nI also you to support two modes: solver and llm, e.g. \"--param mode=solver\" will use deterministic call \nand default mode=llm, which will call LLM",
+  "llm": "claude_cli:claude-haiku-5-5",
+  "rounds": 1,
+  "problems_left": [],
+  "created": "2026-11-04T02:14:58"
+}

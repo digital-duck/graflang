@@ -1,0 +1,11 @@
+{
+  "graph": "hello_world",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "language": "Python",
+    "name": "Wen G",
+    "mode": "solver"
+  },
+  "started": "2026-11-04T03:05:27"
+}

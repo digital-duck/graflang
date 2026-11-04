@@ -1,0 +1,24 @@
+{
+  "steps": 2,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 59,
+    "output_tokens": 9,
+    "cost_usd": 0.0,
+    "ms": 4739
+  },
+  "nodes": {
+    "hello": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 4740
+    },
+    "done": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

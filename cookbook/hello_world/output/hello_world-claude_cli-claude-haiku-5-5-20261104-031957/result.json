@@ -1,0 +1,4 @@
+{
+  "result": "Hello, GraphLang!",
+  "program": "print(\"Hello, GraphLang!\")\n"
+}

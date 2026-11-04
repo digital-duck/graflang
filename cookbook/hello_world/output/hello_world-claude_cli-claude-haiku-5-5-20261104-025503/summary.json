@@ -1,0 +1,29 @@
+{
+  "steps": 3,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 1,
+    "input_tokens": 55,
+    "output_tokens": 9,
+    "cost_usd": 0.0,
+    "ms": 2000
+  },
+  "nodes": {
+    "hello": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2000
+    },
+    "is_solver": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "llm_out": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

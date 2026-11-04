@@ -1,0 +1,4 @@
+{
+  "result": "(not run: only Python and JavaScript are run, not Go)",
+  "program": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, Wen G!\")\n}\n"
+}

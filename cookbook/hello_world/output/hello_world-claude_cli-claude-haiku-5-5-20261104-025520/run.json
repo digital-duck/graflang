@@ -1,0 +1,11 @@
+{
+  "graph": "hello_world",
+  "adapter": "claude_cli",
+  "model": "claude-haiku-5-5",
+  "params": {
+    "language": "Python",
+    "name": "Wen Gong",
+    "mode": "solver"
+  },
+  "started": "2026-11-04T02:55:20"
+}

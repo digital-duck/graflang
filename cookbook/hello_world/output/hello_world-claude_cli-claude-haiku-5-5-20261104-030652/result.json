@@ -1,0 +1,4 @@
+{
+  "result": "Hello, Albert!",
+  "program": "console.log(\"Hello, Albert!\");\n"
+}
