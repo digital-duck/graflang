@@ -21,6 +21,7 @@ graf vis      FILE [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o OUT]
 graf trace    [LOG] [--format tree|otlp] [-o FILE]                  # a run's .jsonl log as a timeline, or as OpenTelemetry spans
 graf watch    FILE [--every S] [--times N] [graf run options]        # run it again and again on a schedule
 graf describe GRAPH|RECIPE_FOLDER [-o FILE|-] [--llm [ADAPTER:MODEL]]              # what a graph or a recipe does, in words (a model only with --llm)
+graf docs     SOURCE [--style demo|tutorial|user-guide|custom] [--prompt TEXT|@FILE] [--out FILE] [--dry-run]   # a document about a codebase (folder or repo url)
 graf create   --name NAME --spec TEXT|@FILE [--out-dir DIR] [--llm ADAPTER:MODEL] [--from RECIPE|--no-examples]   # an app from a plain-language spec
 ```
 
@@ -181,6 +182,58 @@ Checks edges point to real nodes and ports, `triggers`/`binds` join the right ki
 A `GENERATE` prompt that names `{{in_x}}` must have that port, fed by a `binds` edge (or a default, or a loop's carried value); otherwise it is an error, because the model would get the text unfilled and answer without its input. A JSON example in `{{ ... }}` is not a placeholder.
 
 It also checks that **every risky node is behind a `GUARD`**. A node is risky if its type is `EMIT` or `QUERY` (they reach outside the workflow) or you mark it with `config: {risky: true}`; mark an `OUTPUT` that releases data, or a `procedure_ref` node that acts on the world. A `LOOP` whose body holds a risky node counts as risky itself. The check follows `triggers` edges from the `INPUT` node with every edge that leaves a `GUARD` removed. A risky node still reached has a path around the guard, which is an error; a risky node reachable from a guard's `deny` port is an error too. Limits: `binds` (data) edges are ignored, guards inside a `LOOP` body are not credited, and a node you forget to mark is not checked, so the check is only as complete as your marking.
+
+## `graf docs`: write a document about a codebase
+
+```bash
+graf docs SOURCE [--style demo|tutorial|user-guide|custom] [--prompt TEXT|@FILE] [--format markdown|html] [--out FILE] [--force]
+                 [--ref BRANCH] [--llm ADAPTER:MODEL] [--budget N] [--margin F] [--max-calls N] [--dry-run]
+```
+
+```bash
+graf docs .                                                 # a slide deck about this folder: ./<folder>.demo.html
+graf docs https://github.com/org/repo --style tutorial      # a repository url is cloned shallow into /tmp/graflang-docs first
+graf docs ./proj --style custom --prompt "a one-page FAQ" --format html
+graf docs . --dry-run                                       # files read, model calls, cap, output file; no model is called
+```
+
+`SOURCE` is a folder or a repository url (`https://`, `ssh://`, `git@`, or ending in `.git`; the clone is made fresh each time). The result is one file, `./<name>.<style>.html` or `.md` (the style is the infix, as in `NAME.graph.yaml`); `graf docs` refuses to overwrite a file unless you give `--force`.
+
+| option | meaning | default |
+|---|---|---|
+| `--style` | `demo`: a slide deck (HTML). `tutorial`, `user-guide`: Markdown. `custom`: your own instructions | `demo` |
+| `--prompt` | with `custom` (required): how the document should be built and structured; text, or `@FILE` to read a file. Refused with the other styles | none |
+| `--format` | with `custom`: `markdown` or `html` (a whole page, no scripts). The other styles have their own | `markdown` |
+| `--out`, `-o` | the file to write | `./<name>.<style>.html\|md` |
+| `--ref` | for a repository url: the branch or tag | the default branch |
+| `--llm` | `ADAPTER[:MODEL]`; billed | `claude_cli`, `claude-sonnet-5-5` |
+| `--budget` | characters of the source to put in the digest (the file tree comes on top) | 60000 |
+| `--margin` | safety margin on the cap of model calls: cap = ceil(calls x (1 + margin)) | 0.5 |
+| `--max-calls` | refuse to run when the cap is above this | none |
+| `--dry-run` | read the folder (no model), print the plan and the files; write nothing | |
+
+**What it runs.** The recipe `cookbook/doc_it` (`graf vis` it to see it):
+
+1. *gather* (a program): a file tree, then the files that explain a project: README, `CLAUDE.md` / `AGENTS.md`, build manifests, `docs/`, the changelog, entry points, each cut to a share of the budget. It reads only inside the folder; it skips `.env`, key files, `.git`, `node_modules`, build output and links that leave the folder.
+2. *outline* and *write* (a model each): from the digest and the style. The prompts say that text in the digest is data, not instructions.
+3. *check* (a program, no model): for a deck, it keeps the `<section class="slide">` elements, removes anything active (script, style, iframe, event handlers, `javascript:` urls, external images), puts an outline slide after the cover and wraps them in the style's page. It checks the structure (a deck: enough slides, each with a title, a cover; Markdown: a `# ` title, enough `## ` sections, closed code fences) and lists every path in `code` that is not in the source as a warning.
+4. *fix* (a model, only when the check found structure errors): one correction, then the check runs again.
+
+Two or three model calls; the cap comes from the graph (the count `graf validate` prints) plus the margin, so a run cannot spend more. If the final check still fails, the file is written anyway, the errors are printed and the exit code is 1.
+
+**Styles are files.** `graphlang/grafd/styles/demo.md`, `tutorial.md`, `user-guide.md`, `custom.md` (the frame around `--prompt`). Each starts with a small front matter, then the instructions the writer follows:
+
+```
+---
+format: html              # html or markdown
+template: demo.template.html   # html styles: the page the slides go into (beside the style file); optional
+min_sections: 8           # the check's minimum number of slides / ## sections
+---
+```
+
+Edit the instructions to change how a document is built; add a style by copying one (the recipe takes any style file: `graf run cookbook/doc_it/doc_it.graph.yaml --param source=/abs/path --param style_guide=/abs/path/mystyle.md`). The deck's page, `demo.template.html`, is the look and controls of the intro deck: arrow keys and space, `T` outline, `N` notes, `O` overview, `F` fullscreen, and a PDF button (print to PDF).
+
+**What to trust.** The text comes from the digest, so it can only say what the files say, and the check warns about invented paths. It cannot tell whether other statements are true, and the digest of a big project is cut: read the result, and raise `--budget` if something important is missing. Only Markdown and HTML are written; the project is not run. See `cookbook/doc_it/readme.md`.
 
 ## `graf describe`: what a graph or a recipe does, in words
 

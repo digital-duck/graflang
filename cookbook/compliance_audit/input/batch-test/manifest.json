@@ -161,11 +161,12 @@
         "14 Feb 1988"
       ],
       "must_keep": [
-        "E-3310",
         "standard plan"
       ],
-      "ambiguous": [],
-      "note": "One date of birth in three spellings (prose, numeric, short)."
+      "ambiguous": [
+        "E-3310"
+      ],
+      "note": "One date of birth in three spellings (prose, numeric, short). The case number E-3310 is `ambiguous`: it names a case about a person, not a person."
     },
     {
       "id": "name_titles",
@@ -294,11 +295,12 @@
       ],
       "must_keep": [
         "Enterprise",
-        "tickets_last_90_days",
+        "tickets_last_90_days"
+      ],
+      "ambiguous": [
         "Denver"
       ],
-      "ambiguous": [],
-      "note": "Six people in a table: every name and e-mail must go, the plan and ticket columns must stay for the study."
+      "note": "Six people in a table: every name and e-mail must go, the plan and ticket columns must stay for the study. A bare city (Denver) is `ambiguous`: a quasi-identifier, not an address."
     },
     {
       "id": "already_masked",

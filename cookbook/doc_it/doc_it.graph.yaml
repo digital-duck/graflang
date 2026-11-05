@@ -1,0 +1,28 @@
+version: "1.0-graph"
+# doc_it: write a document about a codebase. A program reads the folder into a digest and the style file; a model plans, then writes;
+# a program assembles the page (for a deck: the style's template, an outline slide) and checks it; if the check fails, a model fixes it once.
+# The usual way in is `graf docs SOURCE --style demo|tutorial|user-guide|custom`; this file is what it runs.
+workflow:
+  name: doc_it
+  inputs:
+    - {name: source, type: TEXT, description: "a folder (absolute, or relative to where you run)"}
+    - {name: style_guide, type: TEXT, default: "../../graphlang/grafd/styles/demo.md", description: "a style file (.md with a front matter) or the guide's text"}
+    - {name: budget, type: TEXT, default: "60000", description: "characters of the source to put in the digest"}
+  outputs:
+    - {name: result, type: TEXT, description: "JSON {document, ok, errors, warnings, sections}: the finished document and what the check found"}
+resources:
+  prompts: {outline: ./prompts/outline.md, write: ./prompts/write.md, fix: ./prompts/fix.md}
+steps:
+  - gather: {node: SOLVE, backend: subprocess, command: [python3, -I, procedures/gather.py], parse: {tool: "procedures/gather.py:parse"}, out_type: JSON,
+             timeout: 120, label: "Read the codebase and the style", in: {source: $in.source, style_guide: $in.style_guide, budget: $in.budget}}
+  - digest: {solve: "json_get(@in_g, 'digest')", in: {g: gather}, out: digest}
+  - guide: {solve: "json_get(@in_g, 'style_guide')", in: {g: gather}, out: guide}
+  - outline: {generate: prompts.outline, label: "Plan the document", in: {style_guide: guide, digest: digest}, out: outline}
+  - write: {generate: prompts.write, label: "Write the document", in: {style_guide: guide, outline: outline, digest: digest}, out: body}
+  - check: &check {node: SOLVE, backend: subprocess, command: [python3, -I, procedures/assemble.py], parse: {tool: "procedures/assemble.py:parse"}, out_type: JSON,
+             timeout: 60, label: "Assemble and check", in: {body: write, gathered: gather, source: $in.source}, out: result}
+  - ok: {evaluate: "json_get(@in_c, 'ok') == TRUE", label: "Passed the check?", in: {c: check}}
+  - problems: {solve: "str(json_get(@in_c, 'errors')) + ' ' + str(json_get(@in_c, 'warnings'))", on: ok.fail, in: {c: check}, out: problems}
+  - fix: {generate: prompts.fix, label: "Fix what the check found", in: {style_guide: guide, problems: problems, body: write, digest: digest}, out: body}
+  - check2: {<<: *check, label: "Assemble and check again", in: {body: fix, gathered: gather, source: $in.source}}
+  - done: {output: {result: [check, check2]}, on: [ok.pass, check2]}

@@ -1,0 +1,3 @@
+ACCESS REVIEW NOTE (to be sent to the audit vendor)
+
+Employee [REDACTED] (job title: [REDACTED]) logged in from [REDACTED] on [REDACTED] at [REDACTED] and exported the Q3 revenue report. The VPN session id was [REDACTED]. The employee's manager, [REDACTED] from finance, was told the next morning. The export was approved retroactively. Please review whether off-hours exports need a second approver.

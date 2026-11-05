@@ -423,6 +423,26 @@ entries:
   status: validated
   validated: both paths, haiku
   active: true
+- id: cookbook.doc_it
+  suite: cookbook
+  graph: cookbook/doc_it/doc_it.graph.yaml
+  workflow: doc_it
+  requires: claude_cli
+  calls: '3'
+  description: 'write a document about a codebase (slide deck, tutorial, user guide, or your own prompt): a program reads the code, a model plans and writes, a program assembles and checks, a model fixes once; run it with `graf docs`'
+  category: core
+  needs:
+  - llm
+  inputs:
+  - name: source
+  - name: style_guide
+  - name: budget
+  params:
+    source: .
+    style_guide: ../../graphlang/grafd/styles/tutorial.md
+  status: ran
+  validated: one real run (sonnet-5-5, 2 calls) on this repository
+  active: true
 - id: cookbook.self_refine
   suite: cookbook
   graph: cookbook/self_refine/self_refine.graph.yaml

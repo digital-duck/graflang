@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (LLM judge)",
+  "safe_document": "CUSTOMER FEEDBACK EXTRACT (to be sent to the research vendor)\n\nThe customer wrote that she could not find the export button. She asked us to reply to [REDACTED]\nand, as a backup, to [REDACTED]. She added that she is usually reachable [REDACTED] and that the last\nthree releases each moved the export button to a new menu.\n\nTag: usability. Severity: medium."
+}

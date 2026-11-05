@@ -25,19 +25,19 @@ conda activate graf
 cd /path/to/graflang
 
 # the plan only: how many runs and at most how many model calls (nothing is sent)
-python cookbook/compliance_audit/batch_test.py --variants recipe-z3,baseline --llm claude_cli:claude-haiku-5-5
+python cookbook/compliance_audit/batch_test.py --variants recipe-z3,llm_only --llm claude_cli:claude-haiku-5-5
 
-# make the calls (a run makes at most 3 model calls and is capped at 4); --max-calls refuses a bigger plan
-python cookbook/compliance_audit/batch_test.py --variants recipe-z3,baseline --llm claude_cli:claude-haiku-5-5 --max-calls 120 --yes
+# make the calls (each run's model-call count is read from the graph (`graf validate` prints it, 3 here) and its cap is that plus 50% (5), so a runaway retry cannot spend more; `--max-calls` is an optional budget for the whole batch)
+python cookbook/compliance_audit/batch_test.py --variants recipe-z3,llm_only --llm claude_cli:claude-haiku-5-5 --max-calls 180
 ```
 
-Results go to `cookbook/compliance_audit/output/batch_test-<time>/`: `results.jsonl` (one line per run, written as it arrives), `summary.md` (a table per variant and model, and a table per document) and the full output folder of every run under `runs/`. A stopped batch continues with `--resume --out <that folder>`.
+Results go to `cookbook/compliance_audit/output/batch_test-<time>/`: the full output folder of every run under `runs/`; the scored results and the summary tables go to the SQLite database `output/experiments.db` (`batch_analyze.py` reads it). A stopped batch continues with `--resume`.
 
 ## What to vary
 
 | dimension | how | what it tests |
 |---|---|---|
-| **solver on/off** | `--variants recipe-z3,recipe-stdlib,recipe-sympy,baseline` | the three rule engines (they must agree), and the LLM-only baseline (no solver at all) |
+| **solver on/off** | `--variants recipe-z3,recipe-stdlib,recipe-sympy,llm_only` | the three rule engines (they must agree), and the LLM-only baseline (no solver at all) |
 | **model** | `--llm claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5,ollama:gemma4` | how much the extraction and redaction quality depends on the model |
 | **rules** | `--rules-file ./procedures/rules.json` or `rules_extended.json` | the simple all-or-nothing rules against per-type masking |
 | **destination** | `--destination internal_crm` | external against internal handling (masking is looser inside) |

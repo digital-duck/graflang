@@ -1,0 +1,1 @@
+{"entities": [{"type": "EMAIL", "masked": false}, {"type": "EMAIL", "masked": false}, {"type": "PHONE", "masked": false}, {"type": "ADDRESS", "masked": false}]}

@@ -1,7 +1,7 @@
 """Run the recipe and its LLM-only baseline several times on one document and compare the outcomes.
 
-    python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5            # prints the plan only
-    python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5 --yes      # makes the calls
+    python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5              # makes the calls
+    python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5 --dry-run    # the plan only
 
 Every run is a real `graf run` and is billed (or uses your subscription / local model). Each run makes at most 3 LLM calls and is capped at
 4 by a bindings file, so `--runs 3` on both graphs makes at most 18 calls; the plan line says the number before anything is sent.
@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-GRAPHS = {"recipe": "compliance_audit.graph.yaml", "baseline": "compliance_audit_llm_only.graph.yaml"}
-FIRST_VERDICT = {"recipe": "*-check.out_verdict.md", "baseline": "*-judge.out_verdict.md"}
+GRAPHS = {"recipe": "compliance_audit.graph.yaml", "llm_only": "compliance_audit_llm_only.graph.yaml"}
+FIRST_VERDICT = {"recipe": "*-check.out_verdict.md", "llm_only": "*-judge.out_verdict.md"}
 CALLS_PER_RUN, CAP_PER_RUN = 3, 4
 
 
@@ -55,21 +55,21 @@ def one_run(which: str, args, folder: Path, bind: Path) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--runs", type=int, default=3, help="runs per graph (default 3)")
-    ap.add_argument("--graphs", choices=["both", "recipe", "baseline"], default="both")
+    ap.add_argument("--graphs", choices=["both", "recipe", "llm_only"], default="both")
     ap.add_argument("--llm", required=True, help="adapter[:model], like graf run --llm")
     ap.add_argument("--document", default="./input/hard_case_file.txt", help="a text or a file path (relative paths start in the recipe folder)")
     ap.add_argument("--destination", default="external_api")
     ap.add_argument("--engine", default="z3", help="the recipe's rule engine: stdlib, sympy or z3")
     ap.add_argument("--rules-file", default="./procedures/rules_extended.json")
     ap.add_argument("--out", default=None, help="folder for the run results (default output/repeat_runs-<time>)")
-    ap.add_argument("--yes", action="store_true", help="make the calls; without it only the plan is printed")
+    ap.add_argument("--dry-run", action="store_true", help="print the plan (runs and the upper bound of model calls) and make no calls")
     args = ap.parse_args()
 
-    which = ["recipe", "baseline"] if args.graphs == "both" else [args.graphs]
+    which = ["recipe", "llm_only"] if args.graphs == "both" else [args.graphs]
     total = args.runs * len(which) * CALLS_PER_RUN
     print(f"plan: {args.runs} run(s) of {', '.join(which)} on {args.document} -> {args.destination} with {args.llm}: at most {total} LLM calls")
-    if not args.yes:
-        print("nothing was run; add --yes to make the calls")
+    if args.dry_run:
+        print("dry run: nothing was run")
         return 0
 
     out = Path(args.out) if args.out else HERE / "output" / f"repeat_runs-{time.strftime('%Y%m%d-%H%M%S')}"

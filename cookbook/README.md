@@ -71,9 +71,9 @@ To add a recipe: write the graph and its `readme.md`, add an entry with status `
 
 <!-- catalog:begin -->
 
-### Core recipes (`cookbook/`): 28 graphs
+### Core recipes (`cookbook/`): 29 graphs
 
-✅ 26 validated, 🆕 2 new
+✅ 26 validated, ☑️ 1 ran, 🆕 2 new
 
 | Recipe | Graph | Shows | Needs | Status |
 |---|---|---|---|---|
@@ -98,6 +98,7 @@ To add a recipe: write the graph and its `readme.md`, add an entry with status `
 | `recipe_chain` | [`recipe_chain/recipe_chain.graph.yaml`](../cookbook/recipe_chain/recipe_chain.graph.yaml) | guardrail -> agent_notes -> supervisor as parts, none edited: the acceptance test of the part interface | claude_cli | ✅ validated (2026-11-03, haiku; plumbing only) |
 | `release_approval` | [`release_approval/release_approval.graph.yaml`](../cookbook/release_approval/release_approval.graph.yaml) | a model drafts, a person decides (DECISION), a Cedar guard checks, then the file is written | claude_cli | ✅ validated (2026-11-04, haiku, with `--answer`) |
 | `self_heal` | [`self_heal/self_heal.graph.yaml`](../cookbook/self_heal/self_heal.graph.yaml) | a rule checks a model's JSON; a failed check sends the model its own rejected answer to fix | claude_cli | ✅ validated (both paths, haiku) |
+| `doc_it` | [`doc_it/doc_it.graph.yaml`](../cookbook/doc_it/doc_it.graph.yaml) | write a document about a codebase (slide deck, tutorial, user guide, or your own prompt): a program reads the code, a model plans and writes, a program assembles and checks, a model fixes once; run it with `graf docs` | claude_cli | ☑️ ran (one real run (sonnet-5-5, 2 calls) on this repository) |
 | `self_refine` | [`self_refine/self_refine.graph.yaml`](../cookbook/self_refine/self_refine.graph.yaml) | three GENERATE nodes in a line, each node choosing its own LLM (ollama:gemma3 → haiku → sonnet) | claude_cli, a running Ollama with gemma3 | ✅ validated |
 | `solver_check` | [`solver_check/solver_check.graph.yaml`](../cookbook/solver_check/solver_check.graph.yaml) | deterministic SOLVE (kernel and subprocess backends) and ASSERT routing | none: no model is called | ✅ validated |
 | `stock_analysis` | [`stock_analysis/stock_analysis.graph.yaml`](../cookbook/stock_analysis/stock_analysis.graph.yaml) | BATCH over a list of tickers: Python (SOLVE kernel) fetches prices and computes metrics, the model comments on each and writes one outlook | claude_cli, kernel extra, network | 🆕 new |

@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (stdlib engine)",
+  "safe_document": "INFORME DE INCIDENCIA (para enviar al proveedor de analítica)\n\nEl 8 de noviembre la clienta [REDACTED] llamó al servicio de atención porque su pedido [REDACTED] no había llegado.\nDio como dirección de entrega [REDACTED], y como teléfono [REDACTED]. Su correo es\n[REDACTED]. Para verificar su identidad leyó su DNI, [REDACTED]. El pedido se envió de nuevo el 9 de noviembre\ny llegó el 11 de noviembre. Retraso total: 6 días.\n\nPor favor, analice el retraso entre el envío y la entrega en pedidos similares."
+}

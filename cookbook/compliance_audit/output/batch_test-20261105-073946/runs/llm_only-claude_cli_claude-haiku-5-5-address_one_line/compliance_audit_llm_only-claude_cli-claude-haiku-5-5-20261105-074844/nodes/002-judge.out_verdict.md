@@ -1,0 +1,1 @@
+{"compliant": false, "violated": ["R1"], "facts": {"is_external": true}}

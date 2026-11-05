@@ -96,7 +96,7 @@ One document and one run each says little about consistency. `input/hard_case_fi
 
 ```bash
 python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5          # prints the plan, makes no call
-python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5 --yes    # at most 18 LLM calls
+python cookbook/compliance_audit/repeat_runs.py --runs 3 --llm claude_cli:claude-haiku-5-5    # at most 18 LLM calls (add --dry-run to print the plan only)
 ```
 
 Each run is capped at 4 calls. The report shows, per graph, how many runs were released, how many first said "compliant", how many different `violated` lists appeared, and the tokens per run. A correct first verdict is not compliant (the injection line must not work); what to watch is whether the baseline's first verdict changes between runs while the recipe's facts and rules give the same answer for the same extraction. I have not run this on a real model yet, so there is no result to report here.
@@ -182,21 +182,25 @@ The keys are my reading of what counts as personal data under the demo policy; r
 
 ```bash
 conda activate graf
-# the plan only: runs, and the upper bound of model calls (nothing is sent)
-python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,baseline --llm claude_cli:claude-haiku-5-5
+# dry run: print the plan only (runs, and the upper bound of model calls); nothing is sent
+python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only --llm claude_cli:claude-haiku-5-5 --dry-run
 
-# make the calls. A run makes at most 3 model calls and is capped at 4; --max-calls refuses a bigger plan
-python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,baseline \
-    --llm claude_cli:claude-haiku-5-5 --max-calls 90 --yes
+# make the calls. Each run's model-call count is read from the graph (`graf validate` prints it, 3 here) and its cap is that plus 50% (5), so a runaway retry cannot spend more; `--max-calls` is an optional budget for the whole batch
+python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only \
+    --llm claude_cli:claude-haiku-5-5
+
+python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only \
+    --llm claude_cli:claude-sonnet-5-5,ollama:gemma4
+
 ```
 
-Results go to `output/batch_test-<time>/`: `results.jsonl` (one line per run, as it arrives), `summary.md` (a table per variant and model, and one per document: R released, E escalated, `!` leak, `x` false escalation, `o` over-redaction, `?` error) and every run's full output folder. Continue a stopped batch with `--resume --out <that folder>`. A full run of both variants on all 18 documents with one model is 36 runs, at most 108 model calls.
+Results go to the SQLite database `output/experiments.db` (see below); the summary tables of a batch (a table per variant and model, and one per document: R released, E escalated, `!` leak, `x` false escalation, `o` over-redaction, `?` error) are printed and stored in the `batches.summary` column, and every run's full output folder is under `output/batch_test-<time>/runs/`. Continue a stopped batch with `--resume`. A full run of both variants on all 18 documents with one model is 36 runs, about 108 model calls and never more than 180 (the per-run cap of 5).
 
 **What to vary**
 
 | dimension | how |
 |---|---|
-| solver on/off | `--variants recipe-z3,recipe-stdlib,recipe-sympy,baseline` (the three engines must agree; `baseline` has no solver) |
+| solver on/off | `--variants recipe-z3,recipe-stdlib,recipe-sympy,llm_only` (the three engines must agree; `llm_only` has no solver) |
 | model | `--llm claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5,ollama:gemma4` |
 | rules | `--rules-file ./procedures/rules.json` or `rules_extended.json` |
 | destination | `--destination internal_crm` (external against internal handling) |
@@ -208,6 +212,22 @@ Results go to `output/batch_test-<time>/`: `results.jsonl` (one line per run, as
 **What has been run so far:** a smoke test only, haiku-5-5 on two documents, both variants (4 runs). No false release. On `clean_status_report` the recipe **falsely escalated**: haiku's extraction reported three leftover `OTHER` items as unmasked personal data (the first check says `violated: [R1, R8]`, `masked_other: false`), so the rules stopped a document that has no personal data; the baseline released it. On `ssn_plain` both graphs removed the new hire's start date, which I moved from `must_keep` to `ambiguous`. That is two documents and one model: it is the over-flagging of company ids and the like that the hard-case runs also pointed to, not a result. **The full batch has not been run.**
 
 **Not built:** a `--repeat N` for the same cell (variety is the point, but the sampling noise per cell is worth knowing once); a key for *which items* were found (today only what remains in the released text is scored); a way to judge how useful the redacted text is for the study beyond `must_keep`; a short non-value hint on each extracted item (a kind such as `company_contact`, and where) so that an escalation shows what was flagged.
+
+### Recording and analysing the results (SQLite)
+
+Every result goes into `output/experiments.db` as it arrives (`--db PATH` to change it; there is no `results.jsonl` or `summary.md`: the batch's summary tables are in `batches.summary`, `SELECT summary FROM batches ORDER BY started_at DESC LIMIT 1`). One row per (document, variant, rep, model); `--reps N` repeats each cell; `--resume` skips cells that finished without an error (errors are tried again), so a stopped batch costs nothing twice.
+
+```bash
+G=~/anaconda3/envs/graf/bin/python
+$G cookbook/compliance_audit/batch_test.py --variants recipe-z3,llm_only --llm claude_cli:claude-haiku-5-5             # haiku: makes the calls, then
+$G cookbook/compliance_audit/batch_test.py --variants recipe-z3,llm_only --llm claude_cli:claude-sonnet-5-5            # sonnet: same database
+$G cookbook/compliance_audit/batch_analyze.py --out output/report.md          # rates with 95% intervals, leaks, per document, paired McNemar, hygiene
+sqlite3 output/experiments.db "SELECT * FROM variant_summary"          # or ask your own question
+```
+
+**Prompt v2 and the answer keys (2026-11-05).** The first haiku batch (54 runs, no false release) showed the same four documents over-redacted in every variant, because the shared `prompts/redact.md` told the model to mask "account or case-holder identifiers" and "addresses", while the keys said order, ticket and case numbers and a bare city must stay. After seeing that, two things were changed together: the keys (`E-3310` and `Denver` moved from `must_keep` to `ambiguous`; the order and ticket numbers stay `must_keep`) and the prompt (order, ticket, case and reference numbers, plan names, event dates and a lone city, state or country are not personal data; a street address and a postal code still are). The first batch is kept as `output/experiments-prompt-v1.db`, re-scored against the new keys (`batch_test.py --rescore --db FILE`, no model calls), so the prompt's effect can be read apart from the keys': `batch_analyze.py --db output/experiments-prompt-v1.db --db output/experiments.db` shows each model as `model [file name]`. Because the prompt and keys were changed after looking at results, treat v2 as tuned on this document set and say so when reporting it.
+
+Add `--dry-run` to see the plan the expected and the worst-case number of model calls (`--max-calls N` refuses a plan whose worst case is above N; `--margin 0.3` changes the 50%).
 
 ## Where things are
 

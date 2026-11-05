@@ -63,7 +63,7 @@ where = ["."]
 include = ["graphlang*"]
 
 [tool.setuptools.package-data]
-graphlang = ["schema/*.json", "policies/*.cedar", "grafc/rust_gen/templates/*.j2", "grafc/create_guide*.md", "grafc/create_examples/*/*.yaml", "grafc/create_examples/*/prompts/*.md"]
+graphlang = ["schema/*.json", "policies/*.cedar", "grafc/rust_gen/templates/*.j2", "grafc/create_guide*.md", "grafc/create_examples/*/*.yaml", "grafc/create_examples/*/prompts/*.md", "grafd/styles/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

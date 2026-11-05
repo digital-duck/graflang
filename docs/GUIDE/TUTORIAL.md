@@ -226,11 +226,58 @@ Things to look at:
 
 The default rules are an illustration, not legal advice and not a real GDPR or PCI rule set. The full explanation is in `cookbook/compliance_audit/readme.md`.
 
+## 9. Write documentation for a codebase
+
+`graf docs` points a model at a folder (or a repository url) and writes one document about it: a slide deck, a tutorial, a user guide, or whatever you ask for. It is a GraphLang recipe (`cookbook/doc_it`), so the same things you used above apply: it has a call cap, a log and a run folder.
+
+**Step 1: see the plan, for free.** A dry run reads the files and prints what would happen. No model is called:
+
+```bash
+graf docs . --dry-run
+```
+
+You should see the source folder, the style (`demo`, an HTML slide deck), how many files and characters of the code it reads, the model calls (3 expected, with a cap of 5) and the file it would write (`./<folder>.demo.html`), then the list of files.
+
+**Step 2: write the deck.** Billed, one to three model calls (the default model is `claude_cli` with `claude-sonnet-5-5`; `--llm adapter:model` picks another):
+
+```bash
+graf docs . --llm claude_cli:claude-sonnet-5-5
+```
+
+It prints `wrote graflang.demo.html (N sections; run folder ...)`. Open the file in a browser. Press `T` (or the **TOC** button) for the outline slide, `N` for speaker notes, `O` for an overview, and the **PDF** button to print it to a PDF. Warnings under the plan, such as paths in the text that are not in the source, say what to check by hand: the check cannot know whether the other statements are true, so read the deck.
+
+**Step 3: another style, another source.** A tutorial and a user guide are Markdown. A repository url is cloned (shallow) into `/tmp/graflang-docs` first; `--ref` picks a branch or tag:
+
+```bash
+graf docs . --style tutorial --out my-tutorial.md
+graf docs https://github.com/digital-duck/graflang --style user-guide
+```
+
+**Step 4: your own instructions.** `--style custom` needs `--prompt` (text, or `@FILE`), and `--format markdown|html` (Markdown by default):
+
+```bash
+graf docs . --style custom --prompt "a one-page FAQ for new contributors, five questions" --out faq.md
+```
+
+**Step 5: change a style.** A style is a Markdown file: `graphlang/grafd/styles/demo.md`, `tutorial.md`, `user-guide.md`. Edit the instructions in one (for example, ask the deck for at most 12 slides) and run again; nothing else changes. The deck's page (look, controls) is `demo.template.html` beside them.
+
+**Step 6: compare models.** Everything but the model stays the same, so the output files can be compared directly:
+
+```bash
+graf docs . --llm claude_cli:claude-haiku-5-5  --out graflang.haiku.html
+graf docs . --llm claude_cli:claude-sonnet-5-5 --out graflang.sonnet.html
+```
+
+**What just happened.** A program read the code into a digest (a file tree, then the README, `CLAUDE.md`, build files, `docs/`, the changelog and entry points, cut to `--budget` characters; secrets and files outside the folder are never read). A model planned the document, then wrote it from the digest only. A program assembled the page (for a deck: your slides inside the template, with an outline slide after the cover, and anything active removed) and checked its structure. If that check failed, a model fixed the text once. The graph is `cookbook/doc_it/doc_it.graph.yaml`; try `graf vis` on it.
+
+Limits: only Markdown and HTML are written; a large project does not fit the digest (raise `--budget`); and `graf docs` describes what the files say, it does not run the project.
+
 ## Where next
 
 - [USER-GUIDE.md](USER-GUIDE.md): every command, node type, port convention, `GUARD` and `MUTATE`.
 - [PATTERNS.md](PATTERNS.md): which pattern fits (chain, branch, loop, agent, supervisor, self-healing, guardrail, memory ...) and a recipe to start from.
 - `cookbook/compliance_audit/`: deterministic rules, redact and re-check, and a Cedar release guard (section 8).
+- `cookbook/doc_it/` and `graf docs`: a documentation agent (section 9); its styles are Markdown files you can edit.
 - `cookbook/code_pipeline/`: the flagship, with a test-gated `LOOP`, a Cedar `GUARD` on retries, and SPL procedures.
 - `cookbook/cookbook_catalog.yaml` and `python cookbook/run_all.py --list`: all 120+ recipes (core, PocketFlow patterns, solvers) with what each needs and whether it has been run; `cookbook/README.md` has the tables.
 - [contributor-guide.md](contributor-guide.md): how the runtime is built and how to extend it.

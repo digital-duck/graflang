@@ -73,6 +73,13 @@ def capabilities(nodes: List[Dict]) -> Dict[str, Any]:
     return caps
 
 
+def suggested_cap(calls: int, margin: float = 0.5) -> int:
+    """A `limits.max_llm_calls` for a run that makes `calls` model calls: the count plus a margin (default 50%), rounded up, never
+    below calls + 1. The count is a static one (see `_calls`); the cap is what stops a retry loop that fires a node again and again."""
+    import math
+    return max(calls + 1, math.ceil(calls * (1 + margin)))
+
+
 def used(caps: Dict[str, Any]) -> List[str]:
     return [k for k in KINDS if caps.get(k)]
 

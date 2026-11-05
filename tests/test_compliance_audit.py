@@ -311,8 +311,8 @@ def test_baseline_and_the_main_recipe_use_the_same_redact_prompt_and_guard():
     assert node(GRAPH, "release_guard") == node(BASELINE, "release_guard")
 
 
-def test_repeat_runs_prints_a_plan_and_calls_nothing_without_yes():
-    done = subprocess.run([sys.executable, str(EXAMPLE / "repeat_runs.py"), "--runs", "2", "--llm", "claude_cli"], capture_output=True, text=True)
+def test_repeat_runs_prints_a_plan_and_calls_nothing_on_dry_run():
+    done = subprocess.run([sys.executable, str(EXAMPLE / "repeat_runs.py"), "--runs", "2", "--llm", "claude_cli", "--dry-run"], capture_output=True, text=True)
     assert done.returncode == 0 and "at most 12 LLM calls" in done.stdout and "nothing was run" in done.stdout
 
 

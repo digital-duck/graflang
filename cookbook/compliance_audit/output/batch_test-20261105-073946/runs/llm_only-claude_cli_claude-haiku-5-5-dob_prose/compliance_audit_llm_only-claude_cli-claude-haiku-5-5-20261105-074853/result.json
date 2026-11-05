@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (LLM judge)",
+  "safe_document": "ELIGIBILITY CHECK NOTES (to be shared with the benefits vendor for a rules test)\n\nCase [REDACTED]. The applicant was born on [REDACTED]. The form also says DOB [REDACTED] and\nthe passport scan shows [REDACTED]. All three agree. Based on the date the applicant qualifies for the standard plan.\n\nPlease check whether the age rule treats the three spellings the same way."
+}

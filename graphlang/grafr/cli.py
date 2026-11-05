@@ -247,6 +247,13 @@ def cmd_validate(graph):
         sys.exit(1)
     console.print(f"[bold green]✓[/bold green] Valid GraphLang workflow: {graph_data['workflow']['name']}"
                   + (f" ({len(warnings)} warning(s))" if warnings else ""))
+    from graphlang.grafr import partinfo
+    caps = partinfo.capabilities(graph_data.get("nodes", []))
+    n = caps["llm_calls"]
+    if n:
+        console.print(f"Model calls per run: {'' if caps['llm_exact'] else 'at least '}{n}"
+                      + (f"; suggested limits.max_llm_calls: {partinfo.suggested_cap(n)} (+50%)" if caps["llm_exact"]
+                         else "; the count is not exact (a loop without a numeric max_iterations, a BATCH or a procedure): set the cap yourself"))
 
 
 @click.command("info", short_help="Show a workflow's nodes, edges, inputs and outputs.")

@@ -1,19 +1,21 @@
 """Run the compliance audit over many different documents, with answer keys, and score it.
 
-    python cookbook/compliance_audit/batch_test.py --variants recipe-z3,baseline --llm claude_cli:claude-haiku-5-5            # the plan only
-    python cookbook/compliance_audit/batch_test.py --variants recipe-z3,baseline --llm claude_cli:claude-haiku-5-5 --yes      # makes the calls
+    python cookbook/compliance_audit/batch_test.py --variants recipe-z3,llm_only --llm claude_cli:claude-haiku-5-5              # makes the calls
+    python cookbook/compliance_audit/batch_test.py --variants recipe-z3,llm_only --llm claude_cli:claude-haiku-5-5 --dry-run    # the plan only
 
 The experiment is a grid: documents x variants x models.
 
   documents   input/batch-test/manifest.json (18 documents with answer keys; --docs picks some by id or tag, --limit takes the first N)
-  variants    recipe-z3, recipe-stdlib, recipe-sympy (the recipe: a model reads, a rule engine decides) and baseline (a model judges, no solver)
+  variants    recipe-z3, recipe-stdlib, recipe-sympy (the recipe: a model reads, a rule engine decides) and llm_only (a model judges, no solver)
   models      --llm one or more `adapter:model`, comma separated, for example claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5,ollama:gemma4
 
 Other things to vary: --rules-file (demo rules or extended rules), --destination (external or internal), --docs (a kind of document).
 
-Every run is a real `graf run` and is billed (or uses your subscription or a local model). A run makes at most 3 model calls and is capped at 4 by a
-bindings file; the plan line gives the upper bound before anything is sent, and --max-calls refuses a plan above it. Results are appended to
-results.jsonl as they arrive, so a stopped batch can be continued with --resume (finished cells are skipped).
+Every run is a real `graf run` and is billed (or uses your subscription or a local model). The number of model calls in a run is read from the graph (the figure `graf validate` prints); each run is capped at that plus a
+margin (--margin, default 50%) by a bindings file, so a retry loop cannot run away. The plan line gives the expected and the worst-case total
+before anything is sent, and --max-calls (a budget for the whole batch) refuses a plan whose worst case is above it. Results are appended to
+the SQLite database (--db) as they arrive, so a stopped batch can be continued with --resume (finished cells are skipped). The summary tables are
+printed and stored in the batches table (`summary` column); batch_analyze.py reads the database.
 
 Scoring, per run (the answer key says what is personal data; nothing is guessed):
   false release      the document was released and a `must_mask` string is still in the released text. The costly error.
@@ -34,11 +36,24 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import batch_store as store  # noqa: E402  (SQLite storage, beside this file)
 BATCH = HERE / "input" / "batch-test"
-GRAPHS = {"recipe": "compliance_audit.graph.yaml", "baseline": "compliance_audit_llm_only.graph.yaml"}
-FIRST_VERDICT = {"recipe": "*-check.out_verdict.md", "baseline": "*-judge.out_verdict.md"}
-VARIANTS = ("recipe-z3", "recipe-stdlib", "recipe-sympy", "baseline")
-CALLS_PER_RUN, CAP_PER_RUN = 3, 4
+GRAPHS = {"recipe": "compliance_audit.graph.yaml", "llm_only": "compliance_audit_llm_only.graph.yaml"}
+FIRST_VERDICT = {"recipe": "*-check.out_verdict.md", "llm_only": "*-judge.out_verdict.md"}
+VARIANTS = ("recipe-z3", "recipe-stdlib", "recipe-sympy", "llm_only")
+MARGIN = 0.5            # the per-run cap is the graph's model-call count plus this share (see calls_per_run)
+
+
+def calls_per_run(variant: str, margin: float = MARGIN) -> tuple:
+    """(calls, cap) for one run of `variant`: the static model-call count of its graph (what `graf validate` prints) and the
+    `limits.max_llm_calls` set from it with the margin. Raises when the count is not exact (the cap would be a guess)."""
+    from graphlang.grafr.runtime import load_graph
+    from graphlang.grafr import partinfo
+    caps = partinfo.capabilities(load_graph(HERE / GRAPHS[variant.partition("-")[0]]).get("nodes", []))
+    if not caps["llm_exact"]:
+        raise ValueError(f"{variant}: the graph's model-call count is not exact; set --cap-per-run")
+    return caps["llm_calls"], partinfo.suggested_cap(caps["llm_calls"], margin)
 
 
 # ---- the answer key and the scoring (pure functions; tests/test_batch_test.py covers them) -------------------------------
@@ -161,75 +176,127 @@ def one_run(doc: Dict[str, Any], variant: str, llm: str, args, folder: Path, bin
     first = next(iter(sorted((result_dir / "nodes").glob(FIRST_VERDICT[which]))), None)
     verdict = read_json(first.read_text()) if first else None
     row.update(score(doc, released, str(result.get("safe_document", "")) if released else ""))
-    row.update(audit=audit[:160], calls=summary["llm"]["calls"], tokens_in=summary["llm"]["input_tokens"], tokens_out=summary["llm"]["output_tokens"],
+    nodes = summary.get("nodes", {})
+    row.update(llm_seconds=round(summary["llm"].get("ms", 0) / 1000, 2),                   # time inside model calls
+               other_seconds=round(sum(n.get("ms", 0) for n in nodes.values() if n.get("type") != "GENERATE") / 1000, 2),   # rules, guard, loading
+               audit=audit[:160], calls=summary["llm"]["calls"], tokens_in=summary["llm"]["input_tokens"], tokens_out=summary["llm"]["output_tokens"],
                first_compliant=(verdict or {}).get("compliant"), first_violated=(verdict or {}).get("violated"), result_dir=str(result_dir))
     return row
 
 
+def rescore(args) -> int:
+    """Score every stored result of --db again against the manifest (the run folders keep the released text); no model is called."""
+    docs = {d["id"]: d for d in load_manifest(Path(args.manifest))}
+    conn = store.connect(args.db)
+    changed = total = 0
+    for r in conn.execute("SELECT * FROM results WHERE error IS NULL AND result_dir IS NOT NULL").fetchall():
+        doc, folder = docs.get(r["doc"]), Path(r["result_dir"])
+        if doc is None or not (folder / "result.json").is_file():
+            continue
+        total += 1
+        result = json.loads((folder / "result.json").read_text(encoding="utf-8"))
+        released = str(result.get("audit", "")).startswith("released")
+        new = score(doc, released, str(result.get("safe_document", "")) if released else "")
+        old = (r["correct"], r["false_release"], r["false_escalation"], r["over_redaction"])
+        if old != tuple(int(bool(new[k])) for k in ("correct", "false_release", "false_escalation", "over_redaction")):
+            changed += 1
+            store.write_result(conn, r["batch_id"], {**dict(r), **new})
+    print(f"rescored {total} stored result(s) in {args.db}: {changed} changed")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--variants", default="recipe-z3,baseline", help=f"comma separated, from {', '.join(VARIANTS)} (default recipe-z3,baseline)")
-    ap.add_argument("--llm", required=True, help="one or more adapter:model, comma separated")
+    ap.add_argument("--variants", default="recipe-z3,llm_only", help=f"comma separated, from {', '.join(VARIANTS)} (default recipe-z3,llm_only)")
+    ap.add_argument("--llm", default="", help="one or more adapter:model, comma separated (not needed with --rescore)")
     ap.add_argument("--manifest", default=str(BATCH / "manifest.json"))
     ap.add_argument("--docs", default="", help="document ids or tags, comma separated (default all)")
     ap.add_argument("--limit", type=int, default=None, help="only the first N of the chosen documents")
     ap.add_argument("--rules-file", default="./procedures/rules_extended.json", help="the recipe's rules (relative paths start in the recipe folder)")
     ap.add_argument("--destination", default=None, help="override every document's destination (default: the manifest's, external_api)")
-    ap.add_argument("--max-calls", type=int, default=None, help="refuse a plan whose upper bound of model calls is above this")
+    ap.add_argument("--margin", type=float, default=MARGIN, help="safety margin on each run's model-call cap: cap = ceil(calls x (1 + margin)); default 0.5")
+    ap.add_argument("--cap-per-run", type=int, default=None, help="set every run's model-call cap yourself (needed when the graph's count is not exact)")
+    ap.add_argument("--max-calls", type=int, default=None, help="budget for the whole batch: refuse a plan whose worst case (every run at its cap) is above this")
     ap.add_argument("--timeout", type=int, default=600, help="seconds allowed for one run")
     ap.add_argument("--jobs", type=int, default=1, help="runs at the same time (keep 1 for a local model)")
+    ap.add_argument("--reps", type=int, default=1, help="repeat every cell this many times (a model can vary from run to run)")
+    ap.add_argument("--db", default=str(HERE / "output" / "experiments.db"), help="SQLite database that receives every result (default output/experiments.db)")
     ap.add_argument("--out", default=None, help="results folder (default output/batch_test-<time>)")
-    ap.add_argument("--resume", action="store_true", help="continue a batch in --out: skip the cells already in its results.jsonl")
-    ap.add_argument("--yes", action="store_true", help="make the calls; without it only the plan is printed")
+    ap.add_argument("--resume", action="store_true", help="skip the cells that already have a result without error: in the database (errors are tried again)")
+    ap.add_argument("--rescore", action="store_true", help="no model calls: score the stored results of --db again against the current manifest (after you change an answer key)")
+    ap.add_argument("--dry-run", action="store_true", help="print the plan (runs and the upper bound of model calls) and make no calls")
     args = ap.parse_args(argv)
 
+    if args.rescore:
+        return rescore(args)
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
     bad = [v for v in variants if v not in VARIANTS]
     models = [m.strip() for m in args.llm.split(",") if m.strip()]
     if bad or not models:
         ap.error(f"variants must be from {', '.join(VARIANTS)}; got {bad}" if bad else "give at least one --llm")
     docs = select(load_manifest(Path(args.manifest)), [x.strip() for x in args.docs.split(",") if x.strip()], args.limit)
-    cells = [(d, v, m) for m in models for v in variants for d in docs]
-    upper = len(cells) * CALLS_PER_RUN
-    print(f"plan: {len(docs)} document(s) x {len(variants)} variant(s) ({', '.join(variants)}) x {len(models)} model(s) ({', '.join(models)}) "
-          f"= {len(cells)} runs, at most {upper} model calls")
+    if args.reps < 1:
+        ap.error("--reps must be at least 1")
+    cells = [(d, v, m, r) for m in models for v in variants for d in docs for r in range(args.reps)]
+    per = {}
+    for v in variants:
+        try:
+            calls, cap = calls_per_run(v, args.margin)
+        except ValueError as e:
+            if args.cap_per_run is None:
+                ap.error(str(e))
+            calls, cap = args.cap_per_run, args.cap_per_run
+        per[v] = (calls, args.cap_per_run or cap)
+    upper = sum(per[c[1]][1] for c in cells)          # what the runs may use at most: each run stops at its cap
+    expected = sum(per[c[1]][0] for c in cells)
+    print("plan")
+    print(f"  documents    {len(docs)}")
+    print(f"  variants     {', '.join(variants)}")
+    print(f"  models       {', '.join(models)}")
+    print(f"  reps         {args.reps}")
+    print(f"  runs         {len(cells)}  ({len(docs)} x {len(variants)} x {len(models)} x {args.reps})")
+    print(f"  model calls  about {expected}, at most {upper}")
+    for v in variants:
+        print(f"  cap per run  {v}: {per[v][1]}  (graph makes {per[v][0]})")
     if args.max_calls is not None and upper > args.max_calls:
         print(f"refused: the upper bound {upper} is above --max-calls {args.max_calls}")
         return 2
-    if not args.yes:
-        print("nothing was run; add --yes to make the calls")
+    if args.dry_run:
+        print("dry run: nothing was run")
         return 0
 
     out = Path(args.out) if args.out else HERE / "output" / f"batch_test-{time.strftime('%Y%m%d-%H%M%S')}"
     out.mkdir(parents=True, exist_ok=True)
-    bind = out / "limits.bind.yaml"
-    bind.write_text(f"limits:\n  max_llm_calls: {CAP_PER_RUN}\n  max_steps: 80\n  wall_time_s: {args.timeout}\n")
-    results = out / "results.jsonl"
-    rows: List[Dict[str, Any]] = [json.loads(line) for line in results.read_text().splitlines() if line.strip()] if (args.resume and results.exists()) else []
-    done = {(r["doc"], r["variant"], r["llm"]) for r in rows}
-    todo = [c for c in cells if (c[0]["id"], c[1], c[2]) not in done]
+    binds = {}
+    for v, (_, cap) in per.items():
+        binds[v] = out / f"limits-{v}.bind.yaml"
+        binds[v].write_text(f"limits:\n  max_llm_calls: {cap}\n  max_steps: 80\n  wall_time_s: {args.timeout}\n")
+    conn = store.connect(args.db)
+    finished = store.done_keys(conn) if args.resume else set()
+    rows: List[Dict[str, Any]] = []
+    todo = [c for c in cells if (c[0]["id"], c[1], c[3], c[2]) not in finished]
     if len(todo) < len(cells):
         print(f"resuming: {len(cells) - len(todo)} run(s) already have a result")
+    batch_id = store.start_batch(conn, models=models, variants=variants, n_docs=len(docs), reps=args.reps, args=vars(args))
 
     def work(cell):
-        d, v, m = cell
-        label = f"{v}-{m.replace(':', '_').replace('/', '_')}-{d['id']}"
-        return one_run(d, v, m, args, out / "runs" / label, bind)
+        d, v, m, rep = cell
+        label = f"{v}-{m.replace(':', '_').replace('/', '_')}-{d['id']}" + (f"-r{rep}" if args.reps > 1 else "")
+        return {**one_run(d, v, m, args, out / "runs" / label, binds[v]), "rep": rep}
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         for row in pool.map(work, todo):
             rows.append(row)
-            with results.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            store.write_result(conn, batch_id, row)
             flag = row.get("error") and f"ERROR {row['error']}" or (("released" if row["released"] else "escalated")
                    + (" LEAK " + str(row["leaks"]) if row["false_release"] else "") + (" FALSE-ESCALATION" if row["false_escalation"] else "")
                    + (" over-redacted " + str(row["lost"]) if row["over_redaction"] else ""))
             print(f"{row['variant']:13} {row['llm'].split(':')[-1]:20} {row['doc']:24} {flag}")
 
     report = markdown(rows)
-    (out / "summary.md").write_text(report, encoding="utf-8")
+    store.finish_batch(conn, batch_id, report)
     print("\n" + report)
-    print(f"results: {out}")
+    print(f"run folders: {out / 'runs'}\ndatabase: {args.db}  (batch {batch_id}; python {HERE / 'batch_analyze.py'} --db {args.db})")
     return 0
 
 

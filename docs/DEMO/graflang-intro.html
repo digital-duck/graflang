@@ -65,7 +65,12 @@
   #nav button:hover { background: #eef2fb; border-color: var(--blue); }
   #nav button:disabled { opacity: .4; cursor: default; background: #fff; border-color: #c9ced8; }
   #nav #pdf { margin-left: 10px; }
+  #nav #tocbtn { margin-right: 10px; }
   #hud { position: fixed; right: 14px; bottom: 10px; font-size: 13px; color: #7d8696; z-index: 5; }
+  .toc { columns: 3; column-gap: 3%; list-style: none; margin: 0; padding: 0; font-size: .8em; }
+  .toc li { break-inside: avoid; margin: .22em 0; padding: .12em .3em; border-radius: 6px; cursor: pointer; display: flex; gap: .6em; }
+  .toc li:hover { background: #eef2fb; }
+  .toc .n { color: var(--blue); font-weight: 700; min-width: 1.6em; text-align: right; }
   .notes { display: none; }
   #notes-box { display: none; }
   body.show-notes #notes-box { display: block; position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto;
@@ -84,13 +89,14 @@
 <body>
 <div id="bar"></div>
 <div id="nav">
+  <button id="tocbtn" title="Outline (T)">TOC</button>
   <button id="first" title="First slide (Home)">&lt;&lt;</button>
   <button id="prev" title="Previous slide (←)">&lt;</button>
   <button id="next" title="Next slide (→ or space)">&gt;</button>
   <button id="last" title="Last slide (End)">&gt;&gt;</button>
   <button id="pdf" title="Opens the print dialog: choose Save as PDF, landscape, margins None, and tick Background graphics">PDF</button>
 </div>
-<div id="hud">← → or space · F fullscreen · N notes · O overview</div>
+<div id="hud">← → or space · T outline · F fullscreen · N notes · O overview</div>
 <div class="deck" id="deck">
 
 <!-- 1 ------------------------------------------------------------------------------------------------------------ -->
@@ -103,6 +109,13 @@
   </div>
   <div class="foot"><span><a href="https://github.com/digital-duck/graflang" target="_blank" rel="noopener">https://github.com/digital-duck/graflang</a></span><span></span></div>
   <aside class="notes">Welcome. Fifty minutes: why a graph, a live run, building one, safety, and what is still missing. I will say what is not done as plainly as what is.</aside>
+</section>
+
+<!-- outline -------------------------------------------------------------------------------------------------------- -->
+<section class="slide" id="outline">
+  <h2>Outline</h2>
+  <ol class="toc" id="toc"></ol>
+  <aside class="notes">The outline lists every slide title, built from the slides themselves; click a line to jump. Two or three sentences on the arc: why a graph, a live run, building one, safety, what is missing.</aside>
 </section>
 
 <!-- 2 ------------------------------------------------------------------------------------------------------------ -->
@@ -637,6 +650,18 @@ edges:
 
 <script>
 (function () {
+  // the outline slide is built from the other slides' titles, so it cannot drift when a slide is added or renamed
+  (function () {
+    const all = [...document.querySelectorAll('.slide')], toc = document.getElementById('toc');
+    all.forEach((sl, k) => {
+      const h = sl.querySelector('h2');
+      if (!h || sl === toc.closest('.slide')) return;
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="n">' + (k + 1) + '</span><span>' + h.innerHTML + '</span>';
+      li.onclick = e => { e.stopPropagation(); window.__show && window.__show(k); };
+      toc.appendChild(li);
+    });
+  })();
   const slides = [...document.querySelectorAll('.slide')];
   const bar = document.getElementById('bar');
   let i = Math.min(Math.max(parseInt(location.hash.slice(1), 10) - 1 || 0, 0), slides.length - 1);
@@ -663,6 +688,7 @@ edges:
       if (f && k > 0) f.lastElementChild.textContent = (k + 1) + ' / ' + slides.length;
     });
   }
+  window.__show = show;
   function toggleOverview() {
     overview = !overview;
     const deck = document.getElementById('deck');
@@ -678,12 +704,14 @@ edges:
     }
   }
   const go = (id, f) => document.getElementById(id).addEventListener('click', e => { e.stopPropagation(); if (!overview) f(); });
-  go('first', () => show(0)); go('prev', () => show(i - 1)); go('next', () => show(i + 1)); go('last', () => show(slides.length - 1));
+  const outline = Math.max(0, slides.findIndex(s => s.id === 'outline'));
+  go('tocbtn', () => show(outline)); go('first', () => show(0)); go('prev', () => show(i - 1)); go('next', () => show(i + 1)); go('last', () => show(slides.length - 1));
   document.getElementById('pdf').addEventListener('click', () => { if (overview) toggleOverview(); window.print(); });
   document.addEventListener('keydown', e => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); if (!overview) show(i + 1); }
     else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); if (!overview) show(i - 1); }
+    else if (e.key === 't' || e.key === 'T') { if (!overview) show(outline); }
     else if (e.key === 'Home') show(0);
     else if (e.key === 'End') show(slides.length - 1);
     else if (e.key === 'f' || e.key === 'F') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
