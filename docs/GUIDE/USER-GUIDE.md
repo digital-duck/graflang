@@ -16,7 +16,7 @@ graf expand   FILE      # a compact, parts or expand file in its long nodes/edge
 graf run ... --answer NODE=VALUE   # an answer for a DECISION node (otherwise the terminal is asked)
 graf parts    FILE      # the parts a workflow uses: pin, interface, what each touches, model calls
 graf compact  FILE      # the inverse: a long-form file written as steps: (checked by expanding it again; -o FILE)
-graf compile  FILE --lang spl|rust [-o OUT] [--dry-run]   # SPL script, or a Rust project (stub)
+graf compile  FILE --lang spl|pocketflow|rust [-o OUT] [--dry-run]   # SPL script, a PocketFlow program, or a Rust project (stub)
 graf vis      FILE [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o OUT] [--no-open]
 graf trace    [LOG] [--format tree|otlp] [-o FILE]                  # a run's .jsonl log as a timeline, or as OpenTelemetry spans
 graf watch    FILE [--every S] [--times N] [graf run options]        # run it again and again on a schedule
@@ -186,16 +186,22 @@ It also checks that **every risky node is behind a `GUARD`**. A node is risky if
 ## `graf docs`: write a document about a codebase
 
 ```bash
-graf docs SOURCE [--style demo|tutorial|user-guide|custom] [--prompt TEXT|@FILE] [--format markdown|html] [--out FILE] [--force]
+graf docs SOURCE [--style demo,tutorial,user-guide,custom] [--prompt TEXT|@FILE] [--format html|markdown] [--name NAME] [--out-dir DIR | --out FILE] [--force]
                  [--ref BRANCH] [--llm ADAPTER:MODEL] [--budget N] [--margin F] [--max-calls N] [--dry-run]
 ```
 
 ```bash
 graf docs .                                                 # a slide deck about this folder: ./<folder>.demo.html
 graf docs https://github.com/org/repo --style tutorial      # a repository url is cloned shallow into /tmp/graflang-docs first
-graf docs ./proj --style custom --prompt "a one-page FAQ" --format html
+graf docs ./proj --style demo,tutorial,user-guide --out-dir docs/graf-docs   # one file per style, html
+graf docs ./proj --style tutorial --format markdown          # ./proj.tutorial.md
+graf docs ./proj --style custom --prompt "a one-page FAQ"
 graf docs . --dry-run                                       # files read, model calls, cap, output file; no model is called
 ```
+
+`<name>` in the file names is the folder's name (the repository's name for a url); `--name "Friendly Name"` replaces it in the titles and, cleaned of spaces and slashes, in the file names.
+
+`tutorial` and `user-guide` are written as Markdown with a linked `## Contents` and, by default (`--format html`), converted to a web page; `--format markdown` (or an `--out` ending in `.md`) keeps the Markdown. A slide deck is always html (the user guide has an `## Architecture` section with a mermaid diagram, drawn in the page when online).
 
 `SOURCE` is a folder or a repository url (`https://`, `ssh://`, `git@`, or ending in `.git`; the clone is made fresh each time). The result is one file, `./<name>.<style>.html` or `.md` (the style is the infix, as in `NAME.graph.yaml`); `graf docs` refuses to overwrite a file unless you give `--force`.
 
@@ -400,9 +406,11 @@ expand:
 
 An edge `a -> b` means b runs after a. Nodes with no incoming edge start together; a node with several waits for all of them, and with `pass` receives their values as one object keyed by node id. The workflow's first output is one object, node id to `result`. The graph must have no cycle. The result is ordinary nodes and edges (`graf expand` prints them), so `--workers N` runs independent nodes together. See `cookbook/elaborate_demo`.
 
-## Compile: `graf compile --lang spl|rust`
+## Compile: `graf compile --lang spl|pocketflow|rust`
 
 `graf compile flow.graph.yaml --lang spl -o flow.spl` writes the workflow as an SPL script (structure only, no LLM) that SPL.py's `spl3 run` can run. A prompt becomes a `CREATE FUNCTION`, a lifted Python tool a `CREATE TOOL_API`. What SPL has no word for (lifecycle phases, typed ports) is dropped and listed as a warning. Without `-o` the script is printed. `--lang rust` writes a Cargo project into `-o` (default `<name>_compiled`) and is an experimental stub (`pip install 'graflang[grafc]'`). `--dry-run` does every step, writes nothing and says whether the workflow compiles. Before compiling, the workflow gets the same checks as `graf validate` and is refused on an error; there is no separate `graf check`.
+
+`graf compile flow.graph.yaml --lang pocketflow -o flow_pocketflow.py` writes a PocketFlow program (no model is used to write it). It covers a line, a branch and a loop made of retry wires: `GENERATE`, `SOLVE` with an `expression`, `EVALUATE`, `ASSERT`, and the input and output nodes. Each node becomes a `Node` class, the graph's control edges become `a - "action" >> b`, and the data edges become keys of the shared store (several writers to one input: the last one wins, as in the runtime). The file needs only `pocketflow` and `openai` (not graflang) and reaches the model through the OpenAI client: set `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `LAB_MODEL`. Run it with `python flow_pocketflow.py --param name=value`. It refuses, naming the nodes, what PocketFlow has no form for here: `FORK`, `JOIN`, `LOOP`, `BATCH`, `GUARD`, `MUTATE`, `DECISION`, `RUN_CODE`, `RUN`, `QUERY`, `EMIT`, `OBSERVE`, a `SOLVE` with a backend or a procedure, and a control port that triggers more than one node; lifecycle phases and a node's own `llm` are dropped and listed as warnings. A test runs the same graph in the runtime and as a compiled program with the same scripted replies and requires equal outputs and equal prompts (`tests/test_compile_pocketflow.py`).
 
 ## What a workflow may contain: `workflow.policy`
 

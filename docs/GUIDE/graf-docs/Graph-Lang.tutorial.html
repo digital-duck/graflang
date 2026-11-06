@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph-Lang</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#1f2933}
+h1,h2,h3{line-height:1.25}h2{border-bottom:1px solid #d8dee4;padding-bottom:.2rem;margin-top:2rem}
+code{background:#f1f3f5;padding:.1em .3em;border-radius:3px;font-size:.92em}
+pre.mermaid{background:none;text-align:center}pre{background:#f6f8fa;padding:.8rem 1rem;overflow:auto;border-radius:6px}pre code{background:none;padding:0}
+table{border-collapse:collapse;margin:1rem 0}th,td{border:1px solid #d0d7de;padding:.35rem .6rem;text-align:left}th{background:#f6f8fa}
+blockquote{margin:1rem 0;padding:.1rem 1rem;border-left:4px solid #d0d7de;color:#57606a}a{color:#0969da}
+@media print{body{max-width:none;margin:0}a{color:inherit}}</style>
+</head>
+<body>
+<h1 id="your-first-graphlang-workflow">Your first GraphLang workflow</h1>
+<p>You will install <code>graf</code>, run the bundled <code>self_refine</code> workflow, read its graph, then write a small <code>haiku</code> workflow with a retry loop. You need Python 3.11 or newer, a conda env or venv, and a working <code>claude</code> command-line tool, because the default model is <code>claude_cli</code> with <code>claude-sonnet-5-5</code>.</p>
+<h2 id="contents">Contents</h2>
+<ul><li><a href="#step-1-install-graphlang">Step 1: Install GraphLang</a></li><li><a href="#step-2-check-the-install">Step 2: Check the install</a></li><li><a href="#step-3-inspect-and-run-a-bundled-workflow">Step 3: Inspect and run a bundled workflow</a></li><li><a href="#step-4-see-the-graph">Step 4: See the graph</a></li><li><a href="#step-5-read-the-yaml">Step 5: Read the YAML</a></li><li><a href="#step-6-write-your-own-workflow">Step 6: Write your own workflow</a></li><li><a href="#step-7-validate-and-run-it-with-a-cap">Step 7: Validate and run it with a cap</a></li><li><a href="#what-just-happened">What just happened</a></li><li><a href="#where-to-go-next">Where to go next</a></li></ul>
+<h2 id="step-1-install-graphlang">Step 1: Install GraphLang</h2>
+<p>Create an environment (conda is shown; a venv works too) and install the project from the repository root. The optional extras (<code>anthropic</code>, <code>gemini</code>, <code>spl</code>, <code>vis</code>, and others) are not needed here. <code>graf compile --lang rust</code> is an experimental stub, so do not use it.</p>
+<pre><code class="language-bash">conda create -n graf python=3.11
+conda activate graf
+pip install -e &quot;.[dev]&quot;</code></pre>
+<p>For a venv instead of conda:</p>
+<pre><code class="language-bash">python -m venv .venv
+source .venv/bin/activate        # Linux / macOS</code></pre>
+<p>You should see: the <code>graf</code> command available in your shell (<code>graf --help</code> in the next step shows it).</p>
+<h2 id="step-2-check-the-install">Step 2: Check the install</h2>
+<p>Print the help, then validate a bundled workflow. Validation runs static checks and executes nothing.</p>
+<pre><code class="language-bash">graf --help
+graf validate cookbook/self_refine/self_refine.graph.yaml</code></pre>
+<p>You should see: the command list, then a validation result. Check that it reports no problems. If you also run <code>pytest</code>, failures in <code>tests/test_cedar_compiler.py</code> and <code>tests/test_policy_slicer.py</code> are known (gap #18) and are not install errors.</p>
+<h2 id="step-3-inspect-and-run-a-bundled-workflow">Step 3: Inspect and run a bundled workflow</h2>
+<p><code>info</code> shows the workflow's name, size, inputs, outputs and resources. <code>run</code> executes it. This is a real, billed model run: the default <code>claude_cli</code> adapter makes about three short calls.</p>
+<pre><code class="language-bash">graf info cookbook/self_refine/self_refine.graph.yaml
+graf run  cookbook/self_refine/self_refine.graph.yaml --param topic=&quot;rain&quot;</code></pre>
+<p>You should see: each node printed as it fires (<code>⚡ GENERATE draft (#1)</code> and so on), the output, a <code>log:</code> line with the path of this run's log file, and <code>✓ Workflow completed</code>.</p>
+<h2 id="step-4-see-the-graph">Step 4: See the graph</h2>
+<p>Draw the same workflow. This opens an interactive picture in your browser (the <code>cytoscape</code> engine is the default; <code>--no-open</code> and <code>--engine</code> are available).</p>
+<pre><code class="language-bash">graf vis cookbook/self_refine/self_refine.graph.yaml</code></pre>
+<p>You should see: a page where you can click a node to see its config and links. Check that nodes are coloured by type, <code>triggers</code> edges are solid and <code>binds</code> edges are dashed.</p>
+<h2 id="step-5-read-the-yaml">Step 5: Read the YAML</h2>
+<p>Open <code>cookbook/self_refine/self_refine.graph.yaml</code>. The graph is the program, so you read nodes and edges. There are an <code>INPUT</code> node (<code>wf_entry</code>), three <code>GENERATE</code> nodes (<code>draft</code>, <code>critique</code>, <code>refine</code>) and an <code>OUTPUT</code> node (<code>wf_exit</code>). Ports named <code>trigger</code>, <code>complete</code>, <code>entry</code>, <code>exit</code> carry control; ports named <code>in_&lt;x&gt;</code> and <code>out_&lt;x&gt;</code> carry data. Edges come in two kinds:</p>
+<pre><code class="language-yaml"># control: who fires next
+- {source: &quot;draft.complete&quot;, target: &quot;critique.trigger&quot;, type: &quot;triggers&quot;}
+# data: where a value flows
+- {source: &quot;draft.out_essay&quot;, target: &quot;critique.in_essay&quot;, type: &quot;binds&quot;}</code></pre>
+<p>A node fires when a control token reaches its <code>trigger</code>; it reads its <code>in_*</code> ports and writes its <code>out_*</code> ports. Prompts are files under <code>prompts/</code>, declared in <code>resources.prompts</code> and referenced as <code>prompt_ref: &quot;prompts.draft&quot;</code>. Inside a prompt, <code>{{in_topic}}</code> is replaced with the value on the node's <code>in_topic</code> port.</p>
+<p>You should see: the control chain <code>entry -&gt; draft -&gt; critique -&gt; refine -&gt; exit</code> in the <code>triggers</code> edges.</p>
+<h2 id="step-6-write-your-own-workflow">Step 6: Write your own workflow</h2>
+<p>Make a new folder with a prompt and a graph. First <code>prompts/haiku.md</code>:</p>
+<pre><code class="language-text">Write a haiku about: {{in_topic}}</code></pre>
+<p>Then <code>haiku.graph.yaml</code>:</p>
+<pre><code class="language-yaml">version: &quot;1.0-graph&quot;
+
+workflow:
+  name: &quot;haiku_check&quot;
+  inputs:
+    - {name: &quot;topic&quot;, type: &quot;TEXT&quot;}
+  outputs:
+    - {name: &quot;poem&quot;, type: &quot;TEXT&quot;}
+
+resources:
+  prompts:
+    haiku: &quot;./prompts/haiku.md&quot;
+
+nodes:
+  - id: &quot;start&quot;
+    type: &quot;INPUT&quot;
+    ports: [&quot;entry&quot;, &quot;out_topic&quot;]
+
+  - id: &quot;write&quot;
+    type: &quot;GENERATE&quot;
+    config: {prompt_ref: &quot;prompts.haiku&quot;}
+    ports: [&quot;trigger&quot;, &quot;complete&quot;, &quot;in_topic&quot;, &quot;out_poem&quot;]
+
+  - id: &quot;gate&quot;
+    type: &quot;EVALUATE&quot;
+    config: {condition: &quot;len(@in_poem) &gt; 10&quot;}
+    ports: [&quot;trigger&quot;, &quot;pass&quot;, &quot;fail&quot;, &quot;in_poem&quot;]
+
+  - id: &quot;done&quot;
+    type: &quot;OUTPUT&quot;
+    ports: [&quot;trigger&quot;, &quot;exit&quot;, &quot;in_result&quot;]
+
+edges:
+  - {source: &quot;start.entry&quot;,    target: &quot;write.trigger&quot;, type: &quot;triggers&quot;}
+  - {source: &quot;write.complete&quot;, target: &quot;gate.trigger&quot;,  type: &quot;triggers&quot;}
+  - {source: &quot;gate.pass&quot;,      target: &quot;done.trigger&quot;,  type: &quot;triggers&quot;}
+  - {source: &quot;gate.fail&quot;,      target: &quot;write.trigger&quot;, type: &quot;triggers&quot;}   # retry
+
+  - {source: &quot;start.out_topic&quot;, target: &quot;write.in_topic&quot;, type: &quot;binds&quot;}
+  - {source: &quot;write.out_poem&quot;,  target: &quot;gate.in_poem&quot;,   type: &quot;binds&quot;}</code></pre>
+<p>The tutorial source I was given is cut off after the <code>write.out_poem</code> edge, so I cannot confirm the last edge that carries the poem to <code>done.in_result</code>. Check <code>docs/GUIDE/TUTORIAL.md</code> section 3 for the remaining edge(s) and add them before running; without them the output node receives no data.</p>
+<p>You should see: two files, <code>prompts/haiku.md</code> and <code>haiku.graph.yaml</code>, side by side.</p>
+<h2 id="step-7-validate-and-run-it-with-a-cap">Step 7: Validate and run it with a cap</h2>
+<p>Validate first. <code>graf validate</code> also checks for races, deadlocks and unguarded risky nodes. The <code>gate.fail</code> -&gt; <code>write.trigger</code> wire is a loop, and real model calls are billed, so give the run a bindings file that limits model calls.</p>
+<pre><code class="language-bash">graf validate haiku.graph.yaml
+printf &#x27;limits:\n  max_llm_calls: 4\n&#x27; &gt; /tmp/cap4.yaml
+graf run haiku.graph.yaml --param topic=&quot;rain&quot; --bind /tmp/cap4.yaml</code></pre>
+<p>You should see: validation passing, then the nodes firing and the run finishing. Check that if the gate never passes, the run stops at the cap rather than looping forever.</p>
+<h2 id="what-just-happened">What just happened</h2>
+<p>The graph is the program (steps 5 and 6): you wrote nodes and edges, not code. A run is tokens passing through typed nodes, with <code>triggers</code> edges carrying control and <code>binds</code> edges carrying data (step 3). <code>EVALUATE</code> routes to <code>pass</code> or <code>fail</code>, and the <code>fail</code> wire back to <code>write.trigger</code> is the retry (step 7). <code>graf validate</code> checks the graph before anything runs (steps 2 and 7). The default adapter is a real LLM, so runs cost money, which is why step 7 sets a cap.</p>
+<p>Not implemented: Rust compilation is a stub, and the README's claims about Cedar enforcement go beyond what the hand-written Cedar compiler does today.</p>
+<h2 id="where-to-go-next">Where to go next</h2>
+<ul><li><a href="docs/GUIDE/TUTORIAL.md">docs/GUIDE/TUTORIAL.md</a>: the full tutorial, with logs and more.</li><li><a href="docs/GUIDE/PATTERNS.md">docs/GUIDE/PATTERNS.md</a>: which pattern fits, and which recipe to start from.</li><li><a href="docs/GUIDE/USER-GUIDE.md">docs/GUIDE/USER-GUIDE.md</a>: command and option reference.</li><li><a href="docs/GUIDE/contributor-guide.md">docs/GUIDE/contributor-guide.md</a>: code layout and extending.</li></ul>
+</body>
+</html>

@@ -194,3 +194,55 @@ All four recipes that were refused (`guardrail`, `supervisor`, `self_heal`, `age
 ## Suggested first steps
 
 Items 1 and 2 (a part with several exits; part-relative paths with a confinement rule), because they decide whether the existing recipes can be blocks at all and are small, checkable changes with tests. Then item 6 on the result. Items 3 to 5 follow once real composites show what the interface needs; item 7 waits for the library.
+
+
+# Documentation from a knowledge graph: build, index, retrieve, write
+
+Status: **idea, not built** (2026-11-05). The owner built a documentation agent at work that builds a graph knowledge base of a folder or repository and fills a templated `.docx`, each section or paragraph described by a prompt. This note records how the same shape could extend `graf docs`. Nothing below exists yet and no result is claimed.
+
+## What exists now, and where it stops
+
+`graf docs` (`graphlang/grafd/`, recipe `cookbook/doc_it`) reads a folder into **one bounded digest** (60,000 characters: the file tree, README, the coding agents' instruction files, manifests, docs, changelog, a few entry points), and a model writes the whole document from it in a style (`demo`, `tutorial`, `user-guide`, `custom`). It costs about 3 model calls and needs no index. It works when the project documents itself, and it degrades on a large repository with thin docs, because most of the code never reaches the writer and every section shares the same slice.
+
+## The idea in three steps
+
+1. **Build a graph knowledge base of a repository or local folder.** Files, symbols, documents, configuration and their relations (imports, calls, "documented in", "configured by", "tested by") as nodes and edges. A tool that already does this is [Graphify](https://github.com/Graphify-Labs/graphify) ([site](https://www.graphify.com); read 2026-11-05, from its README and site, not run here): a local, open-source engine (Apache-2.0) that turns a codebase, its docs, SQL schemas, configs and PDFs into a queryable graph.
+  - *Input:* about 40 programming languages parsed with tree-sitter (deterministic, no model, code stays local); docs, PDFs, images and audio/video through a model pass; extras for `.docx`, `.xlsx`, SQL schemas, live PostgreSQL, Terraform and more.
+  - *Edges:* each is tagged `EXTRACTED` (explicit in the source) or `INFERRED`, so a statement can be traced to a `file:line`; communities by Leiden (or Louvain) clustering. **No embeddings and no vector store.**
+  - *Output:* `graphify-out/graph.json` (versioned), `GRAPH_REPORT.md` (key concepts, surprising links, suggested questions), `graph.html`; CLI `graphify query "<question>"`, `graphify path A B`, `graphify explain "<concept>"` (exit 0 answer, 3 ambiguous, 4 no match), an optional MCP server. Install: `uv tool install graphifyy` then `graphify install` (the package name has two y's).
+  - *Limits it states:* docs and media need a model for the semantic pass (a code-only graph works offline); a hosted paid "Graphify Cloud" exists besides the open engine; the report lists a benchmark (LOCOMO recall@10 0.497) that I have not checked.
+  It would be a **dependency or a first step to call, not something to rebuild**: `graf docs` would run `graphify` on the folder (a `SOLVE` subprocess) and read `graph.json`. `zinet` already has a `graphify` drawing engine behind the `graphify` extra, a separate use. Open: whether its `graph.json` schema is stable enough to read directly, and whether to depend on the CLI or its Python package.
+  The builder should be a program, with no model, so a rebuild is cheap and the result can be diffed.
+2. **Index the graph for quick semantic retrieval.** Graphify has no vector store: its `query`, `path` and `explain` follow graph structure and names. That is exact and cheap, but a section prompt such as "how is authentication handled" is a question of meaning, so a meaning index over the nodes (the part to add here) would find the starting nodes and Graphify's graph would then supply their neighbourhood and the sources. Each node (and each short neighbourhood) gets an embedding and a keyword index, as `graphlang/recipe_index.py` and `embedding.py` already do for recipes (meaning through dd-embed plus BM25). A query returns the nodes plus the edges that connect them, with the file and line they came from, so every fact has a source.
+3. **Generate any styled document from retrieval (RAG).** A style becomes a list of sections, each with its own prompt: "what is this section for, what must it contain, what to look up". The recipe loops over the sections; for each one it retrieves from the index with the section's query, then writes that section from what came back, never from the whole repository. A program assembles the sections, adds the linked contents, runs the same checks as today (structure, paths that are not in the source) and converts to HTML, or to `.docx`.
+
+## Why GraphLang is a good host
+
+| Needed | Already in GraphLang |
+|---|---|
+| a loop over sections with a budget | `LOOP`/`BATCH`, `limits.max_llm_calls`, `graf validate` prints the suggested cap |
+| deterministic steps beside model steps | `SOLVE` with `subprocess` backends: the graph builder, the indexer and the assembler are programs; only the writing is a model call |
+| checks that do not depend on the model | `assemble.py` (structure, unverified paths, active content removed), a `GUARD` where a section may only cite retrieved sources |
+| styles as data | the style files (`graphlang/grafd/styles/*.md`) with front matter; a section list is one more field |
+| a recipe a person can read and change | `cookbook/doc_it`, drawn by `graf vis`, described by `graf describe` |
+
+## Sketch of the pieces
+
+- **Style with sections.** Front matter lists `sections:`, each with `title`, `prompt` (what to write), `query` (what to retrieve; default: the title plus the prompt) and `max_chars`. The present styles stay valid: no list means one section, the whole document, as now.
+- **Template input.** A `.docx` (or Markdown) template whose paragraphs carry the prompts, as in the owner's work tool; the recipe fills it. This is the same data as a section list, read from a different file.
+- **Retrieval contract.** Each retrieved item carries `path`, `lines`, `kind` and the text. A section's text may only cite paths that were retrieved; the existing path check becomes exact instead of a warning.
+- **Incremental runs.** The graph and index are cached by the folder's content hash, so a second document (another style, or a changed section) reuses them and costs only the writing calls.
+
+## Honest limits and open questions
+
+- Cost: one model call per section instead of three per document, so a 10-section guide costs about ten calls plus a fix pass. Retrieval quality then decides the result; a wrong query gives a confident section about the wrong thing. This needs a check against `graf docs` as it is, on the same repositories, before it is called better: for example, how many claims in each document are supported by the source, scored by a person on a sample.
+- A graph of code is only as good as its parsers; languages without one fall back to file-level nodes. The graph adds the most where relations matter (what calls what, what documents what) and the least on a small, well-documented project, where today's digest is enough.
+- A model must not be able to write into the index or the template of another run; both are inputs of a run, not outputs.
+- Not decided: whether Graphify is a dependency (the CLI, its Python package, or only its `graph.json`), whether `.docx` output is a converter (pandoc, python-docx) or a filled template, and whether a section may ask for a second retrieval when the first came back thin (a loop with a cap).
+
+## Suggested order
+
+1. Section lists in styles, with retrieval replaced by a per-section slice of today's digest (no index). It shows whether per-section writing alone improves the documents, at small cost.
+2. Run Graphify on the folder and read `graph.json` (try it on this repository and on `cve-coder` first, and look at what it finds beyond today's digest), then the meaning index over its nodes, reusing `embedding.py`.
+3. Retrieval in the section loop; the cited-paths check made exact; the comparison above.
+4. `.docx` output and templates.

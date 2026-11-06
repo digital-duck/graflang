@@ -1,129 +1,152 @@
-# GraphLang experiments: build plan
+# GraphLang experiments: plan
 
-Status: **plan for review (2026-11-05). Nothing in sections 2 to 4 is built yet.** Two pieces of work: (1) make the compliance batch experiment observable and analysable from a database; (2) repeat the NeurIPS-26 round-trip experiment with GraphLang in the loop, to evaluate GraphLang itself.
+Status (2026-11-05): **Project A is built; Project B is revised after reading the rejected NeurIPS-26 paper and is waiting for your review. Nothing in Project B is built.** Experiments move to a new repository, **graflang-lab** (section 4), outside this one: **scaffolded 2026-11-05 at `~/projects/digital-duck/graflang-lab`** (library, gateway, templates, offline tests; uncommitted). Its `docs/DESIGN.md` and `experiments/roundtrip/` now hold the working version of this plan.
 
-## 1. Where things stand (answers to the two questions)
+- Project A: record the compliance-audit batch in SQLite and analyse it. Built (section 2).
+- Project B: repeat the intent-invariance round trip of the NeurIPS-26 paper with GraphLang in the loop, **fixing the paper's weaknesses** (section 3, review in `neurips26-review.md`).
 
-**Does `batch_test.py` record into SQLite?** No. It writes `output/batch_test-<time>/results.jsonl` (one row per document x variant), `summary.md`, and a `runs/<label>/` folder per run (`result.json`, `summary.json`, `nodes/*.md`). There is no store, no cross-batch history, no analysis script. `experiments/code_pipeline/` has the pattern (`batch_store.py`, `analyze.py`); it has not been applied here.
+## 1. Observability: where things stand
 
-**Is GraphLang ready for observability with `OBSERVE` for benchmarking models and solvers?** Partly.
+`OBSERVE`, `summary.json` (calls, tokens, per-node milliseconds), per-node output files, JSONL logs and `graf trace` are enough to record an experiment. What was missing was a store and an analysis layer, not new node types. `claude_cli` token counts are estimates (characters / 4), so compare calls and seconds first.
 
-| Exists | Gap |
-|---|---|
-| `OBSERVE` node: logs a record and appends to `observations.jsonl` in the run folder; never fails a run | No cross-run store; each run is an island |
-| `summary.json` per run: LLM calls, tokens, per-node timings | `claude_cli` token counts are estimates (chars/4), not billed numbers; cost comparisons across adapters are approximate |
-| JSONL logs (`~/.graflang/logs`), `graf trace` (timeline or OTLP spans) | Logs are per process, not keyed by experiment cell (doc, variant, model, rep) |
-| Per-node outputs saved (`nodes/*.md`), so the solver verdict and the LLM verdict can be compared after the fact | Nothing reads them back into a table |
-| Batch scoring (false release, false escalation, over-redaction) in `batch_test.py` | Scoring lives in the script, not in a reusable store |
+## 2. Project A (built): SQLite store and analysis for the compliance batch
 
-Conclusion: the recording primitives are enough; the missing part is a **store and an analysis layer**, not new node types. `OBSERVE` need not change for the first version: the batch reads each run folder after the run finishes (`summary.json`, `result.json`, `observations.jsonl`) and writes rows. If it later proves too indirect, a `--record-db` option on `graf run` is the second step, not the first.
+`cookbook/compliance_audit/`: `batch_test.py` runs documents x variants x models x `--repeat N`, writes every result into `output/experiments.db` (`batch_store.py`; `--resume` skips finished cells), sets each run's model-call cap from the graph's count plus 50% (`graf validate` prints it), and can score stored results again against changed keys (`--rescore`). `batch_analyze.py` reports rates with Wilson intervals, elapsed time (median, p90, model vs rules), leaks, a per-document grid, consistency across repeats and a paired McNemar comparison; several `--db` files can be compared side by side. First haiku batch (54 runs, no false release) and the answer-key and prompt changes that followed are recorded in that recipe's readme.
 
-## 2. Project A: SQLite store and analysis for the compliance batch
+## 3. Project B (revised): does a checkable IR reduce or locate intent drift?
 
-Goal: run the grid (documents x variant x model x repetition) and answer "z3 on or off, which model" with intervals, not impressions.
+### 3.1 What the review changes
 
-Build (small, modelled on `experiments/code_pipeline/store.py` and `analyze.py`):
+The paper's design (S1 to S6: describe, Mermaid, SPL, code, describe, LLM-judge compare) has eight weaknesses (`neurips26-review.md`): no vibe baseline; an unvalidated, noisy judge; n = 1 over 5 recipes; human and tool confounds; localisation by anecdote; "intent" defined as a description of existing code; selection and contamination; no behavioural check. This plan keeps the S1 to S6 idea and the "drift is locatable" question, and changes the design so that each weakness has an answer.
 
-1. `cookbook/compliance_audit/batch_store.py`: tables `batches` (batch_id, host, adapter, model, variants, n_docs, reps, args, started_at, finished_at) and `results` (one row per cell: the existing `results.jsonl` fields plus batch_id, rep, adapter, model). `UNIQUE(doc, variant, rep, adapter, model)` so an interrupted batch resumes without repeating billed calls. A view `variant_summary` (n, correct, false releases, false escalations, over-redaction, mean calls, tokens, seconds per variant and model). Column migration list as in the existing store.
-2. `batch_test.py --db PATH` (default `output/experiments.db`): insert each row as it completes; `--resume` skips cells already present. JSONL and `summary.md` stay (no behaviour change without `--db`).
-3. `cookbook/compliance_audit/batch_analyze.py`: per variant and model, rate with Wilson interval; paired comparison recipe vs baseline on the same documents (McNemar on correct/incorrect, paired bootstrap on cost); a hygiene section (rows with errors, `ambiguous` documents excluded and counted); a consistency section (same document, several reps, does the verdict change).
-4. Tests: store round trip, resume skips present cells, analysis on a hand-made database (offline).
+**The claim to test, narrowed:** *Given the same written requirement and the same model, a pipeline that passes through a checkable IR (SPL, or a GraphLang graph) produces programs that behave and are structured more like the reference than a direct one-shot generation does, and when it does not, the stage where it diverged can be identified without a judge.* Either outcome is reported.
 
-Held equal: same documents, same prompts, same model within a comparison; the only thing that varies between `recipe-*` and `baseline` is the decision step.
+### 3.2 Design
 
-Expected result, stated before any run (to be checked, not assumed): the rule engines (`z3`, `stdlib`, `sympy`) agree on every document since they decide the same rules; the baseline (LLM judge) will have more false releases and more run-to-run variation than the recipe; extraction by smaller models over-flags identifiers as `OTHER` on clean documents (seen on R1 and R8), which shows up as over-redaction for the recipe, not as a false release. If the baseline matches the recipe on correctness, the finding is that the solver buys auditability, not accuracy, and the write-up must say so.
+**Units.** Recipes. At least 25: the 5 of the paper (to connect to it), further recipes from the PocketFlow cookbook (the lifted copies are in `cookbook/pocketflow`; the count is checked in phase 0), and **5 new recipes written for this study** that are in no public repository (contamination control), at least two using a pattern the compiler's library does not cover (so the model-assisted fallback is exercised).
 
-Cost: each recipe run is about 3 LLM calls, capped at 4; baseline similar. Grid of 16 documents x 4 variants x 1 rep = about 200 calls per model. Every run keeps `limits.max_llm_calls`.
+**Intent is a written requirement, not a description of code.** Per recipe, a short **brief** (3 to 8 sentences: inputs, outputs, control flow in words, no code), written by a person from the reference's readme and frozen before any run. The reference program (the original PocketFlow code, or for the new recipes a hand-written one) is the oracle's source. The paper's S1 description is kept only as a secondary input.
 
-Open decisions for you: default database location; whether `ambiguous` documents are reported separately or dropped; model list for the first full grid (haiku only, or haiku + sonnet + one local model).
+**Arms (every arm gets the same brief and the same model; all autonomous, no human edits):**
 
-## 3. Project B: the round trip with GraphLang in the loop
+| arm | path | what it tests |
+|---|---|---|
+| `vibe` | brief -> PocketFlow code, one shot | the missing control |
+| `spl` | brief -> Mermaid -> SPL -> code (the paper's pipeline, frozen at a git commit) | the paper's claim |
+| `graflang` | brief -> graph (`graf create`, checked by `graf validate`) -> code (`graf compile --lang pocketflow`, template) | this repository's claim |
+| `lifted` | reference -> graph (`spl2graph`) -> code, no model | ceiling: loss from the IR and the compile alone |
 
-### 3.1 What the NeurIPS-26 lab does (as read from `SPL.py/NeurIPS-26-lab/README.md`)
+A second, small pass keeps the paper's human checkpoint for `spl` only: every human edit is logged (lines changed, minutes) and the artifact scored before and after, so the human's contribution is **measured, not assumed**.
 
-Five PocketFlow recipes (R1 agent, R2 rag, R3 judge, R4 thinking, R5 research), three models (claude_cli sonnet, openrouter qwen, openrouter gemini), a human checkpoint after each generated artifact. Phase 1, the full IR path:
+**Measurements (the first three need no LLM judge):**
+
+1. **Behaviour (primary).** Record the reference's model replies on k = 3 inputs per recipe, replay them (a scripted model: the same replies keyed by prompt order) into each generated program, and compare final outputs, the order of node transitions, and the number of model calls. Score per input: equal / same outputs different path / different. GraphLang already has record and replay (`RecordingLLM`, `ReplayLLM` in `grafr/metering.py`); the PocketFlow side needs a small stub of `call_llm`.
+2. **Structure.** Extract the flow graph from each program with Python's `ast` (node classes, action-labelled edges, loops) and compare with the reference's by edge-set F1 and normalised graph edit distance. Deterministic.
+3. **Stage-wise localisation.** The IR artifacts carry a flow too (Mermaid edges, the SPL workflow, the graph YAML). Extract and compare each against the reference's structure: the **first stage at which structure diverges** is the localisation. No judge, no anecdote.
+4. **Seeded-fault study (tests the "locatable" claim and the metrics' sensitivity).** Inject a known defect at a known stage (drop an edge, swap a branch, remove a loop bound, rename a node) into a correct IR, compile downstream deterministically, and ask each metric: did it detect the defect, and did it point at the right stage? Report detection rate and localisation accuracy for behaviour, structure and the judge.
+5. **LLM-judged spec similarity (the paper's ΔS), secondary and validated:**
+   - *Noise floor:* two independent `describe` of the same program, compared. *Negative control:* describes of two different recipes, compared. ΔS is reported on the scale these two anchor.
+   - *Test-retest:* the same pair judged 3 times.
+- *Judges (decided: gemma4, with one rule added):* the judge is never the generator's family, and gemma4 is also a generator. So **gemma4 judges the Claude generators' artifacts, and haiku-5-5 judges gemma4's**; where both judge the same pairs (a subset, 20%) their agreement is reported. A local judge costs nothing, so the noise floor, negative control and test-retest can be run many times; it is also the weakest judge in the set, so its agreement with the 30 human-labelled pairs decides whether its scores are used at all (below the threshold in the pre-registration, only the judge-free metrics are reported).
+   - *Human check:* 30 pairs labelled by two people; report agreement (kappa or rank correlation) between judge and humans.
+   - The judge's prompt and rubric are published in the repository.
+6. **Cost:** model calls, tokens (estimates), seconds, human minutes (0 for autonomous arms).
+
+**Models (decided 2026-11-05).** Three generators: haiku-5-5, sonnet-5-5 and gemma4 (local, Ollama); the pilot uses haiku-5-5. Exact model ids and the adapter are stored in every row.
+
+**Repeats.** At least 3 per model-using cell, with the temperature and seed policy recorded. The deterministic compile and extraction steps run once.
+
+**Freezing.** The pipeline versions (SPL tool commit, graflang commit, the lab commit, prompt hashes) are recorded per batch and **frozen before the measured runs**; no fix to a generator during a measured batch (fixes are made, committed, and the batch restarted).
+
+### 3.3 Analysis
+
+Per arm: mean behavioural equivalence and structure F1 with a paired bootstrap interval across recipes (pair by recipe, within model); McNemar for pass/fail on behaviour; effect sizes, not only p-values; failures counted by the **first failing stage** (does not compile, does not run, wrong path, wrong output), never averaged away. With 25 recipes x 3 repeats the intervals are wide enough to say so; the write-up reports what the data cannot tell.
+
+**Pre-registered expectations (to be checked, not assumed; written before any run):**
+- (a) `lifted` has near-ceiling behaviour and structure: if not, the compile is the problem, not intent.
+- (b) `vibe` is competitive on the simple recipes (linear pipelines) and loses on recipes with loops or branches; I expect the IR arms to win clearly only on the latter.
+- (c) `graflang` fails earlier and more visibly (validation errors, a compile refusal) than `spl` or `vibe` (a program that runs but does the wrong thing); that is a detectability advantage, not necessarily an accuracy one.
+- (d) The judge's ΔS correlates only moderately with behaviour; the seeded-fault study shows the judge missing some structural faults that the structure metric catches, and flagging some harmless rewording.
+- **What would count against GraphLang:** `graflang` not above `vibe` on behaviour for the recipes with control flow, or the template compile needing a runtime shim for most recipes. **What would count against the paper's claim:** `spl` not above `vibe`. Both are reported.
+
+### 3.4 What must be built
+
+1. `graf compile --lang pocketflow` (template, no model first; new backend in `grafe/`). Node types with no PocketFlow equivalent (GUARD, MUTATE, DECISION, RUN_CODE, QUERY/EMIT) are refused with a clear message.
+2. A PocketFlow flow extractor (`ast`) and a flow comparer (edge-set F1, graph edit distance).
+3. A stage-wise extractor for Mermaid edges, the SPL workflow and the graph YAML.
+4. The record/replay harness for PocketFlow programs.
+5. A fault injector for the three IRs.
+6. A judge-validation tool: noise floor, negative control, test-retest, cross-judge, human-label import.
+7. The driver, store and analysis (`run.py`, `store.py`, `analyze.py`), reusing the compliance batch's store and the code-pipeline experiment's statistics (Wilson, paired bootstrap, McNemar), moved into a shared module in graflang-lab.
+8. The briefs and the 5 new reference recipes (a human task, not a model task).
+
+### 3.5 Risks
+
+- PocketFlow's shared store and action strings do not map one to one to token-passing dataflow; the template compile may need a small runtime shim (would be reported as such).
+- Scripted-model replay assumes the generated program calls the model in the same order; a correct program that reorders calls is scored "same outputs, different path", which is why path and outputs are scored separately.
+- The paper's own SPL tool is another repository; the `spl` arm pins its commit and re-runs it (not reusing the paper's files), so the models and the judge are equal across arms.
+- 25 recipes x 3 repeats x 3 models x 4 arms is about 900 generations; at roughly 3 to 8 model calls each that is on the order of thousands of calls. Phase 5 is billed: the budget and caps are agreed per phase; the pilot (one recipe, one model) gives the real figure.
+- Claims in the write-up stay inside the data: no "strictly better" without a result.
+
+## 4. The graflang-lab repository
+
+For experiments that are not part of the GraphLang product: Project B, the compliance batch's larger runs, `doc_it` model comparisons, the code-pipeline experiment's successors.
+
+**Proposed layout**
 
 ```
-S1  describe original PocketFlow recipe      -> spec (1)
-S2  text2mmd                                 -> Mermaid chart
-S3  mmd2spl                                  -> SPL workflow
-S4  compile SPL to PocketFlow python         -> code
-S5  describe the generated code              -> spec (2)
-S6  compare spec (1) with spec (2)           -> diff and score (judge: claude-opus-4-6)
+graflang-lab/
+  README.md              what is here, how to reproduce, how results are released
+  pyproject.toml         depends on graflang (pinned by commit or tag); installs lab_common
+  lab_common/            store.py (batches/results tables), stats.py (Wilson, paired bootstrap, McNemar),
+                         judge.py (validated-judge tools), provenance.py (git shas, model ids, prompt hashes)
+  experiments/
+    roundtrip/           Project B: PREREGISTRATION.md (frozen by a git tag before measured runs), briefs/, references/,
+                         run.py, analyze.py, faults/, README.md
+    compliance_batch/    moved from graflang later (batch_test.py, store, analysis) with its answer keys
+    doc_it_models/       model comparison for `graf docs`
+  data/                  small inputs checked in (briefs, answer keys, manifests)
+  results/               databases and reports: git-ignored; released snapshots go to tagged releases
+  tests/                 offline only (stub model); no billed call in CI
 ```
 
-Phase 2 (ablation) bypasses the IR: `spl3 vibe` writes code straight from spec (1) (S7), describe (S8), compare (S9), and S10 compares the two scores (the IR value-add). Closure is judged by the semantic distance between the original spec and the round-trip spec: that distance is the "intent drift" this plan reuses. I have read the README and the first part of `notes.md` (issues were mostly in the generators: Mermaid syntax, SPL fence stripping, WORKFLOW syntax). I have **not** read the R*/src code, the scores, or the later notes, so any claim about the lab's results is out of scope here.
+**Rules**
+- Every row stores the graflang commit, the lab commit, model id and adapter, prompt hashes, and the batch's arguments.
+- `held equal`, oracle independence and the stated expectation come first in each experiment's README, as in `experiments/code_pipeline/`.
+- A frozen pipeline per measured batch; a change means a new batch id.
+- Billed phases need a stated cap before they start.
+- A **double-blind mirror** (anonymous repository, no personal paths, no org names in the code or the data) is built from a tagged commit for any submission.
+- graflang stays free of experiment code; the lab imports graflang, never the reverse. What the lab needs from graflang (for example `graf compile --lang pocketflow`) is built in graflang, tested there, and used by the lab through its CLI.
 
-### 3.2 The GraphLang arm
+**What stays in graflang:** the compliance recipe and its small batch tools (they are the recipe's own test and demo); `doc_it`; `graf compile --lang pocketflow` and the flow extractor, if they are useful beyond the lab (my view: the compiler yes, the extractor no).
 
-The new arm replaces the SPL middle with a graph, and is the one in which the graph's own checks can act:
+## 5. Phases and review points
 
-```
-G1  graf describe (or spl3 splc describe) on the original PocketFlow recipe   -> spec (1)   [same S1 file, reused]
-G2  graf create --spec @spec(1)                                              -> NAME.graph.yaml (validated + mock dry run by create)
-G3  graf validate                                                            -> gate, recorded, not fixed by hand
-G4  graf compile --lang pocketflow                                           -> python code            [NEW]
-G5  describe the generated code (same tool as S5)                            -> spec (2)
-G6  compare spec (1) with spec (2) (same judge, same prompt as S6)           -> diff and score
-G7  (extra, GraphLang only) graf describe on the graph from G2               -> spec (1g), so drift is split in two:
-        spec(1) -> graph  (is the graph faithful?)  and  graph -> code  (is the compile faithful?)
-```
-
-G7 is the useful new measurement: the SPL arm has one end-to-end number; the GraphLang arm can locate where intent is lost, because `graf describe` is deterministic (no model) when run without `--llm`, so graph -> spec adds no noise.
-
-Arms for the table: `spl` (S1 to S6, taken from the lab), `graflang` (G1 to G6), `vibe` (S7 to S9, no IR), and optionally `graflang-det` where G4 is a template compile (no model) as opposed to an LLM-assisted compile.
-
-### 3.3 Things that must be built (honest list)
-
-1. **`graf compile --lang pocketflow`** (new). `--lang rust` is a stub and `--lang spl` exists (`grafe/graph2spl.py`), so this is a new backend in `grafe/`. Scope for v1: GENERATE, EVALUATE, SOLVE (expression/kernel), ASSERT, LOOP, branches by port, FORK/JOIN; reject (with a clear error) node types with no PocketFlow equivalent (GUARD/Cedar, MUTATE, DECISION, RUN_CODE, QUERY/EMIT). The five recipes are the ground truth for what must be covered; first step is to read the five originals and the lifted `cookbook_pocketflow` graphs and list the node types actually used.
-2. **A deterministic template compile first**, LLM-assisted compile only as the second arm. A template compile makes G4 reproducible, so any drift is attributable to G2 (the spec -> graph step) or to the describe/compare tools, not to the compile.
-3. **Lifted graphs as a shortcut control**: the PocketFlow recipes were already lifted into GraphLang by `spl2graph` (`cookbook_pocketflow`). Compiling those back (skipping G1 to G3) measures the compile step alone. This is a cheap, model-free baseline and should run first.
-4. **A compare runner** that takes two spec files and writes a score row to a SQLite store (same schema family as project A: batches/results, UNIQUE on recipe, arm, model, rep). The lab's `spl3 compare` is the reference; use the same judge, same rubric, and same model for every arm.
-5. **A driver** (`experiments/roundtrip/run.py` + `store.py` + `analyze.py`, in the layout of `experiments/code_pipeline/`).
-
-### 3.4 Held equal (non-negotiable, as in `experiments/code_pipeline/README.md`)
-
-Same five recipes and the same S1 spec across arms; same model for the generating step within a comparison; same describe tool for S5/G5; same judge model and rubric; no human edits to a generated artifact in the measured run (the lab's human checkpoints are kept as a separate, unscored pass: a generation that needs repair is recorded as `needed_repair`, not silently fixed). The comparison judge must not be the generating model.
-
-### 3.5 Metrics
-
-- Drift score from the judge (S6/G6/S9) per recipe, arm, model.
-- Failure stage: the first step that failed (create validation, `graf validate`, compile, run of the generated code with the lab's test input). Counted, not averaged away.
-- Executable: does the generated code run on the recipe's test input (yes/no).
-- Cost: LLM calls and tokens per arm.
-- Variance: rep count of at least 3 per cell for the LLM steps, since a single run per cell would not separate drift from noise.
-
-Analysis: per-arm mean with bootstrap interval across recipes, paired by recipe; with 5 recipes the intervals will be wide and the write-up should say so.
-
-### 3.6 Expected result, stated before running
-
-I expect: (a) the deterministic compile of an already-lifted graph shows low drift (the graph contains what the original had); (b) the `spec -> graph` step is where most drift appears, since `graf create` follows the guide to build the smallest graph and may drop detail the spec states; (c) the GraphLang arm fails earlier and more visibly (validation errors) where the SPL arm fails late (the generated code does not run), which is an advantage in detectability, not in final score; (d) final drift scores of the `spl` and `graflang` arms are of similar size, and I do not expect a clear win at five recipes. If GraphLang does not beat or at least match the SPL arm, that is a finding to report, not hide. I have no data for any of this.
-
-### 3.7 Risks
-
-- PocketFlow semantics (shared store, node `post` returning an action string) do not map one-to-one to token-passing dataflow; a faithful compile may need a small runtime shim, which would make G4 less "pure".
-- The lab's results and judge outputs are in a different repository; reusing them for the `spl` arm needs the files, not a re-run, or the arms differ in model versions. Decision for you: reuse the lab's S1 to S6 outputs, or re-run the SPL arm in the same batch.
-- `graf describe` without `--llm` is structure-only; the original recipe's prose context (readme, docstrings) is only there with `--llm` or the lab's `--include-docs`. The two S1 variants must not be mixed across arms.
-- The judge is itself a model; one judge model means one set of biases. Mitigation: a second judge on a random 20% subset to report agreement.
-
-## 4. Phases and review points
-
-| Phase | Work | Needs LLM | Stop and review |
+| Phase | Work | Needs a model | Review |
 |---|---|---|---|
-| 0 | Read the five PocketFlow originals, the lifted graphs, and the lab's R*/src; list node types used; correct this plan | no | Yes: you review the corrected scope |
-| 1 | Project A: store, `--db`, `--resume`, `analyze.py`, tests | no (tests offline) | After you run the haiku batch |
-| 2 | `graf compile --lang pocketflow` (template), compile the five lifted graphs, run the generated code on the lab test inputs | no | Yes: does it run? |
-| 3 | Roundtrip driver, compare runner, store; dry run with `mock` | no | Yes |
-| 4 | Pilot: one recipe, one model, 3 reps, all arms, capped | yes (small, capped) | Yes: check the judge, the cost, the failure stages |
-| 5 | Full grid: 5 recipes x arms x models x reps | yes (billed; budget agreed first) | Yes |
-| 6 | Write-up: findings against the stated expectations, including where they were wrong | no | - |
+| 0 | Read the 5 originals, the lifted graphs and the lab sources; count usable recipes; list node types; write briefs for the first 5; draft `PREREGISTRATION.md`; scaffold graflang-lab | no | **You review scope, briefs and the pre-registration** |
+| 1 | `lab_common` (extract the store and statistics), offline tests | no | |
+| 2 | `graf compile --lang pocketflow` (template), flow extractor, compile the lifted graphs, replay them against the references | no | Does `lifted` reach the ceiling? |
+| 3 | Stage-wise extractor, fault injector, judge tools; dry run with the stub model | no | |
+| 4 | Pilot: 1 recipe, 1 model, 3 repeats, 4 arms, capped; judge validation on the pilot pairs | yes, small | Cost, noise floor, failure stages |
+| 5 | Full grid, 25+ recipes | yes, billed; budget agreed first | |
+| 6 | Seeded-fault study; the human-checkpoint pass | yes, small | |
+| 7 | Report: results against the stated expectations, including where they were wrong. (A double-blind mirror is built only if a submission is planned; there is none now.) | no | |
 
-Budget rule: no phase with a billed model starts without an agreed call cap (`limits.max_llm_calls` per run and a total per batch in the driver).
+## 6. Decisions (2026-11-05) and what follows from them
 
-## 5. Decisions needed from you
+1. ~~graflang-lab~~: created (scaffold).
+2. ~~The briefs~~: written by you.
+3. **Models: haiku-5-5, sonnet-5-5, gemma4.** Adopted (section 3.2). One consequence: all three are also the candidate judges, so the judge rule below matters.
+4. **Judge: gemma4.** Adopted with one change. My constraint was "never the generator's own family", and gemma4 is a generator, so gemma4 cannot judge gemma4's own output. Assignment: gemma4 judges the Claude generators; haiku-5-5 judges gemma4. The 30 human-labelled pairs decide whether gemma4's scores are trusted: it is the weakest judge here, and in the compliance batch it was the model that leaked. Cheap repeated judging is the benefit.
+5. **No rush to write a paper; focus on comparative studies.** Adopted. Changes: the double-blind mirror and the paper framing are dropped from the critical path; the pre-registration stays (it is what makes a comparison credible, paper or not); and the next work is ordered so that comparisons that need no briefs and no judge come first.
 
-1. Phase 0 first (read the originals, then fix the scope), or go straight to Project A after your haiku run?
-2. `pocketflow` compile: template-only for v1 (my recommendation), or LLM-assisted as well?
-3. SPL arm: reuse the lab's existing S1 to S6 files, or re-run it in the same batch for equal model versions (my recommendation if the cost is acceptable)?
-4. Models for the pilot (one) and the full grid (the lab used sonnet, qwen, gemini; this repo's default adapter is `claude_cli`).
-5. Where the experiment lives: `experiments/roundtrip/` in this repo (my recommendation, next to `code_pipeline`), or in the SPL.py lab.
+**Order of work now**
+- **a.** Finish the compliance comparison: v3 (3 models x 3 repeats), the `hard_encoded_mix` key and `redact.md` fix with its v4 check, then the consensus-vote simulation on the stored extractions (offline).
+- **b.** An **execution** comparison of one workflow in all five frameworks (graflang, pocketflow, langgraph, crewai, autogen) through the gateway with scripted replies: same outputs? same path? lines of code, wall time, behaviour at a failing step. It needs no briefs and no judge, and it is what exercises the CrewAI and AutoGen adapters. Start with the workflow in `tests/fixtures/toy_agent` (a decide/search/answer loop).
+- **c.** `roundtrip` once the briefs exist (authoring comparison, as planned).
+- **d.** `graf docs` across the three models (authoring), with the judge validation reused.
+
+**Still open**
+- Whether the first execution comparison uses the toy agent or a recipe from the original five (my suggestion: the toy agent first, then recipe R1).
+- The agreement threshold for trusting gemma4 as a judge (my suggestion: Cohen's kappa of at least 0.6 against the humans on the pairs, written into the pre-registration before labelling).

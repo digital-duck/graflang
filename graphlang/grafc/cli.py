@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from ..grafe.graph2pocketflow import GraphToPocketFlowError, graph_to_pocketflow
 from ..grafe.graph2spl import GraphToSPLError, graph_to_spl
 from ..grafr.topology import check
 from .compiler import GraphLangCompiler
@@ -94,12 +95,12 @@ def cmd_describe(path, output, force, llm_spec):
     err.print(f"wrote {escape(str(dest))}", highlight=False)
 
 
-@click.command("compile", short_help="Compile a workflow to another language (spl, rust).")
+@click.command("compile", short_help="Compile a workflow to another language (spl, pocketflow, rust).")
 @click.argument("graph")
-@click.option("--lang", default="rust", type=click.Choice(["rust", "spl"]), show_default=True,
-              help="rust: a Cargo project (experimental stub); spl: an SPL script for SPL.py's `spl3 run` (structure only, no LLM)")
+@click.option("--lang", default="rust", type=click.Choice(["rust", "spl", "pocketflow"]), show_default=True,
+              help="rust: a Cargo project (experimental stub); spl: an SPL script for SPL.py's `spl3 run` (structure only, no LLM); pocketflow: a PocketFlow Python file (a line, a branch and retry wires; no model)")
 @click.option("-o", "--output", default=None,
-              help="rust: the project folder (default <name>_compiled); spl: the file to write (default: print it)")
+              help="rust: the project folder (default <name>_compiled); spl, pocketflow: the file to write (default: print it)")
 @click.option("--optimize", is_flag=True, help="rust: enable graph optimizations")
 @click.option("--dry-run", is_flag=True, help="do every step but write nothing, and say whether the workflow compiles")
 def cmd_compile(graph, lang, output, optimize, dry_run):
@@ -117,11 +118,18 @@ def cmd_compile(graph, lang, output, optimize, dry_run):
         raise click.UsageError("--optimize applies to --lang rust only")
     if lang == "rust":
         _compile_rust(graph_path, output, optimize, dry_run)
+    elif lang == "pocketflow":
+        _compile_text(graph_path, output, dry_run, "PocketFlow", graph_to_pocketflow, GraphToPocketFlowError)
     else:
         _compile_spl(graph_path, output, dry_run)
 
 
 def _compile_spl(graph_path: Path, output, dry_run: bool) -> None:
+    _compile_text(graph_path, output, dry_run, "SPL", graph_to_spl, GraphToSPLError)
+
+
+def _compile_text(graph_path: Path, output, dry_run: bool, label: str, convert, convert_error) -> None:
+    """Compile to one text file (`--lang spl`, `--lang pocketflow`): the checks of `graf validate`, then `convert(graph) -> (text, warnings)`."""
     compiler = GraphLangCompiler(graph_path=graph_path)
     try:
         compiler.load_graph()
@@ -130,14 +138,14 @@ def _compile_spl(graph_path: Path, output, dry_run: bool) -> None:
         sys.exit(1)
     _problems(compiler.graph_data)
     try:
-        text, warnings = graph_to_spl(compiler.graph_data)
-    except (ValueError, GraphToSPLError, OSError) as e:
+        text, warnings = convert(compiler.graph_data)
+    except (ValueError, convert_error, OSError) as e:
         err.print(f"[red]✗ Cannot export:[/red] {escape(str(e))}")
         sys.exit(1)
     for w in warnings:
         err.print(f"[yellow]warning:[/yellow] {escape(w)}")
     if dry_run:
-        err.print(f"[bold green]✓[/bold green] Workflow compiles to SPL: {graph_path.name} (dry run, nothing written)")
+        err.print(f"[bold green]✓[/bold green] Workflow compiles to {label}: {graph_path.name} (dry run, nothing written)")
     elif output:
         Path(output).write_text(text, encoding="utf-8")
         err.print(f"[green]✓[/green] wrote {output}")

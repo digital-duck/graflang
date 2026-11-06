@@ -5,7 +5,7 @@
 
 The experiment is a grid: documents x variants x models.
 
-  documents   input/batch-test/manifest.json (18 documents with answer keys; --docs picks some by id or tag, --limit takes the first N)
+  documents   input/batch-test/manifest.json (20 documents with answer keys; --docs picks some by id or tag, --limit takes the first N)
   variants    recipe-z3, recipe-stdlib, recipe-sympy (the recipe: a model reads, a rule engine decides) and llm_only (a model judges, no solver)
   models      --llm one or more `adapter:model`, comma separated, for example claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5,ollama:gemma4
 
@@ -219,7 +219,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--max-calls", type=int, default=None, help="budget for the whole batch: refuse a plan whose worst case (every run at its cap) is above this")
     ap.add_argument("--timeout", type=int, default=600, help="seconds allowed for one run")
     ap.add_argument("--jobs", type=int, default=1, help="runs at the same time (keep 1 for a local model)")
-    ap.add_argument("--reps", type=int, default=1, help="repeat every cell this many times (a model can vary from run to run)")
+    ap.add_argument("--repeat", type=int, default=1, help="repeat every cell this many times (a model can vary from run to run)")
     ap.add_argument("--db", default=str(HERE / "output" / "experiments.db"), help="SQLite database that receives every result (default output/experiments.db)")
     ap.add_argument("--out", default=None, help="results folder (default output/batch_test-<time>)")
     ap.add_argument("--resume", action="store_true", help="skip the cells that already have a result without error: in the database (errors are tried again)")
@@ -235,9 +235,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if bad or not models:
         ap.error(f"variants must be from {', '.join(VARIANTS)}; got {bad}" if bad else "give at least one --llm")
     docs = select(load_manifest(Path(args.manifest)), [x.strip() for x in args.docs.split(",") if x.strip()], args.limit)
-    if args.reps < 1:
-        ap.error("--reps must be at least 1")
-    cells = [(d, v, m, r) for m in models for v in variants for d in docs for r in range(args.reps)]
+    if args.repeat < 1:
+        ap.error("--repeat must be at least 1")
+    cells = [(d, v, m, r) for m in models for v in variants for d in docs for r in range(args.repeat)]
     per = {}
     for v in variants:
         try:
@@ -253,8 +253,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  documents    {len(docs)}")
     print(f"  variants     {', '.join(variants)}")
     print(f"  models       {', '.join(models)}")
-    print(f"  reps         {args.reps}")
-    print(f"  runs         {len(cells)}  ({len(docs)} x {len(variants)} x {len(models)} x {args.reps})")
+    print(f"  repeat       {args.repeat}")
+    print(f"  runs         {len(cells)}  ({len(docs)} x {len(variants)} x {len(models)} x {args.repeat})")
     print(f"  model calls  about {expected}, at most {upper}")
     for v in variants:
         print(f"  cap per run  {v}: {per[v][1]}  (graph makes {per[v][0]})")
@@ -277,11 +277,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     todo = [c for c in cells if (c[0]["id"], c[1], c[3], c[2]) not in finished]
     if len(todo) < len(cells):
         print(f"resuming: {len(cells) - len(todo)} run(s) already have a result")
-    batch_id = store.start_batch(conn, models=models, variants=variants, n_docs=len(docs), reps=args.reps, args=vars(args))
+    batch_id = store.start_batch(conn, models=models, variants=variants, n_docs=len(docs), reps=args.repeat, args=vars(args))
 
     def work(cell):
         d, v, m, rep = cell
-        label = f"{v}-{m.replace(':', '_').replace('/', '_')}-{d['id']}" + (f"-r{rep}" if args.reps > 1 else "")
+        label = f"{v}-{m.replace(':', '_').replace('/', '_')}-{d['id']}" + (f"-r{rep}" if args.repeat > 1 else "")
         return {**one_run(d, v, m, args, out / "runs" / label, binds[v]), "rep": rep}
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:

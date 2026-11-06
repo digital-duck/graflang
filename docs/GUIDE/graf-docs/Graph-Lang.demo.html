@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph-Lang</title>
+<style>
+  :root {
+    --ink: #1c2330; --muted: #5b6678; --paper: #fbfbfa; --line: #dfe3ea;
+    --blue: #4f8df5; --gray: #8a919c; --green: #2e9e6b; --orange: #e8913a; --red: #d8473f;
+    --code-bg: #0f1623; --code-ink: #dbe4f3;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #e9ebef; color: var(--ink);
+    font: 26px/1.42 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .deck { position: fixed; inset: 0 0 4.5vh 0; display: grid; place-items: center; }
+  .slide { display: none; width: min(96vw, 158vh); height: min(54vw, 89vh); background: var(--paper);
+    border-radius: 14px; box-shadow: 0 8px 40px rgba(20,30,50,.18); padding: 4.2% 5.5% 3.5%;
+    flex-direction: column; overflow: hidden; position: relative; }
+  .slide.on { display: flex; }
+  h1 { font-size: 2.5em; line-height: 1.1; margin: 0 0 .3em; letter-spacing: -.02em; }
+  h2 { font-size: 1.7em; margin: 0 0 .5em; letter-spacing: -.01em; }
+  h2::after { content: ""; display: block; width: 64px; height: 4px; background: var(--blue); border-radius: 2px; margin-top: .25em; }
+  h3 { font-size: 1.05em; margin: 0 0 .3em; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  p { margin: 0 0 .6em; }
+  ul { margin: 0; padding-left: 1.1em; }
+  li { margin: .3em 0; }
+  li > ul { font-size: .82em; margin-top: .1em; }
+  li::marker { color: var(--blue); }
+  .sub { color: var(--muted); font-size: 1.15em; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 3%; align-items: start; flex: 1; min-height: 0; }
+  .cols.wide-left { grid-template-columns: 1.25fr 1fr; }
+  .cols.wide-right { grid-template-columns: 1fr 1.25fr; }
+  pre, code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  code { background: #eef0f4; padding: .05em .35em; border-radius: 4px; font-size: .88em; }
+  pre { background: var(--code-bg); color: var(--code-ink); padding: .7em .9em; border-radius: 10px; font-size: .66em; line-height: 1.45;
+    margin: 0 0 .6em; overflow: hidden; white-space: pre; }
+  pre .c { color: #7d8ba3; } pre .k { color: #8cc4ff; } pre .s { color: #a5e3b4; } pre .h { color: #ffcf7a; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: .6em .9em; }
+  .tag { display: inline-block; font-size: .62em; font-weight: 700; padding: .12em .6em; border-radius: 99px; color: #fff; vertical-align: middle; }
+  .t-gen { background: var(--blue); } .t-io { background: var(--gray); } .t-sol { background: var(--green); }
+  .t-ctl { background: var(--orange); } .t-safe { background: var(--red); }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { text-align: left; padding: .35em .6em; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .85em; text-transform: uppercase; letter-spacing: .05em; }
+  .big { font-size: 1.5em; line-height: 1.3; }
+  .center { text-align: center; }
+  .grow { flex: 1; min-height: 0; }
+  .foot { position: absolute; left: 5.5%; right: 5.5%; bottom: 1.8%; display: flex; justify-content: space-between;
+    color: #9aa3b2; font-size: .5em; }
+  .foot a { color: inherit; text-decoration: underline; }
+  .refs a { color: var(--blue); display: block; }
+  .refs li { font-size: .78em; }
+  .quiet { color: var(--muted); }
+  .good { color: var(--green); font-weight: 600; } .bad { color: var(--red); font-weight: 600; }
+  .demo { border-left: 6px solid var(--orange); background: #fff6ea; border-radius: 0 10px 10px 0; padding: .5em .9em; margin-bottom: .7em; font-size: .85em; }
+  .demo b { color: var(--orange); letter-spacing: .06em; font-size: .8em; text-transform: uppercase; }
+  .stack > * { margin-bottom: .45em; }
+  svg { max-width: 100%; height: auto; }
+  svg text { font: 600 13px system-ui, sans-serif; }
+  #bar { position: fixed; left: 0; top: 0; height: 4px; background: var(--blue); width: 0; transition: width .2s; z-index: 5; }
+  #nav { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 6px; z-index: 6; }
+  #nav button { font: 600 14px system-ui, sans-serif; min-width: 44px; padding: 6px 12px; border-radius: 8px; border: 1px solid #c9ced8;
+    background: #fff; color: var(--ink); cursor: pointer; }
+  #nav button:hover { background: #eef2fb; border-color: var(--blue); }
+  #nav button:disabled { opacity: .4; cursor: default; background: #fff; border-color: #c9ced8; }
+  #nav #pdf { margin-left: 10px; }
+  #nav #tocbtn { margin-right: 10px; }
+  #hud { position: fixed; right: 14px; bottom: 10px; font-size: 13px; color: #7d8696; z-index: 5; }
+  .toc { columns: 3; column-gap: 3%; list-style: none; margin: 0; padding: 0; font-size: .8em; }
+  .toc li { break-inside: avoid; margin: .22em 0; padding: .12em .3em; border-radius: 6px; cursor: pointer; display: flex; gap: .6em; }
+  .toc li:hover { background: #eef2fb; }
+  .toc .n { color: var(--blue); font-weight: 700; min-width: 1.6em; text-align: right; }
+  .notes { display: none; }
+  #notes-box { display: none; }
+  body.show-notes #notes-box { display: block; position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto;
+    background: #141a26; color: #d7deeb; padding: 14px 6vw; font-size: 17px; line-height: 1.5; z-index: 9; }
+  @page { size: 13.333in 7.5in; margin: 0; }
+  @media print {
+    html, body { background: #fff; height: auto; font-size: 24px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .deck { position: static; display: block; }
+    .slide { display: flex !important; width: 13.333in; height: 7.5in; border-radius: 0; box-shadow: none; break-after: page; page-break-after: always; }
+    .slide:last-child { break-after: auto; page-break-after: auto; }
+    pre { font-size: .58em; }       /* the page is smaller than the screen: keep code lines inside their box */
+    #bar, #hud, #nav, .notes, #notes-box { display: none !important; }
+  }
+</style>
+</head>
+<body data-title="Graph-Lang">
+<div id="bar"></div>
+<div id="nav">
+  <button id="tocbtn" title="Outline (T)">TOC</button>
+  <button id="first" title="First slide (Home)">&lt;&lt;</button>
+  <button id="prev" title="Previous slide (←)">&lt;</button>
+  <button id="next" title="Next slide (→ or space)">&gt;</button>
+  <button id="last" title="Last slide (End)">&gt;&gt;</button>
+  <button id="pdf" title="Opens the print dialog: choose Save as PDF, landscape, margins None, and tick Background graphics">PDF</button>
+</div>
+<div id="hud">← → or space · T outline · F fullscreen · N notes · O overview</div>
+<div class="deck" id="deck">
+<section class="slide">
+  <div style="margin:auto 0">
+    <h1>GraphLang</h1>
+    <p class="big">A graph-first language for agentic workflows.</p>
+    <p class="sub">The graph is the program; the LLM mutates topology instead of writing code.</p>
+  </div>
+  <div class="foot"><span><a href="https://github.com/digital-duck/graflang" target="_blank" rel="noopener">https://github.com/digital-duck/graflang</a></span><span></span></div>
+  <aside class="notes">GraphLang treats a YAML graph as the executable source of truth. It is an early prototype. The talk covers the idea, how a run works, safety, a demo recipe, and what is not done yet.</aside>
+</section>
+
+<section class="slide" id="outline">
+  <h2>Outline</h2>
+  <ol class="toc" id="toc"></ol>
+  <aside class="notes">The outline lists every slide title; click a line to jump.</aside>
+</section>
+
+<section class="slide">
+  <h2>The problem</h2>
+  <ul>
+    <li>Frameworks such as LangGraph and AutoGen use <b>Python code to describe a graph</b>.</li>
+    <li>Safety ends up in <b>scattered if/else guardrails</b>.</li>
+    <li>Parallelism is <code>asyncio.gather</code>, with <b>race conditions</b>.</li>
+    <li>Self-revision means <b>rewriting a Python file</b>.</li>
+  </ul>
+  <aside class="notes">These are the four pain points the README names for imperative frameworks. The rest of the talk answers each of them.</aside>
+</section>
+
+<section class="slide">
+  <h2>The idea: the graph is the program</h2>
+  <table>
+    <tr><th></th><th>Imperative frameworks</th><th>GraphLang</th></tr>
+    <tr><td>Source of truth</td><td>Python code that describes a graph</td><td>The graph itself</td></tr>
+    <tr><td>LLM's role</td><td>Generate text/code</td><td>Mutate the topology</td></tr>
+    <tr><td>Parallelism</td><td><code>asyncio.gather</code> + races</td><td>Explicit <code>FORK</code> / <code>JOIN</code></td></tr>
+    <tr><td>Safety</td><td>Scattered if/else</td><td>Cedar policies</td></tr>
+    <tr><td>Self-revision</td><td>Rewrite the Python file</td><td>A validated graph delta</td></tr>
+  </table>
+  <aside class="notes">The workflow lives in a *.graph.yaml file. The LLM outputs a validated graph delta rather than code. Cedar enforcement at run time applies to GUARD and MUTATE checks.</aside>
+</section>
+
+<section class="slide">
+  <h2>What it is for, and what it is not</h2>
+  <div class="cols">
+    <div class="card stack">
+      <h3>Use it for</h3>
+      <div>✔ multi-step agentic work</div>
+      <div>✔ branches and loops</div>
+      <div>✔ risky actions</div>
+      <div>✔ policy and audit</div>
+      <div>✔ a person in the loop</div>
+    </div>
+    <ul>
+      <li>It is <b>not a general-purpose language</b>.</li>
+      <li>For one model call or a script, write the call or the script.</li>
+      <li>Under about five steps with no policy or audit need, the graph would be longer than the program.</li>
+    </ul>
+  </div>
+  <aside class="notes">The user guide is explicit about when not to use GraphLang. Hello World is one generate step and an output.</aside>
+</section>
+
+<section class="slide">
+  <h2>Anatomy of a graph file</h2>
+  <div class="cols">
+<pre><span class="k">version</span>: <span class="s">"1.0-graph"</span>
+<span class="k">workflow</span>:
+  name: <span class="s">"self_refine"</span>
+  inputs:  [{name: topic}]
+  outputs: [{name: essay}]
+<span class="k">resources</span>:
+  prompts: {draft: <span class="s">"./prompts/draft.md"</span>}
+<span class="k">nodes</span>:
+  - id: draft
+    type: GENERATE
+    ports: [trigger, complete, in_topic, out_essay]
+<span class="k">edges</span>:
+  - {source: draft.complete, target: critique.trigger, type: triggers}
+  - {source: draft.out_essay, target: critique.in_essay, type: binds}</pre>
+    <ul>
+      <li><code>triggers</code>: control tokens between ports such as <code>complete</code>, <code>pass</code>, <code>fail</code>.</li>
+      <li><code>binds</code>: data, keyed by port name.</li>
+      <li>Ports <code>in_x</code> / <code>out_x</code> carry data.</li>
+    </ul>
+  </div>
+  <aside class="notes">The excerpt is abbreviated from the tutorial's self_refine walk-through. A node fires when a control token reaches its trigger, reads its in_ ports and writes its out_ ports.</aside>
+</section>
+
+<section class="slide">
+  <h2>Node types</h2>
+  <table>
+    <tr><th>Type</th><th>Role</th></tr>
+    <tr><td><span class="tag t-gen">GENERATE</span></td><td>probabilistic agent: an LLM call</td></tr>
+    <tr><td><span class="tag t-sol">SOLVE</span> <span class="tag t-sol">ASSERT</span></td><td>deterministic: expression, Python kernel, or subprocess</td></tr>
+    <tr><td><span class="tag t-ctl">EVALUATE</span></td><td>a condition with pass and fail paths</td></tr>
+    <tr><td><span class="tag t-ctl">FORK</span> <span class="tag t-ctl">JOIN</span></td><td>explicit fan-out and barrier</td></tr>
+    <tr><td><span class="tag t-ctl">LOOP</span></td><td>cyclic control flow, test-gated retry</td></tr>
+    <tr><td><span class="tag t-safe">MUTATE</span> <span class="tag t-safe">GUARD</span></td><td>self-revising operator; Cedar policy checkpoint</td></tr>
+  </table>
+  <aside class="notes">There are more node types, for example QUERY, EMIT, OBSERVE, RUN and BATCH, but these are the core ones. SOLVE can run SymPy, Z3, Lean or a Rust binary as a subprocess read through a declared parser.</aside>
+</section>
+
+<section class="slide">
+  <h2>How a run works</h2>
+  <ul>
+    <li>The YAML loads into a <code>networkx.MultiDiGraph</code> and runs as <b>token-passing dataflow</b>.</li>
+    <li>Nodes may <b>re-fire</b>, so retry wires work.</li>
+    <li><code>JOIN</code> is a barrier; <code>FORK</code> emits on all control ports.</li>
+    <li><code>--max-steps</code> bounds runaway loops.</li>
+    <li>It is <b>not</b> true interaction-net rewriting (gap #26).</li>
+  </ul>
+  <aside class="notes">The LOOP node runs its subgraph once per iteration and checks the condition before each iteration. Data edges are last-writer-wins.</aside>
+</section>
+
+<section class="slide">
+  <h2>Three-tier composition</h2>
+  <table>
+    <tr><th>Tier</th><th>What</th></tr>
+    <tr><td>1 Inline</td><td>tiny prompts and expressions in the YAML</td></tr>
+    <tr><td>2 Reference</td><td>external <code>.spl</code> procedures, <code>.md</code> prompts, <code>.cedar</code> policies</td></tr>
+    <tr><td>3 Sub-graph</td><td>a graph within a graph: a LOOP body, or a part used as a <code>SUBGRAPH</code> node</td></tr>
+  </table>
+  <p>The compact <code>steps:</code> form expands to the full graph (<code>graf expand</code>).</p>
+  <aside class="notes">Parts are flattened in place when the graph loads, so the runtime itself has no SUBGRAPH semantics.</aside>
+</section>
+
+<section class="slide">
+  <h2>Safety: Cedar guards and safe MUTATE</h2>
+  <ul>
+    <li><span class="tag t-safe">GUARD</span> and <span class="tag t-safe">MUTATE</span> checks run through <code>cedarpy</code>, <b>fail-closed</b>: any evaluation error denies.</li>
+    <li>A delta can <b>never remove a GUARD</b> or edit the <code>risky</code> flag.</li>
+    <li>A delta may not add or change code-bearing keys such as <code>code</code>, <code>command</code>, <code>parse</code>.</li>
+    <li><code>graf validate</code> finds <b>races, deadlocks and unguarded risky nodes</b> before anything runs.</li>
+  </ul>
+  <aside class="notes">MUTATE validates schema, structure, safety layer, Cedar and budget, then topology invariants on a trial copy. The README claim of Cedar enforcement is limited to GUARD and MUTATE checks.</aside>
+</section>
+
+<section class="slide">
+  <h2>Making runs dependable and affordable</h2>
+  <ul>
+    <li>Per-node <b>retry, timeout, fallback</b> and output schemas; typed ports.</li>
+    <li>Budgets such as <code>limits.max_llm_calls</code> in a <code>--bind</code> file.</li>
+    <li>A run summary with calls, tokens and time.</li>
+    <li><code>--record</code> / <code>--replay</code> of model calls, so tests need no model.</li>
+    <li><code>--checkpoint</code> / <code>--resume</code> after a failure.</li>
+  </ul>
+  <aside class="notes">Real-LLM runs are billed, so a cap matters: a loop once ran many billed calls. Token counts from claude_cli are estimates.</aside>
+</section>
+
+<section class="slide">
+  <h2>The graf command line</h2>
+  <table>
+    <tr><th>Command</th><th>Purpose</th></tr>
+    <tr><td><code>graf validate</code> / <code>info</code></td><td>static checks; name, size, inputs, outputs</td></tr>
+    <tr><td><code>graf run</code> / <code>watch</code></td><td>execute; run on a schedule</td></tr>
+    <tr><td><code>graf vis</code> / <code>trace</code></td><td>draw; a run's log as a timeline</td></tr>
+    <tr><td><code>graf describe</code> / <code>create</code></td><td>graph to words; words to graph</td></tr>
+    <tr><td><code>graf compile</code> / <code>compact</code></td><td>to SPL, PocketFlow or Rust; long form to <code>steps:</code></td></tr>
+    <tr><td><code>graf docs</code></td><td>a document about a codebase</td></tr>
+  </table>
+  <aside class="notes">This deck was itself produced with graf docs, which runs the cookbook doc_it recipe. python -m graphlang does the same as graf.</aside>
+</section>
+
+<section class="slide">
+  <h2>Seeing and editing graphs</h2>
+  <div class="cols">
+    <ul>
+      <li><code>graf vis</code> draws the workflow: colour by node type, <code>binds</code> dashed, a LOOP as a box.</li>
+      <li>Engines: <code>cytoscape</code> (default), <code>graphviz</code>, <code>mermaid</code>, <code>pyvis</code>, <code>graphify</code>.</li>
+      <li>Engines live in the sibling <b>zinet</b> library.</li>
+    </ul>
+    <div class="card stack">
+      <h3>graf vis --edit</h3>
+      <div>✔ Create (describe an app in chat)</div>
+      <div>✔ Edit (buttons or chat, validated)</div>
+      <div>✔ Browse, Import/Export, Settings</div>
+      <div>Not yet: drag-to-connect</div>
+    </div>
+  </div>
+  <aside class="notes">The app is Streamlit and needs the edit extra. It edits long-form files keeping comments, and validates before saving.</aside>
+</section>
+
+<section class="slide">
+  <h2>Example: code_pipeline</h2>
+<pre><span class="k">- id</span>: test_gated_loop
+  <span class="k">type</span>: LOOP
+  config:
+    condition: <span class="s">"NOT @test_passed AND @cycle &lt; @in_max_cycles"</span>
+    subgraph:
+      nodes: [gen, rev, test, guard]
+      edges:
+        - gen.complete   -&gt; rev.trigger
+        - rev.complete   -&gt; test.trigger
+        - test.complete  -&gt; guard.trigger
+        - <span class="h">guard.allow     -&gt; gen.trigger</span>  <span class="c"># safe retry</span></pre>
+  <ul>
+    <li>A test-gated LOOP with a <b>GUARD before each retry</b>.</li>
+    <li>Eight SPL procedures, <code>00</code> to <code>07</code>, next to the graph.</li>
+  </ul>
+  <aside class="notes">The excerpt is condensed from the README; edges are shown as arrows for space. Running the procedures for real needs SPL.py importable.</aside>
+</section>
+
+<section class="slide">
+  <h2>Demo: compliance audit</h2>
+<pre>extract_pii (LLM) -&gt; check (rules) -&gt; compliant?
+   yes -&gt; release_guard (Cedar) -&gt; released
+   no  -&gt; redact (LLM) -&gt; extract_again (LLM)
+          -&gt; recheck -&gt; compliant?
+               no  -&gt; escalated (human)
+               yes -&gt; release_guard</pre>
+  <ul>
+    <li>The model finds the <b>types</b> of personal data; <b>rules</b> decide.</li>
+    <li>A Cedar policy has the last word before release.</li>
+    <li>Anything not shown compliant ends at <code>escalated</code>.</li>
+  </ul>
+  <div class="demo"><b>Demo</b> <code>graf vis cookbook/compliance_audit/compliance_audit.graph.yaml</code>, then a run on <code>customer_case_file.txt</code> with a call cap.</div>
+  <aside class="notes">The recipe is an illustration of the pattern, not legal advice; the rules are not a real GDPR or PCI rule set. A failing document costs 3 model calls per run.</aside>
+</section>
+
+<section class="slide">
+  <h2>Compliance audit: what was measured</h2>
+  <ul>
+    <li><code>batch_test.py</code> runs documents x variants x models x repeats and stores results in SQLite.</li>
+    <li>First haiku batch: <b>54 runs, no false release</b>.</li>
+    <li>One real run took <b>18.0 s</b>; LLM calls took 3.4 to 9.9 s.</li>
+    <li>The rule check took a few milliseconds in-process.</li>
+    <li>Graph traversal is under 0.1% of the run.</li>
+  </ul>
+  <aside class="notes">The timings are one run on one machine, so indicative only. The analysis script reports Wilson intervals and a paired McNemar comparison.</aside>
+</section>
+
+<section class="slide">
+  <h2>Patterns and the cookbook</h2>
+  <table>
+    <tr><th>Pattern</th><th>Start from</th></tr>
+    <tr><td>Chain</td><td><code>self_refine</code>, <code>chain_of_thought</code></td></tr>
+    <tr><td>Branch, guardrail</td><td><code>guardrail</code></td></tr>
+    <tr><td>Evaluator-optimizer loop</td><td><code>supervisor</code>, <code>code_pipeline</code></td></tr>
+    <tr><td>Self-healing</td><td><code>self_heal</code>, <code>ts_verify</code></td></tr>
+    <tr><td>Agent; map-reduce</td><td><code>agent_notes</code>; <code>stock_analysis</code></td></tr>
+    <tr><td>Parallel vote; rules around a model</td><td><code>pocketflow/majority_vote</code>; <code>compliance_audit</code></td></tr>
+  </table>
+  <p>More recipes lifted from SPL.py: <code>cookbook_pocketflow/</code> and <code>cookbook_solvers/</code>.</p>
+  <aside class="notes">docs/GUIDE/PATTERNS.md lists more patterns: memory, read-write-notify, and always-on with graf watch.</aside>
+</section>
+
+<section class="slide">
+  <h2>Relationship to SPL.py</h2>
+  <ul>
+    <li>SPL.py is the declarative workflow language that GraphLang elevates.</li>
+    <li><code>spl2graph</code> lifts SPL workflows to graphs: <b>265 of 274</b> cookbook workflows validate.</li>
+    <li><code>graf compile --lang spl</code> goes back.</li>
+    <li>GraphLang does not depend on SPL.py, except for <code>procedure_ref</code>.</li>
+    <li>LLM calls go through the shared <code>dd-llm</code> package.</li>
+  </ul>
+  <aside class="notes">The 47 solver recipes of SPL.py were migrated into cookbook_solvers and run with a real model.</aside>
+</section>
+
+<section class="slide">
+  <h2>Try it</h2>
+<pre>pip install -e ".[dev]"
+graf validate cookbook/self_refine/self_refine.graph.yaml
+graf run cookbook/self_refine/self_refine.graph.yaml \
+    --param topic="rain"
+graf vis cookbook/self_refine/self_refine.graph.yaml</pre>
+  <ul>
+    <li>Default adapter: <code>claude_cli</code> with <code>claude-sonnet-5-5</code>. It is <b>billed</b>.</li>
+    <li>Cap a loop with a <code>--bind</code> file holding <code>limits.max_llm_calls</code>.</li>
+  </ul>
+  <div class="demo"><b>Demo</b> run self_refine (three short calls), then open the picture with <code>graf vis</code>.</div>
+  <aside class="notes">Python 3.11 or newer is required. Seeing the completed message means the runtime, schema validation and Cedar import all work.</aside>
+</section>
+
+<section class="slide">
+  <h2>Is Rust worth it?</h2>
+  <ul>
+    <li>The Rust target is a <b>stub</b>; <code>graf compile</code> to Rust is experimental.</li>
+    <li>Graph traversal is under 0.1% of a run, so <b>speed is not the reason</b>.</li>
+    <li>Rust would cut about 0.3 s of Python start-up per CLI call.</li>
+    <li>The case for Rust is <b>safety, not speed</b>: memory safety together with Cedar.</li>
+  </ul>
+  <aside class="notes">This is the maintainer's view, based on one measurement with the mock adapter. A Rust target would have to reimplement the expression language, the LLM adapters and the SPL procedure calls.</aside>
+</section>
+
+<section class="slide">
+  <h2>What is not done yet</h2>
+  <ul>
+    <li>Rust compilation is a stub.</li>
+    <li>The hand-written Cedar compiler has known test failures (gap #18).</li>
+    <li>Human in the loop is only a design note; no RAG; no token streaming.</li>
+    <li>No drag-to-connect in the app; no paper draft.</li>
+    <li>No experiments yet support performance claims; Project B is not built.</li>
+  </ul>
+  <aside class="notes">The README is partly aspirational. Project A, the compliance batch store, is built; Project B, the intent-invariance round trip, is a plan awaiting review.</aside>
+</section>
+
+<section class="slide">
+  <h2>References</h2>
+  <ul class="refs">
+    <li><a href="https://github.com/digital-duck/graflang">graflang repository</a></li>
+    <li><a href="https://github.com/digital-duck/SPL.py">SPL.py</a></li>
+    <li><a href="https://github.com/digital-duck/zinet">zinet</a></li>
+    <li><a href="https://www.cedarpolicy.com/">Cedar</a></li>
+    <li><a href="https://github.com/The-Pocket/PocketFlow">PocketFlow</a></li>
+    <li>In the repository: <code>docs/GUIDE/</code> (SETUP, TUTORIAL, USER-GUIDE, PATTERNS), <code>docs/DEV/DESIGN/graflang-design.md</code></li>
+  </ul>
+  <aside class="notes">The setup, tutorial and patterns guides are the best next reading.</aside>
+</section>
+
+<section class="slide">
+  <h2>Questions?</h2>
+  <p class="big">GraphLang: the graph is the program.</p>
+  <aside class="notes">Invite questions. Offer to run a recipe live with a capped budget.</aside>
+</section>
+</div>
+
+<script>
+(function () {
+  // the outline slide is built from the other slides' titles, so it cannot drift when a slide is added or renamed
+  (function () {
+    const all = [...document.querySelectorAll('.slide')], toc = document.getElementById('toc');
+    if (!toc) return;
+    all.forEach((sl, k) => {
+      const h = sl.querySelector('h2');
+      if (!h || sl === toc.closest('.slide')) return;
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="n">' + (k + 1) + '</span><span>' + h.innerHTML + '</span>';
+      li.onclick = e => { e.stopPropagation(); window.__show && window.__show(k); };
+      toc.appendChild(li);
+    });
+  })();
+  const slides = [...document.querySelectorAll('.slide')];
+  const bar = document.getElementById('bar');
+  let i = Math.min(Math.max(parseInt(location.hash.slice(1), 10) - 1 || 0, 0), slides.length - 1);
+  let overview = false;
+
+  function notesBox() {
+    let box = document.getElementById('notes-box');
+    if (!box) { box = document.createElement('div'); box.id = 'notes-box'; document.body.appendChild(box); }
+    const aside = slides[i].querySelector('.notes');
+    box.innerHTML = aside ? aside.innerHTML : '';
+  }
+  function show(n) {
+    i = Math.min(Math.max(n, 0), slides.length - 1);
+    slides.forEach((s, k) => s.classList.toggle('on', k === i));
+    ['first', 'prev'].forEach(id => document.getElementById(id).disabled = i === 0);
+    ['next', 'last'].forEach(id => document.getElementById(id).disabled = i === slides.length - 1);
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    history.replaceState(null, '', '#' + (i + 1));
+    notesBox();
+    // page number in the corner of every slide but the first
+    slides.forEach((s, k) => {
+      let f = s.querySelector('.foot');
+      if (!f && k > 0) { f = document.createElement('div'); f.className = 'foot'; f.innerHTML = '<span></span><span></span>'; f.firstElementChild.textContent = document.body.dataset.title; s.appendChild(f); }
+      if (f && k > 0) f.lastElementChild.textContent = (k + 1) + ' / ' + slides.length;
+    });
+  }
+  window.__show = show;
+  function toggleOverview() {
+    overview = !overview;
+    const deck = document.getElementById('deck');
+    if (overview) {
+      deck.style.cssText = 'position:static;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:14px;place-items:start';
+      slides.forEach((s, k) => { s.classList.add('on'); s.style.cssText = 'width:100%;height:auto;aspect-ratio:16/9;font-size:9px;cursor:pointer'; s.onclick = () => { toggleOverview(); show(k); }; });
+      document.documentElement.style.overflow = 'auto'; document.body.style.overflow = 'auto';
+    } else {
+      deck.style.cssText = '';
+      slides.forEach(s => { s.style.cssText = ''; s.onclick = null; });
+      document.documentElement.style.overflow = ''; document.body.style.overflow = '';
+      show(i);
+    }
+  }
+  const go = (id, f) => document.getElementById(id).addEventListener('click', e => { e.stopPropagation(); if (!overview) f(); });
+  const outline = Math.max(0, slides.findIndex(s => s.id === 'outline'));
+  go('tocbtn', () => show(outline)); go('first', () => show(0)); go('prev', () => show(i - 1)); go('next', () => show(i + 1)); go('last', () => show(slides.length - 1));
+  document.getElementById('pdf').addEventListener('click', () => { if (overview) toggleOverview(); window.print(); });
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); if (!overview) show(i + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); if (!overview) show(i - 1); }
+    else if (e.key === 't' || e.key === 'T') { if (!overview) show(outline); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key === 'f' || e.key === 'F') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
+    else if (e.key === 'n' || e.key === 'N') document.body.classList.toggle('show-notes');
+    else if (e.key === 'o' || e.key === 'O' || e.key === 'Escape' && overview) toggleOverview();
+  });
+  document.addEventListener('click', e => {
+    if (overview || e.target.closest('a, button, pre')) return;
+    show(e.clientX > innerWidth / 2 ? i + 1 : i - 1);
+  });
+  show(i);
+})();
+</script>
+</body>
+</html>

@@ -143,13 +143,14 @@ def test_dry_run_prints_the_plan_and_calls_nothing(project, tmp_path):
 def test_default_output_name_has_the_style_as_its_infix(project, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert f"{tmp_path}/proj.demo.html" in invoke(str(project), "--dry-run").output
-    assert f"{tmp_path}/proj.user-guide.md" in invoke(str(project), "--style", "user-guide", "--dry-run").output
+    assert f"{tmp_path}/proj.user-guide.html" in invoke(str(project), "--style", "user-guide", "--dry-run").output
+    assert f"{tmp_path}/proj.user-guide.md" in invoke(str(project), "--style", "user-guide", "--format", "markdown", "--dry-run").output
 
 
 def test_custom_needs_a_prompt_and_other_styles_refuse_one(project):
     assert invoke(str(project), "--style", "custom", "--dry-run").exit_code == 2
     assert invoke(str(project), "--style", "demo", "--prompt", "x", "--dry-run").exit_code == 2
-    assert invoke(str(project), "--style", "tutorial", "--format", "html", "--dry-run").exit_code == 2
+    assert invoke(str(project), "--style", "demo", "--format", "markdown", "--dry-run").exit_code == 1      # a deck is html only
     r = invoke(str(project), "--style", "custom", "--prompt", "a one page faq", "--format", "html", "--dry-run")
     assert r.exit_code == 0 and "custom  (html)" in r.output and "proj.custom.html" in r.output
 
@@ -192,3 +193,95 @@ def test_the_styles_are_files_with_a_format_and_the_demo_template_exists():
         text = (STYLES / f"{name}.md").read_text()
         assert re.search(rf"^format: {fmt}$", text, re.M) and "source digest" in text
     assert "{{PROMPT}}" in (STYLES / "custom.md").read_text() and "{{SLIDES}}" in (STYLES / "demo.template.html").read_text()
+
+
+# ---- Contents with links, and Markdown to HTML (graf docs tutorial|user-guide with an .html name) ----
+
+def _assemble_mod():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("doc_it_assemble", Path(__file__).resolve().parent.parent / "cookbook/doc_it/procedures/assemble.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+DOC = "# T\n\nintro\n\n## One\n\n```\n## not a heading\n```\n\n### Sub `x`\n\n## Two\n\n## Two\n\n## Three: it's\n"
+
+
+def test_add_toc_inserts_linked_contents_and_dedupes():
+    out = _assemble_mod().add_toc(DOC)
+    assert "## Contents\n\n- [One](#one)\n  - [Sub `x`](#sub-x)\n- [Two](#two)\n- [Two](#two-1)\n- [Three: it's](#three-its)\n" in out
+    assert "not a heading" not in out.split("## One")[0]
+
+
+def test_add_toc_fills_the_writers_own_contents():
+    doc = "# T\n\n## Contents\n\n- One\n- Two\n\n## One\n\n## Two\n\n## Three\n"
+    out = _assemble_mod().add_toc(doc)
+    assert out.count("## Contents") == 1 and "- [One](#one)" in out and "- One\n" not in out
+    assert "[Contents]" not in out
+
+
+def test_add_toc_leaves_short_documents():
+    assert _assemble_mod().add_toc("# T\n\n## A\n\n## B\n") == "# T\n\n## A\n\n## B\n"
+
+
+def test_md2html_links_match_ids_and_escapes():
+    from graphlang.grafd.md2html import convert
+    page = convert(_assemble_mod().add_toc(DOC) + "\n| a | b |\n|---|---|\n| `<x>` | **y** |\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(1))\n")
+    assert page.startswith("<!DOCTYPE html>") and '<h2 id="two-1">' in page and 'href="#two-1"' in page
+    assert "<table>" in page and "<code>&lt;x&gt;</code>" in page and "<strong>y</strong>" in page
+    assert "<script>" not in page and "javascript:" not in page
+
+
+def test_html_name_on_a_markdown_style_is_kept(project, tmp_path):
+    r = invoke(str(project), "--style", "tutorial", "--dry-run", "--out", str(tmp_path / "t.htm"))
+    assert r.exit_code == 0 and str(tmp_path / "t.htm") in r.output and "note:" not in r.output
+
+
+def test_md2html_renders_mermaid_blocks():
+    from graphlang.grafd.md2html import convert
+    page = convert("# T\n\n## Architecture\n\n```mermaid\nflowchart LR\n  A[\"a <b>\"] --> B\n```\n")
+    assert '<pre class="mermaid">flowchart LR' in page and "mermaid.esm.min.mjs" in page and "a &lt;b&gt;" in page
+    assert "mermaid.esm" not in convert("# T\n\n```py\nx\n```\n")
+
+
+def test_path_check_skips_names_that_appear_in_the_source(tmp_path):
+    (tmp_path / "README.md").write_text("The run writes `output/run-1/report.yaml` for each job.\n")
+    (tmp_path / "old.tutorial.md").write_text("see `ghost/made-up.yaml`")
+    got = _assemble_mod().paths_not_found("`output/run-1/report.yaml` `ghost/made-up.yaml` `README.md`", tmp_path)
+    assert got == ["ghost/made-up.yaml"]
+
+
+def test_several_styles_go_to_one_folder(project, tmp_path):
+    out = tmp_path / "docs" / "graf-docs"
+    r = invoke(str(project), "--style", "demo,tutorial,user-guide", "--out-dir", str(out), "--dry-run")
+    assert r.exit_code == 0 and r.output.count("== ") == 3 and r.output.count("dry run") == 3
+    for n in ("proj.demo.html", "proj.tutorial.html", "proj.user-guide.html"):
+        assert str(out / n) in r.output
+    assert invoke(str(project), "--style", "demo,tutorial", "--out", str(tmp_path / "x.html"), "--dry-run").exit_code == 2
+    assert invoke(str(project), "--style", "tutorial,nope", "--dry-run").exit_code == 2
+
+
+def test_markdown_format_skips_the_deck_among_several_and_reports_it(project, tmp_path):
+    r = CliRunner().invoke(cmd_docs, [str(project), "--style", "demo,tutorial", "--format", "markdown", "--out-dir", str(tmp_path), "--dry-run"])
+    assert r.exit_code == 1 and "only comes as html" in r.output and str(tmp_path / "proj.tutorial.md") in r.output and "not written: demo" in r.output
+
+
+def test_name_flag_sets_file_names_and_is_cleaned(project, tmp_path):
+    r = invoke(str(project), "--style", "tutorial,demo", "--name", "My Proj/v2", "--out-dir", str(tmp_path), "--dry-run")
+    assert r.exit_code == 0 and str(tmp_path / "My-Proj-v2.tutorial.html") in r.output and str(tmp_path / "My-Proj-v2.demo.html") in r.output
+    assert invoke(str(project), "--name", "///", "--dry-run").exit_code == 2
+    assert "proj.demo.html" in invoke(str(project), "--out-dir", str(tmp_path), "--dry-run").output
+
+
+def test_gather_reads_every_coding_agents_instruction_file(tmp_path):
+    (tmp_path / "README.md").write_text("# p\n")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "copilot-instructions.md").write_text("COPILOT-RULES")
+    for n, t in (("CLAUDE.md", "CLAUDE-RULES"), ("GEMINI.md", "GEMINI-RULES"), ("codex.md", "CODEX-RULES"), ("AGENTS.md", "AGENTS-RULES"), (".cursorrules", "CURSOR-RULES")):
+        (tmp_path / n).write_text(t)
+    job = json.dumps({"source": str(tmp_path), "style_guide": str(docs_cli.STYLES_DIR / "tutorial.md"), "budget": 60000})
+    out = subprocess.run([sys.executable, "-I", str(Path(docs_cli.__file__).resolve().parents[2] / "cookbook/doc_it/procedures/gather.py")], input=job, capture_output=True, text=True)
+    d = json.loads(out.stdout)["digest"]
+    for t in ("CLAUDE-RULES", "GEMINI-RULES", "CODEX-RULES", "AGENTS-RULES", "CURSOR-RULES", "COPILOT-RULES"):
+        assert t in d

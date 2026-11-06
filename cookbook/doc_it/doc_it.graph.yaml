@@ -7,6 +7,7 @@ workflow:
   inputs:
     - {name: source, type: TEXT, description: "a folder (absolute, or relative to where you run)"}
     - {name: style_guide, type: TEXT, default: "../../graphlang/grafd/styles/demo.md", description: "a style file (.md with a front matter) or the guide's text"}
+    - {name: name, type: TEXT, default: "", description: "what to call the project in titles (default: the folder's name)"}
     - {name: budget, type: TEXT, default: "60000", description: "characters of the source to put in the digest"}
   outputs:
     - {name: result, type: TEXT, description: "JSON {document, ok, errors, warnings, sections}: the finished document and what the check found"}
@@ -14,7 +15,7 @@ resources:
   prompts: {outline: ./prompts/outline.md, write: ./prompts/write.md, fix: ./prompts/fix.md}
 steps:
   - gather: {node: SOLVE, backend: subprocess, command: [python3, -I, procedures/gather.py], parse: {tool: "procedures/gather.py:parse"}, out_type: JSON,
-             timeout: 120, label: "Read the codebase and the style", in: {source: $in.source, style_guide: $in.style_guide, budget: $in.budget}}
+             timeout: 120, label: "Read the codebase and the style", in: {source: $in.source, style_guide: $in.style_guide, budget: $in.budget, name: $in.name}}
   - digest: {solve: "json_get(@in_g, 'digest')", in: {g: gather}, out: digest}
   - guide: {solve: "json_get(@in_g, 'style_guide')", in: {g: gather}, out: guide}
   - outline: {generate: prompts.outline, label: "Plan the document", in: {style_guide: guide, digest: digest}, out: outline}

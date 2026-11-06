@@ -8,6 +8,30 @@ graf docs https://github.com/org/repo --style tutorial          # cloned into th
 graf docs ./proj --style user-guide --out docs/GUIDE.md
 graf docs ./proj --style custom --prompt "a one-page FAQ for new hires" [--format html]      # --prompt @FILE reads the text from a file
 graf docs . --dry-run                              # what it would read, the model calls and the cap, the file it would write; nothing is sent
+
+# CVE-coder
+graf docs ~/projects/digital-duck/cve-coder \
+--style demo,tutorial,user-guide \
+--out-dir ~/projects/digital-duck/cve-coder/docs/GUIDE/graf-docs/ \
+--llm claude_cli:claude-sonnet-5-5 \
+--force
+
+# GraphLang
+graf docs ~/projects/digital-duck/graflang \
+--name "Graph-Lang" \
+--style demo,tutorial,user-guide \
+--out-dir ~/projects/digital-duck/graflang/docs/GUIDE/graf-docs/ \
+--llm claude_cli:claude-sonnet-5-5 \
+--force
+
+# zinet
+graf docs ~/projects/digital-duck/zinet \
+--name "zinet" \
+--style demo,tutorial,user-guide \
+--out-dir ~/projects/digital-duck/zinet/docs/GUIDE/graf-docs/ \
+--llm claude_cli:claude-sonnet-5-5 \
+--force
+
 ```
 
 `graf docs` is a thin wrapper: it resolves the source (a url is cloned shallow, `--ref` picks a branch or tag), picks the style file, sets the cap on model calls from the graph (the count `graf validate` prints, plus 50%, `--margin`), runs this recipe, and writes the file (it refuses to overwrite one without `--force`). A dry run reads the files (no model).

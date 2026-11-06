@@ -451,6 +451,90 @@
         "The card on file ends in 0005"
       ],
       "note": "The existing hard case (demo run 2); its answer key is ../hard_case_notes.md."
+    },
+    {
+      "id": "hard_encoded_mix",
+      "file": "hard_encoded_mix.txt",
+      "destination": "external_api",
+      "expect": "released",
+      "tags": [
+        "hard",
+        "ssn",
+        "card",
+        "dob",
+        "address",
+        "phone",
+        "email",
+        "name",
+        "obfuscated",
+        "long"
+      ],
+      "must_mask": [
+        "one two three, forty-five, six seven eight nine",
+        "4111 1111 1111 1111",
+        "09/28",
+        "1988-02-14",
+        "14/02/88",
+        "ssn_last4=6789",
+        "R. Castellanos",
+        "rcastellanos@example.net",
+        "Calle Reforma 45, Piso 3, Col. Juarez, 06600 Ciudad de Mexico",
+        "+52 55 5555 0123"
+      ],
+      "must_keep": [
+        "TCK-90417",
+        "Studio Plus",
+        "$249.00",
+        "Aurora X2",
+        "4.2.1",
+        "38 minutes"
+      ],
+      "ambiguous": [
+        "Priya"
+      ],
+      "note": "Every kind of data in a form a pattern would miss: an SSN spelled in words, a card number broken across two lines with its expiry, a date of birth in three formats (one inside a log line), a partial SSN in a log field, an address split over two lines, a phone with an extension. Event ids, amounts and product names must survive."
+    },
+    {
+      "id": "hard_thread_buried",
+      "file": "hard_thread_buried.txt",
+      "destination": "external_api",
+      "expect": "released",
+      "tags": [
+        "hard",
+        "name",
+        "email",
+        "phone",
+        "address",
+        "dob",
+        "long",
+        "third-party",
+        "company-contact"
+      ],
+      "must_mask": [
+        "Chidinma Okafor",
+        "Chidi",
+        "Okafor",
+        "Tomasz Kowalczyk",
+        "+48 601 234 567",
+        "chidinma.okafor@example.org",
+        "14 Alder Court, Leeds LS6 1AB",
+        "+44 20 7946 0555",
+        "7 March 1971"
+      ],
+      "must_keep": [
+        "ORD-55021",
+        "INV-2026-0099",
+        "TCK-90502",
+        "Aurora X2",
+        "5.0.2",
+        "16 days"
+      ],
+      "ambiguous": [
+        "Hannah",
+        "support@northwind.example",
+        "logistics@northwind.example"
+      ],
+      "note": "A forwarded thread with quoted levels: the customer's name in five forms (full, first name, 'Dr. Okafor', 'C. Okafor', in her own words), a third person named once with a mobile number, an email, an address inside a quote, a phone near the end, and a date of birth in a footnote after the sign-off. Order, invoice and ticket numbers and the firmware version must survive."
     }
   ]
 }

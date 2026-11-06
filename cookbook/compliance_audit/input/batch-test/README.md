@@ -46,4 +46,4 @@ Results go to `cookbook/compliance_audit/output/batch_test-<time>/`: the full ou
 | **policy** | edit `procedures/rules_extended.json` (for example a rule for company contacts) | the same facts under another policy |
 | **the key** | edit `manifest.json` | how sensitive the scores are to the judgement calls |
 
-Not built: a `--repeat N` for the same cell (the point of this batch is variety, but sampling noise per cell is worth knowing once), a per-document answer key for **which items** were found (today only what remains in the released text is scored), and scoring of the redacted text's usefulness for the vendor's study beyond `must_keep`.
+Not built: a per-document answer key for **which items** were found (today only what remains in the released text is scored), and scoring of the redacted text's usefulness for the vendor's study beyond `must_keep`.

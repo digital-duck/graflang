@@ -166,7 +166,7 @@ Without the package the run stops at the rule check with an error that names it 
 
 ## Batch Experiment
 
-One document run again and again mostly measures sampling noise, and extraction varies from model to model and from document to document. The realistic test is **many different documents, each scored against its own answer key**, for each variant and model. `batch_test.py` runs that grid over the 18 documents in `input/batch-test/` (see its `README.md`).
+One document run again and again mostly measures sampling noise, and extraction varies from model to model and from document to document. The realistic test is **many different documents, each scored against its own answer key**, for each variant and model. `batch_test.py` runs that grid over the 20 documents in `input/batch-test/` (see its `README.md`).
 
 **The documents** (all invented data): four with no personal data (`clean_status_report`, `clean_company_contacts`, `already_masked`, `borderline_ids`), one per kind of personal data (SSN plain and already masked, obfuscated e-mail, phone in five formats, one-line address, date of birth in three spellings, names with titles only, three card brands), and four that are hard for another reason (`injection_override`, `spanish_incident`, `csv_table`, `chat_log_long`), plus `customer_case_file` and `hard_case_file`.
 
@@ -187,14 +187,11 @@ python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdli
 
 # make the calls. Each run's model-call count is read from the graph (`graf validate` prints it, 3 here) and its cap is that plus 50% (5), so a runaway retry cannot spend more; `--max-calls` is an optional budget for the whole batch
 python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only \
-    --llm claude_cli:claude-haiku-5-5
-
-python cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only \
-    --llm claude_cli:claude-sonnet-5-5,ollama:gemma4
+    --llm claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5,ollama:gemma4
 
 ```
 
-Results go to the SQLite database `output/experiments.db` (see below); the summary tables of a batch (a table per variant and model, and one per document: R released, E escalated, `!` leak, `x` false escalation, `o` over-redaction, `?` error) are printed and stored in the `batches.summary` column, and every run's full output folder is under `output/batch_test-<time>/runs/`. Continue a stopped batch with `--resume`. A full run of both variants on all 18 documents with one model is 36 runs, about 108 model calls and never more than 180 (the per-run cap of 5).
+Results go to the SQLite database `output/experiments.db` (see below); the summary tables of a batch (a table per variant and model, and one per document: R released, E escalated, `!` leak, `x` false escalation, `o` over-redaction, `?` error) are printed and stored in the `batches.summary` column, and every run's full output folder is under `output/batch_test-<time>/runs/`. Continue a stopped batch with `--resume`. A full run of both variants on all 20 documents with one model is 40 runs, about 120 model calls and never more than 200 (the per-run cap of 5).
 
 **What to vary**
 
@@ -209,13 +206,13 @@ Results go to the SQLite database `output/experiments.db` (see below); the summa
 | policy | edit `procedures/rules_extended.json` (for example a rule for company contacts) |
 | the key | edit `manifest.json` (how sensitive the scores are to the judgement calls) |
 
-**What has been run so far:** a smoke test only, haiku-5-5 on two documents, both variants (4 runs). No false release. On `clean_status_report` the recipe **falsely escalated**: haiku's extraction reported three leftover `OTHER` items as unmasked personal data (the first check says `violated: [R1, R8]`, `masked_other: false`), so the rules stopped a document that has no personal data; the baseline released it. On `ssn_plain` both graphs removed the new hire's start date, which I moved from `must_keep` to `ambiguous`. That is two documents and one model: it is the over-flagging of company ids and the like that the hard-case runs also pointed to, not a result. **The full batch has not been run.**
+**What has been run:** see *Results so far* below.
 
-**Not built:** a `--repeat N` for the same cell (variety is the point, but the sampling noise per cell is worth knowing once); a key for *which items* were found (today only what remains in the released text is scored); a way to judge how useful the redacted text is for the study beyond `must_keep`; a short non-value hint on each extracted item (a kind such as `company_contact`, and where) so that an escalation shows what was flagged.
+**Not built:** a key for *which items* were found (today only what remains in the released text is scored); a way to judge how useful the redacted text is for the study beyond `must_keep`; a short non-value hint on each extracted item (a kind such as `company_contact`, and where) so that an escalation shows what was flagged.
 
 ### Recording and analysing the results (SQLite)
 
-Every result goes into `output/experiments.db` as it arrives (`--db PATH` to change it; there is no `results.jsonl` or `summary.md`: the batch's summary tables are in `batches.summary`, `SELECT summary FROM batches ORDER BY started_at DESC LIMIT 1`). One row per (document, variant, rep, model); `--reps N` repeats each cell; `--resume` skips cells that finished without an error (errors are tried again), so a stopped batch costs nothing twice.
+Every result goes into `output/experiments.db` as it arrives (`--db PATH` to change it; there is no `results.jsonl` or `summary.md`: the batch's summary tables are in `batches.summary`, `SELECT summary FROM batches ORDER BY started_at DESC LIMIT 1`). One row per (document, variant, rep, model); `--repeat N` runs each cell N times; `--resume` skips cells that finished without an error (errors are tried again), so a stopped batch costs nothing twice.
 
 ```bash
 G=~/anaconda3/envs/graf/bin/python
@@ -229,6 +226,137 @@ sqlite3 output/experiments.db "SELECT * FROM variant_summary"          # or ask 
 
 Add `--dry-run` to see the plan the expected and the worst-case number of model calls (`--max-calls N` refuses a plan whose worst case is above N; `--margin 0.3` changes the 50%).
 
+### Results so far (2026-11-05)
+
+Three rounds (v1 and v2 one run per cell, v3 three), all with a real model. Each round changed something after the one before, so the rounds are kept as separate databases (`output/experiments-prompt-v1.db`, `-v2.db`) and are not pooled.
+
+| round | what changed | documents | models | database |
+|---|---|---|---|---|
+| v1 | first batch | 18 | haiku-5-5 | `experiments-prompt-v1.db` (re-scored against the later keys) |
+| v2 | `redact.md` and the keys: order, ticket and case numbers and a lone city are not personal data | 18 | haiku-5-5, sonnet-5-5, gemma4 | `experiments-prompt-v2.db` |
+| v3 | `extract_pii.md` and `judge.md` get the same definition; two harder documents added | 20 | haiku, sonnet, gemma4, `--repeat 3` | `experiments.db` (540 runs, no errors; report `output/report-v3.md`) |
+
+**v2, three models, 18 documents, one run per cell** (correct / false release / false escalation / over-redaction):
+
+| model | `llm_only` | `recipe-stdlib` | `recipe-z3` |
+|---|---|---|---|
+| haiku-5-5 | 14 / 0 / 4 / 0 | 10 / 0 / 8 / 0 | 11 / 0 / 7 / 0 |
+| sonnet-5-5 | **18** / 0 / 0 / 0 | 16 / 0 / 2 / 0 | 16 / 0 / 2 / 0 |
+| gemma4 (Ollama) | 8 / **7** / 2 / 2 | 14 / **0** / 4 / 0 | 12 / **0** / 6 / 0 |
+
+Cost per run (estimated tokens, claude_cli counts characters / 4; wall seconds): `llm_only` about 1,800 tokens and 12-15 s with the Claude models and 26 s with gemma4; the recipe about 1,400 tokens and 13-14 s (Claude) and 29-35 s (gemma4). The rule engines take 0.07 s (stdlib) and 0.12 s (z3) of a run; about 97% of the time is model calls.
+
+**What the data supports**
+
+1. **The solver makes a weak model's mistakes safe.** gemma4 judging alone released 7 of 18 documents with personal data still in them (39%, 95% interval 20-61%): names, obfuscated e-mails, a list of phone numbers, an address. The same model behind the recipe released none, with either engine. Across all 108 recipe runs (3 models x 2 engines x 18 documents) there was no false release (upper bound of the 95% interval 3.4%). When the extraction is wrong, the deterministic check escalates instead of releasing: the design's "fails closed".
+2. **It is the deterministic decision that matters, not z3 in particular.** `recipe-stdlib` and `recipe-z3` apply the same rules, so the gap between them is extraction noise (gemma4 14 against 12, haiku 10 against 11, sonnet 16 against 16). Pick the engine for what you need (z3 gives an unsat core), not for accuracy.
+
+**What it does not support**
+
+3. **No accuracy gain for the strongest model.** sonnet judging alone got 18 of 18 and never leaked; the recipe added two false escalations. With haiku `llm_only` got 14 against 10-11 for the recipe. The price of the recipe is availability: documents sent to a person that did not need to be.
+4. **18 documents did not challenge sonnet.** A result of 18 of 18 says the set was easy for it, not that a model judge is safe. The v3 set adds two documents built to be hard (see below).
+5. **Time and tokens are not a clear win.** The recipe uses about 25% fewer tokens with the Claude models, but with gemma4 it was slower than `llm_only` (578-626 s against 467 s over the 18 documents). Compare calls and seconds before tokens.
+6. **One run per cell is noise-limited.** `ssn_plain` escalated under stdlib and released under z3 with sonnet and gemma4 alike; those are different samples of the same extraction. No single cell is evidence.
+
+**A flaw found in v2, and the v3 change.** Most of the recipe's false escalations were not the model's. The final check of every false escalation says what was still unmasked: `other` in 15 cases (order, ticket and case numbers) and `address` in 11 (a bare city, for instance in `csv_table`, which escalated in all six recipe cells). The v2 `redact.md` leaves exactly those alone, but `extract_pii.md` still told the model to report them as personal data, so the recheck failed on text that was fine. The prompts had been made consistent with the keys, not with each other. v3 gives `extract_pii.md` and `judge.md` the same definition as `redact.md` (order, ticket, case and reference numbers, product and plan names, dates of events and a lone city, state or country are not personal data; a street address and a postal code are an address; an identifier that belongs to a person and a card expiry date are `OTHER`). This was decided after looking at the v2 results, so v3 is tuned on this document set; say so when reporting it. v2 stays as the "before".
+
+**Expected v3 result, written before the run (to be checked):** the false escalations of the recipe fall, mainly on `csv_table`, `chat_log_long`, `borderline_ids` and `customer_case_file`; no false release in any recipe cell; gemma4 `llm_only` still leaks; sonnet `llm_only` is no longer perfect on the two new documents; `recipe-stdlib` and `recipe-z3` stay within noise of each other. If sonnet `llm_only` is still perfect, or the recipe still escalates the clean documents, that is the finding.
+
+**The two new hard documents** (`hard_encoded_mix`, `hard_thread_buried`; both expected `released`): the first has an SSN spelled in words, a card number broken across two lines with its expiry, a date of birth in three formats (one inside a log line), a partial SSN in a log field, an address over two lines and a phone with an extension. The second is a forwarded thread with quoted levels: the customer's name in five forms, a third person named once with a mobile number, an address inside a quote, and a date of birth in a footnote after the sign-off. Order, invoice and ticket numbers, amounts and the firmware version must survive in both.
+
+**The v3 run**
+
+```bash
+G=~/anaconda3/envs/graf/bin/python
+
+$G cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only --llm claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5,ollama:gemma4 --repeat 3 --dry-run
+# 540 runs, about 1,620 model calls, at most 2,700. From the v2 timings: about 85 minutes for the two Claude models and 90 minutes for gemma4, one run at a time.
+$G cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only \
+--llm claude_cli:claude-haiku-5-5,claude_cli:claude-sonnet-5-5 --repeat 3 --jobs 3
+
+$G cookbook/compliance_audit/batch_test.py --variants recipe-z3,recipe-stdlib,llm_only \
+--llm ollama:gemma4 --repeat 3 --jobs 1
+
+
+# Monitoring: To check progress from a third terminal:
+sqlite3 cookbook/compliance_audit/output/experiments.db "select llm, count(*) from results group by llm"
+# You are done when each model reaches 180 rows (20 documents × 3 variants × 3 repeats).
+
+
+# makeup run
+~/anaconda3/envs/graf/bin/python cookbook/compliance_audit/batch_test.py --variants llm_only \
+ --llm ollama:gemma4 --docs already_masked,csv_table \
+ --repeat 3 --jobs 1 --resume
+
+$G cookbook/compliance_audit/batch_analyze.py --out output/report-v3.md
+$G cookbook/compliance_audit/batch_analyze.py --db output/experiments-prompt-v2.db --db output/experiments.db     # v2 and v3 side by side
+```
+
+The two batches can run at the same time (different models, one database; keep `--jobs 1` for the local model). A stopped batch continues with `--resume`.
+
+**v3 results** (20 documents x 3 variants x 3 models x 3 repeats = 540 runs, no errors; 60 runs per cell; intervals are 95% Wilson)
+
+| model | variant | correct | **false release** | false escalation | over-redaction | tokens/run (est.) | median wall s |
+|---|---|---|---|---|---|---|---|
+| haiku-5-5 | `llm_only` | 54/60 = 90% | **0** | 6 = 10% | 0 | 2,038 | 12.9 |
+| haiku-5-5 | `recipe-stdlib` | 51/60 = 85% | **0** | 9 = 15% | 0 | 1,721 | 13.8 |
+| haiku-5-5 | `recipe-z3` | 52/60 = 87% | **0** | 8 = 13% | 0 | 1,678 | 14.2 |
+| sonnet-5-5 | `llm_only` | 56/60 = 93% | **0** | 4 = 7% | 0 | 1,967 | 12.5 |
+| sonnet-5-5 | `recipe-stdlib` | 56/60 = 93% | **0** | 4 = 7% | 0 | 1,621 | 13.2 |
+| sonnet-5-5 | `recipe-z3` | 56/60 = 93% | **0** | 4 = 7% | 0 | 1,625 | 13.8 |
+| gemma4 | `llm_only` | 33/60 = 55% | **14 = 23%** [14-35] | 13 = 22% | 0 | 3,360 | 27.0 |
+| gemma4 | `recipe-stdlib` | 46/60 = 77% | **0** | 13 = 22% | 1 | 3,419 | 29.1 |
+| gemma4 | `recipe-z3` | 37/60 = 62% | **1 = 2%** [0-9] | 22 = 37% | 0 | 3,512 | 35.5 |
+
+**What v3 shows**
+
+1. **The solver bounds a weak model's leaks, it does not remove them.** gemma4 judging alone released personal data in 14 of 60 runs (23%). Behind the recipe it did so once in 120 runs (0.8%, 95% interval about 0.1-4.6%). A paired test on gemma4, `llm_only` against `recipe-stdlib`, gives p = 0.011 (5 documents favour `llm_only`, 18 favour the recipe). The Claude models leaked in none of 360 runs in any variant (upper bound about 1.1%).
+2. **The one recipe leak, and why.** `recipe-z3`, gemma4, `hard_encoded_mix`: the released text still held `14/02/88`. The redaction step masked the main date of birth and left the second spelling in the sentence "the form wants 14/02/88 if that is easier"; the re-extraction, by the same model, reported the date of birth as masked; the rules then passed, because they only see what the extraction says. **The solver is as good as its extraction.** When one weak model both rewrites and re-reads, one blind spot sits on both sides of the check. (The batch's own scorer found the leak; nothing in the recipe did.)
+3. **For the strong models the recipe is not more accurate.** With sonnet the three variants are identical (56 of 60 each); with haiku `llm_only` is nominally ahead (54 against 51-52); no paired difference among the Claude cells is significant (p from 0.5 to 1.0). The recipe's value there is an auditable verdict (the rule ids and the facts they were checked on) and a bounded failure, not accuracy.
+4. **The v3 prompt change worked for the Claude models.** On the 18 documents that v2 also had, the recipe's false escalations fell from 15 of 36 (42%) to 9 of 108 (8%) for haiku and from 4 of 36 (11%) to 3 of 108 (3%) for sonnet. For gemma4 they did not fall (28% in both): its extraction is too noisy for the definition to help.
+5. **`hard_encoded_mix` is an error in my key, not a weakness of any model.** It accounts for 11 of the 12 Claude recipe false escalations (and 4 of 6 for `llm_only`), all at rule R2. The redacted text is clean, but it keeps the line `ssn_last4=[REDACTED]`, the extraction reports a masked SSN, and R2 says an SSN must be deleted, not masked. The key lists `ssn_last4=6789` under `must_mask`, which accepts masking, and `redact.md` says to mask partial SSN digits; the policy is stricter than both. Without this document the Claude recipe false escalation rate is about 6% (14 of 228) against about 5% for `llm_only` (6 of 114). Neither new document caught sonnet leaking: on `hard_thread_buried` sonnet got 3 of 3 right in every variant.
+6. **Models vary from run to run, and gemma4 the most.** Documents whose outcome changed between the three repeats (of 20): sonnet 1-3, haiku 4-5, gemma4 9-11. For gemma4 about half the documents are unstable, so its single-run v2 table was largely noise; z3 against stdlib on gemma4 (37 against 46 correct, p = 0.078) is that noise, because the two engines apply the same rules.
+7. **Cost and time.** The recipe uses about 16-18% fewer tokens with the Claude models (1,620-1,720 against 1,970-2,040 per run, estimated) and no fewer with gemma4 (3,420-3,510 against 3,360). It is 1-2 s slower per run with the Claude models (median 13.2-14.2 s against 12.5-12.9 s); gemma4 is slower and more spread out (median 29-36 s, 90th percentile 67-84 s). The rule engines take 0.06 s (stdlib) and 0.11 s (z3) per run; 97% or more of a run is model time.
+
+**The v3 expectations, checked**
+
+| expectation (written before the run) | result |
+|---|---|
+| the recipe's false escalations fall | yes for haiku and sonnet (point 4); no for gemma4 |
+| no false release in any recipe cell | **broken**: one leak in 360 recipe runs (point 2) |
+| gemma4 `llm_only` still leaks | yes: 14 of 60 |
+| sonnet `llm_only` is no longer perfect on the two new documents | true on paper (0 of 3 correct on `hard_encoded_mix`), but because of the key (point 5), not a leak |
+| `recipe-stdlib` and `recipe-z3` stay within noise | yes for the Claude models; gemma4 46 against 37 (p = 0.078), not significant, read as noise |
+
+**What the v3 data cannot say.** Twenty documents and three repeats still give wide intervals: 0 of 60 is an upper bound of 6%, and one leak in 120 could be a rate between 0.1% and 4.6%. The documents are invented, and the prompts and keys were tuned on them after v1 and v2, so v3 is not a held-out test. `claude_cli` token counts are estimates. One local model and two Claude models say little about other models.
+
+**The claim the data supports (v3)**
+
+> A deterministic decision step is fast (0.06-0.11 s of a 13-38 s run), adds no model cost of its own, and gives an explainable verdict: the rule ids, the facts they were checked on, and with z3 an unsat core. It bounds a weak model's leaks (23% of runs down to 0.8%) but does not remove them, because a model still reads the document, and the rules are only as good as that reading. Model quality still matters. For the strongest models the recipe adds auditability and a bounded failure, not accuracy.
+
+**In a real application: more gates, the same idea.** The v3 leak came from one weak model doing the extraction and the redaction, and a decision that trusted it. The remedy is not a better prompt but more independent gates around the same deterministic rules, each cheap and each able to say no:
+
+```
+document
+  -> extract (several voters: models and/or repeats)      <- gate 1: vote
+  -> merge the extractions (union, or quorum with a floor) -> rules (solver) -> verdict
+  -> redact -> extract again (voters) -> rules again
+  -> residual scan on the released text (patterns: dates, e-mail, phone, card, SSN shapes)   <- gate 2: no model
+  -> Cedar release guard -> released, else escalated to a person                              <- gate 3: policy
+```
+
+- **Gate 1, vote on the extraction (not on the verdict).** Run the extraction with different models, or repeats of one, and merge the entity maps before the rules run. *Union* (any voter's report counts) is the conservative rule: a leak then needs every voter to miss the item, and the price is more escalations. *Majority* per entity cuts escalations and can bring leaks back. *Quorum with a floor* (majority by default, but one report is enough for an SSN or a card) follows the policy's own idea that some types are worse. Do not vote on release or escalate: the rules are deterministic, and a vote on the verdict throws that away. Voters should differ in family, since repeats of one model share its blind spots. A cheap local model can run first, and the stronger models only on documents it flags.
+- **Gate 2, a residual scan of the released text.** Patterns for dates, e-mail addresses, phone numbers, card numbers and SSN shapes, run on the text that would be released. It is not a model and it looks at the output itself, not at what a model says about it. The v3 leak (`14/02/88` left in a sentence) is the kind of thing it catches. It will also flag harmless text (an order number that looks like a phone number), so a hit should send the document to a person and not edit it.
+- **Gate 3, the policy.** The existing Cedar release guard, unchanged.
+
+In GraphLang the vote is a `FORK` over the voters, a `JOIN`, and a small `SOLVE` that merges the maps by the chosen rule; the `cookbook/pocketflow/majority_vote` graph is a close pattern. The number of model calls goes up with the voters, and the cap on calls per run comes from the graph's count as before.
+
+**Not built and not tested.** The vote (gate 1) and the residual scan (gate 2) are a design, not code. A simulation of the vote on the stored v3 extractions (no new model calls) was proposed and is not done, and neither is the v4 check below; both were skipped for now. What the data allows is only a prediction: a union of the Claude and gemma4 extractions would have caught the `14/02/88` leak if either model flagged the leftover date. That has not been tested.
+
+**Open, skipped for now**
+- Make `redact.md` delete a partial SSN (and say in the key that R2 forbids even a masked one), then re-run only `hard_encoded_mix` as a v4 check (27 runs). It would be a fourth change made after seeing results, to be recorded here. If the key is changed instead, `batch_test.py --rescore` updates the stored scores with no model calls. Until then, `hard_encoded_mix` stays in the set as a known policy-conflict case (point 5 above).
+- Simulate the vote offline on the stored extractions, for each rule (union, majority, quorum with a floor) and voter set: false release and false escalation, from existing run folders, no new calls.
+
 ## Where things are
 
 | File | Role |
@@ -238,7 +366,7 @@ Add `--dry-run` to see the plan the expected and the worst-case number of model 
 | `procedures/compliance_check.py` | the deterministic check as a program: JSON in on stdin, the verdict as one JSON line on stdout, exit 1 when it cannot run. The two `SOLVE` nodes (`check`, `recheck`) run it with `backend: subprocess` |
 | `compliance_audit_llm_only.graph.yaml`, `prompts/judge.md` | the LLM-only baseline to compare with |
 | `procedures/tools.py`, `procedures/rules.json` | the rule engines (stdlib, sympy, z3) and the demo rules, plain Python |
-| `batch_test.py`, `input/batch-test/` | the multi-document experiment: 18 documents with answer keys, a runner over documents x variants x models, and the scoring (see Batch Experiment) |
+| `batch_test.py`, `input/batch-test/` | the multi-document experiment: 20 documents with answer keys, a runner over documents x variants x models, and the scoring (see Batch Experiment) |
 | `repeat_runs.py` | the same document run several times on both graphs (a quick check of consistency) |
 | `policies/release_policy.cedar` | permit only a compliant release; anything else is denied |
 

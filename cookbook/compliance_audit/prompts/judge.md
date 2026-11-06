@@ -2,7 +2,7 @@ You are a data-protection compliance reviewer. Decide whether the document below
 
 EXTERNAL DESTINATIONS: external_api, third_party_vendor, analytics_service, public_bucket. Any other destination is internal.
 
-POLICY (the same rules as procedures/rules_extended.json). "Personal data" means: social security number (SSN), card number (CCN), email, phone, address, name, date of birth (DOB), and anything else that identifies a person or a payment card (OTHER, for example a card expiry date). Data is "masked" if it is replaced by a mask such as [REDACTED] or ***; deleted data is not in the document.
+POLICY (the same rules as procedures/rules_extended.json). "Personal data" means: social security number (SSN), card number (CCN), email, phone, address, name, date of birth (DOB), and anything else that identifies a person or a payment card (OTHER, for example a card expiry date). These are NOT personal data: order, ticket, case and reference numbers, product and plan names, dates of events, and a city, state or country on its own; a street address or a postal code is an address. Data is "masked" if it is replaced by a mask such as [REDACTED] or ***; deleted data is not in the document.
 R1: every kind of personal data except an SSN must be masked before the document goes to an external destination.
 R2: an SSN never goes to an external destination, even masked.
 R3: card numbers must always be masked, internal or external.

@@ -7,7 +7,7 @@ stdin   one JSON object:
 stdout  one line of JSON: {name, root, digest, files, style_guide, format, template, min_sections}
 exit    0 when it worked; 1 with the reason on stderr (no such folder, no readable file).
 
-The digest is a file tree and then the files that explain a project, in this order: README, CLAUDE.md / AGENTS.md, build manifests,
+The digest is a file tree and then the files that explain a project, in this order: README, the coding agents' instruction files (CLAUDE.md, AGENTS.md, GEMINI.md, codex.md, QWEN.md, CONVENTIONS.md, .cursorrules, .github/copilot-instructions.md), build manifests,
 docs, changelog, entry points. Each is cut to a share of the budget. Nothing outside `source` is read (a symlink that leaves it is skipped),
 binary and very large files are skipped, and no secret-looking file (.env, keys) is read.
 """
@@ -21,6 +21,8 @@ IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "
                ".pytest_cache", ".tox", "target", ".next", "site-packages", ".egg-info"}
 SECRET = re.compile(r"(^\.env|secret|credential|\.pem$|\.key$|id_rsa|\.p12$|token)", re.I)
 TEXT_EXT = {".md", ".txt", ".rst", ".toml", ".yaml", ".yml", ".json", ".py", ".js", ".ts", ".rs", ".go", ".sh", ".cfg", ".ini", ".html"}
+AGENT_FILES = ("claude.md", "agents.md", "gemini.md", "codex.md", "qwen.md", "conventions.md", ".cursorrules", ".windsurfrules",     # what each coding agent reads
+               ".github/copilot-instructions.md")
 MANIFESTS = ["pyproject.toml", "package.json", "Cargo.toml", "go.mod", "setup.py", "setup.cfg", "requirements.txt", "Makefile"]
 ENTRY = {"cli.py", "main.py", "__main__.py", "app.py", "index.js", "index.ts", "main.rs", "main.go"}
 MAX_FILE = 400_000
@@ -89,9 +91,10 @@ def build(root: Path, budget: int):
     for name in sorted(top):
         if name.startswith("readme"):
             add(top[name], 14000)
-    for name in ("claude.md", "agents.md", "contributing.md"):
-        if name in top:
-            add(top[name], 7000)
+    byrel = {rel(p).lower(): p for p in files}
+    for name in AGENT_FILES + ("contributing.md",):
+        if name in byrel:
+            add(byrel[name], 7000)
     for name in MANIFESTS:
         if name.lower() in top:
             add(top[name.lower()], 3500)
@@ -120,6 +123,7 @@ def main() -> int:
     root = root.resolve()
     budget = int(job.get("budget") or 60000)
     guide_in = str(job.get("style_guide", ""))
+    name = str(job.get("name") or "").strip() or root.name      # a friendlier name than the folder's, for titles and the writer
     guide_path = Path(guide_in).expanduser() if "\n" not in guide_in and len(guide_in) < 1024 else None
     if guide_path is not None and guide_path.is_file():
         text, base = guide_path.read_text(encoding="utf-8"), guide_path.resolve().parent
@@ -140,8 +144,8 @@ def main() -> int:
     if not picked:
         print(f"gather: found no README, manifest or doc to read in {root}", file=sys.stderr)
         return 1
-    digest = f"PROJECT FOLDER: {root.name}\n\nFILE TREE (first {len(tree)} files):\n" + "\n".join(tree) + "\n\n" + body
-    print(json.dumps({"name": root.name, "root": str(root), "digest": digest, "files": picked, "style_guide": guide.strip(),
+    digest = f"PROJECT: {name} (folder {root.name})\n\nFILE TREE (first {len(tree)} files):\n" + "\n".join(tree) + "\n\n" + body
+    print(json.dumps({"name": name, "root": str(root), "digest": digest, "files": picked, "style_guide": guide.strip(),
                       "format": cfg.get("format", "markdown"), "template": template, "min_sections": int(cfg.get("min_sections", 3))}))
     return 0
 

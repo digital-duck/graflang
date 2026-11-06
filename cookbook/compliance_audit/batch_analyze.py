@@ -3,7 +3,7 @@
     python batch_analyze.py [--db output/experiments.db ...] [--batch ID] [--model SUBSTRING] [--out FILE]
 
 Sections: per model and variant (rates with 95% Wilson intervals, false releases first); elapsed time (median, p90, model vs rules); per document (which documents trip which
-cell); consistency across reps; paired comparison of two variants on the same documents (exact McNemar test on correct / not
+cell); consistency across repeats; paired comparison of two variants on the same documents (exact McNemar test on correct / not
 correct); hygiene (errors, ambiguous items left in released text, documents counted); cost. Nothing is rescored here: the
 scores are the ones batch_test.py stored. For other questions: sqlite3 output/experiments.db "SELECT * FROM variant_summary".
 """
@@ -102,7 +102,7 @@ def timing(rows: List[dict]) -> str:
 def by_document(rows: List[dict]) -> str:
     keys = list(cells(rows))
     docs = sorted({r["doc"] for r in rows})
-    lines = ["## By document", "", "R released, E escalated; `!` leak, `x` false escalation, `o` over-redaction, `?` error. Several reps: one symbol per rep.", "",
+    lines = ["## By document", "", "R released, E escalated; `!` leak, `x` false escalation, `o` over-redaction, `?` error. Several repeats: one symbol per repeat.", "",
              "| document | " + " | ".join(f"{v} / {m.split(':')[-1]}" for m, v in keys) + " |", "|---|" + "---|" * len(keys)]
     for d in docs:
         row = []
@@ -120,9 +120,9 @@ def by_document(rows: List[dict]) -> str:
 
 
 def consistency(rows: List[dict]) -> str:
-    out = ["## Consistency across reps", ""]
+    out = ["## Consistency across repeats", ""]
     any_reps = False
-    lines = ["| model | variant | documents with reps | documents whose outcome changed between reps |", "|---|---|---|---|"]
+    lines = ["| model | variant | documents repeated | documents whose outcome changed between repeats |", "|---|---|---|---|"]
     for (llm, variant), mine in cells(rows).items():
         per_doc: Dict[str, set] = defaultdict(set)
         count: Dict[str, int] = defaultdict(int)
@@ -134,7 +134,7 @@ def consistency(rows: List[dict]) -> str:
         if multi:
             any_reps = True
             lines.append(f"| {llm} | {variant} | {len(multi)} | {sum(len(per_doc[d]) > 1 for d in multi)} |")
-    return "\n".join(out + (lines if any_reps else ["Every cell ran once (`--reps 1`): nothing to compare."])) + "\n"
+    return "\n".join(out + (lines if any_reps else ["Every cell ran once (`--repeat 1`): nothing to compare."])) + "\n"
 
 
 def paired(rows: List[dict]) -> str:
