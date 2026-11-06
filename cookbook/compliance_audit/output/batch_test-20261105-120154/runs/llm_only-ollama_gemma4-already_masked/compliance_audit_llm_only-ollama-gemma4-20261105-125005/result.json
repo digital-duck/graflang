@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (LLM judge)",
+  "safe_document": "ORDER REVIEW (to be shared with the fraud-research vendor)\n\nOrder ORD-90417 was paid with the card [REDACTED] by [REDACTED]. The shipping name is shown as [REDACTED] and the phone\nas [REDACTED] in the order system. The order was held for review for 2 hours and released. Amount: EUR 64.00.\n\nPlease study how often held orders are released."
+}

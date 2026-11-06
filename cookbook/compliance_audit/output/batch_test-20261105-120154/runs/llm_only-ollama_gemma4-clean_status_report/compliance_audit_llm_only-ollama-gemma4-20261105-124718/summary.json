@@ -1,0 +1,44 @@
+{
+  "steps": 6,
+  "mutations": 0,
+  "llm": {
+    "adapter": "ollama",
+    "calls": 1,
+    "input_tokens": 713,
+    "output_tokens": 21,
+    "cost_usd": 0.0,
+    "ms": 1619
+  },
+  "nodes": {
+    "judge": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 1620
+    },
+    "load_document": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 22
+    },
+    "release_guard": {
+      "type": "GUARD",
+      "n": 1,
+      "ms": 2
+    },
+    "compliant_first": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "audit_released": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "released": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

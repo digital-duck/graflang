@@ -1,0 +1,10 @@
+{
+  "graph": "compliance_audit_llm_only",
+  "adapter": "ollama",
+  "model": "gemma4",
+  "params": {
+    "document": "/home/gongai/projects/digital-duck/graflang/cookbook/compliance_audit/input/batch-test/csv_table.txt",
+    "destination": "external_api"
+  },
+  "started": "2026-11-05T12:49:32"
+}

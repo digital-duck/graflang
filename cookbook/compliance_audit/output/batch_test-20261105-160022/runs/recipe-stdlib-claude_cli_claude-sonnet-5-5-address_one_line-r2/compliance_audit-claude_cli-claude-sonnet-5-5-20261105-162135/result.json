@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (stdlib engine)",
+  "safe_document": "DELIVERY EXCEPTION REPORT (to be sent to the carrier for a delivery study)\n\nParcel PX-77120 could not be delivered on 9 November. The label read: Ship to: [REDACTED], Brisbane QLD [REDACTED], Australia.\nThe driver reported that the unit number was not visible from the street and that nobody answered. The parcel was returned to the\ndepot on 10 November and is scheduled for a second attempt.\n\nPlease compare the failure rate of unit-number addresses with house-number addresses in the same suburbs."
+}

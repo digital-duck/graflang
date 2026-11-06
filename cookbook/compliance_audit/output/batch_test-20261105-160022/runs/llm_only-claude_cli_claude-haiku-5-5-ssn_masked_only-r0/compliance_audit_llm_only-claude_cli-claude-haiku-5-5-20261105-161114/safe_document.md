@@ -1,0 +1,4 @@
+IDENTITY CHECK LOG (to be sent to the audit vendor)
+
+12 Nov, 10:02  Call from [REDACTED] about her pension statement. Identity checked with [REDACTED] and the identifier on file. The check passed.
+12 Nov, 10:09  Statement re-sent. Case closed. Please review how long identity checks take on average.

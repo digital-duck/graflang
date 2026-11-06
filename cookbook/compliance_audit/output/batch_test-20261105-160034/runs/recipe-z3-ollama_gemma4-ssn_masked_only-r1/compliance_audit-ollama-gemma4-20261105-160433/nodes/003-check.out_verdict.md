@@ -1,0 +1,1 @@
+{"status": "OK", "engine": "z3", "compliant": false, "violated": ["UNREADABLE_PII_MAP"], "error": "TypeError: list indices must be integers or slices, not str", "facts": {}}

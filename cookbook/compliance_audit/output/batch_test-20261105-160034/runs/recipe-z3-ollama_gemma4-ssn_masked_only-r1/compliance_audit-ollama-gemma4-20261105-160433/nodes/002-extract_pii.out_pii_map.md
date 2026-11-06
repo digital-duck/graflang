@@ -1,0 +1,1 @@
+[{"type": "NAME", "masked": false}, {"type": "DOB", "masked": false}, {"type": "OTHER", "masked": true}]

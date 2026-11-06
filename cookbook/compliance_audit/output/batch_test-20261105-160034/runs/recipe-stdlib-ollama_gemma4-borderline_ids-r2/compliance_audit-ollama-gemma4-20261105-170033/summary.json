@@ -1,0 +1,69 @@
+{
+  "steps": 11,
+  "mutations": 0,
+  "llm": {
+    "adapter": "ollama",
+    "calls": 3,
+    "input_tokens": 1355,
+    "output_tokens": 1297,
+    "cost_usd": 0.0,
+    "ms": 25474
+  },
+  "nodes": {
+    "redact": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 23485
+    },
+    "extract_again": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 1051
+    },
+    "extract_pii": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 939
+    },
+    "recheck": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 19
+    },
+    "check": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 18
+    },
+    "load_document": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 17
+    },
+    "release_guard": {
+      "type": "GUARD",
+      "n": 1,
+      "ms": 2
+    },
+    "compliant_first": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "compliant_second": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "audit_released": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "released": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

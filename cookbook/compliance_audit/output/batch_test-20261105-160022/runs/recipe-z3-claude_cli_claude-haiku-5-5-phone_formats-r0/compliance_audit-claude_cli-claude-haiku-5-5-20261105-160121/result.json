@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (z3 engine)",
+  "safe_document": "CALL-BACK LIST (to be shared with the telephony vendor for a routing test)\n\nPlease test routing for these numbers as they were typed by agents:\n[REDACTED], [REDACTED], [REDACTED], [REDACTED], [REDACTED].\nThe first two belong to one customer, [REDACTED]; the others belong to three other customers. The vendor does not need to know\nwhose they are. We want to know whether all five formats are routed to the right country."
+}

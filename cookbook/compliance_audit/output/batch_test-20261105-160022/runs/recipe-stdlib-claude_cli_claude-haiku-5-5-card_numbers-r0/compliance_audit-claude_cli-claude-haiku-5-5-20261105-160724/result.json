@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (stdlib engine)",
+  "safe_document": "PAYMENT TEST LOG (to be shared with the payments vendor)\n\nThree test charges were made against the sandbox. Visa [REDACTED], expiry [REDACTED]. Mastercard [REDACTED], expiry [REDACTED].\nAmerican Express [REDACTED], expiry [REDACTED]. All three were approved in the sandbox. The customer-facing receipt shows\nonly \"card ending [REDACTED]\" for the first charge. The amount was EUR 1.00 each time.\n\nPlease confirm that the sandbox logs mask the full numbers."
+}

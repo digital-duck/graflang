@@ -1,0 +1,4 @@
+limits:
+  max_llm_calls: 5
+  max_steps: 80
+  wall_time_s: 600

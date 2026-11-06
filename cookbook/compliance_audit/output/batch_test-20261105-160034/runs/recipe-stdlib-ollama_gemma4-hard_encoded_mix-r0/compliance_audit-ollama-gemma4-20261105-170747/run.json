@@ -1,0 +1,12 @@
+{
+  "graph": "compliance_audit",
+  "adapter": "ollama",
+  "model": "gemma4",
+  "params": {
+    "document": "/home/gongai/projects/digital-duck/graflang/cookbook/compliance_audit/input/batch-test/hard_encoded_mix.txt",
+    "destination": "external_api",
+    "engine": "stdlib",
+    "rules_file": "./procedures/rules_extended.json"
+  },
+  "started": "2026-11-05T17:07:47"
+}

@@ -1,0 +1,59 @@
+{
+  "steps": 9,
+  "mutations": 0,
+  "llm": {
+    "adapter": "claude_cli",
+    "calls": 3,
+    "input_tokens": 1700,
+    "output_tokens": 124,
+    "cost_usd": 0.0,
+    "ms": 8184
+  },
+  "nodes": {
+    "judge": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 3932
+    },
+    "redact": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 2862
+    },
+    "judge_again": {
+      "type": "GENERATE",
+      "n": 1,
+      "ms": 1392
+    },
+    "load_document": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 17
+    },
+    "release_guard": {
+      "type": "GUARD",
+      "n": 1,
+      "ms": 2
+    },
+    "compliant_first": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "compliant_second": {
+      "type": "EVALUATE",
+      "n": 1,
+      "ms": 0
+    },
+    "audit_released": {
+      "type": "SOLVE",
+      "n": 1,
+      "ms": 0
+    },
+    "released": {
+      "type": "OUTPUT",
+      "n": 1,
+      "ms": 0
+    }
+  }
+}

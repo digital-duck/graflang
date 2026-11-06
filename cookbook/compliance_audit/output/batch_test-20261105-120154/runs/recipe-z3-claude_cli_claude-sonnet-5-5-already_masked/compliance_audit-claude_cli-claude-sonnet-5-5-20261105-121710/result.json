@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (z3 engine)",
+  "safe_document": "ORDER REVIEW (to be shared with the fraud-research vendor)\n\nOrder ORD-90417 was paid with the card **** **** **** 1111 by m***@example.com. The shipping name is shown as [NAME] and the phone\nas [PHONE] in the order system. The order was held for review for 2 hours and released. Amount: EUR 64.00.\n\nPlease study how often held orders are released.\n"
+}

@@ -1,0 +1,12 @@
+{
+  "graph": "compliance_audit",
+  "adapter": "ollama",
+  "model": "gemma4",
+  "params": {
+    "document": "/home/gongai/projects/digital-duck/graflang/cookbook/compliance_audit/input/batch-test/chat_log_long.txt",
+    "destination": "external_api",
+    "engine": "z3",
+    "rules_file": "./procedures/rules_extended.json"
+  },
+  "started": "2026-11-05T16:21:51"
+}

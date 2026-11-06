@@ -1,0 +1,5 @@
+MEETING MINUTES, vendor review (to be shared with the vendor)
+
+Present: Ms. Delgado (finance), Prof. Ingrid Solheim (external advisor), Mr. T. Nakamura (operations) and two guests.
+Ms. Delgado said the Q3 invoice cycle took 11 days instead of 7. Prof. Solheim recommended splitting approvals by amount. Mr. T. Nakamura
+agreed to trial the change in January. Action: operations to report the cycle time again after the trial.

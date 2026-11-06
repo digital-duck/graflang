@@ -1,0 +1,10 @@
+{"entities": [
+{"type": "NAME", "masked": false},
+{"type": "EMAIL", "masked": false},
+{"type": "NAME", "masked": false},
+{"type": "SSN", "masked": false},
+{"type": "CCN", "masked": false},
+{"type": "DOB", "masked": false},
+{"type": "ADDRESS", "masked": false},
+{"type": "PHONE", "masked": false}
+]}

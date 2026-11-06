@@ -1,0 +1,25 @@
+FORWARDED THREAD, shared with the vendor for a delivery-delay analysis
+
+From: [REDACTED]
+To: [REDACTED]
+Subject: FW: FW: Aurora X2 replacement, order ORD-55021, ticket TCK-90502
+
+> > Hi team, this customer has now written three times. [REDACTED] is on the plan since January and the unit shipped
+> > with firmware 5.0.2. The delivery window we promised was 09:00-12:00 and it was missed by 2 days.
+> >
+> > From her last message: "[REDACTED] here again. I am at [REDACTED], Leeds, and nobody was home on the 9th because I was at work. Please do not leave it with the neighbour."
+> >
+> > She also asked us to talk to her brother-in-law about access to the flat. His name is [REDACTED], mobile
+> > [REDACTED], he has a spare key.
+>
+> Thanks Hannah. I will rebook with the carrier. [REDACTED]'s email on the account is [REDACTED], please use
+> that and not the old one. Invoice INV-2026-0099 was credited already.
+
+Update from logistics: [REDACTED] has been told by phone
+on [REDACTED] and agreed. Replacement shipped under order ORD-55021, tracking in ticket TCK-90502. Total delay 16 days.
+Please look at why windows get missed and how long the rebooking takes.
+
+Regards,
+Hannah, Northwind support
+
+(Footnote for the record: date of birth on file for the account holder, [REDACTED], used for the identity check on 3 September.)

@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (z3 engine)",
+  "safe_document": "ACCESS REVIEW NOTE (to be sent to the audit vendor)\n\nEmployee [REDACTED] (job title: [REDACTED]) logged in from [REDACTED] on 6 November at 02:14 and exported the Q3 revenue\nreport. The VPN session id was [REDACTED]. The employee's manager, [REDACTED] from finance, was told the next morning. The export\nwas approved retroactively. Please review whether off-hours exports need a second approver."
+}

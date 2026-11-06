@@ -1,0 +1,8 @@
+{"entities": [
+{"type": "CCN", "masked": false},
+{"type": "OTHER", "masked": false},
+{"type": "CCN", "masked": false},
+{"type": "OTHER", "masked": false},
+{"type": "CCN", "masked": false},
+{"type": "OTHER", "masked": false}
+]}

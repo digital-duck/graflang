@@ -1,0 +1,4 @@
+{
+  "audit": "released to external_api (LLM judge)",
+  "safe_document": "```\nname,email,phone,city,plan,tickets_last_90_days\n[REDACTED],[REDACTED],[REDACTED],Denver,Pro,4\n[REDACTED],[REDACTED],[REDACTED],Boulder,Basic,1\n[REDACTED],[REDACTED],[REDACTED],Denver,Pro,7\n[REDACTED],[REDACTED],[REDACTED],Aurora,Enterprise,12\n[REDACTED],[REDACTED],[REDACTED],Boulder,Basic,0\n[REDACTED],[REDACTED],[REDACTED],Denver,Pro,3\n\n# Study request (to the analytics vendor): relate the plan to the number of tickets in the last 90 days.\n```"
+}

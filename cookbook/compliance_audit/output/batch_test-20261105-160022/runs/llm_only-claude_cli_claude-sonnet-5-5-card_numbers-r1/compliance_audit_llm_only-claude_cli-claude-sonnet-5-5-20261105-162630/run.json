@@ -1,0 +1,10 @@
+{
+  "graph": "compliance_audit_llm_only",
+  "adapter": "claude_cli",
+  "model": "claude-sonnet-5-5",
+  "params": {
+    "document": "/home/gongai/projects/digital-duck/graflang/cookbook/compliance_audit/input/batch-test/card_numbers.txt",
+    "destination": "external_api"
+  },
+  "started": "2026-11-05T16:26:30"
+}
