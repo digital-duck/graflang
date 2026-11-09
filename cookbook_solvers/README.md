@@ -123,3 +123,16 @@ bash cookbook/tools/lean/setup_lean.sh --with-mathlib    # ~5 GB of prebuilt ole
 ```
 
 It enables Mathlib in the `spl_lean` lake project, runs `lake update mathlib` and `lake exe cache get` (it retries the download up to three times). To keep the Lean stack on another disk, set `ELAN_HOME`, `SPL_LEAN_REPL_DIR` and `SPL_LEAN_PROJECT_DIR` before running it and keep them set in your shell profile, because the REPL reads the same variables at run time. Check it with `graf run cookbook_solvers/neurosymbolic/symbolic_math.graph.yaml --param backend=lean --param problem="the square of any real number is nonnegative"`; the first start is slow because the REPL imports Mathlib once. The details are in SPL.py's `docs/GUIDE/SETUP.md`, section 6.
+
+
+## References
+
+### Z3
+
+- [Z3 Tutorial Colab Notebook](https://colab.research.google.com/github/philzook58/z3_tutorial/blob/master/Z3%20Tutorial.ipynb)
+    - [Getting Started with Z3: A Guide](https://www.philipzucker.com/z3-rise4fun/guide.html)
+- [SAT/SMT by Example](https://smt.st/SAT_SMT_by_example.pdf)
+- [Z3 Intro - Microsoft](https://microsoft.github.io/z3guide/docs/logic/intro/)
+    - [Z3 Guide](https://github.com/microsoft/z3guide)
+- [Programming Z3](https://theory.stanford.edu/~nikolaj/programmingz3.html)
+- [CSC410 Tutorial: Z3](https://www.cs.toronto.edu/~victorn/tutorials/z3/index.html)
