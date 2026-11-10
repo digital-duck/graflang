@@ -8,7 +8,7 @@ workflow:
       generation for enterprise AI
   - name: skills_dir
     type: TEXT
-    default: cookbook_pocketflow/agent_skills/skills
+    default: skills
   - name: default_skill
     type: TEXT
     default: default.md
@@ -243,7 +243,7 @@ nodes:
 
           Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           return p.read_text(encoding='utf-8')
       _spl_result = read_file(skill_path)
     result: _spl_result

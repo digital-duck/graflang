@@ -15,7 +15,7 @@ from graphlang.grafv import ui
 
 def settings_page() -> None:
     saved = ui.settings()
-    st.title("Settings")
+    st.header("Settings")
     names = ws.providers()
     provider = st.selectbox("Provider", names, index=names.index(saved["provider"]) if saved["provider"] in names else 0, key="set_provider",
                             help="the dd-llm adapter the Create and Edit chats call; `graf run` has its own --llm")

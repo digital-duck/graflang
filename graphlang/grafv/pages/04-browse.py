@@ -24,19 +24,25 @@ def _badges(e) -> str:
 def browse_page() -> None:
     ui.settings()
     index = ui.recipe_index()
-    st.title("Browse")
+    st.header("Browse")
     if not index.entries:
         st.info("No recipes yet. Install the cookbook on the Import / Export page, or create an app on the Create page.")
         return
-    note_col, refresh_col = st.columns([5, 1])
-    note_col.caption(f"search: {index.note}")
-    if refresh_col.button("Refresh", key="browse_refresh", help="look for an embedding model again and re-read the recipes"):
-        ui.recipe_index(rebuild=True)
-        st.rerun()
-    query = st.text_input("Search the recipes", key="browse_query", placeholder="e.g. write and test code, check personal data, loop until it passes")
-    left, middle = st.columns([2, 2])
-    roots = left.multiselect("Where", sorted({e.root for e in index.entries}), default=sorted({e.root for e in index.entries}), key="browse_roots")
-    no_code = middle.checkbox("Only recipes that run no programs", key="browse_no_code")
+    with st.sidebar:                                    # the filters live in the sidebar; the page is the search and the cards
+        where = sorted({e.root for e in index.entries})
+        default = ["apps"] if "apps" in where else where        # your apps first: a card per shipped recipe too makes the page slow
+        roots = st.multiselect("Where", where, default=default, key="browse_roots",
+                               help="the folders of the work area to list and search; add more to see the shipped recipes")
+        no_code = st.checkbox("Only recipes that run no programs", key="browse_no_code")
+        hidden = {r: sum(1 for e in index.entries if e.root == r) for r in where if r not in roots}
+        if hidden:
+            st.info(f"**{sum(hidden.values())} more recipes** to browse in "
+                    + ", ".join(f"{r} ({n})" for r, n in hidden.items()) + ": add them under **Where**.")
+        if st.button("Refresh", key="browse_refresh", help="look for an embedding model again and re-read the recipes"):
+            ui.recipe_index(rebuild=True)
+            st.rerun()
+    query = st.text_input(f"Search the recipes · {index.note}", key="browse_query",
+                          placeholder="e.g. write and test code, check personal data, loop until it passes")
     if query.strip():
         hits = index.search(query, k=8, allow_code=not no_code, roots=roots)
         st.caption(f"{len(hits)} recipe(s) close to the request" if hits else "No recipe is close to that. Try other words, or browse everything by clearing the search.")

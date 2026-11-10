@@ -116,7 +116,7 @@ def create_page() -> None:
         _run_chat(request, str(name), bool(allow_code), int(rounds), attachments.images(found), references or None)
         st.rerun()
 
-    st.title("Create")
+    st.header("Create")
     if draft is None:
         st.info("Describe what the app should do in the chat, for example: *classify a support message as urgent or normal, then draft a reply*. "
                 "Give it a name first (under *Settings for this chat*).")

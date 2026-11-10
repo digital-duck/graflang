@@ -91,6 +91,7 @@ def test_a_node_can_be_removed(at):
 
 
 def test_the_run_tab_runs_the_graph_as_it_is_with_the_mock(at):
+    at.selectbox(key="run_adapter").select("mock").run()
     at.text_input(key="run_in_topic").set_value("ducks").run()
     button(at, "run_go").click().run()
     assert not at.exception and any("steps" in s.value for s in at.success)
@@ -197,12 +198,16 @@ def test_a_prompt_written_as_a_block_shows_as_text_and_is_written_back_as_a_bloc
     assert "Be brief." in after and after.count("|-") >= before.count("|-")
 
 
-def test_the_editor_panel_can_be_hidden_to_give_the_picture_the_whole_width(at):
-    assert at.toggle(key="show_panel").value is True and at.selectbox(key="node_pick")
-    at.toggle(key="show_panel").set_value(False).run()
+def test_the_sidebar_shows_the_graph_the_editor_or_both_never_neither(at):
+    assert at.sidebar.toggle(key="show_graph").value is True and at.sidebar.toggle(key="show_panel").value is True
+    assert at.selectbox(key="node_pick") and at.tabs
+    at.sidebar.toggle(key="show_panel").set_value(False).run()                      # the graph alone: the whole width
     assert not at.exception and not at.tabs and not [s for s in at.selectbox if s.key == "node_pick"]
-    at.toggle(key="show_panel").set_value(True).run()
-    assert at.selectbox(key="node_pick")
+    at.sidebar.toggle(key="show_panel").set_value(True).run()
+    at.sidebar.toggle(key="show_graph").set_value(False).run()                      # the editor alone
+    assert not at.exception and at.tabs and at.selectbox(key="node_pick")
+    at.sidebar.toggle(key="show_panel").set_value(False).run()                      # neither: the graph comes back
+    assert not at.exception and at.toggle(key="show_graph").value is True and not at.tabs
 
 
 # ── the Source tab and the file browser ──────────────────────────────────────────────────────────
@@ -306,8 +311,7 @@ def test_a_real_model_run_is_capped_in_calls(at, monkeypatch):
             calls.append(prompt)
             return "text"
     monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: Stub())
-    real = at.selectbox(key="run_adapter").options[1]
-    at.selectbox(key="run_adapter").select(real).run()
+    assert at.selectbox(key="run_adapter").value != "mock"                    # the real model is the default
     assert at.number_input(key="run_max_calls").value == 10                  # a real model always runs under a cap
     at.number_input(key="run_max_calls").set_value(1).run()
     at.text_input(key="run_in_topic").set_value("ducks").run()
@@ -317,6 +321,7 @@ def test_a_real_model_run_is_capped_in_calls(at, monkeypatch):
 
 
 def test_the_mock_run_has_no_cap_box(at):
+    at.selectbox(key="run_adapter").select("mock").run()
     assert not [n for n in at.number_input if n.key == "run_max_calls"]
 
 
@@ -342,9 +347,9 @@ def test_running_a_graph_with_a_program_needs_an_acknowledgement(at):
     at.run()
     assert not at.exception, at.exception
     assert any("runs programs on your computer" in w.value and "shell" in w.value for w in at.warning)
+    assert at.checkbox(key="run_ack_code").value and not button(at, "run_go").disabled      # ticked by default
+    at.checkbox(key="run_ack_code").uncheck().run()
     assert button(at, "run_go").disabled
-    at.checkbox(key="run_ack_code").check().run()
-    assert not button(at, "run_go").disabled
 
 
 def test_a_graph_without_programs_runs_without_the_acknowledgement(at):
@@ -352,7 +357,7 @@ def test_a_graph_without_programs_runs_without_the_acknowledgement(at):
 
 
 def test_the_dry_run_is_not_called_mock_in_the_page(at):
-    assert at.selectbox(key="run_adapter").options[0] == "dry run: placeholder answers, no model"
+    assert at.selectbox(key="run_adapter").options[1] == "dry run: placeholder answers, no model"
 
 
 def test_the_node_dropdown_shows_the_pictures_labels_and_keeps_the_ids_as_values(at):

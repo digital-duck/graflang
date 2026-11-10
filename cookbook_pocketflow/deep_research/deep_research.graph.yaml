@@ -7,7 +7,7 @@ workflow:
     default: Recent advances in quantum error correction
   - name: out
     type: TEXT
-    default: cookbook_pocketflow/deep_research/output/report.txt
+    default: output/report.txt
   outputs:
   - name: report
     type: TEXT
@@ -872,7 +872,7 @@ nodes:
           Creates parent directories automatically.
           Returns the absolute path written.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           p.parent.mkdir(parents=True, exist_ok=True)
           m = str(mode).strip().lower()
           if m not in ('w', 'a'):

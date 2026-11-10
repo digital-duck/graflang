@@ -17,7 +17,7 @@ workflow:
     default: 10
   - name: out_dir
     type: TEXT
-    default: cookbook_pocketflow/map_reduce/output
+    default: output
   outputs:
   - name: report
     type: TEXT
@@ -738,7 +738,7 @@ nodes:
 
           Returns the absolute path of the directory.
           """
-          p = pathlib.Path(str(dir_path).strip())
+          p = pathlib.Path(str(dir_path).strip()).expanduser()
           p.mkdir(parents=True, exist_ok=True)
           return str(p.resolve())
       _spl_result = make_dir(out_dir)
@@ -799,7 +799,7 @@ nodes:
           Creates parent directories automatically.
           Returns the absolute path written.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           p.parent.mkdir(parents=True, exist_ok=True)
           m = str(mode).strip().lower()
           if m not in ('w', 'a'):

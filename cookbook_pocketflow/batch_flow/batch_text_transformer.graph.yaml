@@ -45,7 +45,7 @@ nodes:
 
           Returns the absolute path of the directory.
           """
-          p = pathlib.Path(str(dir_path).strip())
+          p = pathlib.Path(str(dir_path).strip()).expanduser()
           p.mkdir(parents=True, exist_ok=True)
           return str(p.resolve())
       _spl_result = make_dir(output_dir)

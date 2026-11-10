@@ -4,10 +4,10 @@ workflow:
   inputs:
   - name: lead_list_path
     type: TEXT
-    default: cookbook_pocketflow/lead_generation/data/leads.csv
+    default: data/leads.csv
   - name: output_path
     type: TEXT
-    default: cookbook_pocketflow/lead_generation/output/scored_leads.jsonl
+    default: output/scored_leads.jsonl
   - name: max_leads
     type: INTEGER
     default: 100
@@ -37,7 +37,7 @@ nodes:
 
           Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           return p.read_text(encoding='utf-8')
       _spl_result = read_file(lead_list_path)
     result: _spl_result

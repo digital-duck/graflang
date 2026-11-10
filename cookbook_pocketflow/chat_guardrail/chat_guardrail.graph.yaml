@@ -13,7 +13,7 @@ workflow:
     default: 10
   - name: out_dir
     type: TEXT
-    default: cookbook_pocketflow/chat_guardrail/output
+    default: output
   outputs:
   - name: conversation_log
     type: TEXT
@@ -453,7 +453,7 @@ nodes:
           Creates parent directories automatically.
           Returns the absolute path written.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           p.parent.mkdir(parents=True, exist_ok=True)
           m = str(mode).strip().lower()
           if m not in ('w', 'a'):

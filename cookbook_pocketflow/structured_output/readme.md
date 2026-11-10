@@ -46,7 +46,8 @@ conda activate graf
 cd ~/projects/digital-duck/graflang
 
 graf run cookbook_pocketflow/structured_output/structured_output.graph.yaml \
-    --llm ollama:gemma4
+    --llm claude_cli:claude-sonnet-5-5
+#    --llm ollama:gemma4
 ```
 
 ### ToDO

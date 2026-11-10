@@ -4,10 +4,10 @@ workflow:
   inputs:
   - name: input_dir
     type: TEXT
-    default: cookbook_pocketflow/tool_pdf_vision/data
+    default: data
   - name: output_file
     type: TEXT
-    default: cookbook_pocketflow/tool_pdf_vision/output/pocket-flow.md
+    default: output/pocket-flow.md
   - name: work_dir
     type: TEXT
     default: /tmp/pdf_ocr_work
@@ -584,7 +584,7 @@ nodes:
           Creates parent directories automatically.
           Returns the absolute path written.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           p.parent.mkdir(parents=True, exist_ok=True)
           m = str(mode).strip().lower()
           if m not in ('w', 'a'):

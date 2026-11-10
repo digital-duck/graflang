@@ -207,7 +207,8 @@ def problems_tab(editor: GraphEditor) -> None:
 def run_tab(editor: GraphEditor) -> None:
     inputs = editor.data()["workflow"].get("inputs", [])
     spec = ws.llm_spec(ui.settings())
-    adapter = str(st.selectbox("LLM", ["mock", spec], key="run_adapter", format_func=lambda a: "dry run: placeholder answers, no model" if a == "mock" else a,
+    # the model from Settings comes first (a real run is always capped below); the dry run is the other choice
+    adapter = str(st.selectbox("LLM", [spec, "mock"], key="run_adapter", format_func=lambda a: "dry run: placeholder answers, no model" if a == "mock" else a,
                                help=f"a dry run answers every model step with placeholder text; {spec} (from Settings) makes real, billed model calls"))
     max_calls = None
     if adapter != "mock":
@@ -223,7 +224,7 @@ def run_tab(editor: GraphEditor) -> None:
     if programs:
         st.warning("Running this graph runs programs on your computer, whichever model you choose:\n\n" + "\n".join(f"- {p}" for p in programs)
                    + "\n\nRead them first (the Source tab, and the files next to the graph).")
-        acknowledged = st.checkbox("I have read them: run anyway", key="run_ack_code")
+        acknowledged = st.checkbox("I have read them: run anyway", value=True, key="run_ack_code")     # ticked by default: the warning above stays, one click less
     if st.button("Run", key="run_go", disabled=not acknowledged):
         with st.spinner("running"):
             name, _, model = adapter.partition(":")
@@ -380,7 +381,7 @@ def edit_page() -> None:
     ui.settings()
     opened = st.session_state.get("opened")
     if not opened:
-        st.title("Edit")
+        st.header("Edit")
         st.info("Open a recipe: pick one under *Browse files* in the sidebar, or create, import or install some on the other pages.")
         with st.sidebar:
             open_box(workspace)
@@ -388,7 +389,7 @@ def edit_page() -> None:
     target = st.session_state.get("target") or opened          # a clone, once one has been made
     path = Path(target)
     if workspace.is_shipped(path):
-        st.title(workspace.recipe_folder(path).name)
+        st.header(workspace.recipe_folder(path).name)
         st.info("This is a shipped recipe and is read-only. Copy it to your apps first; the copy is the one you edit and the original stays as it is.")
         if ui.unsaved():
             st.caption("Save or undo your edits to the other file first.")
@@ -449,6 +450,7 @@ def edit_page() -> None:
             if st.button("Discard the prompt changes", key="discard_staged"):
                 staged.clear()
                 st.rerun()
+        view_box()
         clone_box(editor, opened, dirty)
         open_box(workspace, path)
         edit_chat(editor, path.parent, f"edit_{target}", staged)
@@ -457,19 +459,40 @@ def edit_page() -> None:
     if flash:
         (st.success if flash[0] == "success" else st.error)(flash[1])
 
-    _, toggle = st.columns([5, 1])
-    show_panel = toggle.toggle("Editor panel", value=True, key="show_panel", help="Hide the tabs on the right to give the picture the whole width.")
-    if not show_panel:
-        picture(editor)
-        return
-    left, right = st.columns([60, 40], gap="small")
-    with left:
-        picture(editor)
-    with right:
-        tabs = st.tabs(["Source", "Node", "Add node", "Edges", "Problems", "Run", "Logs"])
-        for tab, body in zip(tabs, (source_tab, node_tab, add_tab, edge_tab, problems_tab, run_tab, logs_tab)):
-            with tab:
-                body(editor)
+    show_graph, show_panel = st.session_state.get("show_graph", True), st.session_state.get("show_panel", True)
+    if show_graph and show_panel:
+        left, right = st.columns([60, 40], gap="small")
+    else:
+        left = right = st.container()                  # one of them: it gets the whole width
+    if show_graph:
+        with left:
+            picture(editor)
+    if show_panel:
+        with right:
+            panel(editor)
+
+
+def panel(editor: GraphEditor) -> None:
+    tabs = st.tabs(["Source", "Node", "Add node", "Edges", "Problems", "Run", "Logs"])
+    for tab, body in zip(tabs, (source_tab, node_tab, add_tab, edge_tab, problems_tab, run_tab, logs_tab)):
+        with tab:
+            body(editor)
+
+
+def _keep_one_shown() -> None:
+    """Turning both off would leave an empty page: the graph comes back."""
+    if not st.session_state.get("show_graph", True) and not st.session_state.get("show_panel", True):
+        st.session_state["show_graph"] = True
+
+
+def view_box() -> None:
+    """What the page shows: the graph, the editor tabs, or both side by side (at least one of them)."""
+    st.session_state.setdefault("show_graph", True)
+    st.session_state.setdefault("show_panel", True)
+    graph_col, panel_col = st.columns(2)
+    graph_col.toggle("Graph", key="show_graph", on_change=_keep_one_shown, help="the picture of the workflow")
+    panel_col.toggle("Editor", key="show_panel", on_change=_keep_one_shown,
+                     help="the tabs (Source, Node, Run, Logs, ...); turn the graph off to give them the whole width")
 
 if __name__ == "__main__":                # Streamlit runs a page file as a script; tests import the functions
     edit_page()

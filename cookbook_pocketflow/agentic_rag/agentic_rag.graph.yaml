@@ -7,7 +7,7 @@ workflow:
     default: What is retrieval-augmented generation and when should I use it?
   - name: store_path
     type: TEXT
-    default: cookbook_pocketflow/agentic_rag/data/documents.json
+    default: data/documents.json
   - name: max_iterations
     type: INTEGER
     default: 10

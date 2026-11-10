@@ -253,7 +253,7 @@ def test_the_app_opens_on_the_welcome_page_and_says_what_graphlang_is(home, monk
     shutil.copytree(ROOT / "cookbook" / "self_refine", home / "cookbook" / "self_refine", ignore=shutil.ignore_patterns("output"))
     at = AppTest.from_file(str(APP), default_timeout=30).run()
     assert not at.exception, at.exception
-    assert at.title[0].value == "GraphLang" and any("graph is the program" in m.value for m in at.markdown)
+    assert at.header[0].value == "GraphLang" and any("graph is the program" in m.value for m in at.markdown)
     assert [m.label for m in at.metric][:2] == ["Recipes", "Your apps"] and at.metric[0].value == "1"
     assert not at.info                                                                   # there are recipes, so no "install the cookbook" hint
 
@@ -436,7 +436,7 @@ def test_browse_lists_the_recipes_and_searches_them_by_words(home):
     install(home)
     at = page("browse").run()
     assert not at.exception, at.exception
-    assert any("recipe(s)" in c.value for c in at.caption) and any(c.value.startswith("search: ") for c in at.caption)
+    assert any("recipe(s)" in c.value for c in at.caption) and at.text_input(key="browse_query").label.startswith("Search the recipes · ")
     at.text_input(key="browse_query").set_value("review code and run tests in a repair loop").run()
     assert not at.exception
     titles = " ".join(m.value for m in at.markdown)
@@ -518,10 +518,24 @@ def test_browse_lists_one_card_per_recipe_not_one_per_file(home):
     assert found.count("cookbook/compliance_audit") == 1
 
 
+def test_browse_shows_your_apps_first_and_says_more_are_there(home):
+    install(home)
+    shutil.copytree(home / "cookbook" / "self_refine", home / "apps" / "my_refine")
+    at = page("browse").run()
+    assert not at.exception, at.exception
+    assert at.multiselect(key="browse_roots").value == ["apps"]
+    keys = [m.value.split("`")[1] for m in at.markdown if m.value.startswith("**") and "·" in m.value]
+    assert keys == ["apps/my_refine"]
+    assert any("more recipes" in i.value and "cookbook" in i.value for i in at.sidebar.info)
+    assert at.sidebar.multiselect(key="browse_roots") and at.sidebar.checkbox(key="browse_no_code") and button(at.sidebar, "browse_refresh")
+    at.multiselect(key="browse_roots").select("cookbook").run()
+    assert not [i for i in at.sidebar.info if "more recipes" in i.value]
+
+
 def test_browse_says_which_signals_the_search_uses_and_the_embedding_setting_is_on_the_settings_page(home):
     install(home)
     at = page("browse").run()
-    assert any("words only" in c.value for c in at.caption if c.value.startswith("search:"))
+    assert "words only" in at.text_input(key="browse_query").label
     settings = page("settings").run()
     assert settings.text_input(key="set_embedding").value == "none"
     settings.text_input(key="set_embedding").set_value("ollama:qwen3-embedding:0.6b").run()

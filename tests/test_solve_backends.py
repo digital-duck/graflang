@@ -76,6 +76,18 @@ def test_the_same_graph_gives_the_same_result_with_either_backend():
 
 
 @needs_kernel
+def test_a_relative_path_in_a_kernel_is_the_graphs_folder_like_a_subprocess(tmp_path, monkeypatch):
+    """A recipe reads `data/x.txt` wherever it was copied and wherever the process started (`backend: subprocess` already runs there)."""
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "x.txt").write_text("hello")
+    monkeypatch.chdir(ROOT)                                                  # the process starts somewhere else
+    read = {"backend": "kernel", "code": "import pathlib; text = pathlib.Path(path).read_text()", "result": "text"}
+    graph = build([("s", read, ["in_path"])], {"path": "data/x.txt"})
+    graph["_source_dir"] = str(tmp_path)
+    assert GraphLangRuntime(graph, verbose=False).execute({"path": "data/x.txt"}) == {"result": "hello"}
+
+
+@needs_kernel
 def test_bound_values_are_data_never_code():
     hostile = "'); __import__('os').system('touch /tmp/graflang-pwned'); ('"
     _, out = run([("s", {"backend": "kernel", "code": "shown = note", "result": "shown"}, ["in_note"])], {"note": hostile})
@@ -347,7 +359,7 @@ def test_a_kernel_name_picks_the_kernel_and_one_kernel_is_kept_per_name(monkeypa
     started = []
 
     class Fake:
-        def __init__(self, seed=None, kernel_name="python3"):
+        def __init__(self, seed=None, kernel_name="python3", cwd=None):
             started.append(kernel_name)
 
         def close(self):

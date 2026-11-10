@@ -4,10 +4,10 @@ workflow:
   inputs:
   - name: resume_path
     type: TEXT
-    default: cookbook_pocketflow/structured_output/data/resume.txt
+    default: data/resume.txt
   - name: skill_list_path
     type: TEXT
-    default: cookbook_pocketflow/structured_output/data/skills.txt
+    default: data/skills.txt
   - name: max_yaml_retries
     type: INTEGER
     default: 3
@@ -37,7 +37,7 @@ nodes:
 
           Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           return p.read_text(encoding='utf-8')
       _spl_result = read_file(resume_path)
     result: _spl_result
@@ -66,7 +66,7 @@ nodes:
 
           Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           return p.read_text(encoding='utf-8')
       _spl_result = read_file(skill_list_path)
     result: _spl_result

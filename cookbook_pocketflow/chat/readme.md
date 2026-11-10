@@ -44,7 +44,7 @@ conda activate graf
 cd ~/projects/digital-duck/graflang
 
 graf run cookbook_pocketflow/chat/chat.graph.yaml \
-    --llm claude_cli:claude-sonnet-4-6
+    --llm claude_cli:claude-sonnet-5-5
 ```
 
 ## Extend it

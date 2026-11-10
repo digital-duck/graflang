@@ -23,21 +23,24 @@ FEATURES = [
 
 
 def _link(key: str, label: str) -> None:
+    """The page's name as a link to it (with the page's icon); plain bold text when the page is not known (a test, a lone page)."""
     pages = st.session_state.get("pages", {})
     page = pages.get(key)
     if page is not None and not isinstance(page, str):
-        st.page_link(page, label=f"Open {label}")
+        st.page_link(page, label=label)
+    else:
+        st.markdown(f"**{label}**")
 
 
 def welcome_page() -> None:
     workspace = ui.current_workspace()
     settings = ui.settings()
-    st.title("GraphLang")
+    st.header("GraphLang")
     st.markdown("##### A graph-first language for agentic workflows")
     st.write(
         "In GraphLang the **graph is the program**. A workflow is a `*.graph.yaml` file: typed nodes (an LLM that generates, a rule that "
         "decides, a program that computes, a loop, a guard) joined by control and data edges. You read it, draw it, validate it and run it "
-        "with `graf`. Because the workflow is data, a model can *change the graph* (add a step, rewire a branch) and the change is checked "
+        "with `graf` CLI. Because the workflow is data, a model can *change the graph* (add a step, rewire a branch) dynamically and the change is checked "
         "before it is applied, instead of rewriting code.")
     left, right = st.columns(2)
     with left:
@@ -59,11 +62,10 @@ def welcome_page() -> None:
     st.subheader("What this app offers")
     for key, label, text in FEATURES:
         with st.container(border=True):
-            columns = st.columns([1, 4, 1])
-            columns[0].markdown(f"**{label}**")
-            columns[1].write(text)
-            with columns[2]:
+            name, about = st.columns([1, 5])
+            with name:
                 _link(key, label)
+            about.write(text)
 
     st.divider()
     st.subheader("Where you are")

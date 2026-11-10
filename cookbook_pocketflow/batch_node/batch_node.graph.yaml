@@ -4,7 +4,7 @@ workflow:
   inputs:
   - name: csv_path
     type: TEXT
-    default: cookbook_pocketflow/batch_node/data/sales.csv
+    default: data/sales.csv
   - name: chunk_size
     type: TEXT
     default: '500'

@@ -57,7 +57,7 @@ def read_result(stdout: str) -> Any:
 class KernelSession:
     """One running kernel."""
 
-    def __init__(self, seed: Optional[int] = None, kernel_name: str = "python3"):
+    def __init__(self, seed: Optional[int] = None, kernel_name: str = "python3", cwd: Optional[str] = None):
         try:
             from jupyter_client.manager import KernelManager
         except ImportError:
@@ -73,6 +73,8 @@ class KernelSession:
         except Exception as e:
             self.close()
             raise KernelError(f"could not start the {kernel_name!r} kernel: {e}") from None
+        if cwd:                                         # relative paths in a SOLVE's code are the graph's folder, as for `backend: subprocess`
+            self._run(f"import os as __os; __os.chdir({str(cwd)!r})\n", STARTUP_TIMEOUT)     # after the start: the ipc socket names are relative to the start folder
         if seed is not None:
             self._run(f"import random as __random; __random.seed({int(seed)})\n"
                       f"try:\n    import numpy as __numpy; __numpy.random.seed({int(seed)})\nexcept ImportError:\n    pass\n",
@@ -126,8 +128,9 @@ class KernelSession:
 class KernelPool:
     """The kernels of one run (one per kernel name, started when first needed). The root runtime owns it and closes it when the run ends."""
 
-    def __init__(self, default_kernel: str = "python3"):
+    def __init__(self, default_kernel: str = "python3", cwd: Optional[str] = None):
         self.default_kernel = default_kernel            # `graf run --kernel-name`: the kernel of a SOLVE that names none
+        self.cwd = cwd                                  # the graph's folder: where the kernels run
         self._shared: Dict[str, KernelSession] = {}
         self._registered = False
 
@@ -135,14 +138,14 @@ class KernelPool:
     def session(self, scope: str = "run", seed: Optional[int] = None, kernel_name: Optional[str] = None) -> Iterator[KernelSession]:
         kernel_name = kernel_name or self.default_kernel
         if scope == "node":
-            fresh = KernelSession(seed, kernel_name)
+            fresh = KernelSession(seed, kernel_name, self.cwd)
             try:
                 yield fresh
             finally:
                 fresh.close()
             return
         if kernel_name not in self._shared:
-            self._shared[kernel_name] = KernelSession(seed, kernel_name)      # the seed applies when the run's kernel starts
+            self._shared[kernel_name] = KernelSession(seed, kernel_name, self.cwd)      # the seed applies when the run's kernel starts
             if not self._registered:
                 atexit.register(self.close)         # a safety net if the runtime never reaches its `finally`
                 self._registered = True

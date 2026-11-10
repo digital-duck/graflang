@@ -23,7 +23,7 @@ def _report_code(folders) -> None:
 def transfer_page() -> None:
     workspace = ui.current_workspace()
     ui.settings()
-    st.title("Import / Export")
+    st.header("Import / Export")
     cookbook_root = next(r.path for r in workspace.roots if r.name in ("cookbook", "src"))
 
     st.subheader("Install the cookbook")

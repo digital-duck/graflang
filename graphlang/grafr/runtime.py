@@ -184,7 +184,7 @@ class GraphLangRuntime:
             self.parts_policy = (graph_data.get("workflow") or {}).get("parts_policy")
             self.parts_calls = int(graph_data.get("_parts_calls", 0))      # model calls the parts used so far could make, for the cap
             self.node_output = node_output              # --save-nodes: where each node's outputs are written
-            self.kernels = KernelPool(kernel_name)               # kernel SOLVE nodes' Python kernels, closed when the run ends
+            self.kernels = KernelPool(kernel_name, str(self.resolver.base_dir.resolve()))               # kernel SOLVE nodes' Python kernels, closed when the run ends
             self.on_node = on_node                      # called with {node, type, step, ms, route, outputs} as each node finishes (streaming progress)
             self.effects = (getattr(self.llm, "name", "") != "mock") if effects is None else bool(effects)   # EMIT really sends only when true; a dry run (mock) reports instead
         else:

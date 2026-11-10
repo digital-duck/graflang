@@ -4,10 +4,10 @@ workflow:
   inputs:
   - name: project_dir
     type: TEXT
-    default: cookbook_pocketflow/coding_agent
+    default: .
   - name: test_dir
     type: TEXT
-    default: cookbook_pocketflow/coding_agent/tests
+    default: tests
   - name: test_suite
     type: TEXT
     default: |-
@@ -24,7 +24,7 @@ workflow:
           assert two_sum([3, 3], 6) == [0, 1]
   - name: skeleton_file
     type: TEXT
-    default: cookbook_pocketflow/coding_agent/src/solution.py
+    default: src/solution.py
   - name: max_iterations
     type: INTEGER
     default: 10
@@ -93,7 +93,7 @@ nodes:
 
           Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
           """
-          p = pathlib.Path(str(file_path).strip())
+          p = pathlib.Path(str(file_path).strip()).expanduser()
           return p.read_text(encoding='utf-8')
       _spl_result = read_file(skeleton_file)
     result: _spl_result
@@ -405,7 +405,7 @@ nodes:
 
                 Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
                 """
-                p = pathlib.Path(str(file_path).strip())
+                p = pathlib.Path(str(file_path).strip()).expanduser()
                 return p.read_text(encoding='utf-8')
             _spl_result = read_file(action_file)
           result: _spl_result
@@ -444,7 +444,7 @@ nodes:
 
                 Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
                 """
-                p = pathlib.Path(str(file_path).strip())
+                p = pathlib.Path(str(file_path).strip()).expanduser()
                 return p.read_text(encoding='utf-8')
             _spl_result = read_file(action_file)
           result: _spl_result
@@ -516,7 +516,7 @@ nodes:
                 Creates parent directories automatically.
                 Returns the absolute path written.
                 """
-                p = pathlib.Path(str(file_path).strip())
+                p = pathlib.Path(str(file_path).strip()).expanduser()
                 p.parent.mkdir(parents=True, exist_ok=True)
                 m = str(mode).strip().lower()
                 if m not in ('w', 'a'):

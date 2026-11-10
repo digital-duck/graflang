@@ -549,7 +549,9 @@ The schema also lists `QUERY`, `RECOVER`, `CONTEXT`, `OBSERVE`, `EMIT`; check th
 A `SOLVE` can run real code. `backend: kernel` runs Python in a persistent Jupyter kernel (`pip install 'graflang[kernel]'`);
 `backend: subprocess` runs any program as a black box (SymPy, Z3, Lean, a Rust binary). Both follow one contract: each `in_<name>`
 port is a named JSON value, the node's one `out_*` port (besides `out_error`) gets a value of `out_type` (`BOOL`, `INTEGER`,
-`REAL`, `TEXT` or `JSON`, default `JSON`), and an exception, a timeout or a bad output fails the node. `cookbook/solver_check/` uses both.
+`REAL`, `TEXT` or `JSON`, default `JSON`), and an exception, a timeout or a bad output fails the node.
+Both run in the graph's folder, so a relative path in the code or in an input (`data/resume.txt`) is read next to the graph, wherever
+the graph was copied and wherever `graf run` or the editor was started. `cookbook/solver_check/` uses both.
 
 ```yaml
 - id: "sum_kernel"
