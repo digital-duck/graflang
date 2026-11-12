@@ -47,9 +47,34 @@ graf run cookbook_pocketflow/chat/chat.graph.yaml \
     --llm claude_cli:claude-sonnet-5-5
 ```
 
+## Chat in the browser
+
+```bash
+conda activate graf
+cd ~/projects/digital-duck/graflang
+streamlit run cookbook_pocketflow/chat/chat_ui.py
+```
+
+Up to three chatbots answer side by side, one column each, so models can be compared on the same questions. In the sidebar:
+
+- **Reset** (the settings back to their defaults; the chats are kept) and **Clear Chats** (every chatbot's conversation; the settings are kept).
+- **Number of chatbots** (1 to 3).
+- For each chatbot: **Provider** (`anthropic`, through the Claude CLI and billed; or `ollama`, local and free), **Model** (`fable`, `opus`, `sonnet` or `haiku`, the default, for Anthropic; the chat models Ollama has installed, embedding models left out), **Turns it sees**, and **New chat**, which clears only that chatbot.
+
+Type a question at the bottom of the page: every chatbot gets it at the same time, keeps its own conversation, and shows its reply with the model and the seconds it took. A chatbot that fails shows the error in its column; its conversation stays as it was and the others are kept.
+
+The page runs a second graph, `chat_turn.graph.yaml`: **one turn** per run. The history so far and the question go in; the question is appended, the history is trimmed to the last N turns, the model replies (`GENERATE`, one billed call, capped at one per run), and the reply and the new history come out. The page only shows and keeps the conversation, so the chat's logic stays in the graph, and the same graph runs from the command line:
+
+```bash
+graf run cookbook_pocketflow/chat/chat_turn.graph.yaml --llm claude_cli:claude-sonnet-5-5 \
+    --param question="What is a graph?" --param history='[]'
+```
+
+`chat.graph.yaml` (the terminal loop above) reads the keyboard inside a node, which a web page cannot do. Its `trim_turns` also splits on `"\nUser: "` while the history is JSON, so it never trims; `chat_turn.graph.yaml` trims the JSON messages.
+
 ## Extend it
 
-- Wrap with `CALL PARALLEL` to run multiple concurrent chatbot personas and compare outputs
+- ~~Wrap with `CALL PARALLEL` to run multiple concurrent chatbot personas and compare outputs~~ Done in the browser page: up to three chatbots, each with its own model, answer the same question in parallel (one run of `chat_turn.graph.yaml` each). Next: give each chatbot a persona (a system line in the prompt).
 - Replace `read_user_input` with a WebSocket or REST hook to drive web-based chat interfaces
 - Add `EXCEPTION WHEN BudgetExceeded` to gracefully close the session when token limits approach
 - Swap `--llm` flag at runtime to A/B test different models on the same conversation trace

@@ -88,6 +88,16 @@ def test_a_relative_path_in_a_kernel_is_the_graphs_folder_like_a_subprocess(tmp_
 
 
 @needs_kernel
+def test_graphs_with_kernels_can_run_side_by_side_in_threads():
+    """Kernels starting at the same moment must not take the same sockets (a chat page runs one graph per chatbot)."""
+    from concurrent.futures import ThreadPoolExecutor
+    step = [("s", {"backend": "kernel", "code": "total = sum(values)", "result": "total", "out_type": "INTEGER"}, ["in_values"])]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(lambda k: run(step, {"values": [k, k, k]})[1], [1, 2, 3]))
+    assert results == [{"result": 3}, {"result": 6}, {"result": 9}]
+
+
+@needs_kernel
 def test_bound_values_are_data_never_code():
     hostile = "'); __import__('os').system('touch /tmp/graflang-pwned'); ('"
     _, out = run([("s", {"backend": "kernel", "code": "shown = note", "result": "shown"}, ["in_note"])], {"note": hostile})

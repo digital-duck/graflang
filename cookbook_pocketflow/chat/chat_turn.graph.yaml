@@ -1,0 +1,127 @@
+# One turn of the chat: the history so far and a new question in, the reply and the new history out.
+# The chat UI (chat_ui.py, beside this file) keeps the conversation and runs this graph once per question;
+# chat.graph.yaml is the original terminal loop (it reads the keyboard itself).
+version: 1.0-graph
+workflow:
+  name: chat_turn
+  inputs:
+  - name: history
+    type: TEXT
+    default: '[]'
+    description: the conversation so far, a JSON array of {"role", "content"} messages
+  - name: question
+    type: TEXT
+    description: the new user message
+  - name: last_n
+    type: INTEGER
+    default: 10
+    description: how many recent turns (a question and its reply) the model sees
+  outputs:
+  - name: reply
+    type: TEXT
+  - name: history
+    type: TEXT
+nodes:
+- id: wf_entry
+  type: INPUT
+  ports:
+  - entry
+  - out_history
+  - out_question
+  - out_last_n
+- id: add_question
+  type: SOLVE
+  config:
+    tool: append_turn
+    backend: kernel
+    code: |
+      import json
+      def append_turn(history: str, role: str, content: str) -> str:
+          turns = json.loads(history) if str(history).strip() else []
+          turns.append({"role": role, "content": content})
+          return json.dumps(turns)
+      _result = append_turn(history, 'user', question)
+    result: _result
+    out_type: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_history
+  - in_question
+  - out_history
+- id: trim
+  type: SOLVE
+  config:
+    tool: trim_turns
+    backend: kernel
+    code: |
+      import json
+      def trim_turns(history: str, last_n: int) -> str:
+          """Keep the last N turns (a question and its reply) and the new question, so a long chat stays within the model's context."""
+          turns = json.loads(history) if str(history).strip() else []
+          return json.dumps(turns[-(2 * max(1, int(last_n)) + 1):])
+      _result = trim_turns(history, last_n)
+    result: _result
+    out_type: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_history
+  - in_last_n
+  - out_trimmed
+- id: answer
+  type: GENERATE
+  config:
+    function: chat_reply
+    prompt_inline: |-
+      You are a helpful assistant engaged in a multi-turn conversation.
+      The conversation so far is a JSON array of {"role", "content"} messages:
+      {{in_trimmed}}
+      Reply to the most recent user message concisely and helpfully. Write the reply only, in Markdown.
+  ports:
+  - trigger
+  - complete
+  - in_trimmed
+  - out_reply
+- id: add_reply
+  type: SOLVE
+  config:
+    tool: append_turn
+    backend: kernel
+    code: |
+      import json
+      def append_turn(history: str, role: str, content: str) -> str:
+          turns = json.loads(history) if str(history).strip() else []
+          turns.append({"role": role, "content": content})
+          return json.dumps(turns)
+      _result = append_turn(history, 'assistant', reply)
+    result: _result
+    out_type: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_history
+  - in_reply
+  - out_history
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_reply
+  - in_history
+edges:
+- {source: wf_entry.entry, target: add_question.trigger, type: triggers}
+- {source: wf_entry.out_history, target: add_question.in_history, type: binds}
+- {source: wf_entry.out_question, target: add_question.in_question, type: binds}
+- {source: add_question.complete, target: trim.trigger, type: triggers}
+- {source: add_question.out_history, target: trim.in_history, type: binds}
+- {source: wf_entry.out_last_n, target: trim.in_last_n, type: binds}
+- {source: trim.complete, target: answer.trigger, type: triggers}
+- {source: trim.out_trimmed, target: answer.in_trimmed, type: binds}
+- {source: answer.complete, target: add_reply.trigger, type: triggers}
+- {source: add_question.out_history, target: add_reply.in_history, type: binds}
+- {source: answer.out_reply, target: add_reply.in_reply, type: binds}
+- {source: add_reply.complete, target: wf_exit.trigger, type: triggers}
+- {source: answer.out_reply, target: wf_exit.in_reply, type: binds}
+- {source: add_reply.out_history, target: wf_exit.in_history, type: binds}

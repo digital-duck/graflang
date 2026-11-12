@@ -17,11 +17,16 @@ import json
 import keyword
 import os
 import queue
+import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
 
 STARTUP_TIMEOUT = 60
+# Kernels start one at a time in a process: jupyter_client names a kernel's sockets by checking which names are free, so two
+# kernels starting at once (threads running graphs side by side) can take the same ones and read each other's messages
+# ("Invalid Signature", "Kernel died"). Once started they run independently.
+_START_LOCK = threading.Lock()
 MARKER = "__GRAFLANG_RESULT__"
 
 
@@ -65,11 +70,12 @@ class KernelSession:
         try:
             # Unix sockets are protected by file permissions; the default TCP ports on localhost would let any local user
             # connect and run code as this user.
-            self.km = KernelManager(kernel_name=kernel_name, transport="ipc" if os.name == "posix" else "tcp")
-            self.km.start_kernel()
-            self.kc = self.km.client()
-            self.kc.start_channels()
-            self.kc.wait_for_ready(timeout=STARTUP_TIMEOUT)
+            with _START_LOCK:
+                self.km = KernelManager(kernel_name=kernel_name, transport="ipc" if os.name == "posix" else "tcp")
+                self.km.start_kernel()
+                self.kc = self.km.client()
+                self.kc.start_channels()
+                self.kc.wait_for_ready(timeout=STARTUP_TIMEOUT)
         except Exception as e:
             self.close()
             raise KernelError(f"could not start the {kernel_name!r} kernel: {e}") from None
@@ -112,8 +118,9 @@ class KernelSession:
 
     def _restart(self) -> None:
         try:
-            self.km.restart_kernel(now=True)
-            self.kc.wait_for_ready(timeout=STARTUP_TIMEOUT)
+            with _START_LOCK:
+                self.km.restart_kernel(now=True)
+                self.kc.wait_for_ready(timeout=STARTUP_TIMEOUT)
         except Exception:
             pass
 
