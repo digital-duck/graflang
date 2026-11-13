@@ -120,6 +120,11 @@ def node_tab(editor: GraphEditor) -> None:
             st.rerun()
 
 
+def source_height() -> int:
+    """The source box follows the Settings picture height, less the tabs, file chooser and buttons around it, so the two panes end together."""
+    return max(300, ui.canvas_height() - 250)
+
+
 def source_box(key: str, value: str, language: str = "yaml") -> str:
     """An IDE-style editor (Ace, with syntax highlighting) when `streamlit-ace` is installed, else a plain monospace text area."""
     try:
@@ -127,11 +132,11 @@ def source_box(key: str, value: str, language: str = "yaml") -> str:
             raise ImportError
         from streamlit_ace import st_ace
     except ImportError:
-        return st.text_area("Source", value, key=key, height=600, label_visibility="collapsed")
+        return st.text_area("Source", value, key=key, height=source_height(), label_visibility="collapsed")
     # The component keeps its own text under its key (clearing session state does not reach it), so a new file, an Apply or an undo
     # would show the old text. A key that follows the text mounts a fresh editor whenever the graph in the editor changes; typing
     # does not change it (the key follows the applied text, not what is typed).
-    return st_ace(value=value, language=language, theme="github", key=f"{key}_{hashlib.md5(value.encode()).hexdigest()[:12]}", height=600,
+    return st_ace(value=value, language=language, theme="github", key=f"{key}_{hashlib.md5(value.encode()).hexdigest()[:12]}", height=source_height(),
                   tab_size=2, wrap=False, show_gutter=True,
                   auto_update=True) or value        # no Ace "Apply" button of its own: ours below is the only one
 
