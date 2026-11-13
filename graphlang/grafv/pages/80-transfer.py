@@ -30,10 +30,18 @@ def transfer_page() -> None:
     repo = ws.find_repo_cookbook()
     source = st.text_input("Folder with the recipes", str(repo) if repo else "", key="cookbook_source",
                            help="a folder of recipe folders, such as `cookbook/` in a graflang checkout")
-    st.caption(f"copied into {cookbook_root}; a recipe that is already there is left as it is")
-    if st.button("Install", key="cookbook_install", disabled=not source.strip()):
+    target_text = st.text_input("Install into (optional)", "", key="cookbook_target",
+                                help="a folder name such as `solvers` (under ~/.graflang) or a path; empty: the cookbook folder. "
+                                     "Only `cookbook`, `solvers` and `pocketflow` are listed by Browse and Edit")
+    try:
+        target = ws.install_target(target_text, cookbook_root)
+    except ws.WorkspaceError as e:
+        target = None
+        st.error(str(e))
+    st.caption(f"copied into {target or cookbook_root}; a recipe that is already there is left as it is")
+    if st.button("Install", key="cookbook_install", disabled=not source.strip() or target is None):
         try:
-            copied, skipped = ws.install_cookbook(Path(source.strip()).expanduser(), cookbook_root)
+            copied, skipped = ws.install_cookbook(Path(source.strip()).expanduser(), target)
         except (ws.WorkspaceError, OSError) as e:
             st.error(str(e))
         else:
@@ -41,14 +49,16 @@ def transfer_page() -> None:
 
     st.divider()
     st.subheader("Import")
-    st.caption(f"into {workspace.write_root}. A zip made by Export (or a whole cookbook zip), or a single `*.graph.yaml` (without its prompts).")
-    upload = st.file_uploader("A zip or a graph file", type=["zip", "yaml", "yml"], key="import_file")
+    st.caption(f"into {workspace.write_root}. A zip or `.tar.gz` made by Export (or a whole cookbook archive), or a single `*.graph.yaml` (without its prompts).")
+    upload = st.file_uploader("A zip, a tar.gz or a graph file", type=["zip", "gz", "tgz", "tar", "yaml", "yml"], key="import_file")
     name = st.text_input("Name for it (optional)", "", key="import_name", help="the folder name; default: the name in the file")
     if st.button("Import", key="import_go", disabled=upload is None):
         try:
             data = upload.getvalue()
             if upload.name.endswith(".zip"):
                 made = ws.import_zip(data, workspace.write_root, name.strip() or None)
+            elif upload.name.endswith((".tar.gz", ".tgz", ".tar")):
+                made = ws.import_tar(data, workspace.write_root, name.strip() or None)
             else:
                 made = [ws.import_graph_file(data.decode("utf-8", errors="replace"), upload.name, workspace.write_root, name.strip() or None).parent]
         except (ws.WorkspaceError, OSError) as e:

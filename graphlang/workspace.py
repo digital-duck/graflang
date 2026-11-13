@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import stat
+import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ import yaml
 
 GRAPH_SUFFIX = ".graph.yaml"
 SKIP_DIRS = {"output", "outputs", "__pycache__", "node_modules"}
-MAX_ZIP_FILES, MAX_ZIP_BYTES = 2000, 50_000_000
+MAX_ZIP_FILES, MAX_ZIP_BYTES = 20_000, 50_000_000
 CODE_KEYS = ("code", "command", "container")
 CODE_BACKENDS = ("kernel", "subprocess")
 
@@ -218,6 +219,17 @@ def clone_recipe(folder: Path, dest_root: Path, name: Optional[str] = None) -> P
     return target
 
 
+def install_target(text: str, default: Path) -> Path:
+    """Where Install copies to: blank is `default`; a bare name (`solvers`) is a folder under the GraphLang home; anything with a
+    separator or a `~` is a path."""
+    text = text.strip()
+    if not text:
+        return Path(default)
+    if "/" in text or "\\" in text or text.startswith("~"):
+        return Path(text).expanduser()
+    return home() / check_folder_name(text)
+
+
 def install_cookbook(source: Path, dest: Path) -> Tuple[List[str], List[str]]:
     """Copy each recipe folder of `source` that `dest` does not have yet. Returns (copied, skipped because already there)."""
     source, dest = Path(source), Path(dest)
@@ -277,17 +289,49 @@ def import_zip(data: bytes, dest_root: Path, name: Optional[str] = None) -> List
             target = root / m.filename.replace("\\", "/")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(z.read(m))
-        top_graphs = sorted(root.glob(f"*{GRAPH_SUFFIX}"))
-        if top_graphs:
-            wanted = check_folder_name(name or top_graphs[0].name.removesuffix(GRAPH_SUFFIX))
-            return [_move_in(root, Path(dest_root) / wanted)]
-        folders = [p for p in sorted(root.iterdir()) if p.is_dir() and any(p.glob(f"*{GRAPH_SUFFIX}"))]
-        if not folders:
-            raise WorkspaceError(f"the archive holds no recipe (a folder with a *{GRAPH_SUFFIX} file)")
-        taken = [f.name for f in folders if (Path(dest_root) / f.name).exists()]
-        if taken:
-            raise WorkspaceError(f"already in your apps: {', '.join(taken)}; nothing was imported (rename or remove them first)")
-        return [_move_in(f, Path(dest_root) / check_folder_name(f.name)) for f in folders]
+        return _import_tree(root, dest_root, name)
+
+
+def import_tar(data: bytes, dest_root: Path, name: Optional[str] = None) -> List[Path]:
+    """`import_zip` for a `.tar.gz` / `.tgz` / `.tar`: same rules (regular files only, no unsafe paths, same size limits)."""
+    try:
+        t = tarfile.open(fileobj=io.BytesIO(data), mode="r:*")
+    except tarfile.TarError:
+        raise WorkspaceError("that is not a tar archive")
+    with t, tempfile.TemporaryDirectory() as tmp:
+        members = [m for m in t.getmembers() if not m.isdir()]
+        if len(members) > MAX_ZIP_FILES or sum(m.size for m in members) > MAX_ZIP_BYTES:
+            raise WorkspaceError(f"the archive is too large (more than {MAX_ZIP_FILES} files or {MAX_ZIP_BYTES // 1_000_000} MB)")
+        root = Path(tmp)
+        for m in members:
+            p = PurePosixPath(m.name)
+            if p.parts[:1] == (".",):
+                p = PurePosixPath(*p.parts[1:])
+            if not m.isfile() or p.is_absolute() or ".." in p.parts or (p.parts and p.parts[0].endswith(":")):
+                raise WorkspaceError(f"the archive holds an unsafe path: {m.name!r}")
+            target = root / p
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(t.extractfile(m).read())
+        return _import_tree(root, dest_root, name)
+
+
+def _import_tree(root: Path, dest_root: Path, name: Optional[str]) -> List[Path]:
+    top_graphs = sorted(root.glob(f"*{GRAPH_SUFFIX}"))
+    if top_graphs:
+        wanted = check_folder_name(name or top_graphs[0].name.removesuffix(GRAPH_SUFFIX))
+        return [_move_in(root, Path(dest_root) / wanted)]
+    while True:                                 # `tar czf x.tar.gz cookbook/` wraps the recipes in one folder: look inside it
+        entries = list(root.iterdir())
+        if len(entries) != 1 or not entries[0].is_dir() or any(entries[0].glob(f"*{GRAPH_SUFFIX}")):
+            break
+        root = entries[0]
+    folders = [p for p in sorted(root.iterdir()) if p.is_dir() and any(p.glob(f"*{GRAPH_SUFFIX}"))]
+    if not folders:
+        raise WorkspaceError(f"the archive holds no recipe (a folder with a *{GRAPH_SUFFIX} file)")
+    taken = [f.name for f in folders if (Path(dest_root) / f.name).exists()]
+    if taken:
+        raise WorkspaceError(f"already in your apps: {', '.join(taken)}; nothing was imported (rename or remove them first)")
+    return [_move_in(f, Path(dest_root) / check_folder_name(f.name)) for f in folders]
 
 
 def _move_in(src: Path, target: Path) -> Path:

@@ -2,6 +2,7 @@
 import io
 import os
 import stat
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -115,6 +116,26 @@ def test_import_zip_accepts_a_whole_cookbook_and_a_single_recipe_at_the_top(home
         z.writestr("prompts/x.md", "p")
     [one] = ws.import_zip(flat.getvalue(), home / "apps", name="solo_copy")
     assert one.name == "solo_copy" and (one / "prompts" / "x.md").is_file()
+
+
+def _tar(entries):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        for name, text in entries:
+            info = tarfile.TarInfo(name)
+            info.size = len(text)
+            t.addfile(info, io.BytesIO(text.encode()))
+    return buf.getvalue()
+
+
+def test_import_tar_takes_a_whole_cookbook_and_refuses_paths_that_climb_out(home):
+    data = _tar([("a/a.graph.yaml", "workflow: {}"), ("./b/b.graph.yaml", "workflow: {}")])
+    assert sorted(p.name for p in ws.import_tar(data, home / "apps")) == ["a", "b"]
+    with pytest.raises(ws.WorkspaceError, match="unsafe"):
+        ws.import_tar(_tar([("../evil.txt", "x"), ("ok/ok.graph.yaml", "workflow: {}")]), home / "apps2")
+    assert not (home / "evil.txt").exists()
+    with pytest.raises(ws.WorkspaceError, match="not a tar"):
+        ws.import_tar(b"nope", home / "apps3")
 
 
 @pytest.mark.parametrize("member", ["../evil.txt", "/abs/evil.txt", "a/../../evil.txt"])
@@ -296,3 +317,12 @@ def test_the_picture_starts_on_dot_and_has_a_capture_button():
     html = ui._graph_html('{"version": "1.0-graph", "workflow": {"name": "w", "inputs": [], "outputs": []}, "nodes": [{"id": "a", "type": "SOLVE", "ports": ["trigger", "complete"], "config": {"expression": "1"}}], "edges": []}')
     assert ui.PICTURE_LAYOUT == "dot"
     assert 'id="capture"' in html and html.index('id="reset"') < html.index('id="capture"')
+
+
+def test_install_target_blank_name_or_path(home):
+    default = home / "cookbook"
+    assert ws.install_target("  ", default) == default
+    assert ws.install_target("solvers", default) == ws.home() / "solvers"
+    assert ws.install_target("/tmp/x/y", default) == Path("/tmp/x/y")
+    with pytest.raises(ws.WorkspaceError):
+        ws.install_target(".hidden", default)
