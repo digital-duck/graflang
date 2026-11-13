@@ -8,12 +8,23 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Tuple
 
 from .editor import EditError, GraphEditor
 
 PROMPT_FILE = re.compile(r"^prompts/[A-Za-z0-9_.-]+\.(md|txt)$")
+EDITABLE_SUFFIXES = {".md": "markdown", ".txt": "text", ".spl": "text", ".cedar": "text", ".yaml": "yaml", ".yml": "yaml", ".json": "json",
+                     ".py": "python", ".toml": "toml"}       # the text files of a recipe the Source tab can browse and edit (name -> Ace language)
+MAX_EDITABLE_BYTES = 200_000
+
+
+def editable_rel(folder: Path, rel: str) -> bool:
+    """May `rel` (a path relative to the recipe folder) be written from the Source tab? A text file inside the folder, nothing hidden."""
+    path = PurePosixPath(rel.replace("\\", "/"))
+    if path.is_absolute() or ".." in path.parts or any(part.startswith(".") for part in path.parts) or path.suffix.lower() not in EDITABLE_SUFFIXES:
+        return False
+    return Path(folder, *path.parts).resolve().is_relative_to(Path(folder).resolve())
 FENCE = re.compile(r"```(?:json)?\s*([\s\S]*?)```")
 OPS = {
     "add_node": ("id", "type", "ports"),
@@ -148,10 +159,10 @@ def prompt_files(folder: Path, staged: Dict[str, str]) -> Dict[str, str]:
 
 
 def write_staged(folder: Path, staged: Dict[str, str]) -> List[Path]:
-    """Write the staged prompt files (after the graph itself has been saved). Returns the paths written."""
+    """Write the staged files: prompts changed by chat, and any text file of the recipe changed in the Source tab (after the graph itself has been saved). Returns the paths written."""
     written = []
     for rel, text in staged.items():
-        if not PROMPT_FILE.match(rel):
+        if not (PROMPT_FILE.match(rel) or editable_rel(folder, rel)):
             raise EditError(f"refusing to write {rel!r}")
         target = Path(folder) / rel
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -225,6 +225,34 @@ def test_the_source_tab_shows_the_file_and_apply_brings_typed_changes_into_the_e
     assert "hand edit" in at.file.read_text()
 
 
+def test_the_source_tab_browses_other_files_and_save_writes_a_staged_one(at):
+    pick_file = next(b for b in at.selectbox if b.key.startswith("browse_"))
+    assert pick_file.options[0].startswith("self_refine.graph.yaml") and "readme.md" in pick_file.options
+    assert any(o.startswith("prompts/") for o in pick_file.options) and not any(o.startswith("output") for o in pick_file.options)
+    pick_file.select("readme.md").run()
+    box = at.text_area(key="source_file_readme.md")
+    assert box.value == (at.file.parent / "readme.md").read_text()
+    box.set_value(box.value + "\nA line added in the Source tab.\n").run()
+    button(at, "file_stage").click().run()
+    assert not at.exception and "A line added" not in (at.file.parent / "readme.md").read_text()      # staged, not written
+    assert not button(at, "save").disabled                                                            # Save would write it
+    button(at, "save").click().run()
+    assert not at.exception and "A line added" in (at.file.parent / "readme.md").read_text()
+
+
+def test_a_staged_file_can_be_dropped_and_only_text_files_inside_the_folder_are_written(at, tmp_path):
+    from graphlang.grafv import chat_ops
+    next(b for b in at.selectbox if b.key.startswith("browse_")).select("readme.md").run()
+    box = at.text_area(key="source_file_readme.md")
+    box.set_value("changed").run()
+    button(at, "file_stage").click().run()
+    button(at, "file_drop").click().run()
+    assert (at.file.parent / "readme.md").read_text() != "changed"
+    for bad in ("../x.md", "/etc/passwd.md", "a.exe", ".hidden.md"):
+        assert not chat_ops.editable_rel(at.file.parent, bad)
+    assert chat_ops.editable_rel(at.file.parent, "prompts/new.md")
+
+
 def test_the_source_tab_reports_bad_yaml_and_keeps_the_graph(at):
     at.text_area(key="source_text").set_value("a: [").run()
     button(at, "source_apply").click().run()

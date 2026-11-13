@@ -7,6 +7,7 @@ instead of ~/.graflang/cookbook, solvers, pocketflow and apps, optional).
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -119,20 +120,57 @@ def node_tab(editor: GraphEditor) -> None:
             st.rerun()
 
 
-def source_box(key: str, value: str) -> str:
-    """An IDE-style editor (Ace, with YAML highlighting) when `streamlit-ace` is installed, else a plain monospace text area."""
+def source_box(key: str, value: str, language: str = "yaml") -> str:
+    """An IDE-style editor (Ace, with syntax highlighting) when `streamlit-ace` is installed, else a plain monospace text area."""
     try:
         if os.environ.get("GRAF_PLAIN_EDITOR"):                  # a plain box on request (and in tests, which cannot drive a component)
             raise ImportError
         from streamlit_ace import st_ace
     except ImportError:
         return st.text_area("Source", value, key=key, height=600, label_visibility="collapsed")
-    return st_ace(value=value, language="yaml", theme="github", key=key, height=600, tab_size=2, wrap=False, show_gutter=True,
+    # The component keeps its own text under its key (clearing session state does not reach it), so a new file, an Apply or an undo
+    # would show the old text. A key that follows the text mounts a fresh editor whenever the graph in the editor changes; typing
+    # does not change it (the key follows the applied text, not what is typed).
+    return st_ace(value=value, language=language, theme="github", key=f"{key}_{hashlib.md5(value.encode()).hexdigest()[:12]}", height=600,
+                  tab_size=2, wrap=False, show_gutter=True,
                   auto_update=True) or value        # no Ace "Apply" button of its own: ours below is the only one
 
 
+def recipe_files(folder: Path) -> list[str]:
+    """The text files of the recipe folder (and its sub-folders), relative to it: what the Source tab can show. Run output, caches and hidden
+    files are left out, and so is anything large."""
+    found = []
+    for here, dirs, names in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in ws.SKIP_DIRS)
+        for name in sorted(names):
+            path = Path(here, name)
+            if (not name.startswith(".") and path.suffix.lower() in chat_ops.EDITABLE_SUFFIXES and not path.is_symlink()
+                    and path.stat().st_size <= chat_ops.MAX_EDITABLE_BYTES):
+                found.append(path.relative_to(folder).as_posix())
+    return sorted(found, key=lambda r: (r.count("/"), r))
+
+
 def source_tab(editor: GraphEditor) -> None:
-    """The whole file as text, for a power user: edit it, Apply to bring it into the editor (undoable), then Save as usual."""
+    """Browse and edit the files of the recipe. The graph file as text: edit it, Apply to bring it into the editor (undoable), then Save as
+    usual. Any other file: Stage the change, and Save writes it together with the graph."""
+    target = st.session_state.get("file")
+    staged = st.session_state.setdefault(f"staged_{target}", {})
+    folder = editor.path.resolve().parent
+    graph_rel = editor.path.name
+    files = [graph_rel] + [r for r in recipe_files(folder) if r != graph_rel]          # the graph first: it is what opens
+    key = f"browse_{target}"
+    if st.session_state.get(key) not in files:
+        st.session_state.pop(key, None)
+    rel = str(st.selectbox("File", files, key=key, format_func=lambda r: r + ("  (the graph)" if r == graph_rel else "") + ("  ● staged" if r in staged else ""),
+                           help="the files of this recipe: the graph, its prompts, procedures, policies and notes"))
+    st.caption(f"📄 `{folder / rel}`")                    # the file this text belongs to, so a mix-up cannot go unseen
+    if rel == graph_rel:
+        graph_source(editor)
+    else:
+        other_file(folder, rel, staged)
+
+
+def graph_source(editor: GraphEditor) -> None:
     current = editor.source()
     text = source_box("source_text", current)
     changed = text != current
@@ -146,6 +184,36 @@ def source_tab(editor: GraphEditor) -> None:
         st.rerun()
     st.caption("Apply checks that this is YAML in the long `nodes:`/`edges:` form; the Problems tab then says what `graf validate` finds, and Save "
                "stays off until there are no errors. Apply can be undone.")
+
+
+def other_file(folder: Path, rel: str, staged: dict) -> None:
+    path = folder / rel
+    try:
+        on_disk = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        st.warning(f"cannot read {rel}: {e}")
+        return
+    current = staged.get(rel, on_disk)
+    language = chat_ops.EDITABLE_SUFFIXES.get(path.suffix.lower(), "text")
+    text = source_box(f"source_file_{rel}", current, language)
+    changed = text != current
+    left, middle, right = st.columns(3)
+    if left.button("Stage", key="file_stage", type="primary", disabled=not changed,
+                   help="Keep this change with the graph's unsaved edits. Nothing is written until Save."):
+        if text == on_disk:
+            staged.pop(rel, None)
+        else:
+            staged[rel] = text
+        forget_widgets()
+        st.rerun()
+    if middle.button("Revert the text", key="file_revert", disabled=not changed, help="Throw away what you typed here."):
+        forget_widgets()
+        st.rerun()
+    if right.button("Drop the staged change", key="file_drop", disabled=rel not in staged, help="Go back to the file as it is on disk."):
+        staged.pop(rel, None)
+        forget_widgets()
+        st.rerun()
+    st.caption("A change here is staged, not written: Save (left) writes it together with the graph. Undo does not cover staged files.")
 
 
 def add_tab(editor: GraphEditor) -> None:
