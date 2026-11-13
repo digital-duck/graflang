@@ -10,6 +10,7 @@
       "required": ["name"],
       "properties": {
         "name": { "type": "string" },
+        "description": { "type": "string", "description": "what this workflow is for, in a few sentences: shown by graf describe and the Browse page, and the first thing recipe search reads" },
         "parts_policy": { "type": "object", "description": "what parts used here may do: forbid [read, write, email, webhook, stdout, program], max_llm_calls N" },
         "policy": { "type": "string", "description": "policies.<name>: Cedar rules for which nodes this workflow may contain (checked by graf validate and graf run)" },
         "inputs": { "type": "array", "items": { "$ref": "#/defs/Param" } },

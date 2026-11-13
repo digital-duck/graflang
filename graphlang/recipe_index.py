@@ -127,7 +127,8 @@ def describe(root: str, folder: Path, writable: bool) -> Optional[Entry]:
     readme_path = next((p for p in (folder / "readme.md", folder / "README.md") if p.is_file()), None)
     readme = readme_path.read_text(encoding="utf-8", errors="replace")[:MAX_README_CHARS] if readme_path else ""
     title = next((line.lstrip("# ").strip() for line in readme.splitlines() if line.startswith("# ")), "") or folder.name
-    description = (_first_paragraph(readme) if readme else "") or _header_comment(text) or str((raw.get("workflow") or {}).get("name", ""))
+    declared = str((raw.get("workflow") or {}).get("description") or "").strip() if isinstance(raw, dict) else ""    # `workflow.description` wins
+    description = declared or (_first_paragraph(readme) if readme else "") or _header_comment(text) or str((raw.get("workflow") or {}).get("name", ""))
     node_types: Counter = Counter()
     nodes = raw.get("nodes") if isinstance(raw, dict) else None
     if isinstance(nodes, list):

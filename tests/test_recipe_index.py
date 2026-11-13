@@ -226,3 +226,17 @@ def test_a_query_is_embedded_once_however_often_it_is_searched(home):
     second = idx.search("write code and test it")
     assert [h.entry.key for h in first] == [h.entry.key for h in second]
     assert len(calls) == before + 1
+
+
+def test_a_declared_workflow_description_is_the_recipes_description(tmp_path):
+    folder = tmp_path / "r"
+    folder.mkdir()
+    (folder / "r.graph.yaml").write_text(
+        "# a header comment\nversion: 1.0-graph\nworkflow:\n  name: r\n  description: |\n    Triage support tickets by urgency.\n"
+        "nodes:\n- {id: a, type: INPUT, ports: [entry]}\n- {id: b, type: OUTPUT, ports: [trigger]}\n"
+        "edges:\n- {source: a.entry, target: b.trigger, type: triggers}\n", encoding="utf-8")
+    (folder / "readme.md").write_text("# R\n\nThe readme says something else.\n", encoding="utf-8")
+    entry = R.describe("apps", folder, True)
+    assert entry.description == "Triage support tickets by urgency."
+    from graphlang.grafr.runtime import load_graph
+    assert load_graph(folder / "r.graph.yaml")["workflow"]["description"].startswith("Triage")        # the schema accepts it
