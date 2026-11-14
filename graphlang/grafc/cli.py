@@ -225,9 +225,35 @@ def _compile_rust(graph_path: Path, output, optimize: bool, dry_run: bool) -> No
     console.print(f"  ./target/release/{graph_path.stem}")
 
 
+def _read_diagrams(paths, adapter: str):
+    """The diagram files as (mime type, bytes) pairs; refused up front when the adapter cannot read images (before any billed call)."""
+    from ..grafr.adapters import can_read_images
+    from ..grafv import attachments
+    if not can_read_images(adapter):
+        raise click.BadParameter(f"adapter {adapter!r} cannot read images; use --llm claude_cli or --llm anthropic:<model>", param_hint="--diagram")
+
+    class _File:
+        def __init__(self, path):
+            self.name = Path(path).name
+            try:
+                self._data = Path(path).read_bytes()
+            except OSError as e:
+                raise click.BadParameter(f"cannot read {path}: {e}", param_hint="--diagram")
+
+        def getvalue(self):
+            return self._data
+    found, notes = attachments.read([_File(p) for p in paths])
+    images = attachments.images(found)
+    if notes or len(images) != len(paths):
+        raise click.BadParameter("; ".join(notes) or "not an image", param_hint="--diagram")
+    return images
+
+
 @click.command("create", short_help="Generate a GraphLang app from a plain-language spec (vibe-coding).")
 @click.option("--name", required=True, help="the app's name: lower-case letters, digits, _ (it names NAME.graph.yaml and workflow.name)")
-@click.option("--spec", required=True, help="what the app should do, in plain language; @FILE reads it from a file")
+@click.option("--spec", default=None, help="what the app should do, in plain language; @FILE reads it from a file (optional when --diagram is given)")
+@click.option("--diagram", "diagrams", multiple=True, type=click.Path(dir_okay=False), metavar="IMAGE",
+              help="a picture of the workflow (png, jpg, webp, gif; repeatable) for the model to build from; needs an adapter that can read images (claude_cli, anthropic)")
 @click.option("--out-dir", type=click.Path(file_okay=False), default=None, help="the folder to write the app into (default ./NAME); it must be empty or new, unless --force")
 @click.option("--llm", "llm_spec", default=None, help="the LLM that writes the app, ADAPTER[:MODEL] (default claude_cli:claude-sonnet-5-5)")
 @click.option("--max-rounds", type=click.IntRange(1, 10), default=3, show_default=True,
@@ -245,7 +271,7 @@ def _compile_rust(graph_path: Path, output, optimize: bool, dry_run: bool) -> No
 @click.option("--log-level", default=None, help="file log level (default info)")
 @click.option("--log-dir", type=click.Path(file_okay=False), default=None, help="where log files go (default ~/.graflang/logs)")
 @click.option("--no-log", is_flag=True, help="do not write a log file")
-def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, examples, from_recipe, src_dir, embedding, log_level, log_dir, no_log):
+def cmd_create(name, spec, diagrams, out_dir, llm_spec, max_rounds, allow_code, force, examples, from_recipe, src_dir, embedding, log_level, log_dir, no_log):
     """Generate a GraphLang app from a specification.
 
     The LLM writes the app's files (NAME.graph.yaml, prompts/*.md, readme.md); the result is checked like `graf validate` and with a
@@ -255,6 +281,7 @@ def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, exa
     \b
     graf create --name triage --spec "classify a support message as urgent or normal, then draft a reply" --out-dir apps/triage
     graf create --name notes --spec @notes_spec.md --llm claude_cli:claude-haiku-5-5
+    graf create --name triage --diagram sketch.png --spec "the model decides which branch"
     """
     from ..grafr.adapters import default_model, make_llm
     from ..grafr.metering import MeteredLLM
@@ -262,6 +289,9 @@ def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, exa
     from .create import CreateError, check_name, create_app, find_examples, write_app
     try:
         check_name(name)
+        if spec is None and not diagrams:
+            raise click.UsageError("give --spec, --diagram, or both")
+        spec = spec or ""
         if spec.startswith("@"):
             try:
                 spec = Path(spec[1:]).read_text(encoding="utf-8")
@@ -271,6 +301,7 @@ def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, exa
             adapter, model = parse_llm_spec(llm_spec or "claude_cli")
         except ValueError as e:
             raise click.BadParameter(str(e), param_hint="--llm")
+        pictures = _read_diagrams(diagrams, adapter) if diagrams else None
         explicit = model
         model = model or default_model(adapter)
         dest = Path(out_dir) if out_dir else Path(name)
@@ -300,7 +331,13 @@ def cmd_create(name, spec, out_dir, llm_spec, max_rounds, allow_code, force, exa
                 console.print(f"[dim]no similar recipe to show ({shown.note})[/dim]")
             if shown.words_only and shown.keys:
                 console.print("[yellow]note:[/yellow] examples were chosen by words only; an embedding model finds closer ones (--embedding, or the app's Settings)")
-        created = create_app(name, spec, llm, model, max_rounds=max_rounds, allow_code=allow_code, references=(shown.text or None) if shown else None)
+        asked = spec
+        if pictures:
+            asked = (spec.strip() + "\n\n" if spec.strip() else "") + (
+                "A picture of the workflow is attached. Build the app it shows: boxes are steps, arrows are edges, labels on arrows name the "
+                "branch or the condition. Where the picture is unclear, choose the simplest reading and say so in readme.md.")
+        created = create_app(name, asked, llm, model, max_rounds=max_rounds, allow_code=allow_code, images=pictures,
+                             references=(shown.text or None) if shown else None)
         written = write_app(name, spec, created, dest, f"{adapter}:{model}" if model else adapter, force)
     except CreateError as e:
         console.print(f"[red]Error:[/red] {escape(str(e))}")

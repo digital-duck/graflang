@@ -95,10 +95,37 @@ def test_an_image_goes_to_an_adapter_that_takes_anthropic_messages_as_a_base64_b
 
 def test_an_adapter_that_cannot_read_images_says_so_instead_of_dropping_them(fake_dd_llm):
     with pytest.raises(LLMUnavailable, match="cannot read images.*anthropic"):
-        DDLLM("claude_cli").generate("describe it", images=[("image/png", b"abc")])
-    assert fake_dd_llm["claude_cli"].calls == []                       # no call was made
+        DDLLM("openai").generate("describe it", images=[("image/png", b"abc")])
+    assert fake_dd_llm["openai"].calls == []                       # no call was made
 
 
 def test_without_images_nothing_changes(fake_dd_llm):
     DDLLM("claude_cli").generate("plain", model="m")
     assert "messages" not in fake_dd_llm["claude_cli"].calls[0][2]
+
+
+def test_claude_cli_gets_the_images_as_files_for_its_read_tool(monkeypatch):
+    seen = {}
+
+    class Result:
+        success, content, error_history = True, "ok", None
+        input_tokens = output_tokens = 0
+        cost_usd = None
+
+    class Fake:
+        def __init__(self, **options):
+            seen["options"] = options
+
+        def call(self, prompt, model="", **kw):
+            import re
+            seen["prompt"] = prompt
+            seen["files"] = {p: open(p, "rb").read() for p in re.findall(r"/\S+\.png", prompt)}
+            return Result()
+    fake = types.SimpleNamespace(get_adapter=lambda name, **options: Fake(**options))
+    monkeypatch.setitem(sys.modules, "dd_llm", fake)
+    llm = DDLLM("claude_cli")
+    assert llm.generate("describe", images=[("image/png", b"PNG1")]) == "ok"
+    assert seen["options"] == {"allowed_tools": ["Read"]} and seen["prompt"].endswith("describe")
+    assert list(seen["files"].values()) == [b"PNG1"]
+    import os
+    assert not any(os.path.exists(p) for p in seen["files"])        # the temporary files are gone after the call

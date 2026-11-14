@@ -18,6 +18,8 @@ file) applies; else the adapter's default (claude_cli: claude-sonnet-5-5).
 from __future__ import annotations
 
 import base64
+import os
+import tempfile
 import threading
 from typing import Any, Dict, Optional, Tuple
 
@@ -68,7 +70,24 @@ class MockLLM:
         return f"[Mock LLM response from {model or 'mock'} for prompt: {prompt[:300]}...]"
 
 
-IMAGE_ADAPTERS = {"anthropic"}       # dd-llm adapters that pass Anthropic-style message content (with image blocks) through; claude_cli does not
+IMAGE_ADAPTERS = {"anthropic"}       # dd-llm adapters that pass Anthropic-style message content (with image blocks) through
+PATH_IMAGE_ADAPTERS = {"claude_cli"}  # the CLI takes no image blocks, but its Read tool views an image file whose path is in the prompt (see `_with_image_files`)
+
+
+def can_read_images(adapter: str) -> bool:
+    return adapter in IMAGE_ADAPTERS or adapter in PATH_IMAGE_ADAPTERS
+
+
+def _with_image_files(prompt: str, images, folder: str) -> str:
+    """Write each image into `folder` and tell the model, in the prompt, to look at the files (claude_cli reads them with its Read tool)."""
+    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+    paths = []
+    for n, (mime, data) in enumerate(images, 1):
+        path = os.path.join(folder, f"image{n}{ext.get(mime, '.png')}")
+        with open(path, "wb") as f:
+            f.write(data)
+        paths.append(path)
+    return ("Look at these image file(s) first, with your Read tool (use no other tool): " + ", ".join(paths) + "\n\n" + prompt)
 
 
 class DDLLM:
@@ -89,9 +108,9 @@ class DDLLM:
         self.default_model = default                 # used when neither the node nor the command line names one
         self._local = threading.local()
 
-    def _get_adapter(self, name: str):
+    def _get_adapter(self, name: str, **options: Any):
         try:
-            return self._dd_llm.get_adapter(name)
+            return self._dd_llm.get_adapter(name, **options)
         except ValueError as e:                      # unknown adapter, or a required key / setting is missing
             raise LLMUnavailable(str(e)) from e
 
@@ -105,19 +124,27 @@ class DDLLM:
         kwargs = {k: v for k, v in opts.items() if k in ("max_tokens", "temperature", "system") and v is not None}
         adapter = adapter or self.name
         images = opts.get("images") or []
+        read_tool = False
         if images:
-            if adapter not in IMAGE_ADAPTERS:
-                raise LLMUnavailable("adapter %r cannot read images; choose one that can (%s) on the Settings page, or remove the image"
-                                     % (adapter, ", ".join(sorted(IMAGE_ADAPTERS))))
-            kwargs["messages"] = [{"role": "user", "content": [
-                *({"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode("ascii")}}
-                  for mime, data in images), {"type": "text", "text": prompt}]}]
+            if not can_read_images(adapter):
+                raise LLMUnavailable("adapter %r cannot read images; choose one that can (%s)" % (adapter, ", ".join(sorted(IMAGE_ADAPTERS | PATH_IMAGE_ADAPTERS))))
+            if adapter in IMAGE_ADAPTERS:
+                kwargs["messages"] = [{"role": "user", "content": [
+                    *({"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode("ascii")}}
+                      for mime, data in images), {"type": "text", "text": prompt}]}]
+            else:
+                read_tool = True
+        key = adapter + "+read" if read_tool else adapter
         with self._adapters_lock:
-            if adapter not in self._adapters:
-                self._adapters[adapter] = self._get_adapter(adapter)
-            chosen = self._adapters[adapter]
+            if key not in self._adapters:
+                self._adapters[key] = self._get_adapter(adapter, **({"allowed_tools": ["Read"]} if read_tool else {}))
+            chosen = self._adapters[key]
         try:
-            result = chosen.call(prompt, model=model or "", **kwargs)
+            if read_tool:
+                with tempfile.TemporaryDirectory(prefix="graflang-img-") as folder:
+                    result = chosen.call(_with_image_files(prompt, images, folder), model=model or "", **kwargs)
+            else:
+                result = chosen.call(prompt, model=model or "", **kwargs)
         except ImportError as e:                     # the provider's SDK is an optional extra of dd-llm
             raise LLMUnavailable("adapter %r needs an extra package: %s (see `pip install dd-llm[%s]`)" % (adapter, e, adapter)) from e
         self._local.usage = {"input_tokens": getattr(result, "input_tokens", 0), "output_tokens": getattr(result, "output_tokens", 0),

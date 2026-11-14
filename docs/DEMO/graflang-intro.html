@@ -42,6 +42,8 @@
   .t-ctl { background: var(--orange); } .t-safe { background: var(--red); }
   table { border-collapse: collapse; width: 100%; font-size: .92em; }
   th, td { text-align: left; padding: .35em .6em; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.types td:first-child, table.types th:first-child { white-space: nowrap; width: 1%; }
+  table.types td:last-child { max-width: 34em; }
   th { color: var(--muted); font-weight: 600; font-size: .85em; text-transform: uppercase; letter-spacing: .05em; }
   .big { font-size: 1.5em; line-height: 1.3; }
   .center { text-align: center; }
@@ -71,6 +73,9 @@
   .toc li { break-inside: avoid; margin: .22em 0; padding: .12em .3em; border-radius: 6px; cursor: pointer; display: flex; gap: .6em; }
   .toc li:hover { background: #eef2fb; }
   .toc .n { color: var(--blue); font-weight: 700; min-width: 1.6em; text-align: right; }
+  body.show-notes #nav { top: 8px; bottom: auto; }
+  body.show-notes #hud { top: 14px; bottom: auto; }
+  body.show-notes .deck { inset: 48px 0 0 0; }
   .notes { display: none; }
   #notes-box { display: none; }
   body.show-notes #notes-box { display: block; position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto;
@@ -129,7 +134,7 @@
       <li>When a model rewrites it, the model writes <b>arbitrary code</b>.</li>
     </ul>
     <div class="card stack">
-      <h3>What we want</h3>
+      <h3>OUR SOLUTION</h3>
       <div>✔ the structure is data you can draw</div>
       <div>✔ checks before anything runs</div>
       <div>✔ hard limits on steps, calls, cost</div>
@@ -190,18 +195,18 @@
 <!-- 5 ------------------------------------------------------------------------------------------------------------ -->
 <section class="slide">
   <h2>The node types</h2>
-  <table>
+  <table class="types">
     <tr><th>Type</th><th>What it does</th></tr>
-    <tr><td><span class="tag t-io">INPUT</span> <span class="tag t-io">OUTPUT</span></td><td>the workflow's entry and exit; typed inputs and outputs</td></tr>
-    <tr><td><span class="tag t-gen">GENERATE</span></td><td>one model call from a prompt file</td></tr>
+    <tr><td><span class="tag t-gen">GENERATE</span></td><td>probabilistic compute: LLM model call from a prompt</td></tr>
+    <tr><td><span class="tag t-sol">SOLVE</span></td><td>deterministic computate: an expression, a Python kernel, or a program run as a subprocess (optionally in a container)</td></tr>
     <tr><td><span class="tag t-ctl">EVALUATE</span> <span class="tag t-ctl">ASSERT</span></td><td>a condition routes the token to <code>pass</code> or <code>fail</code></td></tr>
-    <tr><td><span class="tag t-sol">SOLVE</span></td><td>exact computation: an expression, a Python kernel, or a program run as a subprocess (optionally in a container)</td></tr>
     <tr><td><span class="tag t-ctl">LOOP</span> <span class="tag t-ctl">FORK</span> <span class="tag t-ctl">JOIN</span> <span class="tag t-ctl">BATCH</span></td><td>repeat a sub-graph; fan out; wait for all; run once per item</td></tr>
-    <tr><td><span class="tag t-safe">GUARD</span> <span class="tag t-safe">MUTATE</span></td><td>a Cedar policy check; a model-proposed change to the graph, validated before it is applied</td></tr>
+    <tr><td><span class="tag t-io">INPUT</span> <span class="tag t-io">OUTPUT</span></td><td>the workflow's entry and exit; typed inputs and outputs</td></tr>
     <tr><td><span class="tag t-io">QUERY</span> <span class="tag t-io">EMIT</span> <span class="tag t-io">OBSERVE</span></td><td>read a file; write, post or e-mail; record what passes by. QUERY and EMIT are risky, so each sits behind a guard</td></tr>
     <tr><td><span class="tag t-io">RUN</span> <span class="tag t-io">CONTEXT</span></td><td>work done by an external program; shared state</td></tr>
+    <tr><td><span class="tag t-safe">GUARD</span> <span class="tag t-safe">MUTATE</span></td><td>a Cedar policy check; a model-proposed change to the graph, validated before it is applied</td></tr>
   </table>
-  <aside class="notes">Point at the split: the model does the fuzzy part (GENERATE), exact things go to SOLVE, decisions go to EVALUATE and GUARD.</aside>
+  <aside class="notes">Walk the table top to bottom: the model does the fuzzy part (GENERATE), exact things go to SOLVE, decisions go to EVALUATE and ASSERT, LOOP/FORK/JOIN/BATCH shape the flow, INPUT/OUTPUT, QUERY/EMIT/OBSERVE and RUN/CONTEXT connect it to the outside, and GUARD/MUTATE (last) keep any change to the graph safe.</aside>
 </section>
 
 <!-- 6 ------------------------------------------------------------------------------------------------------------ -->
@@ -330,8 +335,8 @@ edges:
   <h2>Another model: change the command, not the graph</h2>
   <pre><span class="k">graf</span> run haiku.graph.yaml --llm claude_cli:claude-haiku-5-5 --param topic=<span class="s">"health"</span></pre>
   <ul>
-    <li>Adapter and model are chosen at run time. The file names of logs and outputs carry them, so runs with different models are easy to tell apart.</li>
-    <li>Real calls go through <b>dd-llm</b>; a <code>--bind</code> file holds <code>limits</code>: <code>max_llm_calls</code>, <code>max_cost_usd</code>, <code>wall_time_s</code>.</li>
+    <li>LLM Adapter (PROVIDER:MODEL-ID) are chosen at run time. The file names of logs and outputs carry them, so runs with different models are easy to tell apart.</li>
+    <li>Real calls go through <b>dd-llm</b> package; a <code>--bind</code> file holds <code>limits</code>: <code>max_llm_calls</code>, <code>max_cost_usd</code>, <code>wall_time_s</code>.</li>
     <li><b>Record and replay</b>: save the model's answers once, re-run for free.</li>
     <li><b>Checkpoint and resume</b>: a run that fails at step N resumes from there.</li>
   </ul>
@@ -340,7 +345,7 @@ edges:
 
 <!-- 12 ----------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
-  <h2>A real example: PII compliance audit</h2>
+  <h2>Demo 2: PII compliance audit</h2>
   <div class="cols">
     <div class="stack">
       <ol style="margin:0;padding-left:1.1em">
@@ -358,7 +363,9 @@ edges:
       <div><code>graf validate</code> proves the risky output is reachable only through the guard's <code>allow</code> port.</div>
     </div>
   </div>
-  <div class="demo"><b>Live</b> &nbsp;<code>graf run cookbook/compliance_audit/compliance_audit.graph.yaml --param document="…SSN…" --param destination=external_api --param engine=stdlib --param rules_file="./procedures/rules_extended.json"</code></div>
+  <div class="demo"><b>Live</b> &nbsp;<code>graf run cookbook/compliance_audit/compliance_audit.graph.yaml \ <br> 
+    --param document="…SSN…" --param destination=external_api --param engine=stdlib \ <br> 
+    --param rules_file="./procedures/rules_extended.json"</code></div>
   <aside class="notes">Default rules are an illustration, not legal advice. Try destination=internal_db to see the first check pass untouched.</aside>
 </section>
 
@@ -377,7 +384,7 @@ edges:
     </div>
     <div class="stack">
       <h3>47 solver recipes</h3>
-      <p>Migrated from SPL: Z3, MILP, Nash and Stackelberg games, Lean, Sage, MiniZinc, Pyomo, SimPy, pandera and more.</p>
+      <p>Migrated from SPL / PocketFlow: Z3, MILP, Nash and Stackelberg games, Lean, Sage, MiniZinc, Pyomo, SimPy, pandera and more.</p>
       <p class="quiet">All run with the default model; the fixes needed are listed in <code>cookbook_solvers/README.md</code>. Not installed here: Mathlib, Couenne/Bonmin, the MiniZinc binary (fallbacks used).</p>
     </div>
   </div>
@@ -392,8 +399,8 @@ edges:
     <tr><td><span class="tag t-sol">graf validate</span></td><td>structure, ports, conditions, prompts with no feeding edge; a risky output reachable only through a guard</td></tr>
     <tr><td><span class="tag t-safe">GUARD</span></td><td><b>Cedar</b> policy via the official engine; fails closed (any evaluation error denies)</td></tr>
     <tr><td><span class="tag t-safe">MUTATE</span></td><td>a model's graph change: schema, structure, <b>Cedar</b> policy, budget, then invariants on a trial copy. It can never remove a guard, and can never add code (<code>code</code>, <code>command</code>, <code>backend</code>…)</td></tr>
-    <tr><td><span class="tag t-ctl">Limits</span></td><td><code>--max-steps</code>, <code>max_llm_calls</code>, cost, wall time</td></tr>
     <tr><td><span class="tag t-safe">Policy</span></td><td><code>workflow.policy</code>: what a workflow may contain; programs on your computer need an explicit acknowledgement in the app</td></tr>
+    <tr><td><span class="tag t-ctl">Limits</span></td><td><code>--max-steps</code>, <code>max_llm_calls</code>, cost, wall time</td></tr>
   </table>
   <p class="quiet" style="margin-top:.5em">Executors are not a sandbox: see "What the executors do not confine" in the user guide.</p>
   <aside class="notes">Be direct that RUN and subprocess SOLVE execute programs on the machine. The container option narrows that; it is not the default.</aside>
@@ -401,7 +408,7 @@ edges:
 
 <!-- 15 ----------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
-  <h2>Describe it, get a graph; read a graph, get words</h2>
+  <h2>Vibe and Describe</h2>
   <div class="cols">
     <div class="stack">
       <h3>Create (vibe coding)</h3>
@@ -410,20 +417,21 @@ edges:
   decisions and action items with
   owners; fix items with no owner"</span></pre>
       <p>A model writes <code>meeting_notes.graph.yaml</code>, prompts and a readme. It is checked like <code>validate</code>, plus a dry run, and retried up to 3 rounds.</p>
+      <p>Or draw it: <code>--diagram sketch.png</code> builds the app from a picture of the workflow.</p>
     </div>
     <div class="stack">
       <h3>Describe (reverse-engineering)</h3>
-<pre><span class="k">graf</span> describe apps/meeting_notes</pre>
+<pre><span class="k">graf</span> describe apps/meeting_notes/</pre>
       <p>The graph in words: inputs, output, steps in order, data flow, cost. No model needed; with <code>--llm</code> one billed call writes a full specification.</p>
       <p class="quiet">That text is what <code>graf create --spec @FILE</code> takes: graph → spec → graph.</p>
     </div>
   </div>
-  <aside class="notes">Generated code needs --allow-code (or the app's checkbox). Mention the round trip is equivalent, not identical.</aside>
+  <aside class="notes">Generated code needs --allow-code (or the app's checkbox). --diagram takes a whiteboard photo or an exported drawing, with or without --spec; claude_cli and anthropic can read images, other adapters are refused up front. It can misread an arrow, so check the result with graf describe. Mention the round trip is equivalent, not identical.</aside>
 </section>
 
 <!-- 16 ----------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
-  <h2>The app: <code>graf vis --edit</code></h2>
+  <h2>The EDITOR: <code>graf vis --edit</code></h2>
   <div class="demo"><b>Live</b> &nbsp;create an app from a sentence, then edit and run it</div>
   <div class="cols">
     <ul>
@@ -431,7 +439,7 @@ edges:
       <li><b>Create</b>: chat with a model; the draft shows readme, workflow picture, graph and prompts.</li>
       <li><b>Edit</b>: picture plus tabs: Source, Node, Add node, Edges, Problems, <b>Run</b>, <b>Logs</b>.</li>
       <li><b>Browse</b>: search recipes by meaning and keywords.</li>
-      <li><b>Import / Export</b> zip, and <b>Settings</b>.</li>
+      <li><b>Import / Export</b> archive bundle, and <b>Settings</b>.</li>
     </ul>
     <div class="card stack">
       <h3>Good to know</h3>
@@ -445,19 +453,12 @@ edges:
 
 <!-- Cookbook ---------------------------------------------------------------------------------------------------- -->
 <section class="slide">
-  <h2>Cookbook recipes: 125 graphs</h2>
+  <h2>Cookbook: 100+ graph recipes</h2>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:2.5%;flex:1;min-height:0;font-size:.7em">
     <div class="card stack">
       <h3>Core <span class="tag t-gen">28</span></h3>
       <div><b>The language, one feature at a time:</b> parts, <code>LOOP</code>, Cedar <code>GUARD</code>, <code>MUTATE</code>, human <code>DECISION</code>, containers.</div>
       <div><b>Small agents and apps:</b> agent loop, supervisor, guardrail, self-heal, heartbeat, a book writer, a code pipeline with tests.</div>
-    </div>
-    <div class="card stack">
-      <h3>PocketFlow patterns <span class="tag t-ctl">42</span></h3>
-      <div><b>Basics (11):</b> chat, structured output, workflow, batch, map-reduce, flow.</div>
-      <div><b>Agents (9):</b> ReAct, supervisor, multi-agent, debate, A2A, MCP.</div>
-      <div><b>Tools, retrieval, memory (9):</b> search, crawler, database, embeddings, PDF vision, RAG, chat memory.</div>
-      <div><b>Apps and quality (13):</b> deep research, text-to-SQL, invoices, leads, coding agent, self-healing, guardrails, tracing.</div>
     </div>
     <div class="card stack">
       <h3>Solvers <span class="tag t-sol">55</span></h3>
@@ -466,6 +467,13 @@ edges:
       <div><b>Games:</b> Nash, Stackelberg, CFR.</div>
       <div><b>Verification:</b> Z3 policies, SQL, units, schemas, pytest, properties.</div>
       <div><b>Science:</b> physics, materials, geometry, simulation.</div>
+    </div>
+    <div class="card stack">
+      <h3>PocketFlow patterns <span class="tag t-ctl">42</span></h3>
+      <div><b>Basics (11):</b> chat, structured output, workflow, batch, map-reduce, flow.</div>
+      <div><b>Agents (9):</b> ReAct, supervisor, multi-agent, debate, A2A, MCP.</div>
+      <div><b>Tools, retrieval, memory (9):</b> search, crawler, database, embeddings, PDF vision, RAG, chat memory.</div>
+      <div><b>Apps and quality (13):</b> deep research, text-to-SQL, invoices, leads, coding agent, self-healing, guardrails, tracing.</div>
     </div>
   </div>
   <div class="card" style="font-size:.64em;margin-top:.4em">
@@ -504,7 +512,7 @@ edges:
 
 <!-- 18 ----------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
-  <h2>Compile it to target language</h2>
+  <h2>Compile to target language</h2>
   <pre><span class="k">graf</span> compile workflow.graph.yaml --lang spl -o workflow.spl
 <span class="k">graf</span> compile workflow.graph.yaml --lang rust          <span class="c"># experimental stub</span></pre>
   <ul>
@@ -571,7 +579,7 @@ edges:
         <li><code>docs/GUIDE/SETUP.md</code></li>
         <li><code>docs/GUIDE/TUTORIAL.md</code>: 15 minutes, hands on</li>
         <li><code>docs/GUIDE/USER-GUIDE.md</code>: every command and node</li>
-        <li><code>cookbook/</code> and <code>cookbook_solvers/</code></li>
+        <li><code>cookbook/</code>, <code>cookbook_solvers/</code> and <code>cookbook_pocketflow/</code> recipes</li>
       </ul>
     </div>
   </div>
@@ -608,8 +616,9 @@ edges:
 <section class="slide center">
   <div style="margin:auto 0">
     <h1>Questions?</h1>
-    <p class="big">The graph is the program.</p>
-    <p class="sub">Draw it, check it, bound it, then run it.</p>
+    <br><br><br><br>
+    <p class="sub">Code/data as graph</p>
+    <p class="sub">draw &rarr; check &rarr; bind &rarr; run</p>
   </div>
 </section>
 
@@ -621,8 +630,8 @@ edges:
       <h3>Our work</h3>
       <ul>
         <li><b>GraphLang</b>: <a href="https://github.com/digital-duck/graflang" target="_blank" rel="noopener">github.com/digital-duck/graflang</a></li>
-        <li><b>SPL</b> (the language GraphLang grew from): <a href="https://github.com/digital-duck/SPL.py" target="_blank" rel="noopener">github.com/digital-duck/SPL.py</a></li>
-        <li>W. G. Gong, <i>SPL: Orchestrating Workflows with Declarative Deterministic-Probabilistic Composition</i>, arXiv:2607.07727, 2026: <a href="https://arxiv.org/pdf/2607.07727" target="_blank" rel="noopener">arxiv.org/pdf/2607.07727</a></li>
+        <li><b>SPL</b>: <a href="https://github.com/digital-duck/SPL.py" target="_blank" rel="noopener">github.com/digital-duck/SPL.py</a></li>
+        <li>W. G. Gong, <i>Orchestrating Workflows with Declarative Deterministic-Probabilistic Composition</i>, arXiv:2607.07727: <a href="https://arxiv.org/pdf/2607.07727" target="_blank" rel="noopener">arxiv.org/pdf/2607.07727</a></li>
       </ul>
       <h3 style="margin-top:.8em">Policy</h3>
       <ul>
@@ -633,7 +642,7 @@ edges:
     <div class="stack">
       <h3>Ideas</h3>
       <ul>
-        <li><b>Interaction nets</b> (the inspiration for token passing): <a href="https://www.wikiwand.com/en/Interaction_nets" target="_blank" rel="noopener">wikiwand.com/en/Interaction_nets</a></li>
+        <li><b>Interaction nets</b>: <a href="https://www.wikiwand.com/en/Interaction_nets" target="_blank" rel="noopener">wikiwand.com/en/Interaction_nets</a></li>
       </ul>
       <h3 style="margin-top:.8em">Compared with, and benchmark</h3>
       <ul>

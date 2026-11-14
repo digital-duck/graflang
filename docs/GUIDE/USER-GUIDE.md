@@ -22,7 +22,7 @@ graf trace    [LOG] [--format tree|otlp] [-o FILE]                  # a run's .j
 graf watch    FILE [--every S] [--times N] [graf run options]        # run it again and again on a schedule
 graf describe GRAPH|RECIPE_FOLDER [-o FILE|-] [--llm [ADAPTER:MODEL]]              # what a graph or a recipe does, in words (a model only with --llm)
 graf docs     SOURCE [--style demo|tutorial|user-guide|custom] [--prompt TEXT|@FILE] [--out FILE] [--dry-run]   # a document about a codebase (folder or repo url)
-graf create   --name NAME --spec TEXT|@FILE [--out-dir DIR] [--llm ADAPTER:MODEL] [--from RECIPE|--no-examples]   # an app from a plain-language spec
+graf create   --name NAME --spec TEXT|@FILE [--diagram IMAGE] [--out-dir DIR] [--llm ADAPTER:MODEL] [--from RECIPE|--no-examples]   # an app from a plain-language spec
 ```
 
 `python -m graphlang ...` is equivalent to `graf ...`.
@@ -273,12 +273,21 @@ graf create --name meeting_notes --out-dir apps/meeting_notes --llm claude_cli:c
     --spec "turn raw meeting notes into a summary, decisions and action items with owners; check that every item has an owner and fix those that do not; return one markdown document"
 ```
 
+Or start from a drawing (a whiteboard photo, a draw.io or Mermaid export), with or without words:
+
+```bash
+graf create --name triage --diagram sketch.png --spec "the model decides which branch to take"
+```
+
+The picture is shown to the model in every round. It may misread an arrow or a label, so check the result with `graf describe` and compare it with what you drew; where the picture is unclear the model picks the simplest reading and says so in `readme.md`.
+
 It writes `apps/meeting_notes/`: `meeting_notes.graph.yaml` (the compact `steps:` form), `prompts/*.md`, `readme.md` (inputs, outputs, how to run, calls per run) and `create.json` (the spec, the LLM, how many rounds it took). Then `graf vis`, `graf run` or edit it like any other workflow.
 
 | Option | |
 |---|---|
 | `--name` | lower-case letters, digits and `_`; names the graph file and `workflow.name` |
-| `--spec` | the specification; `@spec.md` reads it from a file |
+| `--spec` | the specification; `@spec.md` reads it from a file. Optional when `--diagram` is given |
+| `--diagram` | a picture of the workflow (png, jpg, webp or gif; repeat the option for more, at most 4, each under 5 MB). The model builds what it shows: boxes are steps, arrows are edges, labels on arrows are branches or conditions. Needs an LLM that can read images: `claude_cli` (the picture is saved to a temporary file that the CLI opens with its Read tool) or `anthropic`; any other is refused before a call is made |
 | `--out-dir` | where to write (default `./NAME`); it must be new or empty, unless `--force` |
 | `--llm` | `ADAPTER[:MODEL]` for the LLM that writes the app (default `claude_cli:claude-sonnet-5-5`). This is not the LLM the app uses when it runs: that is `graf run --llm`, or each step's own `llm:` |
 | `--max-rounds` | LLM calls at most (default 3): the first writes the app, each next one fixes the problems found in the last |

@@ -299,3 +299,56 @@ def test_the_command_uses_the_embedding_in_the_app_settings_unless_told_otherwis
     CliRunner().invoke(main, base + ["--out-dir", str(tmp_path / "a")])
     CliRunner().invoke(main, base + ["--out-dir", str(tmp_path / "b"), "--embedding", "none"])
     assert seen == ["ollama:some-model", "none"]
+
+
+# ── --diagram: a picture of the workflow ──
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 20
+
+
+def test_a_diagram_is_shown_to_the_model_with_every_round(monkeypatch, tmp_path):
+    seen = []
+
+    class Seer(Scripted):
+        def generate(self, prompt, model=None, **opts):
+            seen.append((prompt, opts.get("images")))
+            return super().generate(prompt, model=model, **opts)
+    llm = Seer(reply_for("branch", "triage"))
+    llm.name = "claude_cli"
+    picture = tmp_path / "sketch.png"
+    picture.write_bytes(PNG)
+    result = run_cli(monkeypatch, tmp_path, llm, "--diagram", str(picture))
+    assert result.exit_code == 0, result.output
+    assert seen[0][1] == [("image/png", PNG)] and "picture of the workflow is attached" in seen[0][0]
+
+
+def test_a_diagram_alone_is_enough_but_a_spec_or_a_diagram_is_needed(monkeypatch, tmp_path):
+    llm = Scripted(reply_for("branch", "triage"))
+    llm.name = "claude_cli"
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: llm)
+    picture = tmp_path / "sketch.jpg"
+    picture.write_bytes(b"jpg")
+    base = ["create", "--name", "triage", "--llm", "claude_cli", "--out-dir", str(tmp_path / "t"), "--no-log"]
+    assert CliRunner().invoke(main, base + ["--diagram", str(picture)]).exit_code == 0
+    none = CliRunner().invoke(main, base)
+    assert none.exit_code != 0 and "--spec, --diagram" in none.output
+
+
+def test_a_diagram_with_an_adapter_that_cannot_read_images_is_refused_before_any_call(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: calls.append(adapter))
+    picture = tmp_path / "s.png"
+    picture.write_bytes(PNG)
+    result = CliRunner().invoke(main, ["create", "--name", "triage", "--spec", "x", "--diagram", str(picture), "--llm", "openai:gpt-x",
+                                       "--out-dir", str(tmp_path / "t"), "--no-log"])
+    assert result.exit_code != 0 and "cannot read images" in result.output and calls == []
+
+
+def test_a_diagram_that_is_not_an_image_or_is_missing_is_refused(monkeypatch, tmp_path):
+    monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: None)
+    text = tmp_path / "notes.txt"
+    text.write_text("hi")
+    for bad in (text, tmp_path / "missing.png"):
+        result = CliRunner().invoke(main, ["create", "--name", "triage", "--diagram", str(bad), "--llm", "claude_cli",
+                                           "--out-dir", str(tmp_path / "t"), "--no-log"])
+        assert result.exit_code != 0 and "--diagram" in result.output
