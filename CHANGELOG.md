@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.1
+
+- Needs `zinet>=0.2.2`: 0.2.0 asked for `zinet>=0.2.1`, whose PyPI build lacks `Style.default_layout`, so `graf vis` and the app's pictures failed with a `TypeError`.
+- A test that needs the optional `spl-llm` extra is skipped without it.
+
 ## 0.2.0
 
 - **Kernel sockets** go in `$GRAFLANG_KERNEL_DIR` (else a private temporary folder), never the launch folder (`kernel.ipc_prefix()`; `tests/test_kernel_sockets.py`). Includes `graphlang.grafr.metering`, which the Multi-Chat app (dd-chat) needs.

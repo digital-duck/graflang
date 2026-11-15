@@ -502,6 +502,7 @@ def test_equivalence_by_paired_tost_uses_the_pre_specified_margin():
 
 
 def test_the_name_check_reads_the_required_name_and_checks_the_definition():
+    pytest.importorskip("spl", reason="the recipe's tools.py imports spl (pip install graflang[spl])")
     import importlib.util
     path = Path(__file__).resolve().parent.parent / "cookbook" / "code_pipeline" / "tools.py"
     spec_ = importlib.util.spec_from_file_location("cp_tools", path)
