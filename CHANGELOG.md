@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.0
+
+- **Kernel sockets** go in `$GRAFLANG_KERNEL_DIR` (else a private temporary folder), never the launch folder (`kernel.ipc_prefix()`; `tests/test_kernel_sockets.py`). Includes `graphlang.grafr.metering`, which the Multi-Chat app (dd-chat) needs.
+
 - **`graf create --diagram IMAGE`** (repeatable; `--spec` becomes optional): build the app from a picture of the workflow. The images go to `create_app(images=...)` and are shown with every round. `claude_cli` reads them through its Read tool (`DDLLM` writes them to a temporary folder, allows only `Read`, and names the paths in the prompt); `anthropic` takes image blocks; any other adapter is refused before a billed call (`adapters.can_read_images`). Changes the app's Create page too: a screenshot now works with `claude_cli`. Tests in `tests/test_create.py` and `tests/test_attachments.py`.
 
 - **`graf compile --lang pocketflow`** (`grafe/graph2pocketflow.py`): a graph with `GENERATE`, `SOLVE` (expression), `EVALUATE`, `ASSERT` and the input and output nodes, wired as a line, a branch or retry wires, is written as a standalone PocketFlow program (needs `pocketflow` and `openai`; the model comes from `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `LAB_MODEL`). Everything else is refused with the node ids. Tested by running a graph both in the runtime and as the compiled program with the same scripted replies: equal outputs and equal prompts, on the pass and the fail branch. It is the compile target of the round-trip experiment in the sibling `graflang-lab` repository.

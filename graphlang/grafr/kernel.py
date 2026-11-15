@@ -8,6 +8,9 @@ marker line on stdout; anything else the code prints is ignored.
 Scope: `run` shares one kernel across all kernel nodes of a run (started on the first firing, shut down when the run ends,
 including on Ctrl-C); `node` starts a fresh kernel for each firing. A timeout restarts the kernel, so its variables are gone.
 
+Sockets: on POSIX a kernel talks over Unix sockets (files named `kernel-ipc-<n>`). They go in $GRAFLANG_KERNEL_DIR when it is set,
+else in a private temporary folder of this process (removed at exit); never in the current folder.
+
 Needs `pip install graflang[kernel]` (jupyter_client and ipykernel). Nothing here is imported until a kernel node fires.
 """
 from __future__ import annotations
@@ -17,6 +20,8 @@ import json
 import keyword
 import os
 import queue
+import shutil
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -28,6 +33,23 @@ STARTUP_TIMEOUT = 60
 # ("Invalid Signature", "Kernel died"). Once started they run independently.
 _START_LOCK = threading.Lock()
 MARKER = "__GRAFLANG_RESULT__"
+_private_dir: Optional[str] = None
+
+
+def ipc_prefix() -> str:
+    """The absolute name the kernels' Unix sockets start with (jupyter_client adds `-<n>`). Without it jupyter_client uses
+    `kernel-ipc` relative to the current folder, which litters wherever the program was started. The folder is made 0700:
+    the sockets accept code, so only this user may reach them. Keep it short: a socket path is limited to about 100 bytes."""
+    global _private_dir
+    folder = os.environ.get("GRAFLANG_KERNEL_DIR")
+    if not folder:
+        if _private_dir is None:
+            _private_dir = tempfile.mkdtemp(prefix="graflang-kernels-")
+            atexit.register(shutil.rmtree, _private_dir, True)
+        folder = _private_dir
+    folder = os.path.abspath(folder)
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    return os.path.join(folder, "kernel-ipc")
 
 
 class KernelError(RuntimeError):
@@ -71,7 +93,8 @@ class KernelSession:
             # Unix sockets are protected by file permissions; the default TCP ports on localhost would let any local user
             # connect and run code as this user.
             with _START_LOCK:
-                self.km = KernelManager(kernel_name=kernel_name, transport="ipc" if os.name == "posix" else "tcp")
+                ipc = os.name == "posix"
+                self.km = KernelManager(kernel_name=kernel_name, transport="ipc" if ipc else "tcp", **({"ip": ipc_prefix()} if ipc else {}))
                 self.km.start_kernel()
                 self.kc = self.km.client()
                 self.kc.start_channels()
@@ -80,7 +103,7 @@ class KernelSession:
             self.close()
             raise KernelError(f"could not start the {kernel_name!r} kernel: {e}") from None
         if cwd:                                         # relative paths in a SOLVE's code are the graph's folder, as for `backend: subprocess`
-            self._run(f"import os as __os; __os.chdir({str(cwd)!r})\n", STARTUP_TIMEOUT)     # after the start: the ipc socket names are relative to the start folder
+            self._run(f"import os as __os; __os.chdir({str(cwd)!r})\n", STARTUP_TIMEOUT)
         if seed is not None:
             self._run(f"import random as __random; __random.seed({int(seed)})\n"
                       f"try:\n    import numpy as __numpy; __numpy.random.seed({int(seed)})\nexcept ImportError:\n    pass\n",
