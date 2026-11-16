@@ -26,7 +26,7 @@ nodes:
   type: SOLVE
   config:
     tool: topic_to_filename
-    backend: kernel
+    backend: jupyter:ipython
     arguments:
     - '@topic'
     code: |
@@ -51,7 +51,7 @@ nodes:
   type: SOLVE
   config:
     tool: make_dir
-    backend: kernel
+    backend: jupyter:ipython
     arguments:
     - '@out_dir'
     code: |
@@ -104,7 +104,7 @@ nodes:
   type: SOLVE
   config:
     tool: path_join
-    backend: kernel
+    backend: jupyter:ipython
     arguments:
     - '@out_dir'
     - '@slug + ''_outline.yaml'''
@@ -133,7 +133,7 @@ nodes:
   type: SOLVE
   config:
     tool: write_file
-    backend: kernel
+    backend: jupyter:ipython
     arguments:
     - '@outline_path'
     - '@yaml_outline'
@@ -183,7 +183,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -211,7 +211,7 @@ nodes:
         type: SOLVE
         config:
           tool: get_yaml_section
-          backend: kernel
+          backend: jupyter:ipython
           arguments:
           - '@yaml_outline'
           - '@i'
@@ -243,7 +243,7 @@ nodes:
         type: SOLVE
         config:
           tool: isblank
-          backend: kernel
+          backend: jupyter:ipython
           arguments:
           - '@section_title'
           code: |
@@ -266,7 +266,7 @@ nodes:
         type: SOLVE
         config:
           tool: lower
-          backend: kernel
+          backend: jupyter:ipython
           arguments:
           - '@is_blank'
           code: |
@@ -335,8 +335,9 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_all_drafts + ''## '' + @in_section_title + ''\n'' + @in_section_draft
-            + ''\n'''
+          expression: >-
+            @in_all_drafts + '## ' + @in_section_title + '\n'
+            + @in_section_draft + '\n'
         ports:
         - trigger
         - complete
@@ -436,7 +437,7 @@ nodes:
   type: SOLVE
   config:
     tool: path_join
-    backend: kernel
+    backend: jupyter:ipython
     arguments:
     - '@out_dir'
     - '@slug + ''.md'''
@@ -465,7 +466,7 @@ nodes:
   type: SOLVE
   config:
     tool: write_file
-    backend: kernel
+    backend: jupyter:ipython
     arguments:
     - '@article_path'
     - '@article'

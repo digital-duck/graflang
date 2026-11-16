@@ -1383,9 +1383,9 @@ entries:
   status: ran
   active: true
   note: completed with claude_cli:claude-sonnet-5-5 on 2026-11-03; output not reviewed
-- id: pocketflow.workflow
+- id: pocketflow.writer_workflow
   suite: pocketflow
-  graph: cookbook_pocketflow/workflow/article_writer.graph.yaml
+  graph: cookbook_pocketflow/writer_workflow/article_writer.graph.yaml
   workflow: article_writer
   description: 'Produces a polished, publication-ready article on any topic through a three-phase sequential pipeline:
     outline generation (YAML), section-by-section drafting (iterated with a WHILE loop), and...'
@@ -1398,7 +1398,7 @@ entries:
   - name: max_sections
     default: 5
   - name: out_dir
-    default: cookbook_pocketflow/workflow/output
+    default: cookbook_pocketflow/writer_workflow/output
   status: lifted
   active: true
 - id: solvers.auto_planning
