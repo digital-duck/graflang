@@ -3,7 +3,7 @@ JSON value in, the one `out_*` port (besides `out_error`) gets a value of the de
 or a bad answer fails the node, or goes to the `error` port with `on_error: route`.
 
     executor: subprocess   any program that reads JSON on stdin (same keys as SOLVE backend: subprocess)
-    executor: python       code in a persistent Python kernel (same keys as SOLVE backend: kernel)
+    executor: python       code in a persistent Python kernel (same keys as SOLVE backend: jupyter)
     executor: http         POST the inputs as JSON to `url` and read JSON back; `allow_hosts` is required
 
 The http protocol: the request body is `{"inputs": {name: value}}`; the answer is `{"result": value}` or the value itself, or
@@ -28,7 +28,7 @@ from .solver import OUT_TYPES, TIMEOUT, check_type
 _log = get_logger("grafr.run")
 
 EXECUTORS = ("subprocess", "python", "http")
-BACKEND_OF = {"subprocess": "subprocess", "python": "kernel"}
+BACKEND_OF = {"subprocess": "subprocess", "python": "jupyter"}          # `python`: the run's Jupyter kernel (a Python one)
 METHODS = ("POST", "PUT", "PATCH")
 MAX_BODY = 5_000_000
 

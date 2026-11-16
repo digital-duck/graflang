@@ -334,7 +334,7 @@ Schema: `graphlang/schema/graflang-ir.json`. Node ids match `[a-zA-Z0-9_]+`.
 
 **Create.** Describe the app in the two-line message box on the left (under it one row: Send, Clear, which empties the chat above but keeps the app, and Upload, which attaches files; Ctrl+Enter also sends; the chat is a scrolling box; the first message is the specification, as in `graf create --spec`). Under *Settings for this chat*: the app name (letters, digits, underscores; hyphens and spaces become underscores, and the page says what it will be saved as), *Allow app to call external programs* (on to begin with; untick it to keep generated apps free of programs), *Most attempts per message* (1 to 10, 3 to begin with; each is a billed call) and *Show similar recipes*; the model writes the graph, its prompts and a readme, which are checked like `graf validate` plus a dry run. Later messages ask for changes, and *Undo the last change* steps back. Each attempt is a billed call (at most the number you set per message). Nothing is written until **Save**, and the model may not add programs unless you tick *Allow app to call external programs*. **Attachments.** The message boxes on Create and Edit take attachments (*Upload* beside Send): documents (`.txt`, `.md`, `.yaml`, `.json`, `.csv`, `.py` and a few more) are read into your message as material to read, not instructions; screenshots (`.png`, `.jpg`, `.webp`, `.gif`) are shown to the model, but only a provider that takes images can do that (the `anthropic` provider; `claude_cli` cannot), and otherwise the chat says so and nothing is sent. A file it cannot use (a PDF, a binary) is named in the chat with the reason. A created graph is in the compact `steps:` form; the Edit page offers a long-form copy to edit.
 
-**Edit.** The picture is the `graf vis` view. On the right, the **Source** tab holds the whole file as text in a code editor (YAML highlighting with `streamlit-ace`, installed with graflang; a plain box if it is missing) for changes that are quicker to type: **Apply** brings the text into the editor (it must be YAML in the long `nodes:`/`edges:` form; it can be undone), the Problems tab says what `graf validate` finds, and nothing is written until **Save**. The other tabs: change a node's ports and config (values are YAML), rename or remove it, add a node, add or remove edges, read the problems `graf validate` finds as you work, and **Run** the graph as it is now (`mock`, or the model chosen on Settings, which makes real calls). The chat in the sidebar changes the graph in words: the model answers with a short list of operations, which go through the same editing methods as the buttons, so a chat edit is validated, keeps your comments, stays unsaved until **Save** and can be **Undo**ne. If any operation fails, none is applied. Changes to a prompt file (`prompts/*.md`) are held back and written together with the graph on Save. The sidebar's **Browse files** lists every recipe and every `*.graph.yaml` in it, sub-folders (parts, sub-graphs) included. **Clone** copies the saved file beside the original (same folder) and edits the copy, **Back** returns. Nothing is written until Save, Save is off while there are errors, and the file is replaced only after the new one is complete. Edges are made from lists, not by dragging on the picture. Drag the edge of the sidebar to give the chat or the picture more room, set the picture's height on the Settings page (default 800 pixels), and switch off *Editor panel* above the picture to hide the tabs and give the picture the whole width. A person may set anything a node can hold; the rule that a `MUTATE` can never add code applies to models, not to you.
+**Edit.** The picture is the `graf vis` view. On the right, the **Source** tab holds the whole file as text in a code editor (YAML highlighting with `streamlit-ace`, installed with graflang; a plain box if it is missing) for changes that are quicker to type: **Apply** brings the text into the editor (it must be YAML in the long `nodes:`/`edges:` form; it can be undone), the Problems tab says what `graf validate` finds, and nothing is written until **Save**. The other tabs: change a node's ports and config (values are YAML), rename or remove it, add a node, add or remove edges, read the problems `graf validate` finds as you work, and **Run** the graph as it is now (`mock`, or the model chosen on Settings, which makes real calls); the **Logs** tab then shows the run (inputs, outputs, what each node produced, time and model usage) and saves each output with its **Download** button, as Markdown for text and YAML for anything else. A run with a `topic` input (else `title`, `subject`, `name` or `question`) is labelled with it, and the file is named `<graph>-<topic>.md`, for example `article_writer-ai_impact_on_scientific_research.md` (lower case, `_` between words, cut to 80 characters); without one, the output's own name is used. The chat in the sidebar changes the graph in words: the model answers with a short list of operations, which go through the same editing methods as the buttons, so a chat edit is validated, keeps your comments, stays unsaved until **Save** and can be **Undo**ne. If any operation fails, none is applied. Changes to a prompt file (`prompts/*.md`) are held back and written together with the graph on Save. The sidebar's **Browse files** lists every recipe and every `*.graph.yaml` in it, sub-folders (parts, sub-graphs) included. **Clone** copies the saved file beside the original (same folder) and edits the copy, **Back** returns. **Rename** gives the whole recipe (its folder in your apps) a new name, for an import called `workflow` that is too generic; it is off while there are unsaved edits and never overwrites a recipe that has that name. Nothing is written until Save, Save is off while there are errors, and the file is replaced only after the new one is complete. Edges are made from lists, not by dragging on the picture. Drag the edge of the sidebar to give the chat or the picture more room, set the picture's height on the Settings page (default 800 pixels), and switch off *Editor panel* above the picture to hide the tabs and give the picture the whole width. A person may set anything a node can hold; the rule that a `MUTATE` can never add code applies to models, not to you.
 
 **Browse.** Search the recipes of the work area (the shipped cookbook and your apps) in your own words: "coding", "write and test code", "check personal data". One card is one **recipe** (its main graph, sub-graphs and prompts together), not one file. The search combines **meaning** (the request and each recipe's description are embedded and compared) with **words** (BM25 over name, description, readme, node types, inputs and prompts, with a light stemmer), and returns the best recipe and those close to it, not a long tail; when nothing is close it says so. Meaning needs an embedding model: with `sentence-transformers` installed (`pip install 'graflang[semantic]'`) or a local Ollama embedding model (`ollama pull qwen3-embedding:0.6b`) it is found automatically; choose one on the Settings page, or `none`. With neither, the search uses words only and the page says so. Each card shows what the recipe takes and gives, roughly how many model calls it makes and whether it runs programs, and lets you look inside, **Open** its main graph on the Edit page, or **Use in Create**. Create uses the same search: your first message goes to the model together with up to two similar recipes (up to three with the one you chose on Browse) as examples, listed in the chat; tick off *Show similar recipes to the model* to send none. Recipes that run programs are left out unless you allowed programs. Recipe embeddings are cached in `~/.graflang/cache/`, so only a recipe that changed is embedded again.
 
@@ -465,7 +465,7 @@ limits: {max_steps: 200, wall_time_s: 300}
 
 - **JOIN as fan-in.** A `JOIN` with `in_*` ports and one `out_*` port waits for all its branches, then puts their values in one object keyed by the port names (`in_x` becomes `x`). A node downstream reads a field with `@in_args.x`. Expressions also read `@list[0]` and `@obj['key']`.
 - **`BATCH`** runs a `subgraph` once per item of a list and collects one value per item, in order. `over` names the `in_*` port holding the list, `item_var` (default `item`) and `index` are visible to the body, `outputs: {texts: {collect: "w.out_text"}}` names what to collect, `concurrency` sets how many items run at once, `max_items` caps the list (default 1000).
-- **`graf run --kernel-name NAME`** sets the Jupyter kernel that `backend: kernel` SOLVE nodes run in (default `python3`; `sagemath` after `pip install 'spl-llm[sage]'` and `python -m sage.repl.ipython_kernel.install --user`). A node's own `kernel_name` wins; each kernel name is one kernel for the run.
+- **`graf run --kernel-name NAME`** sets the Jupyter kernel that plain `backend: jupyter` (and the older `kernel`) SOLVE nodes run in (default `python3`; `sagemath` after `pip install 'spl-llm[sage]'` and `python -m sage.repl.ipython_kernel.install --user`). A node's own kernel wins (`backend: jupyter:<kernel>`, or the older `kernel_name` key; naming both differently is an error); each kernel name is one kernel for the run.
 - **`graf run --workers N`** (or `limits.concurrency` in a bindings file) runs the nodes that are released together, such as the branches of a `FORK`, at the same time. The result does not depend on which call finishes first. The default is 1, one node at a time.
 
 ## RUN: work done by an executor
@@ -475,7 +475,7 @@ limits: {max_steps: 200, wall_time_s: 300}
 | `executor` | does | keys |
 |---|---|---|
 | `subprocess` | runs a program that reads JSON on stdin | the same as `SOLVE` with `backend: subprocess` |
-| `python` | runs code in a Python kernel | the same as `SOLVE` with `backend: kernel` |
+| `python` | runs code in a Python kernel | the same as `SOLVE` with `backend: jupyter` |
 | `http` | posts `{"inputs": {...}}` as JSON to `url`, reads JSON back | `url`, `allow_hosts` (required), `method`, `headers`, `timeout`, `out_type`, `on_error` |
 
 An http answer is `{"result": value}` or the value itself, or `{"error": {"code": "...", "message": "...", "retryable": true}}`. A 5xx, a 429 or `retryable: true` counts as a transient failure, so `phases: {exec: {retry: {max: 3, on: [transient]}}}` tries again; any other error is permanent. The host must be in `allow_hosts`, and redirects are not followed.
@@ -544,7 +544,7 @@ Each node has `id`, `type`, `ports`, and optional `config`. Port names carry the
 | `OUTPUT` | exit point: its `in_*` ports become the workflow outputs |
 | `GENERATE` | LLM call: `prompt_ref`, `prompt_inline`, or `procedure_ref`. The result goes on the first `out_*` port |
 | `EVALUATE` / `ASSERT` | evaluate `config.condition`; route to `pass` or `fail` |
-| `SOLVE` | deterministic: `config.expression`, a `procedure_ref`, or a `backend` (`kernel` or `subprocess`; see "SOLVE backends") |
+| `SOLVE` | deterministic: `config.expression`, a `procedure_ref`, or a `backend` (`jupyter:<kernel>` or `subprocess`; see "SOLVE backends") |
 | `FORK` | emits on all its control output ports |
 | `JOIN` | barrier: fires when every incoming trigger has arrived |
 | `LOOP` | repeats a `subgraph` (see below) |
@@ -555,8 +555,24 @@ The schema also lists `QUERY`, `RECOVER`, `CONTEXT`, `OBSERVE`, `EMIT`; check th
 
 ## SOLVE backends
 
-A `SOLVE` can run real code. `backend: kernel` runs Python in a persistent Jupyter kernel (`pip install 'graflang[kernel]'`);
-`backend: subprocess` runs any program as a black box (SymPy, Z3, Lean, a Rust binary). Both follow one contract: each `in_<name>`
+**Writing a long `expression`.** A `SOLVE` with an `expression` (and a `CONTEXT` `set`) uses the language of the Conditions section below: Python syntax, `@variables`, a fixed set of functions, never `eval`. A long one is easier to write as a YAML block scalar than inside quotes, where every `'` has to be doubled:
+
+```yaml
+expression: >-                   # folded: the lines join into one; -  drops the final newline
+  @in_all_drafts + '## ' + @in_section_title + '\n'
+  + @in_section_draft + '\n'
+
+expression: |                    # or an f-string, with no + and no quote doubling
+  f"{@in_all_drafts}## {@in_section_title}\n{@in_section_draft}\n"
+```
+
+In a block scalar YAML processes no escapes, so `\n` reaches the evaluator as backslash-n and the string literal turns it into a newline. In a double-quoted YAML string the same `"\n"` becomes a real newline first and breaks the expression, so use a block scalar or single quotes. An `expression` may run over several lines, and the surrounding blanks are ignored.
+
+A `SOLVE` can run real code. The `backend` says what runs it: `backend: subprocess` runs any program as a black box (an OS command: SymPy, Z3, Lean, a Rust binary, in any language), and `backend: jupyter:<kernel>` runs the node's code in a persistent Jupyter kernel (`pip install 'graflang[kernel]'`). `jupyter:ipython` is the standard Python kernel; `jupyter:sagemath` or the name of any installed kernel (`jupyter kernelspec list`) picks another; plain `jupyter` uses the run's kernel (`graf run --kernel-name`, default `python3`). The older spelling `backend: kernel` means plain `jupyter` and still works.
+
+**The code of a jupyter node is Python.** `code` and `result` are written in Python whatever the kernel: the cell graflang sends is Python source, so the kernel must run Python (the standard one, a virtualenv's own, or a Python-based one such as `sagemath`). `graf validate` checks the code with Python's parser, and refuses a kernel that declares another language (`deno`, `julia`, ...) before anything runs; so does starting one. Other languages are not supported yet: each would need its own cell writer. For a program in another language, use `backend: subprocess`.
+
+Both backends follow one contract: each `in_<name>`
 port is a named JSON value, the node's one `out_*` port (besides `out_error`) gets a value of `out_type` (`BOOL`, `INTEGER`,
 `REAL`, `TEXT` or `JSON`, default `JSON`), and an exception, a timeout or a bad output fails the node.
 Both run in the graph's folder, so a relative path in the code or in an input (`data/resume.txt`) is read next to the graph, wherever
@@ -566,14 +582,13 @@ the graph was copied and wherever `graf run` or the editor was started. `cookboo
 - id: "sum_kernel"
   type: "SOLVE"
   config:
-    backend: "kernel"
+    backend: "jupyter:ipython"   # Python, in the standard IPython kernel (jupyter:sagemath, jupyter:<any Python kernel>)
     code: |                      # trusted: it is in the graph file, reviewed like code
       total = sum(values)        # in_values arrives as the variable `values`
     result: "total"              # an expression; its JSON value goes to out_total
     out_type: "INTEGER"
     timeout: 30                  # seconds
     scope: "run"                 # "run": one kernel for the whole run (default); "node": a fresh kernel for every firing
-    kernel_name: "python3"       # optional: another installed Jupyter kernel, e.g. "sagemath" (jupyter kernelspec list); default: --kernel-name
   ports: ["trigger", "complete", "in_values", "out_total"]
 
 - id: "solve_sat"
@@ -596,7 +611,7 @@ the graph was copied and wherever `graf run` or the editor was started. `cookboo
 - **The kernel** starts on the first kernel node and is shut down when the run ends, Ctrl-C included. A timeout restarts it (its variables are gone). `seed` seeds `random` (and numpy, if installed) when the kernel starts. It talks over a Unix socket, not TCP.
 - **Not a sandbox.** Code runs with your privileges. It may come only from the graph file: a MUTATE delta that adds or changes `backend`, `code`, `result`, `command`, `parse` or `env_passthrough` (a variable such as `NODE_OPTIONS` changes what runs), at any depth, is refused before any policy is consulted.
 - **`graf validate`** reports as errors what graflang cannot run (a syntax error, a missing `result`, an unknown backend, parser or type, two result ports, `on_error: route` without an `error` port, a SOLVE that computes nothing) and as warnings what the machine running the graph may supply (a command or `requirements` item not found, a parser file that is missing or does not define the function, an input the code never uses). It never runs your code or your parser.
-- **Logging:** each firing logs `solve.kernel.exec` or `solve.subprocess.exec` with the node, a hash of the code or of the input and output, the duration and the outcome.
+- **Logging:** each firing logs `solve.jupyter.exec` or `solve.subprocess.exec` with the node, a hash of the code or of the input and output, the duration and the outcome.
 
 ## Edges and data
 

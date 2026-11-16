@@ -47,8 +47,8 @@ def _load_or_exit(graph_path: Path) -> dict:
               help="run nodes released together (the branches of a FORK, ...) on this many threads; default 1, or limits.concurrency "
                    "of a --bind file. Results are applied in a fixed order, so a run does not depend on which call finishes first")
 @click.option("--kernel-name", default="python3", show_default=True,
-              help="the Jupyter kernel that `backend: kernel` SOLVE nodes run in (see `jupyter kernelspec list`), e.g. sagemath; "
-                   "a node's own `kernel_name` wins")
+              help="the Jupyter kernel that `backend: jupyter` SOLVE nodes run in (see `jupyter kernelspec list`), e.g. sagemath; "
+                   "a node's own kernel (`jupyter:<kernel>` or `kernel_name`) wins")
 @click.option("--record", "record_file", type=click.Path(dir_okay=False), default=None,
               help="write every GENERATE call to this cassette (JSON lines) while running")
 @click.option("--replay", "replay_file", type=click.Path(exists=True, dir_okay=False), default=None,

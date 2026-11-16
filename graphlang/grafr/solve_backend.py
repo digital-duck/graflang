@@ -1,4 +1,8 @@
-"""`SOLVE` with a `backend`: run deterministic code (a Python kernel) or a black-box program (a subprocess).
+"""`SOLVE` with a `backend`: run deterministic code (Python, in a Jupyter kernel) or a black-box program (a subprocess).
+
+`backend` is `subprocess`, or `jupyter:<kernel>` for a Jupyter kernel: `jupyter:ipython` (the standard Python kernel), `jupyter:sagemath`,
+or any installed kernelspec that runs Python. Plain `jupyter` uses the run's kernel (`graf run --kernel-name`, default `python3`).
+`kernel` is the older spelling of plain `jupyter` and still works. The `code` and `result` of a jupyter node are Python.
 
 Both backends keep one contract (see docs/DEV/design-solver-kernel.md): each `in_<name>` port is a named JSON value, the one
 `out_*` port (other than `out_error`) receives a value of the declared `out_type`, and an exception, a timeout or a bad
@@ -19,15 +23,50 @@ import shutil
 import time
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..logging_config import ERROR, WARNING, get_logger, log_event
-from .kernel import KernelError, KernelPool
+from .kernel import CELL_LANGUAGE, KernelError, KernelPool, python_kernel_problem
 from .solver import BUILTIN_PARSERS, CONTAINER_KEYS, MEMORY_MB, OUT_TYPES, TIMEOUT, SolverError, check_type, run_solver
 
 _log = get_logger("grafr.solve")
 
-BACKENDS = ("kernel", "subprocess")
+BACKENDS = ("jupyter", "subprocess")                   # the families; `jupyter` takes a kernel: `jupyter:<kernel>`
+KERNEL_ALIASES = {"ipython": "python3", "python": "python3"}      # `jupyter:ipython` (or `:python`) is the standard IPython kernel, whose kernelspec is called python3
+BACKEND_SPELLINGS = "subprocess, jupyter, or jupyter:<kernel> such as jupyter:ipython (`kernel` is the older spelling of jupyter)"
+
+
+def parse_backend(value: Any) -> Tuple[str, Optional[str]]:
+    """A `backend` value as (family, kernel): ("subprocess", None), ("jupyter", None) for the run's own kernel, or ("jupyter", "sagemath")
+    for `jupyter:sagemath` (an alias such as `ipython` is replaced by its kernelspec name). Raises ValueError for anything else."""
+    if not isinstance(value, str):
+        raise ValueError(f"backend must be text: {BACKEND_SPELLINGS}")
+    text = value.strip()
+    if text == "kernel":                                # the first spelling, kept so existing graphs run unchanged
+        return "jupyter", None
+    family, colon, kernel = (part.strip() for part in text.partition(":"))
+    if family not in BACKENDS:
+        raise ValueError(f"unknown backend {value!r} (one of {BACKEND_SPELLINGS})")
+    if colon and family == "subprocess":
+        raise ValueError("backend: subprocess takes no kernel; a kernel goes after jupyter, as in jupyter:ipython")
+    if colon and not kernel:
+        raise ValueError(f"backend {value!r} names no kernel: write jupyter:ipython, or plain jupyter for the run's kernel")
+    return family, (KERNEL_ALIASES.get(kernel, kernel) or None)
+
+
+def is_code_backend(value: Any) -> bool:
+    """Is `value` a backend that runs a program from the graph file (a jupyter kernel or a subprocess)? False for a malformed value."""
+    try:
+        parse_backend(value)
+    except ValueError:
+        return False
+    return True
+
+
+def kernel_for(cfg: Dict[str, Any]) -> Optional[str]:
+    """The kernel a jupyter node names: the one in its `backend`, else its `kernel_name`; None means the run's kernel."""
+    named = parse_backend(cfg["backend"])[1]
+    return named or cfg.get("kernel_name") or None
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SCOPES = ("run", "node")
 # Config keys that decide what runs. They come from the graph file, never from a model: a MUTATE delta that adds or changes
@@ -73,12 +112,14 @@ def run_backend(node_data: Dict, in_data: Dict[str, Any], resolver, kernels: Ker
     timeout = cfg.get("timeout", TIMEOUT)
     started = time.perf_counter()
     fields: Dict[str, Any] = {"node": node_id, "backend": backend, "inputs": sorted(inputs)}
+    family = "backend"                                         # the log event's noun; the real one once the backend value is read
     try:
-        if backend == "kernel":
+        family, _ = parse_backend(backend)
+        if family == "jupyter":
             fields["code_sha"] = _digest(cfg["code"] + "\n" + cfg["result"])
-            with kernels.session(cfg.get("scope", "run"), cfg.get("seed"), cfg.get("kernel_name")) as kernel:
+            with kernels.session(cfg.get("scope", "run"), cfg.get("seed"), kernel_for(cfg)) as kernel:
                 value = check_type(kernel.execute(inputs, cfg["code"], cfg["result"], timeout), out_type)
-        elif backend == "subprocess":
+        elif family == "subprocess":
             names = cfg.get("env_passthrough", [])
             unset = [n for n in names if n not in os.environ]
             if unset:                                          # declared means needed: fail, never run without it
@@ -89,17 +130,15 @@ def run_backend(node_data: Dict, in_data: Dict[str, Any], resolver, kernels: Ker
                              base_dir=resolver.base_dir, timeout=timeout, memory_mb=cfg.get("memory_mb", MEMORY_MB),
                              cwd=resolver.base_dir, env={n: os.environ[n] for n in names}, container=cfg.get("container"))
             value, fields["output_sha"], fields["parser"] = res.value, _digest(res.stdout), res.parser
-        else:
-            raise ValueError(f"unknown backend {backend!r} (one of {', '.join(BACKENDS)})")
     except (SolverError, KernelError, ValueError) as e:
         message = f"{type(e).__name__}: {e}"
         routed = cfg.get("on_error") == "route" and "error" in ports
-        log_event(_log, f"solve.{backend}.exec", level=WARNING if routed else ERROR, outcome="routed" if routed else "failed",
+        log_event(_log, f"solve.{family}.exec", level=WARNING if routed else ERROR, outcome="routed" if routed else "failed",
                   error=message, ms=round((time.perf_counter() - started) * 1000), **fields)
         if routed:
             return {"_route": "error", **({"out_error": str(e)} if "out_error" in ports else {})}
         raise SolveError(f"SOLVE node {node_id!r}: {e}") from e
-    log_event(_log, f"solve.{backend}.exec", outcome="ok", ms=round((time.perf_counter() - started) * 1000), **fields)
+    log_event(_log, f"solve.{family}.exec", outcome="ok", ms=round((time.perf_counter() - started) * 1000), **fields)
     out_ports = [p for p in ports if p.startswith("out_") and p != "out_error"]
     return {out_ports[0]: value}
 
@@ -127,8 +166,10 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
         if not any(k in cfg for k in ("expression", "procedure_ref")):
             errors.append("computes nothing: give it a backend, an expression or a procedure_ref")
         return errors, warnings
-    if backend not in BACKENDS:
-        return [f"unknown backend {backend!r} (one of {', '.join(BACKENDS)})"], warnings
+    try:
+        family, named_kernel = parse_backend(backend)
+    except ValueError as e:
+        return [str(e)], warnings
     for k in ("expression", "procedure_ref"):
         if k in cfg:
             errors.append(f"a backend SOLVE cannot also have {k}")
@@ -146,19 +187,27 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
         errors.append(f"a backend SOLVE needs exactly one result port out_* (besides out_error), found {len(results)}")
     in_names = [p[3:] for p in ports if p.startswith("in_")]
 
-    if backend == "kernel":
+    if family == "jupyter":
         if "env_passthrough" in cfg:
             errors.append("env_passthrough applies to backend: subprocess; a kernel inherits the runtime's environment")
         used = None
         if not isinstance(cfg.get("code"), str) or not isinstance(cfg.get("result"), str):
-            errors.append("a kernel SOLVE needs `code` and `result` (text)")
+            errors.append(f"a jupyter SOLVE needs `code` and `result` (text, in {CELL_LANGUAGE.capitalize()})")
         else:
-            try:
+            try:                                                # the code is Python, so Python's own parser checks it
                 used = _names_in(cfg["code"], "exec") | _names_in(cfg["result"], "eval")
             except SyntaxError as e:
-                errors.append(f"code or result has a syntax error: {e.msg} (line {e.lineno})")
+                errors.append(f"code or result has a syntax error: {e.msg} (line {e.lineno}); a jupyter backend runs {CELL_LANGUAGE.capitalize()}")
         if not isinstance(cfg.get("kernel_name", ""), str):
             errors.append("kernel_name must be text: the name of an installed Jupyter kernel (see `jupyter kernelspec list`)")
+        elif named_kernel and cfg.get("kernel_name") and cfg["kernel_name"] != named_kernel:
+            errors.append(f"backend names the kernel {named_kernel!r} but kernel_name says {cfg['kernel_name']!r}: "
+                          f"name it once, in the backend (jupyter:<kernel>)")
+        else:
+            kernel = kernel_for(cfg)
+            problem = python_kernel_problem(kernel) if kernel else None      # the run's own kernel is not known until it runs
+            if problem:
+                errors.append(problem)
         if cfg.get("scope", "run") not in SCOPES:
             errors.append(f"scope must be one of {', '.join(SCOPES)}")
         for name in in_names:
@@ -167,7 +216,7 @@ def check_solve(node: Dict, base_dir: Path) -> Tuple[List[str], List[str]]:
             elif used is not None and name not in used:
                 warnings.append(f"input in_{name} is never used by the code or the result")
         if find_spec("jupyter_client") is None or find_spec("ipykernel") is None:
-            warnings.append("the kernel backend needs `pip install 'graflang[kernel]'` (jupyter_client, ipykernel)")
+            warnings.append("the jupyter backend needs `pip install 'graflang[kernel]'` (jupyter_client, ipykernel)")
     else:
         command = cfg.get("command")
         if not (isinstance(command, list) and command and all(isinstance(c, str) for c in command)):

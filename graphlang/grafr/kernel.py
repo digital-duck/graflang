@@ -1,4 +1,10 @@
-"""Persistent Python kernel backend for SOLVE (`config.backend: kernel`), over jupyter_client.
+"""Persistent Jupyter kernel backend for SOLVE (`config.backend: jupyter:<kernel>`), over jupyter_client.
+
+The `code` and `result` of such a node are PYTHON, always: the cell this module sends (`build_cell`) is Python source, so the
+kernel must run Python. That is the standard IPython kernel (`jupyter:ipython`, the kernelspec `python3`), a virtualenv's own
+kernel, or a Python-based one such as `sagemath`. A kernel for another language (deno, julia, ...) is refused with a clear
+message, by `graf validate` and again when the kernel starts. Supporting one means a cell writer for that language (the
+inputs bound as variables, `code` run, `result` printed after the marker) beside `build_cell`; none exists yet.
 
 A kernel runs the node's `code` (trusted: it is written in the graph file, never taken from a model). Inputs reach the code
 as data: they travel as one JSON string literal and are bound to variables, so a bound value that looks like Python is
@@ -27,6 +33,8 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
 
+CELL_LANGUAGE = "python"                  # the language of a kernel node's `code` and `result`: build_cell writes Python
+PYTHON_LANGUAGES = frozenset({"python", "ipython", "sage"})       # kernelspec `language` values that run Python source (Sage's is a superset)
 STARTUP_TIMEOUT = 60
 # Kernels start one at a time in a process: jupyter_client names a kernel's sockets by checking which names are free, so two
 # kernels starting at once (threads running graphs side by side) can take the same ones and read each other's messages
@@ -70,6 +78,32 @@ def build_cell(inputs: Dict[str, Any], code: str, result: str) -> str:
             f"print({MARKER!r} + __json.dumps({result}))\n")
 
 
+def kernel_language(kernel_name: str) -> Optional[str]:
+    """The `language` an installed kernel declares in its kernelspec (`python`, `javascript`, ...), lower case; None when the kernel
+    is not installed here or jupyter_client is missing (then nothing is known, and starting it reports the problem)."""
+    try:
+        from jupyter_client.kernelspec import KernelSpecManager
+        return (KernelSpecManager().get_kernel_spec(kernel_name).language or "").strip().lower() or None
+    except Exception:
+        return None
+
+
+def runs_python(language: Optional[str]) -> bool:
+    """Does a kernel declaring `language` run Python source? Unknown (None) counts as yes: it is only refused on evidence."""
+    if language is None:
+        return True
+    return language.rstrip("0123456789") in PYTHON_LANGUAGES
+
+
+def python_kernel_problem(kernel_name: str) -> Optional[str]:
+    """Why `kernel_name` cannot run a node's Python cell, or None (it can, or it is not known here)."""
+    language = kernel_language(kernel_name)
+    if runs_python(language):
+        return None
+    return (f"kernel {kernel_name!r} runs {language}, but the code and result of a jupyter backend are written in {CELL_LANGUAGE.capitalize()}; "
+            f"use a Python kernel such as jupyter:ipython ({CELL_LANGUAGE} is the only language supported so far)")
+
+
 def read_result(stdout: str) -> Any:
     """The JSON value on the last marker line. Raises KernelError if there is none."""
     for line in reversed(stdout.splitlines()):
@@ -88,7 +122,10 @@ class KernelSession:
         try:
             from jupyter_client.manager import KernelManager
         except ImportError:
-            raise KernelError("the kernel backend needs jupyter_client and ipykernel: pip install 'graflang[kernel]'") from None
+            raise KernelError("the jupyter backend needs jupyter_client and ipykernel: pip install 'graflang[kernel]'") from None
+        problem = python_kernel_problem(kernel_name)
+        if problem:
+            raise KernelError(problem)
         try:
             # Unix sockets are protected by file permissions; the default TCP ports on localhost would let any local user
             # connect and run code as this user.

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from .cedar_guard import CedarGuard, PolicyError
 from .resolver import ResourceResolver
+from .solve_backend import parse_backend
 from .topology import _risky
 
 PRINCIPAL, ACTION = 'Workflow::"{name}"', 'Action::"run_node"'
@@ -33,9 +34,19 @@ def _nodes(nodes: List[Dict], prefix: str = "") -> Iterator[tuple]:
             yield from _nodes(body.get("nodes", []), f"{prefix}{n['id']}/")
 
 
+def _backend_executor(backend: Any) -> str:
+    """What a policy sees as `context.executor` for a SOLVE backend. Every jupyter spelling (`kernel`, `jupyter`, `jupyter:ipython`, ...)
+    is "kernel", the value policies were written against: a policy that forbids kernels must keep matching whatever the graph calls it."""
+    try:
+        family, _ = parse_backend(backend)
+    except ValueError:
+        return str(backend or "")
+    return "kernel" if family == "jupyter" else family
+
+
 def node_context(node: Dict) -> Dict[str, Any]:
     cfg = node.get("config", {})
-    executor = cfg.get("executor") or cfg.get("backend") or ""
+    executor = cfg.get("executor") or _backend_executor(cfg.get("backend"))
     return {"type": node["type"], "risky": _risky(node), "needs": [str(x) for x in cfg.get("needs", [])], "executor": executor,
             "host": (urlparse(cfg.get("url", "")).hostname or "") if executor == "http" else ""}
 

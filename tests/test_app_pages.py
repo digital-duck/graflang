@@ -753,3 +753,35 @@ def test_the_create_sidebar_order_and_the_primary_send_button(home):
     assert any(c.value.startswith("model: ") for c in at.sidebar.expander[0].caption)       # the model line sits inside the settings
     send_button = next(b for b in at.sidebar.button if b.key == "create_send")
     assert send_button.proto.type == "primary"
+
+
+def test_rename_the_open_recipe_from_the_sidebar(home, monkeypatch):
+    folder = home / "apps" / "workflow"
+    shutil.copytree(ROOT / "cookbook" / "self_refine", folder, ignore=shutil.ignore_patterns("output"))
+    monkeypatch.setenv("GRAF_EDIT_FILE", str(folder / "self_refine.graph.yaml"))
+    at = AppTest.from_file(str(APP), default_timeout=30).run()
+    assert not at.exception
+    name = next(w for w in at.sidebar.text_input if w.key == "recipe_rename_name_workflow")
+    name.set_value("self-refine-demo").run()
+    button(at, "recipe_rename_go").click().run()
+    assert not at.exception
+    new = home / "apps" / "self-refine-demo"
+    assert new.is_dir() and not folder.exists() and (new / "self_refine.graph.yaml").is_file()
+    assert at.session_state["opened"] == str(new / "self_refine.graph.yaml")                   # the page follows the folder
+    assert at.sidebar.markdown[0].value == "### self_refine.graph.yaml" and str(new) in at.sidebar.caption[0].value
+    assert any("renamed workflow to self-refine-demo" in s.value for s in at.success)
+
+
+def test_rename_says_so_when_the_name_is_taken_and_is_not_offered_for_a_shipped_recipe(home, monkeypatch):
+    for name in ("workflow", "taken"):
+        shutil.copytree(ROOT / "cookbook" / "self_refine", home / "apps" / name, ignore=shutil.ignore_patterns("output"))
+    monkeypatch.setenv("GRAF_EDIT_FILE", str(home / "apps" / "workflow" / "self_refine.graph.yaml"))
+    at = AppTest.from_file(str(APP), default_timeout=30).run()
+    next(w for w in at.sidebar.text_input if w.key == "recipe_rename_name_workflow").set_value("taken").run()
+    button(at, "recipe_rename_go").click().run()
+    assert not at.exception and any("already exists" in e.value for e in at.error)
+    assert (home / "apps" / "workflow").is_dir()                                               # nothing moved
+    shutil.copytree(ROOT / "cookbook" / "self_refine", home / "cookbook" / "self_refine", ignore=shutil.ignore_patterns("output"))
+    monkeypatch.setenv("GRAF_EDIT_FILE", str(home / "cookbook" / "self_refine" / "self_refine.graph.yaml"))
+    at = AppTest.from_file(str(APP), default_timeout=30).run()
+    assert not at.exception and not [b for b in at.button if b.key == "recipe_rename_go"]

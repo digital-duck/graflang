@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from .solve_backend import is_code_backend
+
 KINDS = ("read", "write", "email", "webhook", "stdout", "program")
 
 
@@ -67,7 +69,7 @@ def capabilities(nodes: List[Dict]) -> Dict[str, Any]:
                 caps["webhook"].append(str(cfg.get("url", "(unset)")))
             else:
                 caps["stdout"].append("stdout")
-        elif t == "RUN" or (t == "SOLVE" and cfg.get("backend") in ("kernel", "subprocess")):
+        elif t == "RUN" or (t == "SOLVE" and is_code_backend(cfg.get("backend"))):
             caps["program"].append(str(cfg.get("command") or cfg.get("executor") or cfg.get("backend") or "RUN"))
     caps["llm_calls"], caps["llm_exact"] = _calls(nodes)
     return caps

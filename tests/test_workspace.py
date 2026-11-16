@@ -326,3 +326,24 @@ def test_install_target_blank_name_or_path(home):
     assert ws.install_target("/tmp/x/y", default) == Path("/tmp/x/y")
     with pytest.raises(ws.WorkspaceError):
         ws.install_target(".hidden", default)
+
+
+def test_rename_recipe_moves_the_folder_and_never_overwrites(home):
+    src = make_recipe(home / "apps", "workflow")
+    make_recipe(home / "apps", "taken")
+    new = ws.rename_recipe(src, "article_writer")
+    assert new == home / "apps" / "article_writer" and not src.exists()
+    assert (new / "r.graph.yaml").is_file() and (new / "prompts" / "p.md").read_text() == "hi"          # everything came along
+    with pytest.raises(ws.WorkspaceError, match="already exists"):
+        ws.rename_recipe(new, "taken")
+    assert (home / "apps" / "taken").is_dir() and new.is_dir()                                          # nothing was lost
+    with pytest.raises(ws.WorkspaceError, match="already called"):
+        ws.rename_recipe(new, "article_writer")
+
+
+@pytest.mark.parametrize("name", ["", "../x", "a/b", ".hid", "output"])
+def test_rename_recipe_refuses_unusable_names(home, name):
+    src = make_recipe(home / "apps", "workflow")
+    with pytest.raises(ws.WorkspaceError):
+        ws.rename_recipe(src, name)
+    assert src.is_dir()

@@ -3,6 +3,7 @@ into the same shape `GraphEditor.run` returns, so one page shows a fresh run and
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,6 +16,27 @@ def run_folders(graph_path: Path) -> List[Path]:
     stem = Path(graph_path).name.removesuffix(".graph.yaml").removesuffix(".yaml")
     found = [d for d in root.iterdir() if d.is_dir() and (d / "run.json").is_file() and d.name.startswith(stem + "-")]
     return sorted(found, key=lambda d: d.name.rsplit("-", 2)[-2:], reverse=True)        # the name ends in -YYYYMMDD-HHMMSS
+
+
+TITLE_INPUTS = ("topic", "title", "subject", "name", "question")      # the inputs that say what a run is about, in this order
+FILE_NAME_CHARS = 80
+
+
+def title_of(inputs: Any) -> str:
+    """What a run is about: the value of its `topic` input (else `title`, `subject`, `name` or `question`), on one line; "" when it has none."""
+    if not isinstance(inputs, dict):
+        return ""
+    for name in TITLE_INPUTS:
+        text = " ".join(str(inputs.get(name) or "").split())
+        if text:
+            return text
+    return ""
+
+
+def slug(text: str, limit: int = FILE_NAME_CHARS) -> str:
+    """`text` as a file-name part: lower case, runs of anything but letters, digits and `_` become one `_`, cut to `limit` characters
+    (and not left ending in `_`). "AI impact on scientific research" is "ai_impact_on_scientific_research"."""
+    return re.sub(r"\W+", "_", text.lower()).strip("_")[:limit].strip("_")
 
 
 def _json(path: Path) -> Any:

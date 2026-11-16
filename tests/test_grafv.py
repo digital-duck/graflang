@@ -279,3 +279,15 @@ def test_underscores_become_spaces_but_an_explicit_label_is_left_alone():
     assert _label({"id": "x", "type": "GENERATE", "config": {"label": "keep_this_as_written"}}) == "keep_this_as_written"
     G, _ = build(workflow())
     assert "_" not in " ".join(d["label"] for _, d in G.nodes(data=True) if d["label"] != "p")   # ids stay in the panel, not on the node
+
+
+def test_a_cut_prompt_in_the_node_detail_ends_in_dots():
+    from graphlang.grafv.model import PROMPT_PREVIEW, _info
+    def shown(prompt):
+        node = {"id": "g", "type": "GENERATE", "ports": [], "config": {"prompt_inline": prompt}}
+        return next(l for l in _info(node).splitlines() if l.startswith("prompt_inline: "))
+    long_line = "Generate a structured article outline for the topic: " + "x" * 40
+    assert shown(long_line) == "prompt_inline: " + long_line[:PROMPT_PREVIEW] + "..."          # cut mid-line
+    assert shown("short\nsecond line") == "prompt_inline: short..."                             # more lines than the one shown
+    assert shown("short one") == "prompt_inline: short one"                                     # nothing cut, nothing added
+    assert shown("exactly\n") == "prompt_inline: exactly"                                       # trailing blank lines are not text

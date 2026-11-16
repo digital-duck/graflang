@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -320,6 +321,13 @@ def show_result(value) -> None:
         st.code(yaml.safe_dump(value, sort_keys=False, allow_unicode=True, default_flow_style=False), language="yaml")
 
 
+def output_file(value) -> tuple:
+    """(text, extension, MIME type) of one workflow output as a file: text (usually Markdown) as it is, anything structured as YAML."""
+    if isinstance(value, str):
+        return value, "md", "text/markdown"
+    return yaml.safe_dump(value, sort_keys=False, allow_unicode=True, default_flow_style=False), "yaml", "application/yaml"
+
+
 def logs_tab(editor: GraphEditor) -> None:
     """The last run, made readable: inputs, outputs, what each node produced, the time per node and the model's usage."""
     past = runs.run_folders(editor.path)
@@ -340,8 +348,19 @@ def logs_tab(editor: GraphEditor) -> None:
         with st.expander("Inputs"):
             show_result(result["inputs"])
     st.markdown("#### Output")
-    for name, value in (result["outputs"] or {}).items():
-        st.markdown(f"**{name}**")
+    stem = editor.path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
+    outputs = result["outputs"] or {}
+    title = runs.title_of(result.get("inputs"))                   # e.g. the topic: it names the output better than the workflow's own output name
+    for name, value in outputs.items():
+        several = len(outputs) > 1                                # with more than one output the name stays, to tell them apart
+        label, download = st.columns([5, 1], vertical_alignment="center")
+        shown = f"{title} · {name}" if title and several else (title or name)
+        label.markdown("**" + re.sub(r"([\\`*_{}\[\]<>#|~$])", r"\\\1", shown) + "**")        # a topic is text, not markdown to be interpreted
+        data, extension, mime = output_file(value)
+        parts = [stem, runs.slug(title) or name] + ([name] if several and runs.slug(title) else [])
+        file_name = "-".join(parts) + f".{extension}"
+        download.download_button("Download", data, file_name=file_name, mime=mime, key=f"download_output_{name}",
+                                 icon=":material/download:", help=f"save this output as {file_name} (Markdown for text, YAML for anything else)")
         show_result(value)
     produced = result.get("values") or {}
     if produced:
@@ -381,6 +400,43 @@ def clone_box(editor: GraphEditor, original: str, dirty: bool) -> None:
                 st.session_state["target"] = str(new)
                 st.session_state["flash"] = ("success", f"now editing {new.name}; {editor.path.name} is untouched")
                 forget_widgets()
+            st.rerun()
+
+
+def _moved(path, old: Path, new: Path) -> str:
+    """`path` after the folder `old` was renamed to `new` (a path outside it stays as it is)."""
+    path = Path(path).resolve()
+    try:
+        return str(new / path.relative_to(old))
+    except ValueError:
+        return str(path)
+
+
+def rename_box(workspace: ws.Workspace, path: Path, dirty: bool) -> None:
+    """Rename the open recipe (its folder: a name like `workflow`, from an import, is often too generic). Only recipes in your own apps;
+    off while there are unsaved edits, because the open file is about to move."""
+    if not workspace.writable_for(path):
+        return
+    folder = workspace.recipe_folder(path)
+    with st.popover("Rename", icon=":material/edit:", help="give the recipe (its folder) a new name", width="stretch"):
+        name = st.text_input("New name of the recipe", folder.name, key=f"recipe_rename_name_{folder.name}")
+        if dirty:
+            st.caption("Save or undo your edits first: the file moves with the folder.")
+        if st.button("Rename recipe", key="recipe_rename_go", type="primary",
+                     disabled=dirty or not name.strip() or name.strip() == folder.name):
+            try:
+                new = ws.rename_recipe(folder, name)
+            except (ws.WorkspaceError, OSError) as e:
+                st.session_state["flash"] = ("error", str(e))
+            else:
+                state = st.session_state
+                state["opened"] = _moved(state["opened"], folder, new)
+                if state.get("target"):
+                    state["target"] = _moved(state["target"], folder, new)
+                for key in ("file", "editor", "run_result"):
+                    state.pop(key, None)                                 # the editor is loaded again from the new place
+                forget_widgets()
+                state["flash"] = ("success", f"renamed {folder.name} to {new.name}")
             st.rerun()
 
 
@@ -525,6 +581,7 @@ def edit_page() -> None:
                 st.rerun()
         view_box()
         clone_box(editor, opened, dirty)
+        rename_box(workspace, path, dirty)
         open_box(workspace, path)
         edit_chat(editor, path.parent, f"edit_{target}", staged)
 

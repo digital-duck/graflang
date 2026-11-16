@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterator, List, Optional
 import networkx as nx
 
 from ..grafr.resolver import ResourceResolver
+from ..grafr.solve_backend import is_code_backend
 
 PROMPT_CHARS = 600
 FILE_CHARS, TOTAL_CHARS = 12_000, 60_000                 # what of a recipe's files goes to the model: each file, and all of them together
@@ -213,7 +214,7 @@ def describe_graph(graph: Dict[str, Any], source: Optional[Path] = None) -> str:
     out += ["", "## What it does, step by step", ""] + _steps(nodes, edges, resolver, 0)
     every = list(_walk(nodes))
     models = sum(n["type"] == "GENERATE" for n in every)
-    programs = sum(n["type"] == "RUN" or (n.get("config") or {}).get("backend") in ("kernel", "subprocess") for n in every)
+    programs = sum(n["type"] == "RUN" or is_code_backend((n.get("config") or {}).get("backend")) for n in every)
     repeats = any(n["type"] in ("LOOP", "BATCH") for n in nodes)
     out += ["", "## Notes",
             f"- Model steps: {models}" + (" (a step inside a repeat or a per-item run makes one call each time it runs)." if repeats and models else ".")]

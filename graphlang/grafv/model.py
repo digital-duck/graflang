@@ -28,6 +28,7 @@ def color(node_type: str) -> str:
 
 
 LABEL_CHARS = 36
+PROMPT_PREVIEW = 60                  # characters of a node's prompt_inline shown in its detail pane (the first line only)
 
 
 def _short(text: str, limit: int = LABEL_CHARS) -> str:
@@ -78,7 +79,9 @@ def _info(node: Dict[str, Any]) -> str:
     lines = [f"id: {node['id']}", f"type: {node['type']}"]
     lines += [f"{k}: {cfg[k]}" for k in CONFIG_KEYS if cfg.get(k) not in (None, "", [])]
     if cfg.get("prompt_inline"):
-        lines.append("prompt_inline: " + str(cfg["prompt_inline"]).strip().splitlines()[0][:60])
+        text = str(cfg["prompt_inline"]).strip()
+        first = text.splitlines()[0]
+        lines.append("prompt_inline: " + first[:PROMPT_PREVIEW] + ("..." if len(first) > PROMPT_PREVIEW or text != first else ""))     # "..." marks a cut
     lines.append("ports: " + ", ".join(node.get("ports", [])))
     return "\n".join(lines)
 

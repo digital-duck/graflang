@@ -32,7 +32,7 @@ GRAPH_SUFFIX = ".graph.yaml"
 SKIP_DIRS = {"output", "outputs", "__pycache__", "node_modules"}
 MAX_ZIP_FILES, MAX_ZIP_BYTES = 20_000, 50_000_000
 CODE_KEYS = ("code", "command", "container")
-CODE_BACKENDS = ("kernel", "subprocess")
+CODE_BACKENDS = ("jupyter", "kernel", "subprocess")          # a backend value is one of these, or jupyter:<kernel> (see runs_program)
 
 
 class WorkspaceError(ValueError):
@@ -219,6 +219,22 @@ def clone_recipe(folder: Path, dest_root: Path, name: Optional[str] = None) -> P
     return target
 
 
+def rename_recipe(folder: Path, name: str) -> Path:
+    """Rename a recipe folder in place (same parent); never overwrites. Returns the new folder. The graph's prompts and procedures are
+    found relative to the graph file, so they come along; only the recipe's name changes (a workflow's own `name:` is not touched)."""
+    folder = Path(folder)
+    name = check_folder_name(name)
+    if not folder.is_dir():
+        raise WorkspaceError(f"{folder} is not a folder")
+    target = folder.parent / name
+    if name == folder.name:
+        raise WorkspaceError(f"the recipe is already called {name!r}")
+    if target.exists():
+        raise WorkspaceError(f"{target} already exists: pick another name (nothing was renamed)")
+    folder.rename(target)
+    return target
+
+
 def install_target(text: str, default: Path) -> Path:
     """Where Install copies to: blank is `default`; a bare name (`solvers`) is a folder under the GraphLang home; anything with a
     separator or a `~` is a path."""
@@ -363,7 +379,7 @@ def import_graph_file(text: str, filename: str, dest_root: Path, name: Optional[
 def runs_program(node: dict) -> bool:
     """A node that runs a program: `RUN`, a SOLVE with a kernel or subprocess backend, or any node with code, a command or a container."""
     cfg = node.get("config") or {}
-    return node.get("type") == "RUN" or cfg.get("backend") in CODE_BACKENDS or any(k in cfg for k in CODE_KEYS)
+    return node.get("type") == "RUN" or str(cfg.get("backend")).partition(":")[0].strip() in CODE_BACKENDS or any(k in cfg for k in CODE_KEYS)
 
 
 def program_nodes(graph: dict) -> List[str]:

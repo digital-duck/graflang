@@ -433,3 +433,38 @@ def test_a_failed_saved_run_is_listed_with_its_reason(at):
     [folder] = runs.run_folders(at.file)
     loaded = runs.load_run(folder)
     assert not loaded["ok"] and loaded["error"] and "failed" in runs.label(folder)
+
+
+def test_each_output_of_a_run_has_a_download_button(at):
+    at.selectbox(key="run_adapter").select("mock").run()
+    at.text_input(key="run_in_topic").set_value("ducks").run()
+    button(at, "run_go").click().run()
+    assert not at.exception
+    downloads = at.get("download_button")
+    assert [d.proto.label for d in downloads] == ["Download"] and downloads[0].proto.id                  # one output, one button
+    assert any(m.value == "**ducks**" for m in at.markdown)                                              # the topic names the output, not "essay"
+    assert downloads[0].proto.help.startswith("save this output as self_refine-ducks.md")                 # <recipe>-<topic>.md
+
+
+def test_an_output_is_saved_as_markdown_when_it_is_text_and_as_yaml_otherwise():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("page_edit", Path(__file__).parent.parent / "graphlang" / "grafv" / "pages" / "02-edit.py")
+    page = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(page)
+    assert page.output_file("# Title\n\ntext") == ("# Title\n\ntext", "md", "text/markdown")
+    text, extension, mime = page.output_file({"a": [1, 2], "b": "é"})
+    assert (extension, mime) == ("yaml", "application/yaml") and "a:" in text and "é" in text
+
+
+def test_a_run_is_titled_by_its_topic_and_the_file_name_is_cut_short():
+    from graphlang.grafv.runs import slug, title_of
+    assert title_of({"topic": "AI impact on scientific research", "max_sections": "5"}) == "AI impact on scientific research"
+    assert title_of({"max_sections": "5", "title": "  Two\nlines  "}) == "Two lines"            # one line, trimmed
+    assert title_of({"max_sections": "5", "out_dir": "output"}) == "" and title_of(None) == ""    # no topic: the output keeps its own name
+    assert slug("AI impact on scientific research") == "ai_impact_on_scientific_research"
+    assert slug("  What's new? (2026) -- AI/ML!  ") == "what_s_new_2026_ai_ml"
+    assert slug("深度学习 简介") == "深度学习_简介"                                                   # other scripts are kept
+    long = "word " * 40
+    assert len(slug(long)) <= 80 and not slug(long).endswith("_") and slug(long).startswith("word_word")
+    assert slug("???") == ""

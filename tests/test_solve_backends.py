@@ -391,3 +391,100 @@ def test_a_kernel_name_must_be_text():
     errors, _ = check_solve({"id": "s", "type": "SOLVE", "ports": ["trigger", "complete", "out_x"],
                                 "config": {"backend": "kernel", "code": "x = 1", "result": "x", "kernel_name": 3}}, Path("."))
     assert any("kernel_name" in e for e in errors)
+
+
+# ---- the backend spelling: subprocess runs a program; jupyter:<kernel> runs Python in that kernel -------------------
+from graphlang.grafr import kernel as kernel_module  # noqa: E402
+from graphlang.grafr.solve_backend import is_code_backend, kernel_for, parse_backend  # noqa: E402
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("subprocess", ("subprocess", None)),
+    ("jupyter", ("jupyter", None)),                        # the run's own kernel
+    ("kernel", ("jupyter", None)),                         # the older spelling, still valid
+    ("jupyter:ipython", ("jupyter", "python3")),           # the standard Python kernel is called python3 in Jupyter
+    ("jupyter:python", ("jupyter", "python3")),
+    ("jupyter:sagemath", ("jupyter", "sagemath")),
+    (" jupyter : zinets2 ", ("jupyter", "zinets2")),
+])
+def test_parse_backend_reads_the_family_and_the_kernel(value, expected):
+    assert parse_backend(value) == expected and is_code_backend(value)
+
+
+@pytest.mark.parametrize("value", ["jupyter:", "subprocess:python3", "kernel:python3", "docker", "", 3, None, ["jupyter"]])
+def test_parse_backend_refuses_the_rest(value):
+    with pytest.raises(ValueError):
+        parse_backend(value)
+    assert not is_code_backend(value)
+
+
+def test_the_kernel_of_a_node_comes_from_its_backend_then_kernel_name():
+    assert kernel_for({"backend": "jupyter:ipython"}) == "python3"
+    assert kernel_for({"backend": "jupyter:sagemath", "kernel_name": "sagemath"}) == "sagemath"
+    assert kernel_for({"backend": "kernel", "kernel_name": "sagemath"}) == "sagemath"          # an existing graph
+    assert kernel_for({"backend": "jupyter"}) is None and kernel_for({"backend": "kernel"}) is None
+
+
+@needs_kernel
+def test_a_jupyter_ipython_node_runs_its_python_in_the_standard_kernel():
+    _, out = run([("k", {"backend": "jupyter:ipython", "code": "total = sum(values)", "result": "total"}, ["in_values"])], {"values": [1, 2, 3]})
+    assert out == {"result": 6}
+
+
+def test_a_node_starts_the_kernel_its_backend_names(monkeypatch):
+    started = []
+
+    class Fake:
+        def __init__(self, seed=None, kernel_name="python3", cwd=None):
+            started.append(kernel_name)
+
+        def execute(self, inputs, code, result, timeout):
+            return 1
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(kernel_module, "KernelSession", Fake)
+    run([("a", {"backend": "jupyter:sagemath", "code": "x = 1", "result": "x"}, [])])
+    run([("b", {"backend": "kernel", "kernel_name": "zinets2", "code": "x = 1", "result": "x"}, [])])
+    assert started == ["sagemath", "zinets2"]
+
+
+@pytest.mark.parametrize("backend", ["jupyter:ipython", "jupyter", "kernel", "subprocess"])
+def test_every_code_backend_counts_as_a_program_for_the_safety_checks(backend):
+    from graphlang import workspace as ws
+    from graphlang.grafr.capabilities import node_context
+    node = {"id": "s", "type": "SOLVE", "config": {"backend": backend}, "ports": []}
+    assert ws.runs_program(node)
+    assert node_context(node)["executor"] == ("subprocess" if backend == "subprocess" else "kernel")     # policies keep seeing "kernel"
+
+
+@pytest.mark.parametrize("config, text", [
+    ({"backend": "jupyter:", "code": "x = 1", "result": "x"}, "names no kernel"),
+    ({"backend": "subprocess:python3", "command": ["echo"]}, "takes no kernel"),
+    ({"backend": "docker", "code": "x = 1", "result": "x"}, "unknown backend"),
+    ({"backend": "jupyter:sagemath", "kernel_name": "zinets2", "code": "x = 1", "result": "x"}, "name it once"),
+])
+def test_validate_explains_a_bad_backend(config, text):
+    errors, _ = problems(config)
+    assert any(text in e for e in errors), errors
+
+
+def test_the_code_of_a_jupyter_node_is_python_and_a_kernel_for_another_language_is_refused(monkeypatch):
+    languages = {"deno": "typescript", "julia-1.10": "julia", "sagemath": "sage", "python3": "python", "mine": "python3"}
+    monkeypatch.setattr(kernel_module, "kernel_language", lambda name: languages.get(name))
+    config = {"code": "x = 1", "result": "x"}
+    for name in ("python3", "sagemath", "mine"):                                 # Python, Sage (a Python superset), a kernel saying python3
+        assert problems({"backend": f"jupyter:{name}", **config})[0] == []
+    assert problems({"backend": "jupyter:notinstalled", **config})[0] == []     # not known here: the run reports it
+    for name, language in (("deno", "typescript"), ("julia-1.10", "julia")):
+        errors, _ = problems({"backend": f"jupyter:{name}", **config})
+        assert errors and language in errors[0] and "Python" in errors[0], errors
+    errors, _ = problems({"backend": "kernel", "kernel_name": "deno", **config})      # the same rule for the older spelling
+    assert errors and "typescript" in errors[0]
+
+
+def test_a_kernel_for_another_language_is_refused_when_it_starts_too(monkeypatch):
+    monkeypatch.setattr(kernel_module, "kernel_language", lambda name: "javascript")
+    with pytest.raises(kernel_module.KernelError, match="javascript.*Python"):
+        kernel_module.KernelSession(kernel_name="javascript")
