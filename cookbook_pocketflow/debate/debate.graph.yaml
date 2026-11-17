@@ -73,7 +73,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -82,7 +82,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -100,7 +100,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete

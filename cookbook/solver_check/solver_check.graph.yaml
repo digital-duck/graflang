@@ -53,13 +53,16 @@ nodes:
   - id: "report_ok"
     type: "SOLVE"
     config:
-      expression: "'confirmed: ' + str(@in_total) + ' (kernel and subprocess agree)'"
+      expression: |-
+        'confirmed: ' + str(@in_total) + ' (kernel and subprocess agree)'
     ports: ["trigger", "complete", "in_total", "out_verdict"]
 
   - id: "report_mismatch"
     type: "SOLVE"
     config:
-      expression: "'MISMATCH: kernel ' + str(@in_kernel_total) + ', subprocess ' + str(@in_script_total) + ', expected ' + str(@in_expected)"
+      expression: >-
+        'MISMATCH: kernel ' + str(@in_kernel_total) + ', subprocess ' +
+        str(@in_script_total) + ', expected ' + str(@in_expected)
     ports: ["trigger", "complete", "in_kernel_total", "in_script_total", "in_expected", "out_verdict"]
 
   - id: "report_failed"

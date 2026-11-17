@@ -18,7 +18,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''No previous search'''
+    expression: "'No previous search'"
   ports:
   - trigger
   - complete
@@ -36,7 +36,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''false'''
+    expression: "'false'"
   ports:
   - trigger
   - complete
@@ -54,7 +54,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -62,7 +62,8 @@ nodes:
 - id: loop_1
   type: LOOP
   config:
-    condition: latest(@in_done, @done) != 'true' AND latest(@in_iteration, @iteration)
+    condition: >-
+      latest(@in_done, @done) != 'true' AND latest(@in_iteration, @iteration)
       < 10 AND latest(@in_early_exit_1, @early_exit_1) == FALSE
     outputs:
       iteration:
@@ -290,7 +291,8 @@ nodes:
       - id: eval_3
         type: EVALUATE
         config:
-          condition: 'contains(@in_subject, ''action: search'')'
+          condition: |-
+            contains(@in_subject, 'action: search')
           branch: 1
         ports:
         - trigger
@@ -396,8 +398,9 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_context + ''\nSEARCH: '' + @in_search_query + ''\nRESULTS:
-            '' + @in_search_results'
+          expression: >-
+            @in_context + '\nSEARCH: ' + @in_search_query + '\nRESULTS: ' +
+            @in_search_results
         ports:
         - trigger
         - complete
@@ -430,7 +433,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''true'''
+          expression: "'true'"
         ports:
         - trigger
         - complete

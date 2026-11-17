@@ -68,7 +68,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''No results returned for query: '' + @in_query'
+    expression: |-
+      'No results returned for query: ' + @in_query
   ports:
   - trigger
   - complete

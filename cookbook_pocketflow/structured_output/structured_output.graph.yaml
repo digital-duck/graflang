@@ -201,7 +201,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -210,7 +210,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''incomplete'''
+    expression: "'incomplete'"
   ports:
   - trigger
   - complete
@@ -334,7 +334,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''complete'''
+          expression: "'complete'"
         ports:
         - trigger
         - complete

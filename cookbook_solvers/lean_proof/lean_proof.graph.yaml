@@ -52,7 +52,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''init'''
+      expression: "'init'"
     ports:
       - trigger
       - complete
@@ -105,7 +105,7 @@ nodes:
           - id: eval_1
             type: EVALUATE
             config:
-              condition: '@in_stmt_ok_lc == ''true'''
+              condition: "@in_stmt_ok_lc == 'true'"
               branch: 1
             ports:
               - trigger
@@ -125,7 +125,7 @@ nodes:
           - id: eval_2
             type: EVALUATE
             config:
-              condition: '@in_stmt_ok_lc == ''init'''
+              condition: "@in_stmt_ok_lc == 'init'"
               branch: 2
             ports:
               - trigger
@@ -541,7 +541,8 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''not judged (formalization failed)'''
+      expression: |-
+        'not judged (formalization failed)'
     ports:
       - trigger
       - complete
@@ -550,7 +551,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''unverified'''
+      expression: "'unverified'"
     ports:
       - trigger
       - complete
@@ -559,7 +560,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -568,7 +569,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -576,7 +577,7 @@ nodes:
   - id: eval_3
     type: EVALUATE
     config:
-      condition: '@in_stmt_ok_lc == ''true'''
+      condition: "@in_stmt_ok_lc == 'true'"
       branch: 1
     ports:
       - trigger
@@ -613,7 +614,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''statement_checked'''
+      expression: "'statement_checked'"
     ports:
       - trigger
       - complete
@@ -622,7 +623,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''init'''
+      expression: "'init'"
     ports:
       - trigger
       - complete
@@ -694,7 +695,7 @@ nodes:
   - id: eval_4
     type: EVALUATE
     config:
-      condition: '@in_citation_lc == ''none'''
+      condition: "@in_citation_lc == 'none'"
       branch: 1
     ports:
       - trigger
@@ -705,7 +706,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -858,7 +859,7 @@ nodes:
           - id: eval_5
             type: EVALUATE
             config:
-              condition: '@in_proof_ok_lc == ''true'''
+              condition: "@in_proof_ok_lc == 'true'"
               branch: 1
             ports:
               - trigger
@@ -878,7 +879,7 @@ nodes:
           - id: eval_6
             type: EVALUATE
             config:
-              condition: '@in_proof_ok_lc == ''init'''
+              condition: "@in_proof_ok_lc == 'init'"
               branch: 2
             ports:
               - trigger
@@ -1379,7 +1380,7 @@ nodes:
   - id: eval_7
     type: EVALUATE
     config:
-      condition: '@in_proof_ok_lc == ''true'''
+      condition: "@in_proof_ok_lc == 'true'"
       branch: 1
     ports:
       - trigger
@@ -1390,7 +1391,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''machine_proved'''
+      expression: "'machine_proved'"
     ports:
       - trigger
       - complete
@@ -1399,7 +1400,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -1460,7 +1461,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -1468,7 +1469,7 @@ nodes:
   - id: eval_8
     type: EVALUATE
     config:
-      condition: '@in_badge == ''machine_proved'''
+      condition: "@in_badge == 'machine_proved'"
       branch: 1
     ports:
       - trigger

@@ -22,8 +22,9 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''=== Text Transformation Tool ===\nOptions: uppercase | lowercase
-      | reverse | collapse whitespace | exit\n'''
+    expression: >-
+      '=== Text Transformation Tool ===\nOptions: uppercase | lowercase |
+      reverse | collapse whitespace | exit\n'
   ports:
   - trigger
   - complete
@@ -32,7 +33,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -188,7 +189,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_session_log + ''[exit] Session ended.\n'''
+          expression: |-
+            @in_session_log + '[exit] Session ended.\n'
         ports:
         - trigger
         - complete
@@ -300,7 +302,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: ''''''
+          expression: "''"
         ports:
         - trigger
         - complete
@@ -433,8 +435,9 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_session_log + ''['' + @in_transform_type + "] ''" + @in_input_text
-            + "'' => ''" + @in_result + "''\n"'
+          expression: >-
+            @in_session_log + '[' + @in_transform_type + "] '" + @in_input_text + "'
+            => '" + @in_result + "'\n"
         ports:
         - trigger
         - complete

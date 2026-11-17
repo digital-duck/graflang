@@ -25,7 +25,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -162,8 +162,9 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_history + ''\n[Thought+Action]: '' + @in_action_json +
-            ''\n[Observation]: '' + @in_observation'
+          expression: >-
+            @in_history + '\n[Thought+Action]: ' + @in_action_json +
+            '\n[Observation]: ' + @in_observation
         ports:
         - trigger
         - complete

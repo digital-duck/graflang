@@ -32,7 +32,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -41,7 +41,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -50,7 +50,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -59,7 +59,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -68,7 +68,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -77,7 +77,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -86,7 +86,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -95,7 +95,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -104,7 +104,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''in_progress'''
+    expression: "'in_progress'"
   ports:
   - trigger
   - complete
@@ -343,7 +343,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''complete'''
+          expression: "'complete'"
         ports:
         - trigger
         - complete
@@ -717,7 +717,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '@in_best_solution + ''\n\n'' + @in_failure_report'
+    expression: |-
+      @in_best_solution + '\n\n' + @in_failure_report
   ports:
   - trigger
   - complete

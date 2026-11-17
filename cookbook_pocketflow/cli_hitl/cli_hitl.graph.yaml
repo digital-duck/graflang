@@ -40,7 +40,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -49,7 +49,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -153,7 +153,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_rejected_jokes + ''- '' + @in_joke + ''\n'''
+          expression: |-
+            @in_rejected_jokes + '- ' + @in_joke + '\n'
         ports:
         - trigger
         - complete

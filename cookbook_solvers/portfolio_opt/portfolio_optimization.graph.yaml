@@ -54,7 +54,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -63,7 +63,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''N/A'''
+      expression: "'N/A'"
     ports:
       - trigger
       - complete
@@ -72,7 +72,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''{}'''
+      expression: "'{}'"
     ports:
       - trigger
       - complete
@@ -81,7 +81,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''{}'''
+      expression: "'{}'"
     ports:
       - trigger
       - complete
@@ -210,7 +210,7 @@ nodes:
   - id: eval_1
     type: EVALUATE
     config:
-      condition: '@in_use_solver == ''true'''
+      condition: "@in_use_solver == 'true'"
       branch: 1
     ports:
       - trigger
@@ -220,7 +220,7 @@ nodes:
   - id: eval_2
     type: EVALUATE
     config:
-      condition: '@in_algorithm == ''auto'''
+      condition: "@in_algorithm == 'auto'"
       branch: 1
     ports:
       - trigger
@@ -542,7 +542,7 @@ nodes:
   - id: eval_3
     type: EVALUATE
     config:
-      condition: '@in_opt_status == ''OPTIMAL'''
+      condition: "@in_opt_status == 'OPTIMAL'"
       branch: 1
     ports:
       - trigger
@@ -553,7 +553,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''OPTIMAL'''
+      expression: "'OPTIMAL'"
     ports:
       - trigger
       - complete

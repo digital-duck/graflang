@@ -26,7 +26,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''[]'''
+    expression: "'[]'"
   ports:
   - trigger
   - complete
@@ -44,7 +44,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -53,7 +53,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''true'''
+    expression: "'true'"
   ports:
   - trigger
   - complete
@@ -62,7 +62,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -71,7 +71,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -88,7 +88,8 @@ nodes:
 - id: loop_2
   type: LOOP
   config:
-    condition: latest(@in_next_thought_needed, @next_thought_needed) == 'true' AND
+    condition: >-
+      latest(@in_next_thought_needed, @next_thought_needed) == 'true' AND
       latest(@in_iteration, @iteration) < @in_max_iterations
     outputs:
       thought_number:
@@ -225,7 +226,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''false'''
+          expression: "'false'"
         ports:
         - trigger
         - complete
@@ -233,8 +234,9 @@ nodes:
       - id: loop_1
         type: LOOP
         config:
-          condition: latest(@in_yaml_valid, @yaml_valid) == 'false' AND latest(@in_retry_count,
-            @retry_count) < 3
+          condition: >-
+            latest(@in_yaml_valid, @yaml_valid) == 'false' AND
+            latest(@in_retry_count, @retry_count) < 3
           outputs:
             thought_data:
               from: gen_1.out_thought_data

@@ -117,7 +117,9 @@ nodes:
   - id: eval_1
     type: EVALUATE
     config:
-      condition: (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode == 'yes')
+      condition: >-
+        (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode
+        == 'yes')
       branch: 1
     ports:
       - trigger
@@ -128,7 +130,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''yes'''
+      expression: "'yes'"
     ports:
       - trigger
       - complete
@@ -137,7 +139,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''no'''
+      expression: "'no'"
     ports:
       - trigger
       - complete
@@ -145,7 +147,7 @@ nodes:
   - id: eval_2
     type: EVALUATE
     config:
-      condition: '@in_use_solver == ''no'''
+      condition: "@in_use_solver == 'no'"
       branch: 1
     ports:
       - trigger
@@ -248,7 +250,7 @@ nodes:
   - id: eval_3
     type: EVALUATE
     config:
-      condition: '@in_result == '''''
+      condition: "@in_result == ''"
       branch: 1
     ports:
       - trigger
@@ -259,7 +261,8 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''[FAILURE] The unaided LLM returned nothing for this problem.'''
+      expression: |-
+        '[FAILURE] The unaided LLM returned nothing for this problem.'
     ports:
       - trigger
       - complete
@@ -267,7 +270,7 @@ nodes:
   - id: eval_4
     type: EVALUATE
     config:
-      condition: '@in_backend_lc == ''lean'''
+      condition: "@in_backend_lc == 'lean'"
       branch: 1
     ports:
       - trigger
@@ -308,7 +311,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -317,7 +320,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''init'''
+      expression: "'init'"
     ports:
       - trigger
       - complete
@@ -370,7 +373,7 @@ nodes:
           - id: eval_5
             type: EVALUATE
             config:
-              condition: '@in_stmt_ok_lc == ''true'''
+              condition: "@in_stmt_ok_lc == 'true'"
               branch: 1
             ports:
               - trigger
@@ -390,7 +393,7 @@ nodes:
           - id: eval_6
             type: EVALUATE
             config:
-              condition: '@in_stmt_ok_lc == ''init'''
+              condition: "@in_stmt_ok_lc == 'init'"
               branch: 2
             ports:
               - trigger
@@ -822,7 +825,8 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''not judged (formalization failed)'''
+      expression: |-
+        'not judged (formalization failed)'
     ports:
       - trigger
       - complete
@@ -831,7 +835,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''unverified'''
+      expression: "'unverified'"
     ports:
       - trigger
       - complete
@@ -840,7 +844,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -849,7 +853,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -858,7 +862,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -866,7 +870,7 @@ nodes:
   - id: eval_7
     type: EVALUATE
     config:
-      condition: '@in_stmt_ok_lc == ''true'''
+      condition: "@in_stmt_ok_lc == 'true'"
       branch: 1
     ports:
       - trigger
@@ -877,7 +881,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''statement_checked'''
+      expression: "'statement_checked'"
     ports:
       - trigger
       - complete
@@ -922,7 +926,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''unfaithful'''
+      expression: "'unfaithful'"
     ports:
       - trigger
       - complete
@@ -931,7 +935,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''init'''
+      expression: "'init'"
     ports:
       - trigger
       - complete
@@ -1003,7 +1007,7 @@ nodes:
   - id: eval_9
     type: EVALUATE
     config:
-      condition: '@in_citation_lc == ''none'''
+      condition: "@in_citation_lc == 'none'"
       branch: 1
     ports:
       - trigger
@@ -1014,7 +1018,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -1207,7 +1211,7 @@ nodes:
           - id: eval_10
             type: EVALUATE
             config:
-              condition: '@in_proof_ok_lc == ''true'''
+              condition: "@in_proof_ok_lc == 'true'"
               branch: 1
             ports:
               - trigger
@@ -1227,7 +1231,7 @@ nodes:
           - id: eval_11
             type: EVALUATE
             config:
-              condition: '@in_proof_ok_lc == ''init'''
+              condition: "@in_proof_ok_lc == 'init'"
               branch: 2
             ports:
               - trigger
@@ -1740,7 +1744,7 @@ nodes:
   - id: eval_12
     type: EVALUATE
     config:
-      condition: '@in_proof_ok_lc == ''true'''
+      condition: "@in_proof_ok_lc == 'true'"
       branch: 1
     ports:
       - trigger
@@ -1751,7 +1755,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''machine_proved'''
+      expression: "'machine_proved'"
     ports:
       - trigger
       - complete
@@ -1760,7 +1764,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -2059,7 +2063,7 @@ nodes:
   - id: eval_13
     type: EVALUATE
     config:
-      condition: '@in_n_steps == ''0'''
+      condition: "@in_n_steps == '0'"
       branch: 1
     ports:
       - trigger
@@ -2111,7 +2115,9 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: 'f''[PLAN FAILURE] The planning step could not decompose "{@in_problem}" into usable operations.\nRaw decomposition output: {@in_steps_text}'''
+      expression: >-
+        f'[PLAN FAILURE] The planning step could not decompose "{@in_problem}"
+        into usable operations.\nRaw decomposition output: {@in_steps_text}'
     ports:
       - trigger
       - complete
@@ -2131,7 +2137,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -2140,7 +2146,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -2314,7 +2320,8 @@ nodes:
           - id: eval_14
             type: EVALUATE
             config:
-              condition: '@in_running_expression == ''solver_error'''
+              condition: |-
+                @in_running_expression == 'solver_error'
               branch: 1
             ports:
               - trigger
@@ -2368,7 +2375,8 @@ nodes:
             type: CONTEXT
             config:
               action: set
-              expression: '@in_trace + f''{@in_step_no}. {@in_trace_line}\n'''
+              expression: |-
+                @in_trace + f'{@in_step_no}. {@in_trace_line}\n'
             ports:
               - trigger
               - complete
@@ -2610,7 +2618,7 @@ nodes:
   - id: eval_15
     type: EVALUATE
     config:
-      condition: '@in_result == '''''
+      condition: "@in_result == ''"
       branch: 1
     ports:
       - trigger
@@ -2621,7 +2629,9 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: f'[NARRATION FAILURE] The chain verified correctly but the explanation step returned nothing.\nVerified chain:\n{@in_trace}'
+      expression: >-
+        f'[NARRATION FAILURE] The chain verified correctly but the explanation
+        step returned nothing.\nVerified chain:\n{@in_trace}'
     ports:
       - trigger
       - complete

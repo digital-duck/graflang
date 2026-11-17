@@ -117,7 +117,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''init'''
+      expression: "'init'"
     ports:
       - trigger
       - complete
@@ -275,7 +275,7 @@ nodes:
           - id: eval_1
             type: EVALUATE
             config:
-              condition: '@in_run_status == ''passed'''
+              condition: "@in_run_status == 'passed'"
               branch: 1
             ports:
               - trigger

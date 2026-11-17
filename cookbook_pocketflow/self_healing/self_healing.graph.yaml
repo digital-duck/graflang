@@ -32,7 +32,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''false'''
+    expression: "'false'"
   ports:
   - trigger
   - complete
@@ -41,7 +41,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -50,7 +50,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -154,7 +154,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''true'''
+          expression: "'true'"
         ports:
         - trigger
         - complete
@@ -352,8 +352,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''FAILURE: max retries reached without valid syntax. Last errors:
-      '' + @in_errors'
+    expression: |-
+      'FAILURE: max retries reached without valid syntax. Last errors: ' + @in_errors
   ports:
   - trigger
   - complete

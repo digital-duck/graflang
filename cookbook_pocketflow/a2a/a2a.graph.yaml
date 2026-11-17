@@ -54,7 +54,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -247,7 +247,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_context + ''\n[Search: '' + @in_query + '']\n'' + @in_observation'
+          expression: |-
+            @in_context + '\n[Search: ' + @in_query + ']\n' + @in_observation
         ports:
         - trigger
         - complete

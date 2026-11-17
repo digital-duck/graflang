@@ -38,7 +38,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -291,8 +291,9 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_conversation_log + ''User: '' + @in_current_message + ''\nAssistant:
-            '' + @in_response + ''\n\n'''
+          expression: >-
+            @in_conversation_log + 'User: ' + @in_current_message + '\nAssistant: '
+            + @in_response + '\n\n'
         ports:
         - trigger
         - complete

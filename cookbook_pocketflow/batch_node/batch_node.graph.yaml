@@ -30,7 +30,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''0'''
+    expression: "'0'"
   ports:
   - trigger
   - complete
@@ -39,7 +39,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''0'''
+    expression: "'0'"
   ports:
   - trigger
   - complete
@@ -48,7 +48,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''0'''
+    expression: "'0'"
   ports:
   - trigger
   - complete

@@ -31,7 +31,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -40,7 +40,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -49,7 +49,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -607,7 +607,8 @@ nodes:
       - id: eval_2
         type: EVALUATE
         config:
-          condition: 'contains(@in_subject, ''DECISION: finalize'')'
+          condition: |-
+            contains(@in_subject, 'DECISION: finalize')
           branch: 1
         ports:
         - trigger

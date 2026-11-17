@@ -47,7 +47,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -148,7 +148,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_run_log + ''cycle '' + str(@in_cycle) + '': no new emails\n'''
+          expression: |-
+            @in_run_log + 'cycle ' + str(@in_cycle) + ': no new emails\n'
         ports:
         - trigger
         - complete
@@ -218,8 +219,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''['' + @in_timestamp + ''] '' + @in_summary + '' | '' + @in_action
-            + ''\n'''
+          expression: |-
+            '[' + @in_timestamp + '] ' + @in_summary + ' | ' + @in_action + '\n'
         ports:
         - trigger
         - complete
@@ -273,7 +274,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_run_log + ''cycle '' + str(@in_cycle) + '': processed emails\n'''
+          expression: |-
+            @in_run_log + 'cycle ' + str(@in_cycle) + ': processed emails\n'
         ports:
         - trigger
         - complete

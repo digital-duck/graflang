@@ -94,7 +94,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -103,7 +103,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -509,7 +509,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_scored_leads + @in_lead + ''\n'''
+          expression: |-
+            @in_scored_leads + @in_lead + '\n'
         ports:
         - trigger
         - complete
@@ -520,7 +521,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_ready_emails + @in_email + ''\n---\n'''
+          expression: |-
+            @in_ready_emails + @in_email + '\n---\n'
         ports:
         - trigger
         - complete
@@ -531,7 +533,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''skipped'''
+          expression: "'skipped'"
         ports:
         - trigger
         - complete
@@ -685,8 +687,9 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''=== SCORED LEADS ===\n'' + @in_scored_leads + ''\n=== READY-TO-SEND
-      EMAILS ===\n'' + @in_ready_emails'
+    expression: >-
+      '=== SCORED LEADS ===\n' + @in_scored_leads + '\n=== READY-TO-SEND
+      EMAILS ===\n' + @in_ready_emails
   ports:
   - trigger
   - complete

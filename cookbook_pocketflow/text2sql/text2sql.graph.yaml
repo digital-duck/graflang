@@ -35,7 +35,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -44,7 +44,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''false'''
+    expression: "'false'"
   ports:
   - trigger
   - complete
@@ -53,7 +53,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -237,7 +237,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''true'''
+          expression: "'true'"
         ports:
         - trigger
         - complete
@@ -321,7 +321,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''SQL generation failed after all attempts. Last error: '' + @in_exec_result'
+    expression: |-
+      'SQL generation failed after all attempts. Last error: ' + @in_exec_result
   ports:
   - trigger
   - complete

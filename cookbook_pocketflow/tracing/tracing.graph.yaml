@@ -106,7 +106,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''ok'''
+    expression: "'ok'"
   ports:
   - trigger
   - complete
@@ -115,7 +115,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -412,7 +412,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''error'''
+          expression: "'error'"
         ports:
         - trigger
         - complete
@@ -421,7 +421,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_trace_summary + ''ERROR:prep:'' + @in_current_node'
+          expression: |-
+            @in_trace_summary + 'ERROR:prep:' + @in_current_node
         ports:
         - trigger
         - complete
@@ -601,7 +602,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''error'''
+          expression: "'error'"
         ports:
         - trigger
         - complete
@@ -610,7 +611,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_trace_summary + ''ERROR:exec:'' + @in_current_node'
+          expression: |-
+            @in_trace_summary + 'ERROR:exec:' + @in_current_node
         ports:
         - trigger
         - complete
@@ -790,7 +792,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''error'''
+          expression: "'error'"
         ports:
         - trigger
         - complete
@@ -799,7 +801,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_trace_summary + ''ERROR:post:'' + @in_current_node'
+          expression: |-
+            @in_trace_summary + 'ERROR:post:' + @in_current_node
         ports:
         - trigger
         - complete
@@ -850,7 +853,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_trace_summary + ''OK:'' + @in_current_node + '' '''
+          expression: |-
+            @in_trace_summary + 'OK:' + @in_current_node + ' '
         ports:
         - trigger
         - complete
@@ -1110,7 +1114,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '@in_trace_summary + ''| finalized:'' + @in_trace_id'
+    expression: |-
+      @in_trace_summary + '| finalized:' + @in_trace_id
   ports:
   - trigger
   - complete
@@ -1121,7 +1126,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '@in_trace_summary + ''| trace_ended_with_error'''
+    expression: |-
+      @in_trace_summary + '| trace_ended_with_error'
   ports:
   - trigger
   - complete

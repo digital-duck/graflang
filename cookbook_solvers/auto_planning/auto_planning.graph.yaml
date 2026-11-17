@@ -137,7 +137,9 @@ nodes:
   - id: eval_1
     type: EVALUATE
     config:
-      condition: (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode == 'yes')
+      condition: >-
+        (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode
+        == 'yes')
       branch: 1
     ports:
       - trigger
@@ -148,7 +150,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''yes'''
+      expression: "'yes'"
     ports:
       - trigger
       - complete
@@ -157,7 +159,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''no'''
+      expression: "'no'"
     ports:
       - trigger
       - complete
@@ -165,7 +167,7 @@ nodes:
   - id: eval_2
     type: EVALUATE
     config:
-      condition: '@in_use_solver == ''no'''
+      condition: "@in_use_solver == 'no'"
       branch: 1
     ports:
       - trigger
@@ -240,7 +242,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''init'''
+      expression: "'init'"
     ports:
       - trigger
       - complete
@@ -249,7 +251,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''[]'''
+      expression: "'[]'"
     ports:
       - trigger
       - complete
@@ -258,7 +260,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''{}'''
+      expression: "'{}'"
     ports:
       - trigger
       - complete
@@ -292,7 +294,7 @@ nodes:
           - id: eval_3
             type: EVALUATE
             config:
-              condition: '@in_status == ''OK'''
+              condition: "@in_status == 'OK'"
               branch: 1
             ports:
               - trigger
@@ -312,7 +314,7 @@ nodes:
           - id: eval_4
             type: EVALUATE
             config:
-              condition: '@in_status == ''init'''
+              condition: "@in_status == 'init'"
               branch: 2
             ports:
               - trigger

@@ -84,7 +84,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -103,7 +103,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -280,7 +280,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: ''''''
+          expression: "''"
         ports:
         - trigger
         - complete
@@ -409,7 +409,8 @@ nodes:
               type: CONTEXT
               config:
                 action: set
-                expression: '@in_pdf_text + @in_page_text_part + ''\n\n'''
+                expression: |-
+                  @in_pdf_text + @in_page_text_part + '\n\n'
               ports:
               - trigger
               - complete
@@ -474,8 +475,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_combined_markdown + ''## '' + @in_pdf_path + ''\n\n'' +
-            @in_pdf_text'
+          expression: |-
+            @in_combined_markdown + '## ' + @in_pdf_path + '\n\n' + @in_pdf_text
         ports:
         - trigger
         - complete

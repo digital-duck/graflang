@@ -43,7 +43,7 @@ nodes:
   - id: eval_1
     type: EVALUATE
     config:
-      condition: '@in_subject == ''true'''
+      condition: "@in_subject == 'true'"
       semantic: true
       branch: 1
     ports:
@@ -77,7 +77,7 @@ nodes:
   - id: eval_2
     type: EVALUATE
     config:
-      condition: '@in_subject == ''false'''
+      condition: "@in_subject == 'false'"
       semantic: true
       branch: 2
     ports:
@@ -231,7 +231,7 @@ nodes:
   - id: eval_3
     type: EVALUATE
     config:
-      condition: '@in_use_solver == ''true'''
+      condition: "@in_use_solver == 'true'"
       branch: 1
     ports:
       - trigger
@@ -501,7 +501,7 @@ nodes:
   - id: eval_4
     type: EVALUATE
     config:
-      condition: '@in_use_solver == ''false'''
+      condition: "@in_use_solver == 'false'"
       branch: 2
     ports:
       - trigger

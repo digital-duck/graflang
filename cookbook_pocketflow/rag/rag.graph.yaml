@@ -270,7 +270,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''skipped'''
+    expression: "'skipped'"
   ports:
   - trigger
   - complete

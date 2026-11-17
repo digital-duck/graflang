@@ -358,7 +358,7 @@ nodes:
   - id: eval_1
     type: EVALUATE
     config:
-      condition: '@in_operation_lc == ''galois'''
+      condition: "@in_operation_lc == 'galois'"
       branch: 1
     ports:
       - trigger
@@ -382,7 +382,7 @@ nodes:
   - id: eval_2
     type: EVALUATE
     config:
-      condition: '@in_operation_lc == ''factor'''
+      condition: "@in_operation_lc == 'factor'"
       branch: 2
     ports:
       - trigger
@@ -406,7 +406,7 @@ nodes:
   - id: eval_3
     type: EVALUATE
     config:
-      condition: '@in_operation_lc == ''conic'''
+      condition: "@in_operation_lc == 'conic'"
       branch: 3
     ports:
       - trigger
@@ -430,7 +430,7 @@ nodes:
   - id: eval_4
     type: EVALUATE
     config:
-      condition: '@in_operation_lc == ''rank'''
+      condition: "@in_operation_lc == 'rank'"
       branch: 4
     ports:
       - trigger
@@ -455,7 +455,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''unsupported_operation'''
+      expression: "'unsupported_operation'"
     ports:
       - trigger
       - complete
@@ -467,7 +467,8 @@ nodes:
       backend: kernel
       kernel_name: sagemath
       code: ''
-      result: "'%.3fs'%(__import__('time').perf_counter()-float(_t0))"
+      result: |-
+        '%.3fs'%(__import__('time').perf_counter()-float(_t0))
       out_type: TEXT
     ports:
       - trigger

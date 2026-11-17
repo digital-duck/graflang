@@ -92,7 +92,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''tool'''
+    expression: "'tool'"
   ports:
   - trigger
   - complete
@@ -101,7 +101,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''params'''
+    expression: "'params'"
   ports:
   - trigger
   - complete

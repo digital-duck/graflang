@@ -27,7 +27,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''0'''
+    expression: "'0'"
   ports:
   - trigger
   - complete
@@ -36,7 +36,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''0'''
+    expression: "'0'"
   ports:
   - trigger
   - complete
@@ -45,7 +45,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''0.00'''
+    expression: "'0.00'"
   ports:
   - trigger
   - complete
@@ -54,7 +54,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -313,9 +313,11 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_running_log + ''[Text '' + str(@in_text_count) + ''] '' + @in_current_input
-            + '' | words: '' + str(@in_words_in_input) + '' | total words: '' + str(@in_total_word_count)
-            + '' | avg words/text: '' + str(@in_avg_words) + ''\n'''
+          expression: >-
+            @in_running_log + '[Text ' + str(@in_text_count) + '] ' +
+            @in_current_input + ' | words: ' + str(@in_words_in_input) + ' | total
+            words: ' + str(@in_total_word_count) + ' | avg words/text: ' +
+            str(@in_avg_words) + '\n'
         ports:
         - trigger
         - complete
@@ -427,9 +429,11 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '@in_running_log + ''\n=== Final Statistics ===\nTotal texts processed
-      : '' + str(@in_text_count) + ''\nTotal words counted   : '' + str(@in_total_word_count)
-      + ''\nAverage words per text: '' + str(@in_avg_words)'
+    expression: >-
+      @in_running_log + '\n=== Final Statistics ===\nTotal texts processed : '
+      + str(@in_text_count) + '\nTotal words counted   : ' +
+      str(@in_total_word_count) + '\nAverage words per text: ' +
+      str(@in_avg_words)
   ports:
   - trigger
   - complete

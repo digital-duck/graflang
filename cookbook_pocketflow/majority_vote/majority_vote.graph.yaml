@@ -84,7 +84,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '@in_ans1 + ''\n'' + @in_ans2 + ''\n'' + @in_ans3'
+    expression: |-
+      @in_ans1 + '\n' + @in_ans2 + '\n' + @in_ans3
   ports:
   - trigger
   - complete

@@ -80,7 +80,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -307,7 +307,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_all_evaluations + @in_path1 + ''|||'' + @in_eval1 + ''\n'''
+          expression: |-
+            @in_all_evaluations + @in_path1 + '|||' + @in_eval1 + '\n'
         ports:
         - trigger
         - complete
@@ -319,7 +320,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_all_evaluations + @in_path2 + ''|||'' + @in_eval2 + ''\n'''
+          expression: |-
+            @in_all_evaluations + @in_path2 + '|||' + @in_eval2 + '\n'
         ports:
         - trigger
         - complete
@@ -331,7 +333,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_all_evaluations + @in_path3 + ''|||'' + @in_eval3 + ''\n'''
+          expression: |-
+            @in_all_evaluations + @in_path3 + '|||' + @in_eval3 + '\n'
         ports:
         - trigger
         - complete

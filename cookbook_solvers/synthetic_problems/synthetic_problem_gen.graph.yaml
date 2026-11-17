@@ -39,7 +39,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -48,7 +48,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''0'''
+      expression: "'0'"
     ports:
       - trigger
       - complete
@@ -57,7 +57,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''0'''
+      expression: "'0'"
     ports:
       - trigger
       - complete
@@ -66,7 +66,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''0'''
+      expression: "'0'"
     ports:
       - trigger
       - complete
@@ -75,7 +75,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''(not saved)'''
+      expression: "'(not saved)'"
     ports:
       - trigger
       - complete
@@ -84,7 +84,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: '''(no variants generated)'''
+      expression: "'(no variants generated)'"
     ports:
       - trigger
       - complete

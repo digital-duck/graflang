@@ -32,7 +32,8 @@ nodes:
   - id: "chapter_loop"
     type: "LOOP"
     config:
-      condition: "@chapter_index < @in_num_chapters"
+      condition: |-
+        @chapter_index < @in_num_chapters
       max_iterations: "@in_num_chapters"
       index_var: chapter_index                 # 0-based; also readable by the body as port in_chapter_index
       outputs:

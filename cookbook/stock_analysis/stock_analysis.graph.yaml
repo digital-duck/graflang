@@ -154,7 +154,8 @@ nodes:
             type: CONTEXT
             config:
               action: set
-              expression: "@in_ticker + ': ' + @in_insight"
+              expression: |-
+                @in_ticker + ': ' + @in_insight
             ports:
               - trigger
               - complete

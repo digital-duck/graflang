@@ -100,14 +100,18 @@ nodes:
   - id: "audit_released"
     type: "SOLVE"
     config:
-      expression: "'released to ' + @in_destination + ' (' + json_get(@in_verdict, 'engine') + ' engine)'"
+      expression: >-
+        'released to ' + @in_destination + ' (' + json_get(@in_verdict,
+        'engine') + ' engine)'
       label: "Audit note: released"
     ports: ["trigger", "complete", "in_destination", "in_verdict", "out_audit"]
 
   - id: "audit_escalated"
     type: "SOLVE"
     config:
-      expression: "'ESCALATED to a human reviewer, not released. Violated: ' + str(json_get(@in_verdict, 'violated'))"
+      expression: >-
+        'ESCALATED to a human reviewer, not released. Violated: ' +
+        str(json_get(@in_verdict, 'violated'))
       label: "Audit note: escalated"
     ports: ["trigger", "complete", "in_verdict", "out_audit"]
 

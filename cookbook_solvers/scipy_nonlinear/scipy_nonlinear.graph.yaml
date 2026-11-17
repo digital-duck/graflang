@@ -82,7 +82,7 @@ nodes:
   - id: eval_1
     type: EVALUATE
     config:
-      condition: '@in_problem_type == ''pricing'''
+      condition: "@in_problem_type == 'pricing'"
       branch: 1
     ports:
       - trigger
@@ -258,7 +258,7 @@ nodes:
   - id: eval_2
     type: EVALUATE
     config:
-      condition: '@in_use_solver == ''true'''
+      condition: "@in_use_solver == 'true'"
       branch: 1
     ports:
       - trigger
@@ -584,7 +584,7 @@ nodes:
   - id: eval_3
     type: EVALUATE
     config:
-      condition: '@in_use_solver == ''false'''
+      condition: "@in_use_solver == 'false'"
       branch: 2
     ports:
       - trigger

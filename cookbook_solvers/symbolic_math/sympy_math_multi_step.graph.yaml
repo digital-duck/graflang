@@ -167,7 +167,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -176,7 +176,7 @@ nodes:
     type: CONTEXT
     config:
       action: set
-      expression: ''''''
+      expression: "''"
     ports:
       - trigger
       - complete
@@ -347,7 +347,8 @@ nodes:
             type: CONTEXT
             config:
               action: set
-              expression: '@in_trace + f''{@in_step_no}. {@in_trace_line}\n'''
+              expression: |-
+                @in_trace + f'{@in_step_no}. {@in_trace_line}\n'
             ports:
               - trigger
               - complete

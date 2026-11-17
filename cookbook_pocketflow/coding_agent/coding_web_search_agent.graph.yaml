@@ -111,7 +111,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -129,7 +129,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''incomplete'''
+    expression: "'incomplete'"
   ports:
   - trigger
   - complete
@@ -138,7 +138,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -328,7 +328,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''false'''
+          expression: "'false'"
         ports:
         - trigger
         - complete
@@ -596,7 +596,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''true'''
+          expression: "'true'"
         ports:
         - trigger
         - complete
@@ -605,7 +605,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''unknown action: '' + @in_action_type'
+          expression: |-
+            'unknown action: ' + @in_action_type
         ports:
         - trigger
         - complete
@@ -699,7 +700,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''success'''
+          expression: "'success'"
         ports:
         - trigger
         - complete

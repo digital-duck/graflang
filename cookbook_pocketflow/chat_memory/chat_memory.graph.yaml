@@ -29,7 +29,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''[]'''
+    expression: "'[]'"
   ports:
   - trigger
   - complete
@@ -38,7 +38,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''[]'''
+    expression: "'[]'"
   ports:
   - trigger
   - complete
@@ -47,7 +47,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -304,8 +304,9 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_conversation + ''User: '' + @in_user_input + ''\nAssistant:
-            '' + @in_response + ''\n\n'''
+          expression: >-
+            @in_conversation + 'User: ' + @in_user_input + '\nAssistant: ' +
+            @in_response + '\n\n'
         ports:
         - trigger
         - complete
@@ -572,7 +573,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''no'''
+          expression: "'no'"
         ports:
         - trigger
         - complete

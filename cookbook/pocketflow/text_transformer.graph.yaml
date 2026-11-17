@@ -23,8 +23,9 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''=== Text Transformation Tool ===\nOptions: uppercase | lowercase
-      | reverse | collapse whitespace | exit\n'''
+    expression: >-
+      '=== Text Transformation Tool ===\nOptions: uppercase | lowercase |
+      reverse | collapse whitespace | exit\n'
   ports:
   - trigger
   - complete
@@ -33,7 +34,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -96,15 +97,23 @@ nodes:
           - '@commands'
           - '@i'
           - '''|'''
-          code: "import json\n\ndef list_get(value: str, index: str, delimiter: str=',')\
-            \ -> str:\n    \"\"\"LIST_GET(value, index, delimiter) — 1-based element\
-            \ from a JSON array\n    or, if value isn't valid JSON, a delimited list.\"\
-            \"\"\n    s = str(value).strip()\n    idx = int(index) - 1\n    if s.startswith('[')\
-            \ and s.endswith(']'):\n        try:\n            parts = json.loads(s)\n\
-            \            return str(parts[idx]) if 0 <= idx < len(parts) else ''\n\
-            \        except (json.JSONDecodeError, TypeError):\n            pass\n\
-            \    parts = s.split(str(delimiter))\n    return parts[idx].strip() if\
-            \ 0 <= idx < len(parts) else ''\n_spl_result = list_get(commands, i, '|')\n"
+          code: |
+            import json
+
+            def list_get(value: str, index: str, delimiter: str=',') -> str:
+                """LIST_GET(value, index, delimiter) — 1-based element from a JSON array
+                or, if value isn't valid JSON, a delimited list."""
+                s = str(value).strip()
+                idx = int(index) - 1
+                if s.startswith('[') and s.endswith(']'):
+                    try:
+                        parts = json.loads(s)
+                        return str(parts[idx]) if 0 <= idx < len(parts) else ''
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                parts = s.split(str(delimiter))
+                return parts[idx].strip() if 0 <= idx < len(parts) else ''
+            _spl_result = list_get(commands, i, '|')
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -126,9 +135,11 @@ nodes:
           backend: kernel
           arguments:
           - '@command'
-          code: "def trim(value: str) -> str:\n    \"\"\"TRIM(value) — remove leading\
-            \ and trailing whitespace.\"\"\"\n    return str(value).strip()\n_spl_result\
-            \ = trim(command)\n"
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+            _spl_result = trim(command)
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -148,10 +159,11 @@ nodes:
           arguments:
           - '@command'
           - '''exit'''
-          code: "def contains(value: str, substring: str) -> str:\n    \"\"\"CONTAINS(value,\
-            \ substring) — returns 'true' or 'false'.\"\"\"\n    return 'true' if\
-            \ str(substring) in str(value) else 'false'\n_spl_result = contains(command,\
-            \ 'exit')\n"
+          code: |
+            def contains(value: str, substring: str) -> str:
+                """CONTAINS(value, substring) — returns 'true' or 'false'."""
+                return 'true' if str(substring) in str(value) else 'false'
+            _spl_result = contains(command, 'exit')
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -178,7 +190,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_session_log + ''[exit] Session ended.\n'''
+          expression: |-
+            @in_session_log + '[exit] Session ended.\n'
         ports:
         - trigger
         - complete
@@ -204,19 +217,28 @@ nodes:
           - ''':'''
           - '''1'''
           - '''true'''
-          code: "def trim(value: str) -> str:\n    \"\"\"TRIM(value) — remove leading\
-            \ and trailing whitespace.\"\"\"\n    return str(value).strip()\n\ndef\
-            \ split_part(value: str, delimiter: str, part: str, trim: str='true')\
-            \ -> str:\n    \"\"\"SPLIT_PART(value, delimiter, part [, trim]) — 1-based\
-            \ part after splitting on delimiter.\n\n    The part comes back whitespace-trimmed\
-            \ by default: delimited protocol\n    lines ('a | b') are padded for readability\
-            \ and virtually every caller\n    wants the bare field (list_get behaves\
-            \ the same way). Pass trim='false'\n    to keep the raw part, padding\
-            \ included.\n    \"\"\"\n    parts = str(value).split(str(delimiter))\n\
-            \    idx = int(part) - 1\n    if not 0 <= idx < len(parts):\n        return\
-            \ ''\n    raw = parts[idx]\n    if str(trim).strip().lower() in {'false',\
-            \ '0', 'no'}:\n        return raw\n    return raw.strip()\n_spl_result\
-            \ = split_part(command, ':', '1', 'true')\n"
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+
+            def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                The part comes back whitespace-trimmed by default: delimited protocol
+                lines ('a | b') are padded for readability and virtually every caller
+                wants the bare field (list_get behaves the same way). Pass trim='false'
+                to keep the raw part, padding included.
+                """
+                parts = str(value).split(str(delimiter))
+                idx = int(part) - 1
+                if not 0 <= idx < len(parts):
+                    return ''
+                raw = parts[idx]
+                if str(trim).strip().lower() in {'false', '0', 'no'}:
+                    return raw
+                return raw.strip()
+            _spl_result = split_part(command, ':', '1', 'true')
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -241,19 +263,28 @@ nodes:
           - ''':'''
           - '''2'''
           - '''true'''
-          code: "def trim(value: str) -> str:\n    \"\"\"TRIM(value) — remove leading\
-            \ and trailing whitespace.\"\"\"\n    return str(value).strip()\n\ndef\
-            \ split_part(value: str, delimiter: str, part: str, trim: str='true')\
-            \ -> str:\n    \"\"\"SPLIT_PART(value, delimiter, part [, trim]) — 1-based\
-            \ part after splitting on delimiter.\n\n    The part comes back whitespace-trimmed\
-            \ by default: delimited protocol\n    lines ('a | b') are padded for readability\
-            \ and virtually every caller\n    wants the bare field (list_get behaves\
-            \ the same way). Pass trim='false'\n    to keep the raw part, padding\
-            \ included.\n    \"\"\"\n    parts = str(value).split(str(delimiter))\n\
-            \    idx = int(part) - 1\n    if not 0 <= idx < len(parts):\n        return\
-            \ ''\n    raw = parts[idx]\n    if str(trim).strip().lower() in {'false',\
-            \ '0', 'no'}:\n        return raw\n    return raw.strip()\n_spl_result\
-            \ = split_part(command, ':', '2', 'true')\n"
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+
+            def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                The part comes back whitespace-trimmed by default: delimited protocol
+                lines ('a | b') are padded for readability and virtually every caller
+                wants the bare field (list_get behaves the same way). Pass trim='false'
+                to keep the raw part, padding included.
+                """
+                parts = str(value).split(str(delimiter))
+                idx = int(part) - 1
+                if not 0 <= idx < len(parts):
+                    return ''
+                raw = parts[idx]
+                if str(trim).strip().lower() in {'false', '0', 'no'}:
+                    return raw
+                return raw.strip()
+            _spl_result = split_part(command, ':', '2', 'true')
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -272,7 +303,7 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: ''''''
+          expression: "''"
         ports:
         - trigger
         - complete
@@ -294,8 +325,11 @@ nodes:
           backend: kernel
           arguments:
           - '@input_text'
-          code: "def upper(value: str) -> str:\n    \"\"\"UPPER(value) — convert to\
-            \ uppercase.\"\"\"\n    return str(value).upper()\n_spl_result = upper(input_text)\n"
+          code: |
+            def upper(value: str) -> str:
+                """UPPER(value) — convert to uppercase."""
+                return str(value).upper()
+            _spl_result = upper(input_text)
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -324,8 +358,11 @@ nodes:
           backend: kernel
           arguments:
           - '@input_text'
-          code: "def lower(value: str) -> str:\n    \"\"\"LOWER(value) — convert to\
-            \ lowercase.\"\"\"\n    return str(value).lower()\n_spl_result = lower(input_text)\n"
+          code: |
+            def lower(value: str) -> str:
+                """LOWER(value) — convert to lowercase."""
+                return str(value).lower()
+            _spl_result = lower(input_text)
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -354,8 +391,11 @@ nodes:
           backend: kernel
           arguments:
           - '@input_text'
-          code: "def reverse(value: str) -> str:\n    \"\"\"REVERSE(value) — reverse\
-            \ a string.\"\"\"\n    return str(value)[::-1]\n_spl_result = reverse(input_text)\n"
+          code: |
+            def reverse(value: str) -> str:
+                """REVERSE(value) — reverse a string."""
+                return str(value)[::-1]
+            _spl_result = reverse(input_text)
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -374,9 +414,14 @@ nodes:
           backend: kernel
           arguments:
           - '@input_text'
-          code: "import re\ndef collapse_whitespace(text: str) -> str:\n    try:\n\
-            \        return re.sub(r'\\s+', ' ', text).strip()\n    except Exception\
-            \ as e:\n        return f\"error: {e}\"\n_spl_result = collapse_whitespace(input_text)\n"
+          code: |
+            import re
+            def collapse_whitespace(text: str) -> str:
+                try:
+                    return re.sub(r'\s+', ' ', text).strip()
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = collapse_whitespace(input_text)
           result: _spl_result
           out_type: TEXT
           tool_params:
@@ -391,8 +436,9 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '@in_session_log + ''['' + @in_transform_type + "] ''" + @in_input_text
-            + "'' => ''" + @in_result + "''\n"'
+          expression: >-
+            @in_session_log + '[' + @in_transform_type + "] '" + @in_input_text + "'
+            => '" + @in_result + "'\n"
         ports:
         - trigger
         - complete

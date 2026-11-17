@@ -35,7 +35,7 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: ''''''
+    expression: "''"
   ports:
   - trigger
   - complete
@@ -44,7 +44,8 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''Game Over: the target word was not guessed.'''
+    expression: |-
+      'Game Over: the target word was not guessed.'
   ports:
   - trigger
   - complete
@@ -163,7 +164,8 @@ nodes:
         type: CONTEXT
         config:
           action: set
-          expression: '''Game Won! The target word was: '' + @in_target_word'
+          expression: |-
+            'Game Won! The target word was: ' + @in_target_word
         ports:
         - trigger
         - complete

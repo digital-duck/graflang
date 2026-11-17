@@ -357,8 +357,9 @@ nodes:
   type: CONTEXT
   config:
     action: set
-    expression: '''Translation complete:'' + ''\n'' + @in_result1 + ''\n'' + @in_result2
-      + ''\n'' + @in_result3'
+    expression: >-
+      'Translation complete:' + '\n' + @in_result1 + '\n' + @in_result2 + '\n'
+      + @in_result3
   ports:
   - trigger
   - complete
