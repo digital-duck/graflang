@@ -418,8 +418,8 @@ def rename_box(workspace: ws.Workspace, path: Path, dirty: bool) -> None:
     if not workspace.writable_for(path):
         return
     folder = workspace.recipe_folder(path)
-    with st.popover("Rename", icon=":material/edit:", help="give the recipe (its folder) a new name", width="stretch"):
-        name = st.text_input("New name of the recipe", folder.name, key=f"recipe_rename_name_{folder.name}")
+    with st.expander("Rename"):
+        name = st.text_input("New name of the recipe (its folder)", folder.name, key=f"recipe_rename_name_{folder.name}")
         if dirty:
             st.caption("Save or undo your edits first: the file moves with the folder.")
         if st.button("Rename recipe", key="recipe_rename_go", type="primary",
@@ -442,7 +442,7 @@ def rename_box(workspace: ws.Workspace, path: Path, dirty: bool) -> None:
 
 def open_box(workspace: ws.Workspace, current: "Path | None" = None) -> None:
     """Browse the work area: pick a recipe, then any `*.graph.yaml` in it, including those in sub-folders (parts, sub-graphs)."""
-    with st.expander("Browse files", expanded=False):
+    with st.expander("Browse", expanded=False):
         folders = {}
         for r in workspace.recipes():
             folders.setdefault(r.folder, r)
@@ -479,7 +479,7 @@ open_graph = ui.open_graph
 
 def edit_chat(editor: GraphEditor, folder: Path, scope: str, staged: dict) -> None:
     """Ask for a change in words: the model answers with operations, which go through the editor like the buttons do (all or none)."""
-    st.markdown("### Ask for a change")
+    st.markdown("### Change via AI")
     ui.show_chat(scope)
     value = ui.chat_box("edit", "e.g. make the critique stricter", history=scope)
     text, files = attachments.unpack(value)
@@ -552,24 +552,26 @@ def edit_page() -> None:
     dirty = editor.changed or bool(staged)
 
     with st.sidebar:
+        view_box()
         st.markdown(f"### {path.name}")
         st.caption(("unsaved changes" if dirty else "saved") + " · " + str(path.resolve().parent))
         if getattr(editor, "compact_origin", False):
             st.caption("short `steps:` form: it stays short when you save (comments in the file are not kept)")
         errors, _ = editor.problems()
-        save_col, undo_col, reload_col = st.columns([1, 1, 2.2])
-        if save_col.button("Save", type="primary", disabled=not dirty or bool(errors), key="save"):
-            def save_all():
-                editor.save()
-                chat_ops.write_staged(path.parent, staged)
-                staged.clear()
-            if attempt(save_all, "saved"):
+        if dirty:                                               # Save and Undo only while there are unsaved changes; otherwise Reload
+            save_col, undo_col, _ = st.columns([1, 1, 2.2])
+            if save_col.button("Save", type="primary", disabled=not dirty or bool(errors), key="save"):
+                def save_all():
+                    editor.save()
+                    chat_ops.write_staged(path.parent, staged)
+                    staged.clear()
+                if attempt(save_all, "saved"):
+                    st.rerun()
+            if undo_col.button("Undo", key="undo", disabled=not editor.can_undo):
+                editor.undo()
+                forget_widgets()
                 st.rerun()
-        if undo_col.button("Undo", key="undo", disabled=not editor.can_undo):
-            editor.undo()
-            forget_widgets()
-            st.rerun()
-        if reload_col.button("Reload", key="reload", disabled=dirty, help="Reload from disk. Off while there are unsaved edits: save or undo them first." if dirty else "Reload from disk"):
+        elif st.button("Reload", key="reload", help="Read the file from disk again, after it was changed outside this page"):
             st.session_state.pop("file")
             st.rerun()
         if errors:
@@ -579,10 +581,9 @@ def edit_page() -> None:
             if st.button("Discard the prompt changes", key="discard_staged"):
                 staged.clear()
                 st.rerun()
-        view_box()
-        clone_box(editor, opened, dirty)
-        rename_box(workspace, path, dirty)
         open_box(workspace, path)
+        rename_box(workspace, path, dirty)
+        clone_box(editor, opened, dirty)
         edit_chat(editor, path.parent, f"edit_{target}", staged)
 
     flash = st.session_state.pop("flash", None)

@@ -29,6 +29,11 @@ def button(app, key):
     return next(b for b in app.button if b.key == key)
 
 
+def shown(app, key):
+    """Is the button on the page? Save and Undo are drawn only while there is something to save or take back."""
+    return any(b.key == key for b in app.button)
+
+
 def send(at, scope, text):
     """Type `text` in the chat box of `scope` ("create" or "edit") and press Send."""
     boxes = [w for tree in (at, at.sidebar) for w in tree.text_area if w.key == f"{scope}_text"]
@@ -42,7 +47,7 @@ def pick(app, node):
 
 def test_it_opens_and_shows_a_valid_graph(at):
     assert at.sidebar.markdown[0].value.startswith("### self_refine.graph.yaml")
-    assert button(at, "save").disabled                                    # nothing to save yet
+    assert not shown(at, "save") and not shown(at, "undo") and shown(at, "reload")      # nothing to save yet: Reload, no greyed-out buttons
     assert any("valid: no errors" in s.value for s in at.success)
 
 
@@ -69,7 +74,7 @@ def test_undo_restores_the_edit(at):
     at.text_area(key="cfg_draft_llm").set_value("ollama:x").run()
     button(at, "set_draft_llm").click().run()
     button(at, "undo").click().run()
-    assert button(at, "save").disabled and at.text_area(key="cfg_draft_llm").value == "ollama:gemma3"
+    assert not shown(at, "save") and at.text_area(key="cfg_draft_llm").value == "ollama:gemma3"      # nothing left to save
 
 
 def test_a_node_is_added_from_the_form_and_saved(at):
@@ -159,14 +164,14 @@ def test_a_chat_edit_can_be_undone_and_its_prompt_changes_discarded(at, monkeypa
     send(at, "edit", "change things")
     button(at, "undo").click().run()
     button(at, "discard_staged").click().run()
-    assert button(at, "save").disabled and not at.session_state[f"staged_{at.session_state['file']}"]
+    assert not shown(at, "save") and not at.session_state[f"staged_{at.session_state['file']}"]
 
 
 def test_a_chat_reply_that_cannot_be_applied_changes_nothing_and_says_why(at, monkeypatch):
     stub_chat(monkeypatch, json.dumps({"say": "x", "ops": [
         {"op": "set_config", "node": "draft", "key": "llm", "value": "a:b"}, {"op": "remove_node", "id": "no_such_node"}]}))
     send(at, "edit", "do it")
-    assert not at.exception and button(at, "save").disabled
+    assert not at.exception and not shown(at, "save")
     assert any("could not apply" in m["content"] for m in at.session_state[f"chat_edit_{at.session_state['file']}"])
 
 
@@ -256,7 +261,7 @@ def test_a_staged_file_can_be_dropped_and_only_text_files_inside_the_folder_are_
 def test_the_source_tab_reports_bad_yaml_and_keeps_the_graph(at):
     at.text_area(key="source_text").set_value("a: [").run()
     button(at, "source_apply").click().run()
-    assert not at.exception and any("not valid YAML" in e.value for e in at.error) and button(at, "save").disabled
+    assert not at.exception and any("not valid YAML" in e.value for e in at.error) and not shown(at, "save")
 
 
 def test_the_source_tab_follows_other_edits_and_undo(at):
@@ -362,12 +367,12 @@ def test_the_edge_lists_follow_the_type_at_once(at):
 
 def test_opening_or_reloading_is_off_while_there_are_unsaved_edits(at):
     pick(at, "draft")
-    assert not button(at, "open_go").disabled and not button(at, "reload").disabled
+    assert not button(at, "open_go").disabled and shown(at, "reload") and not shown(at, "save")
     at.text_area(key="cfg_draft_llm").set_value("ollama:llama3").run()
     button(at, "set_draft_llm").click().run()
-    assert button(at, "open_go").disabled and button(at, "reload").disabled          # an edit is unsaved: nothing may drop it
+    assert button(at, "open_go").disabled and not shown(at, "reload") and shown(at, "save")      # an edit is unsaved: nothing may drop it, Save appears
     button(at, "save").click().run()
-    assert not button(at, "open_go").disabled and not button(at, "reload").disabled
+    assert not button(at, "open_go").disabled and shown(at, "reload") and not shown(at, "save")
 
 
 def test_running_a_graph_with_a_program_needs_an_acknowledgement(at):

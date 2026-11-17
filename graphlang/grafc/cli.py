@@ -95,6 +95,36 @@ def cmd_describe(path, output, force, llm_spec):
     err.print(f"wrote {escape(str(dest))}", highlight=False)
 
 
+@click.command("prettier", short_help="Rewrite a graph file with its code, prompts and expressions as YAML block scalars.")
+@click.argument("graph", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", "out_file", type=click.Path(dir_okay=False), default=None,
+              help="write the result to FILE (it may be GRAPH itself); without it the result is printed")
+def cmd_prettier(graph, out_file):
+    """Write GRAPH with its text attributes (code, prompt_inline, expression, condition, result) as YAML block scalars, so no quote has to
+    be doubled and no \\n escaped: a long expression, a program or a prompt reads as the text it is. Only the style changes: every value
+    is read back and compared with the original, and one that would not come back exactly is kept as it was (and listed). Comments, the
+    order of keys and everything else are kept. Running it again on its own output changes nothing.
+
+    \b
+    graf prettier writer.graph.yaml -o writer-v2.graph.yaml      # write a new file
+    graf prettier writer.graph.yaml                              # print it
+    graf prettier writer.graph.yaml -o writer.graph.yaml         # in place (commit first if you want the old text back)
+    """
+    from .prettier import PrettierError, prettify
+    try:
+        text, report = prettify(Path(graph).read_text(encoding="utf-8"))
+    except (PrettierError, UnicodeDecodeError) as e:
+        err.print(f"[red]✗[/red] {escape(str(graph))}: {escape(str(e))}")
+        sys.exit(1)
+    if out_file:
+        Path(out_file).write_text(text, encoding="utf-8")
+    else:
+        click.echo(text, nl=False)
+    for item in report.kept:
+        err.print(f"[yellow]kept as it was:[/yellow] {escape(item)}")
+    err.print(f"{report.summary()}; the result reads back the same as the original." + (f" Wrote {escape(out_file)}." if out_file else ""))
+
+
 @click.command("compile", short_help="Compile a workflow to another language (spl, pocketflow, rust).")
 @click.argument("graph")
 @click.option("--lang", default="rust", type=click.Choice(["rust", "spl", "pocketflow"]), show_default=True,
