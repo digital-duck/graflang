@@ -416,7 +416,8 @@ class GraphLangRuntime:
         data = self.G.nodes[node]
         self.fired[node] = self.fired.get(node, 0) + 1
         if self.verbose:
-            console.print(f"{'  ' * self.depth}[cyan]⚡[/cyan] {data['type']} {node} (#{self.fired[node]})")
+            again = f" [dim](fired {self.fired[node]} times in this run)[/dim]" if self.fired[node] > 1 else ""      # a body is a fresh copy per round: a count of 1 says nothing
+            console.print(f"{'  ' * self.depth}[cyan]⚡[/cyan] {data['type']} {node}{again}")
         in_data = self._gather_inputs(node)
         log_event(_log, "node.fire", level=DEBUG, node=node, type=data["type"], n=self.fired[node], depth=self.depth,
                   inputs=sorted(in_data))
@@ -610,6 +611,8 @@ class GraphLangRuntime:
             except ExpressionError as e:
                 raise ValueError(f"LOOP {node_data['id']!r}: {e}") from None
             log_event(_log, "loop.iteration", level=DEBUG, node=node_data["id"], cycle=cycle, depth=self.depth)
+            if self.verbose:
+                console.print(f"{'  ' * (self.depth + 1)}[bold magenta]↻ round {cycle + 1}[/bold magenta] [dim]of {node_data['id']}[/dim]")
             seen = {**in_data, **{k: v for k, v in state.items() if k in carried}, index_var: cycle, "cycle": cycle}     # what the body can read
             sub = GraphLangRuntime(self.graph_data, _parent=self, _nodes=body["nodes"], _edges=body["edges"],
                                    _boundary=in_data, _scope=seen, verbose=self.verbose)

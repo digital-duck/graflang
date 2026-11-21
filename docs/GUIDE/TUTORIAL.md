@@ -9,7 +9,7 @@ graf info cookbook/self_refine/self_refine.graph.yaml
 graf run  cookbook/self_refine/self_refine.graph.yaml --param topic="rain"
 ```
 
-`info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft (#1)` and so on), then the output and a `log:` line with the path of this run's log file (section 5).
+`info` shows the workflow's name, size, inputs, outputs and resources. `run` executes it and prints each node as it fires (`⚡ GENERATE draft` and so on; a loop prints `↻ round 2 of <loop>` before each round, and a node that fires again within one run says how often), then the output and a `log:` line with the path of this run's log file (section 5).
 
 ## 2. Read the graph
 
