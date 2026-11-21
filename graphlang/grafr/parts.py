@@ -64,7 +64,7 @@ def _names(ports: Any) -> List[str]:
     return list(ports) if isinstance(ports, (list, tuple)) else list(ports)
 
 
-def _load_part(path: Path, stack: Tuple[Path, ...], flatten: bool = True) -> Dict:
+def _load_part(path: Path, stack: Tuple[Path, ...], inner: Optional[int] = None) -> Dict:
     if path in stack:
         chain = " -> ".join(p.name for p in (*stack, path))
         raise PartError(f"a part cannot use itself: {chain}")
@@ -77,8 +77,8 @@ def _load_part(path: Path, stack: Tuple[Path, ...], flatten: bool = True) -> Dic
         raise PartError(f"{path.name} is not a workflow file (needs workflow:, nodes:, edges:)")
     data.setdefault("edges", [])
     data["_source_dir"] = str(path.parent)
-    if flatten:
-        flatten_parts(data, _stack=(*stack, path))
+    if inner != 0:                                         # `inner`: how many levels of the part's own uses to expand (None: all)
+        flatten_parts(data, _stack=(*stack, path), levels=inner)
     return data
 
 
@@ -200,7 +200,7 @@ def _port_type(node: Dict, port: str) -> str:
 
 
 def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, base: Path, stack: Tuple[Path, ...],
-                flatten: bool = True) -> Tuple[List[Dict], List[Dict]]:
+                inner: Optional[int] = None) -> Tuple[List[Dict], List[Dict]]:
     uid, cfg = use["id"], use.get("config", {})
     ref = cfg.get("part", "")
     kind, _, pname = ref.partition(".")
@@ -208,7 +208,7 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
     if kind != "parts" or rel is None:
         raise PartError(f"SUBGRAPH {uid!r}: config.part {ref!r} is not listed under resources.parts")
     part_path = part_file(rel, base)
-    part = _load_part(part_path, stack, flatten)         # flatten=False: the part's own uses stay uses (`graf ungroup`)
+    part = _load_part(part_path, stack, inner)           # inner=0: the part's own uses stay uses (`graf ungroup`, `graf expand --depth`)
     inputs, out_maps, in_map, entry, exits = _interface(part, pname)
     out_names = {o for m in out_maps.values() for o in m.values()}
     errors = _error_exits(part, exits, pname)
@@ -261,6 +261,10 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
     for k in KINDS:
         for name, path in (part.get("resources", {}).get(k) or {}).items():
             res.setdefault(k, {})[prefix + name] = str((part_dir / path).resolve())
+    if has_parts(part["nodes"]):                                     # uses left unexpanded keep working: their parts join this graph's, under new names
+        for name, path in (part.get("resources", {}).get("parts") or {}).items():
+            named = str(path).partition(":")[0] in ROOTS and not str(path).startswith((".", "/"))
+            res.setdefault("parts", {})[prefix + name] = str(path) if named else str((part_dir / path).resolve())
 
     def rewrite(node: Dict) -> Dict:
         node = copy.deepcopy(node)
@@ -272,6 +276,8 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
             for key, kind_ in REF_KEYS:
                 if key in cfg_:
                     cfg_[key] = f"{kind_}.{prefix}{str(cfg_[key]).partition('.')[2]}"
+            if node.get("type") == "SUBGRAPH" and isinstance(cfg_.get("part"), str):          # a use left unexpanded: its part under its new name
+                cfg_["part"] = f"parts.{prefix}{cfg_['part'].partition('.')[2]}"
             body = cfg_.get("subgraph")
             if isinstance(body, dict):
                 body["nodes"] = [_rewrite_refs(b, prefix) for b in body.get("nodes", [])]
@@ -410,6 +416,8 @@ def _rewrite_refs(node: Dict, prefix: str) -> Dict:
         for key, kind in REF_KEYS:
             if key in cfg:
                 cfg[key] = f"{kind}.{prefix}{str(cfg[key]).partition('.')[2]}"
+        if node.get("type") == "SUBGRAPH" and isinstance(cfg.get("part"), str):
+            cfg["part"] = f"parts.{prefix}{cfg['part'].partition('.')[2]}"
         body = cfg.get("subgraph")
         if isinstance(body, dict):
             body["nodes"] = [_rewrite_refs(b, prefix) for b in body.get("nodes", [])]
@@ -448,21 +456,27 @@ def _check_catalogue(graph: Dict[str, Any], base: Path) -> None:
             x["description"], x["remedy"] = entry.get("description"), entry.get("remedy")
 
 
-def _flatten_scope(parent: Dict, nodes: List[Dict], edges: List[Dict], base: Path, stack: Tuple[Path, ...]) -> Tuple[List[Dict], List[Dict]]:
+def _flatten_scope(parent: Dict, nodes: List[Dict], edges: List[Dict], base: Path, stack: Tuple[Path, ...],
+                   levels: Optional[int] = None) -> Tuple[List[Dict], List[Dict]]:
+    """Expand the uses of one scope; `levels` is how many levels of composites to open (None: all, 0: none)."""
+    _refuse_edges_into_uses(nodes, edges)
+    if levels == 0:
+        return nodes, edges
     for n in nodes:
         body = n.get("config", {}).get("subgraph")
         if isinstance(body, dict) and has_parts(body.get("nodes", [])):
-            body["nodes"], body["edges"] = _flatten_scope(parent, body["nodes"], body.get("edges", []), base, stack)
-    _refuse_edges_into_uses(nodes, edges)
-    while True:
-        use = next((n for n in nodes if n.get("type") == "SUBGRAPH"), None)
-        if use is None:
-            return nodes, edges
-        nodes, edges = _expand_use(parent, nodes, edges, use, base, stack)
+            body["nodes"], body["edges"] = _flatten_scope(parent, body["nodes"], body.get("edges", []), base, stack, levels)
+    inner = None if levels is None else levels - 1                  # the levels left for what is inside each part
+    for use_id in [n["id"] for n in nodes if n.get("type") == "SUBGRAPH"]:       # only the uses written here: ones a part leaves closed stay closed
+        use = next(n for n in nodes if n["id"] == use_id)
+        nodes, edges = _expand_use(parent, nodes, edges, use, base, stack, inner)
+    return nodes, edges
 
 
-def flatten_parts(graph_data: Dict[str, Any], base_dir: Optional[Path] = None, _stack: Tuple[Path, ...] = ()) -> None:
-    """Expand every SUBGRAPH node of the graph in place. Does nothing when there are none."""
+def flatten_parts(graph_data: Dict[str, Any], base_dir: Optional[Path] = None, _stack: Tuple[Path, ...] = (), levels: Optional[int] = None) -> None:
+    """Expand every SUBGRAPH node of the graph in place (`levels`: only that many levels of composites; None: all). Does nothing when there are none."""
+    if levels == 0:
+        return
     if "elaborate" in graph_data and "expand" not in graph_data:
         graph_data["expand"] = graph_data.pop("elaborate")      # the key's first name
     if "expand" in graph_data:
@@ -471,6 +485,6 @@ def flatten_parts(graph_data: Dict[str, Any], base_dir: Optional[Path] = None, _
     if not has_parts(graph_data.get("nodes", [])):
         return
     base = Path(base_dir or graph_data.get("_source_dir", "."))
-    graph_data["nodes"], graph_data["edges"] = _flatten_scope(graph_data, graph_data["nodes"], graph_data.get("edges", []), base, _stack)
+    graph_data["nodes"], graph_data["edges"] = _flatten_scope(graph_data, graph_data["nodes"], graph_data.get("edges", []), base, _stack, levels)
     if not _stack and graph_data.get("_error_codes"):
         _check_catalogue(graph_data, base)

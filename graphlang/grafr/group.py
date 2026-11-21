@@ -228,7 +228,7 @@ def ungroup(data: Dict[str, Any], use_id: str, base: Path) -> Dict[str, Any]:
     work["_source_dir"] = str(base)
     prefix = f"{use_id}__"
     try:
-        new_nodes, new_edges = _expand_use(work, work["nodes"], work.get("edges", []), use, base, (), flatten=False)
+        new_nodes, new_edges = _expand_use(work, work["nodes"], work.get("edges", []), use, base, (), inner=0)
     except PartError as e:
         raise GroupError(str(e)) from None
     taken = {n["id"] for n in new_nodes if not n["id"].startswith(prefix)}
@@ -240,26 +240,20 @@ def ungroup(data: Dict[str, Any], use_id: str, base: Path) -> Dict[str, Any]:
             taken.add(rename[n["id"]])
     res = work.setdefault("resources", {})
     new_refs: Dict[str, str] = {}
-    for kind in KINDS:                                       # the part's files, as paths from this graph's folder, under their own names
+    for kind in (*KINDS, "parts"):                           # the part's files (and the parts it uses), as paths from this graph's folder, under their own names
         for key in [k for k in (res.get(kind) or {}) if k.startswith(prefix)]:
             short = key[len(prefix):]
             target = short if short not in res[kind] else key
             new_refs[f"{kind}.{key}"] = f"{kind}.{target}"
-            res[kind][target] = "./" + os.path.relpath(res[kind].pop(key), base)
-
-    inner_parts: Dict[str, str] = {}                         # the part's own uses: their entries join this graph's, read from its folder
-    for iname, ipath in ((raw.get("resources") or {}).get("parts") or {}).items():
-        ipath = str(ipath)
-        target = iname if (res.get("parts") or {}).get(iname) in (None, ipath) else f"{prefix}{iname}"
-        named = ipath.partition(":")[0] in ROOTS_ and not ipath.startswith((".", "/"))
-        res.setdefault("parts", {})[target] = ipath if named else "./" + os.path.relpath((path.parent / ipath).resolve(), base)
-        inner_parts[f"parts.{iname}"] = f"parts.{target}"
+            value = res[kind].pop(key)
+            named = kind == "parts" and value.partition(":")[0] in ROOTS_ and not value.startswith((".", "/"))
+            res[kind][target] = value if named else "./" + os.path.relpath(value, base)
 
     def fix(node: Dict) -> None:
         cfg = node.get("config")
         if isinstance(cfg, dict):
-            if node.get("type") == "SUBGRAPH" and cfg.get("part") in inner_parts:
-                cfg["part"] = inner_parts[cfg["part"]]
+            if node.get("type") == "SUBGRAPH" and cfg.get("part") in new_refs:
+                cfg["part"] = new_refs[cfg["part"]]
             for rkey, _ in REF_KEYS:
                 if cfg.get(rkey) in new_refs:
                     cfg[rkey] = new_refs[cfg[rkey]]

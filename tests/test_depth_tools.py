@@ -110,3 +110,44 @@ def test_vis_draws_the_inner_level_as_a_box_inside_the_outer_one(tmp_path):
 def test_graf_expand_drops_the_loaders_bookkeeping(tmp_path):
     out = CliRunner().invoke(main, ["expand", nested(tmp_path)]).output
     assert "_part_of" not in out and "_use_parent" not in out and "_source_dir" not in out
+
+
+# ---- graf expand --depth ---------------------------------------------------------------------------------------------------
+
+def expanded(graph, depth=None):
+    import yaml
+    args = ["expand", graph] + (["--depth", depth] if depth is not None else [])
+    r = CliRunner().invoke(main, args)
+    assert r.exit_code == 0, r.output
+    return yaml.safe_load(r.output)
+
+
+def uses(doc):
+    return sorted(n["id"] for n in doc["nodes"] if n["type"] == "SUBGRAPH")
+
+
+def test_expand_depth_opens_one_level_of_composites_at_a_time(tmp_path):
+    g = nested(tmp_path)
+    d0, d1, d2, dall = (expanded(g, d) for d in ("0", "1", "2", "all"))
+    assert uses(d0) == ["analyze", "wr"]                                         # nothing opened: the long form only
+    assert uses(d1) == ["wr__review", "wr__write"]                               # analyze and wr opened; what is inside wr is still closed
+    assert uses(d2) == [] == uses(dall)
+    assert len(d0["nodes"]) < len(d1["nodes"]) == len(d2["nodes"]) == len(dall["nodes"])      # (each inner part here is one node: opening it swaps one for one)
+    assert expanded(g) == dall                                                   # no flag means all
+
+
+def test_a_partly_expanded_graph_loads_and_is_the_same_graph_when_opened_fully(tmp_path):
+    import yaml
+    from graphlang.grafr.runtime import load_graph
+    g = nested(tmp_path)
+    mid = Path(g).with_name("half.graph.yaml")
+    mid.write_text(yaml.safe_dump(expanded(g, "1")))                             # a file in the same folder: its paths still resolve
+    a, b = load_graph(Path(g)), load_graph(mid)
+    key = lambda e: (e["source"], e["target"], e["type"])      # noqa: E731
+    assert sorted(n["id"] for n in a["nodes"]) == sorted(n["id"] for n in b["nodes"])
+    assert sorted(map(key, a["edges"])) == sorted(map(key, b["edges"]))
+
+
+def test_expand_depth_rejects_a_bad_value(tmp_path):
+    r = CliRunner().invoke(main, ["expand", nested(tmp_path), "--depth", "-3"])
+    assert r.exit_code == 1 and "whole number" in r.output

@@ -23,10 +23,10 @@ from .topology import check
 console = Console()
 
 
-def _load_or_exit(graph_path: Path) -> dict:
+def _load_or_exit(graph_path: Path, levels: "int | None" = None) -> dict:
     """load_graph, with a message and exit code 1 (not a traceback) for a bad or wrong-kind file."""
     try:
-        return load_graph(graph_path)
+        return load_graph(graph_path, levels=levels)
     except (ValueError, OSError) as e:
         console.print(f"[red]✗ Invalid graph:[/red] {escape(str(e))}")
         sys.exit(1)
@@ -304,16 +304,26 @@ def cmd_info(graph, depth):
 
 
 
-@click.command("expand", short_help="Print a compact (steps:) workflow in its long nodes/edges form.")
+@click.command("expand", short_help="Print a workflow in its long nodes/edges form, with its composites opened.")
 @click.argument("graph")
-def cmd_expand(graph):
-    """Print the long form of a workflow written with `steps:`; a file already in long form prints as it is."""
+@click.option("--depth", default="all", show_default=True, metavar="N|all",
+              help="levels of composites (parts) to open: 0 only writes the long form and leaves every composite a node, N opens N levels, `all` "
+                   "opens them all into the flat graph the runtime executes (ids `<use>__<node>`)")
+def cmd_expand(graph, depth):
+    """Print the long form of a workflow written with `steps:`; a file already in long form prints as it is. Composites (SUBGRAPH uses of parts)
+    are opened as far as --depth says, by default all of them: the result is the physical graph that `graf run` executes."""
     from ruamel.yaml import YAML
+    from ..grafv.cli import _depth
+    try:
+        levels = _depth(depth)
+    except click.BadParameter as ex:
+        console.print(f"[red]Error:[/red] {ex.message}")
+        sys.exit(1)
     graph_path = Path(graph)
     if not graph_path.exists():
         console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
         sys.exit(1)
-    data = _load_or_exit(graph_path)
+    data = _load_or_exit(graph_path, levels)
     for key in [k for k in data if str(k).startswith("_")]:          # the loader's bookkeeping is not part of the graph
         del data[key]
     yaml = YAML(typ="safe")

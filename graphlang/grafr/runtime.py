@@ -66,16 +66,16 @@ DEFAULT_LOOP_MAX = 100
 TRUE_WORDS, FALSE_WORDS = {"true", "1", "yes", "y"}, {"false", "0", "no", "n"}
 
 
-def load_graph(graph_path: Path) -> Dict:
+def load_graph(graph_path: Path, levels: "int | None" = None) -> Dict:
     """Load a GraphLang YAML file and validate it against the schema. A missing schema is an error:
-    silently skipping validation would let invalid graphs through."""
+    silently skipping validation would let invalid graphs through. `levels` opens only that many levels of composites (None: all; `graf expand --depth`)."""
     graph_path = Path(graph_path)
     with open(graph_path, "r", encoding="utf-8") as f:
         graph_data = YAML(typ="safe").load(f)
     if is_compact(graph_data):
         graph_data = expand(graph_data)
     graph_data["_source_dir"] = str(graph_path.resolve().parent)
-    flatten_parts(graph_data)                           # SUBGRAPH nodes become the part's own nodes
+    flatten_parts(graph_data, levels=levels)            # SUBGRAPH nodes become the part's own nodes
     require_graphlang(graph_data, graph_path)
     if not SCHEMA_PATH.is_file():
         raise FileNotFoundError(f"GraphLang schema not found at {SCHEMA_PATH}")
