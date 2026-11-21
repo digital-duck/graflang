@@ -96,7 +96,7 @@ def _add(G: nx.MultiDiGraph, nodes: List[Dict], edges: List[Dict], prefix: str, 
          notes: List[str], part_of: Dict[str, Tuple[str, str]] | None = None) -> None:
     ids = {}
     part_of = part_of or {}
-    for use, pname in dict.fromkeys(part_of[n["id"]] for n in nodes if n["id"] in part_of):    # a used part is drawn as a box
+    for use, pname in dict.fromkeys(tuple(part_of[n["id"]]) for n in nodes if n["id"] in part_of):    # a used part is drawn as a box
         G.add_node(prefix + use, label=f"{use} ({pname})", kind="SUBGRAPH", color=color("SUBGRAPH"), info=f"part {pname}",
                    **({"parent": parent} if parent else {}))
     for n in nodes:
