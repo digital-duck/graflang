@@ -28,6 +28,13 @@ Reply with ONE JSON object and nothing else (no explanation, no code fence):
       "quality_bar": "what separates a good result from a merely present one, in a sentence a user would agree with"
     }
   ],
+  "demo": {
+    "description": "what the demo shows and what a good result looks like",
+    "files": {"sample/pkg/mod.py": "a SMALL sample input the demo needs (at most 4 files; may be empty)"},
+    "command": ["python", "-m", "pkg", "generate", "sample", "-o", "out"],
+    "env": {"PKG_LLM": "offline"},
+    "outputs": ["out"]
+  },
   "tasks": [
     {
       "id": "t1",
@@ -47,6 +54,10 @@ Rules:
   where the product's value needs an external service or intelligence (a language model, a web API, a git clone), the product calls it through a small injectable interface (for example a
   `llm: Callable[[str], str]` parameter), the tests pass a deterministic fake, and the real one is wired in the CLI and the UI (options or environment variables choose the provider).
   Import a provider's SDK lazily inside the function that uses it, never at the top of a module. Never remove a capability the specification needs because it is hard to test.
+- The `demo` is how the finished product is judged: after the build it is run once, in the sandbox, on the sample and the files it writes (`outputs`) are read by a reviewer who compares
+  them with each deliverable's quality bar. So the demo must run offline: every capability that needs a model or service has an OFFLINE STAND-IN, switched on by an option or an environment
+  variable (put it in `command` or `env`), that returns deterministic placeholder text quoting the first 300 characters of the prompt it received, so the reviewer can see what the model would
+  be asked. The demo exercises the main path of the product (for a generator: input -> output file), `command` starts with "python", and some task builds the offline stand-in.
 - Do not replace intelligence with a listing. Prose that explains (a tutorial, a user guide, a summary, slides with a message) cannot come from a template that enumerates names and
   docstrings; it needs a mechanism that can write and reason, fed with facts the product extracted (a knowledge graph, an outline). A template may lay out content; it may not be the content.
   Every deliverable in `deliverables` must have a mechanism that can reach its quality bar, and some task must build it.

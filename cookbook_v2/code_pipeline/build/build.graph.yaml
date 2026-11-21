@@ -40,8 +40,9 @@ steps:
         - task:    {solve: "json_get(@in_context, 'task')", in: {context: context.context}, out: task}
         - summary: {solve: "json_get(@in_context, 'summary')", in: {context: context.context}, out: summary}
         - project: {solve: "json_get(@in_context, 'project')", in: {context: context.context}, out: project}
+        - demo:    {solve: "json_get(@in_context, 'demo')", in: {context: context.context}, out: demo}
         - first:   {solve: "json_get(@in_context, 'first_file')", in: {context: context.context}, out: first}
-        - write:   {generate: prompts.write_task, in: {spec: $loop.spec, lang: $loop.lang, reference: $loop.reference, summary: summary.summary, task: task.task, project: project.project, report: $loop.report}, out: reply, label: Write the task}
+        - write:   {generate: prompts.write_task, in: {spec: $loop.spec, lang: $loop.lang, reference: $loop.reference, summary: summary.summary, demo: demo.demo, task: task.task, project: project.project, report: $loop.report}, out: reply, label: Write the task}
         - merge:
             node: SOLVE
             in: {text: write.reply, lang: $loop.lang, spec: $loop.spec, files: $loop.files, default_path: first.first}

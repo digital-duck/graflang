@@ -38,7 +38,7 @@ Named lookups (`cookbook:name`) and the Browse page see only `cookbook/`; run a 
 | chat_memory | `cookbook/chat_memory` | `cookbook_v2/chat_memory` | **ported, offline-equivalent** | guard, `recall`, `reply`, `remember` | same output |
 
 | code_gen | new (uses `code_parts`' prompt and splitter) | `cookbook_v2/code_gen` | **new, offline-tested** (scripted model) | one graph: write, split | the reply becomes a project folder (modules, `__init__.py`, README) |
-| code_pipeline | `cookbook/code_pipeline` + `cookbook/code_parts` | `cookbook_v2/code_pipeline` | **new, offline-tested (stub and real Docker); not run with a real model**. Deliberately NOT equivalent to the original | top / `analyze` (build plan, self-healing, exit `vague`), `build` (a loop over the plan's tasks), `finish` (SPL 05-07) | scripted model: a thin plan is refused and healed, the project is built task by task with a fix pass, vague plans stop the run; verify runs in a container (preflight first); output `code` is FILES in `.graf/codes/<run>/` |
+| code_pipeline | `cookbook/code_pipeline` + `cookbook/code_parts` | `cookbook_v2/code_pipeline` | **new, offline-tested (stub and real Docker); not run with a real model**. Deliberately NOT equivalent to the original | top / `analyze` (build plan, self-healing, exit `vague`), `build` (a loop over the plan's tasks), `appraise` (run the demo, judge, rework), `finish` (SPL 05-07) | scripted model: a thin plan is refused and healed, the project is built task by task with a fix pass, vague plans stop the run; verify runs in a container (preflight first); output `code` is FILES in `.graf/codes/<run>/` |
 
 `code_pipeline` is the repository-capable recipe. A one-shot reply cannot hold a repository, so `analyze` first turns the spec into a build plan (JSON list of small tasks,
 each with files and an acceptance test; a checker judges it and its complaints feed the next draft), then `build` loops over the tasks: each writes its files, they are merged
@@ -107,7 +107,7 @@ instead (its assumption: "No LLM is called: content is derived deterministically
 one; (2) the tests the model wrote for itself only assert that headings and files exist, so `[PASSED]` measures nothing about quality; (3) nothing between plan and build asked whether the
 plan delivers the spec. Fixes made: the plan separates the offline tests from the product (a model/service is called through an injectable interface, tests use fakes, SDKs are imported lazily),
 it must list `deliverables` with a `mechanism` and a `quality_bar` (checked by `check_plan.py`), and a model reviews each plan that passes the check against the spec before building starts.
-Not done: a check of the built product's real output (run it on a sample and have a model judge it against the quality bar), which is what would catch (2).
+Then added: an `appraise` composite after the build that runs the finished product once on the plan's `demo` (offline, in the container, with an offline stand-in for any model) and has a model judge the output against each deliverable's quality bar, reworking a rejected product (max_appraisals). It catches structural failures (a listing, a missing feature, a crashing demo); it cannot judge the prose a real model would write.
 
 ## Next candidates (not committed to; say which)
 

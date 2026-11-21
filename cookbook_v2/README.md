@@ -7,7 +7,7 @@ policies it uses. The originals in `cookbook/` are left alone (the experiments a
 | Recipe | Top level reads | Composites |
 |---|---|---|
 | code_gen | write, split | none: one model call and a file splitter; the output is a project folder (`.graf/codes/<run>/`) |
-| code_pipeline | preflight, analyze, build, finish | **repository-capable**: `analyze` (the spec -> a build plan of small tasks, self-healing, exit `vague`), `build` (a loop over the tasks: write, merge, RUN the project in a container, fix), `finish`; outputs `docs`, `plan`, `code` (FILES), `report` |
+| code_pipeline | preflight, analyze, build, appraise, finish | **repository-capable**: `analyze` (the spec -> a build plan of small tasks, self-healing, exit `vague`), `build` (a loop over the tasks: write, merge, RUN the project in a container, fix), `appraise` (run the finished product on the plan's demo, offline, and have a model judge the output against the quality bars; rework if rejected), `finish`; outputs `docs`, `plan`, `code` (FILES), `report`, `appraisal` |
 | code_pipeline_spl | understand, build, finish | the faithful port of `cookbook/code_pipeline` (SPL procedures, one block of code; needs SPL.py) |
 | compliance_audit | load, assess, remediate, guard, release or escalate | `assess` (used twice), `remediate` (exit `unfixed`) |
 | your_book | outline, chapters, compile | `outline`, `chapters` (the loop), `compile` |
@@ -79,16 +79,20 @@ The run's first step, `preflight`, checks the container before any model call is
 networkx, flask, fastapi, pandas, ...); the container has no network, so add yours to `tools/verify.Dockerfile` and rebuild.
 
 ```bash
-SPEC="write a documentation app called doc-agent: given a github URL or a local path it builds a knowledge graph of the codebase and generates a styled .md document
-(styles: tutorial, user-guide, slide-deck); a streamlit UI with preview; a slide-deck can be converted from .md to an .html app; a well-structured python repo, with
-a click CLI that generates documents for a list of repos in batch"
+SPEC="Write a documentation app called doc-agent. Given a GitHub URL or a local path it reads the codebase, builds a knowledge graph of it (modules, classes, functions,
+imports, calls) and uses an LLM to write a styled Markdown document from that graph. The LLM writes real explanatory prose from the extracted facts (the architecture, how the
+parts work together, how to use it), not a list of names and docstrings. Three styles: tutorial (a guided walk through the code in dependency order that explains the ideas),
+user-guide (what it does, how to install and use it, task by task, with examples) and slide-deck (a short deck, one message per slide, slides separated by ---). A slide-deck
+.md can be converted to a self-contained .html slide app. The app has a Streamlit UI with a preview of the generated document and downloads, and a click CLI that generates
+documents for a list of repos in batch (a file with one URL or path per line) and carries on when one repo fails. It is a well-structured python repo (a package, the CLI, the UI,
+tests, a README). The LLM provider is chosen by an option or an environment variable, and an offline mode lets the tests and a demo run without a model."
 
 # the repository-capable pipeline: a build plan of small tasks, then the project task by task. Files: .graf/codes/<run>/; the plan, the report and every step's output: .graf/outputs/<run>/
 graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml \
     --llm claude_cli:claude-sonnet-5-5 --param spec="$SPEC" --param check_closure=false
 ```
 
-Raise `max_llm_calls` in a copy of the bind file for a big spec: about 6 for the plan (drafts and reviews), 2 per planned task and 3 for `finish`. Read the `plan` output first (`.graf/outputs/<run>/plan.md`): it shows how the work was split.
+Raise `max_llm_calls` in a copy of the bind file for a big spec: about 6 for the plan (drafts and reviews), 2 per planned task, 3 to 4 for the appraisal (a judgement, and a rework when it rejects) and 3 for `finish`. Read the `plan` output first (`.graf/outputs/<run>/plan.md`): it shows how the work was split.
 
 ```bash
 # the one-call version: no plan, no review, no run, no container

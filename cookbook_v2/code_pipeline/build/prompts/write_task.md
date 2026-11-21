@@ -6,6 +6,9 @@ The project, in short:
 The whole specification (for context; you only do the task below):
 {{in_spec}}
 
+The demo that is run on the finished project (what you write must make it work, including any offline stand-in for a model):
+{{in_demo}}
+
 THE TASK (write exactly this, nothing more):
 {{in_task}}
 

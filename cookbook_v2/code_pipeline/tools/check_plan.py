@@ -3,7 +3,7 @@
 stdin   {"plan": the planner's reply (JSON, or JSON in a code fence), "lang": "python"}
 stdout  one line of JSON: {"ok": bool, "report": text, "tasks": N}
 
-A plan is {"ready": bool, "summary": text, "assumptions": [..], "deliverables": [{"name", "mechanism", "quality_bar"}], "tasks": [{"id", "title", "description", "files": [paths], "depends_on": [ids], "acceptance"}]}.
+A plan is {"ready": bool, "summary": text, "assumptions": [..], "deliverables": [{"name", "mechanism", "quality_bar"}], "demo": {"description", "files", "command", "env", "outputs"}, "tasks": [{"id", "title", "description", "files": [paths], "depends_on": [ids], "acceptance"}]}.
 The check is the planner's feedback: a plan that is not specific enough to build from is returned with the list of what is missing, and the planner is asked again.
 """
 import json
@@ -39,6 +39,29 @@ def safe(path):
     return bool(path) and path != "." and not path.startswith(("/", ".."))
 
 
+def check_demo(demo, lang):
+    """The demo is run on the finished project and its output is judged: it must be a command that runs offline and writes something to read."""
+    if lang.lower() != "python":
+        return []
+    if not isinstance(demo, dict):
+        return ["`demo` is missing: a command that runs the finished product on a small sample, offline, and says which output files to read (see the plan format)"]
+    problems = []
+    cmd = demo.get("command")
+    if not isinstance(cmd, list) or not cmd or not all(isinstance(c, str) for c in cmd) or cmd[0] != "python":
+        problems.append("`demo.command` must be an argument list starting with \"python\", e.g. [\"python\", \"-m\", \"pkg\", \"generate\", \"sample\", \"-o\", \"out\"]")
+    outs = demo.get("outputs")
+    if not isinstance(outs, list) or not outs or not all(isinstance(o, str) and safe(o) for o in outs):
+        problems.append("`demo.outputs` must list the safe relative paths (files or folders) the demo writes and a reviewer will read")
+    files = demo.get("files", {})
+    if not isinstance(files, dict) or len(files) > 4 or not all(safe(k) and isinstance(v, str) for k, v in files.items()):
+        problems.append("`demo.files` is a mapping of at most 4 safe relative paths to small sample inputs")
+    if not isinstance(demo.get("env", {}), dict):
+        problems.append("`demo.env` is a mapping of environment variable names to values (use it to switch the product to its offline stand-in)")
+    if not str(demo.get("description") or "").strip():
+        problems.append("`demo.description` is missing: what the demo shows and what a good result looks like")
+    return problems
+
+
 def check(plan, lang):
     if not isinstance(plan, dict):
         return ["the reply is not a JSON object: reply with the JSON plan only"]
@@ -56,6 +79,7 @@ def check(plan, lang):
         for n, d in enumerate(deliverables, 1):
             if not isinstance(d, dict) or not all(str(d.get(k) or "").strip() for k in ("name", "mechanism", "quality_bar")):
                 problems.append(f"deliverable {n} needs a `name`, a `mechanism` (how its content is produced) and a `quality_bar` (what makes it good, not merely present)")
+    problems += check_demo(plan.get("demo"), lang)
     tasks = plan.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         return problems + ["`tasks` must be a non-empty list"]

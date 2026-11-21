@@ -242,8 +242,15 @@ def test_code_gen_splits_the_reply_into_a_project_with_modules_and_a_readme(tmp_
 DELIVERABLES = [{"name": "a demo", "mechanism": "plain functions", "quality_bar": "the answers are right"}]
 
 
-def plan(*tasks, ready=True, deliverables=DELIVERABLES):
-    return json.dumps({"ready": ready, "summary": "a demo package", "assumptions": [], "deliverables": deliverables, "tasks": list(tasks)})
+DEMO = {"description": "shouts a word and writes it to out/x.txt", "files": {"sample/word.txt": "hi"}, "env": {"DEMO_LLM": "offline"}, "outputs": ["out"],
+        "command": ["python", "-c", "import pathlib; from demo.cli import shout; pathlib.Path('out').mkdir(); pathlib.Path('out/x.txt').write_text(shout('hi'))"]}
+
+
+def plan(*tasks, ready=True, deliverables=DELIVERABLES, demo=DEMO):
+    doc = {"ready": ready, "summary": "a demo package", "assumptions": [], "deliverables": deliverables, "tasks": list(tasks)}
+    if demo is not None:
+        doc["demo"] = demo
+    return json.dumps(doc)
 
 
 def task(tid, files, deps=(), description="Implement the module: its public functions with their signatures and behaviour."):
@@ -268,7 +275,8 @@ def test_the_plan_heals_itself_and_the_project_is_built_task_by_task(docker, tmp
               5: "[APPROVED]",
               6: reply(CORE_OK, TEST),                        # task 1
               7: reply(CLI_BAD, CLI_TEST),                    # task 2: its test fails
-              8: reply(CLI_OK)}                               # the fix pass
+              8: reply(CLI_OK),                               # the fix pass
+              9: "[ACCEPTED]"}                                # the demo's output is judged good
     prompts = []
     llm_cls = Scripted
 
@@ -289,7 +297,8 @@ def test_the_plan_heals_itself_and_the_project_is_built_task_by_task(docker, tmp
     assert "Task t1 of 2" in prompts[5] and "(nothing written yet)" in prompts[5]                          # task 1 sees its own task, no files yet
     assert "Task t2 of 2" in prompts[6] and "=== FILE: demo/core.py ===" in prompts[6]                     # task 2 sees what task 1 wrote
     assert "FAILED" in prompts[7] and "Task t2" in prompts[7] and "=== FILE: demo/cli.py ===" in prompts[7]     # the fix pass sees the failure and the project
-    assert out["report"].lstrip().startswith("[PASSED]") and llm.calls == 8
+    assert out["report"].lstrip().startswith("[PASSED]") and llm.calls == 9 and out["appraisal"].startswith("[ACCEPTED]")
+    assert "a demanding reviewer of a finished software product" in prompts[8] and '"out/x.txt": "HI!"' in prompts[8]       # the judge saw what the demo really wrote
     assert set(out["code"]) >= {"demo/core.py", "demo/cli.py", "demo/__init__.py", "tests/test_core.py", "tests/test_cli.py", "tests/__init__.py", "README.md"}
     assert out["code"]["demo/cli.py"] == CLI_OK[1] and json.loads(out["plan"])["tasks"][1]["id"] == "t2" and out["docs"]
 
@@ -301,30 +310,70 @@ def test_a_plan_that_never_gets_good_ends_in_the_vague_exit_without_building(doc
 
 
 def test_a_planner_that_says_not_ready_is_asked_again(docker, tmp_path, monkeypatch):
-    rt, out, llm = run_new("code_pipeline", PARAMS, {1: plan(T1, ready=False), 2: GOOD_PLAN, 3: "[APPROVED]", 4: reply(CORE_OK, TEST), 5: reply(CLI_OK, CLI_TEST)}, tmp_path, monkeypatch)
+    rt, out, llm = run_new("code_pipeline", PARAMS, {1: plan(T1, ready=False), 2: GOOD_PLAN, 3: "[APPROVED]", 4: reply(CORE_OK, TEST), 5: reply(CLI_OK, CLI_TEST), 6: "[ACCEPTED]"}, tmp_path, monkeypatch)
     assert rt.loop_iterations["analyze__planning"] == 2 and out["report"].lstrip().startswith("[PASSED]")
 
 
 def test_a_task_the_fix_cannot_repair_goes_on_and_the_report_says_failed(docker, tmp_path, monkeypatch):
-    script = {1: GOOD_PLAN, 2: "[APPROVED]", 3: reply(CORE_OK, TEST), 4: reply(CLI_BAD, CLI_TEST), 5: reply(CLI_BAD)}
+    script = {1: GOOD_PLAN, 2: "[APPROVED]", 3: reply(CORE_OK, TEST), 4: reply(CLI_BAD, CLI_TEST), 5: reply(CLI_BAD), 6: "[ACCEPTED]"}
     rt, out, llm = run_new("code_pipeline", PARAMS, script, tmp_path, monkeypatch)
-    assert llm.calls == 5 and out["report"].lstrip().startswith("[FAILED]") and "demo/cli.py" in out["code"]
+    assert llm.calls == 6 and out["report"].lstrip().startswith("[FAILED]") and "demo/cli.py" in out["code"]
 
 
 def test_a_reply_without_file_markers_goes_into_the_tasks_first_file(docker, tmp_path, monkeypatch):
     one = plan(task("t1", ["demo/core.py", "tests/test_core.py"]))
-    rt, out, llm = run_new("code_pipeline", PARAMS, {1: one, 2: "[APPROVED]", 3: "def add(a, b):\n    return a + b\n"}, tmp_path, monkeypatch)
+    rt, out, llm = run_new("code_pipeline", PARAMS, {1: one, 2: "[APPROVED]", 3: "def add(a, b):\n    return a + b\n", 4: "[ACCEPTED]"}, tmp_path, monkeypatch)
     assert out["code"]["demo/core.py"] == "def add(a, b):\n    return a + b\n"
 
 
 def test_every_verify_runs_in_a_locked_down_container_and_the_preflight_comes_first(docker, tmp_path, monkeypatch):
-    run_new("code_pipeline", PARAMS, {1: GOOD_PLAN, 2: "[APPROVED]", 3: reply(CORE_OK, TEST), 4: reply(CLI_BAD, CLI_TEST), 5: reply(CLI_OK)}, tmp_path, monkeypatch)
+    run_new("code_pipeline", PARAMS, {1: GOOD_PLAN, 2: "[APPROVED]", 3: reply(CORE_OK, TEST), 4: reply(CLI_BAD, CLI_TEST), 5: reply(CLI_OK), 6: "[ACCEPTED]"}, tmp_path, monkeypatch)
     runs = docker()
-    assert len(runs) == 4, runs                                                   # the preflight, task 1, task 2, the fixed task 2
+    assert [r["command"][1] for r in runs] == ["tools/verify_project.py"] * 4 + ["tools/run_demo.py"], runs     # preflight, task 1, task 2, the fixed task 2, the demo
     for run in runs:
-        assert run["command"] == ["python", "tools/verify_project.py"]
         for flag in ("--network none", "--read-only", "--cap-drop ALL", "--memory 1024m", "--cpus 2", "--pids-limit 256"):
             assert flag in run["flags"], (flag, run["flags"])
+
+
+def test_a_rejected_product_is_reworked_and_judged_again(docker, tmp_path, monkeypatch):
+    script = {1: GOOD_PLAN, 2: "[APPROVED]", 3: reply(CORE_OK, TEST), 4: reply(CLI_OK, CLI_TEST),
+              5: "[REWORK]\n1. demo/cli.py: the output is a bare uppercase word, not what the quality bar asks for",
+              6: reply(("demo/cli.py", "from demo.core import add\n\ndef shout(s):\n    return s.upper() + '!!'\n"), ("tests/test_cli.py", CLI_TEST[1].replace("'A!'", "'A!!'"))),
+              7: "[ACCEPTED]"}
+    prompts = []
+
+    class Recording(Scripted):
+        def generate(self, prompt, model=None, **opts):
+            prompts.append(prompt)
+            return super().generate(prompt, model, **opts)
+
+    graph = copy_recipe(V2 / "code_pipeline", tmp_path / "cp")
+    monkeypatch.chdir(graph.parent)
+    llm = Recording(script)
+    rt = GraphLangRuntime(load_graph(graph), llm=llm, verbose=False)
+    out = rt.execute(dict(PARAMS))
+    assert rt.loop_iterations["appraise__appraisals"] == 2 and llm.calls == 7
+    assert "the output is a bare uppercase word" in prompts[5] and "=== FILE: demo/cli.py ===" in prompts[5] and '"out/x.txt": "HI!"' in prompts[5]     # the developer sees defects, project and demo output
+    assert out["appraisal"].startswith("[ACCEPTED]") and out["code"]["demo/cli.py"].endswith("'!!'\n") and out["report"].lstrip().startswith("[PASSED]")
+    assert '"out/x.txt": "HI!!"' in prompts[6]                                         # the second appraisal saw the reworked product's output
+
+
+def test_a_demo_that_fails_is_shown_to_the_judge_as_a_defect(docker, tmp_path, monkeypatch):
+    broken = dict(DEMO, command=["python", "-c", "raise SystemExit('boom')"], outputs=["out"])
+    seen = []
+
+    class Recording(Scripted):
+        def generate(self, prompt, model=None, **opts):
+            seen.append(prompt)
+            return super().generate(prompt, model, **opts)
+
+    graph = copy_recipe(V2 / "code_pipeline", tmp_path / "cp")
+    monkeypatch.chdir(graph.parent)
+    one = plan(T1, demo=broken)
+    llm = Recording({1: one, 2: "[APPROVED]", 3: reply(CORE_OK, TEST), 4: "[ACCEPTED]"})
+    GraphLangRuntime(load_graph(graph), llm=llm, verbose=False).execute(dict(PARAMS))
+    judged = seen[3]
+    assert '"ok": false' in judged and '"returncode": 1' in judged and "boom" in judged and '"missing": ["out"]' in judged
 
 
 def test_a_broken_container_stops_the_run_before_any_model_call(tmp_path, monkeypatch):
@@ -360,6 +409,21 @@ def test_check_plan_names_what_is_missing():
     thin = tool("check_plan.py", {"plan": plan(T1, T2, deliverables=[{"name": "a document", "mechanism": "a template"}]), "lang": "python"})["report"]
     assert "needs a `name`, a `mechanism`" in thin and "`quality_bar`" in thin
     assert tool("check_plan.py", {"plan": "```json\n" + GOOD_PLAN + "\n```", "lang": "python"})["ok"]            # a code fence around the JSON is fine
+
+
+def test_check_plan_wants_a_runnable_offline_demo():
+    for bad, words in ((None, "`demo` is missing"), ({**DEMO, "command": ["pytest"]}, "starting with \"python\""), ({**DEMO, "outputs": []}, "`demo.outputs`"),
+                       ({**DEMO, "files": {"../x": "a"}}, "`demo.files`"), ({**DEMO, "description": ""}, "`demo.description`")):
+        report = tool("check_plan.py", {"plan": plan(T1, T2, demo=bad), "lang": "python"})["report"]
+        assert words in report, (bad, report)
+
+
+def test_run_demo_reports_the_output_files_and_what_is_missing():
+    project = {"p/__init__.py": "", "p/m.py": "def f():\n    return 'made'\n"}
+    demo = {"description": "d", "command": ["python", "-c", "import pathlib; from p.m import f; pathlib.Path('o').mkdir(); pathlib.Path('o/a.txt').write_text(f())"], "outputs": ["o", "gone.txt"]}
+    got = tool("run_demo.py", {"files": project, "plan": json.dumps({"demo": demo})})
+    assert got["returncode"] == 0 and got["outputs"] == {"o/a.txt": "made"} and got["missing"] == ["gone.txt"] and not got["ok"]
+    assert tool("run_demo.py", {"files": project, "plan": "{}"})["error"] == "the plan has no demo command"
 
 
 def test_task_context_shows_one_task_and_the_files_so_far():

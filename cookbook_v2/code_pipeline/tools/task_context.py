@@ -1,7 +1,7 @@
 """What the writer of one task needs to see (Python, run by a SOLVE node with backend: subprocess).
 
 stdin   {"plan": the plan (JSON text), "task_index": 0-based task number, "files": {path: text} written so far, or empty}
-stdout  one line of JSON: {"task": Markdown of the task, "title", "summary": the plan's summary, "first_file", "project": the files so far as text, "last": bool}
+stdout  one line of JSON: {"task": Markdown of the task, "title", "summary": the plan's summary, "first_file", "demo", "project": the files so far as text, "last": bool}
 
 The project text lists every file written so far (`=== FILE: path ===` and its content), the newest last; when it is longer than the budget the oldest
 files are shortened to their first lines, so a long project still fits in one prompt.
@@ -53,7 +53,10 @@ def main():
              "Files to write: " + ", ".join(t.get("files") or []), "", "Acceptance: " + str(t.get("acceptance", "")).strip()]
     if t.get("depends_on"):
         lines.append("Builds on: " + ", ".join(map(str, t["depends_on"])))
-    print(json.dumps({"task": "\n".join(lines), "title": t.get("title", ""), "summary": plan.get("summary", ""),
+    demo = plan.get("demo") if isinstance(plan.get("demo"), dict) else {}
+    demo_text = ("(no demo)" if not demo else f"{demo.get('description', '')}\nCommand: {' '.join(map(str, demo.get('command') or []))}\nEnvironment: {json.dumps(demo.get('env') or {})}\n"
+                 f"Sample files: {', '.join((demo.get('files') or {}).keys()) or 'none'}\nOutputs read afterwards: {', '.join(demo.get('outputs') or [])}")
+    print(json.dumps({"demo": demo_text, "task": "\n".join(lines), "title": t.get("title", ""), "summary": plan.get("summary", ""),
                       "project": project_text(data.get("files")), "first_file": (t.get("files") or [""])[0], "last": i == len(tasks) - 1}))
 
 
