@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .parts import PATH_NODES, REF_KEYS
 
@@ -29,6 +29,24 @@ class GroupError(ValueError):
 def _end(ref: str) -> Tuple[str, str]:
     node, _, port = ref.partition(".")
     return node, port
+
+
+def _type_of(data: Dict[str, Any], nodes: Dict[str, Dict], ref: str) -> Optional[str]:
+    """The declared type of a port `node.port`: a workflow input (through the INPUT node), a typed `ports:` mapping, or `port_types`. None if untyped."""
+    node_id, _, port = ref.partition(".")
+    node = nodes.get(node_id)
+    if node is None:
+        return None
+    found: Any = None
+    if node.get("type") == "INPUT":
+        found = next((p.get("type") for p in (data.get("workflow") or {}).get("inputs", []) if f"out_{p['name']}" == port), None)
+    elif isinstance(node.get("ports"), dict):
+        found = node["ports"].get(port)
+        found = found.get("type") if isinstance(found, dict) else found
+    else:
+        found = (node.get("port_types") or {}).get(port)
+    found = str(found).split("!")[0].upper() if found else None
+    return found if found and found != "ANY" else None
 
 
 def _up(path: str) -> str:
@@ -73,7 +91,7 @@ def _unique(name: str, taken: Set[str], node: str) -> str:
     return f"{node}_{name}{i}"
 
 
-def group(data: Dict[str, Any], ids: List[str], name: str, description: str = "") -> Tuple[Dict[str, Any], Dict[str, Any], List[Tuple[str, str, str]]]:
+def group(data: Dict[str, Any], ids: List[str], name: str, description: str = "", exits: "Dict[str, List[str]] | None" = None) -> Tuple[Dict[str, Any], Dict[str, Any], List[Tuple[str, str, str]]]:
     """(parent graph, part graph, files). `files` are (kind, name in the part, path in the parent's resources) for each prompt, procedure
     or policy a selected node uses: `write_group` copies them into the part's folder."""
     if not name or not name.replace("_", "").isalnum():
@@ -99,10 +117,28 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
         raise GroupError("the selection needs exactly one entry (one selected node that outside nodes trigger); "
                          + ("nothing outside triggers it" if not entries else f"found {len(entries)}: {', '.join(sorted(entries))}"))
     entry_node = next(iter(entries))
-    exits = sorted({e["source"] for e in trig_out})
-    targets = {frozenset(e["target"] for e in trig_out if e["source"] == s) for s in exits}
-    if len(targets) > 1:
-        raise GroupError("the selection has several ways out that lead to different nodes; a composite has one `complete`")
+    sources = sorted({e["source"] for e in trig_out})
+    goes_to = {s: frozenset(e["target"] for e in trig_out if e["source"] == s) for s in sources}
+    named: Dict[str, List[str]] = {}                                      # error exits: name -> the leaving control ports that become it
+    for xname, srcs in (exits or {}).items():
+        if not xname.isidentifier() or xname in ("trigger", "complete") or xname.startswith(("in_", "out_")):
+            raise GroupError(f"exit name {xname!r}: use a name that is not trigger, complete, in_* or out_*")
+        for src in srcs:
+            if src not in goes_to:
+                raise GroupError(f"exit {xname!r}: {src!r} is not a control port that leaves the selection (they are: {', '.join(sources) or 'none'})")
+        if len({goes_to[s] for s in srcs}) > 1:
+            raise GroupError(f"exit {xname!r}: its ports lead to different nodes; give each its own name")
+        named[xname] = list(srcs)
+    taken = {s for srcs in named.values() for s in srcs}
+    if len(taken) != sum(len(v) for v in named.values()):
+        raise GroupError("a control port can leave by one exit only")
+    normal = [s for s in sources if s not in taken]
+    if len({goes_to[s] for s in normal}) > 1:
+        raise GroupError("the selection has several ways out that lead to different nodes: " + ", ".join(sources)
+                         + "; name the ones that are failures as error exits (`--exit NAME=node.port`), the rest must share one way out")
+    if sources and not normal:
+        raise GroupError("at least one way out must stay the normal one (`complete`); name only the others as exits")
+    targets = {goes_to[s] for s in normal}
 
     # data across the boundary
     in_edges = [e for e in edges if e["type"] == "binds" and _end(e["target"])[0] in inside and _end(e["source"])[0] not in inside]
@@ -121,8 +157,12 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
             out_names[src] = _unique(sp[4:], set(out_names.values()), sn)
 
     # the part
-    wf_in = [{"name": nm, "type": "TEXT"} for nm in in_names.values()]
-    wf_out = [{"name": nm, "type": "TEXT"} for nm in out_names.values()]
+    first_target: Dict[str, str] = {}
+    for e in in_edges:
+        first_target.setdefault(e["source"], e["target"])
+    # the interface keeps the types the graph already declares: an input's from where it comes (else where it goes), an output's from where it is made
+    wf_in = [{"name": nm, "type": _type_of(data, nodes, src) or _type_of(data, nodes, first_target[src]) or "TEXT"} for src, nm in in_names.items()]
+    wf_out = [{"name": nm, "type": _type_of(data, nodes, src) or "TEXT"} for src, nm in out_names.items()]
     inner_ids = set(sel)
     part_nodes = [{"id": ENTRY, "type": "INPUT", "ports": ["entry", *[f"out_{n}" for n in in_names.values()]]}]
     part_nodes += [copy.deepcopy(nodes[i]) for i in sel]
@@ -131,8 +171,11 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
     part_nodes.append({"id": EXIT, "type": "OUTPUT", "ports": ["trigger", "exit", *[f"in_{n}" for n in out_names.values()]]})
     part_edges = [copy.deepcopy(e) for e in edges if _end(e["source"])[0] in inner_ids and _end(e["target"])[0] in inner_ids]
     part_edges.append({"source": f"{ENTRY}.entry", "target": f"{entry_node}.trigger", "type": "triggers"})
-    for s in exits:
+    for s in normal:
         part_edges.append({"source": s, "target": f"{EXIT}.trigger", "type": "triggers"})
+    for xname, srcs in named.items():                                     # each error exit is an OUTPUT of its own, ended with `exit: <name>`
+        part_nodes.insert(len(part_nodes) - 1, {"id": f"{EXIT}_{xname}", "type": "OUTPUT", "ports": ["trigger", "exit"], "config": {"exit": xname}})
+        part_edges += [{"source": s, "target": f"{EXIT}_{xname}.trigger", "type": "triggers"} for s in srcs]
     for e in in_edges:
         part_edges.append({"source": f"{ENTRY}.out_{in_names[e['source']]}", "target": e["target"], "type": "binds"})
     for src, nm in out_names.items():
@@ -142,6 +185,8 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
             "nodes": part_nodes, "edges": part_edges}
     if description.strip():
         part["workflow"] = {"name": name, "description": description.strip(), "inputs": wf_in, "outputs": wf_out}
+    if named:
+        part["workflow"]["errors"] = [{"name": x, "description": f"leaves by {', '.join(srcs)}"} for x, srcs in named.items()]
 
     # resources the selected nodes use go with them
     files: List[Tuple[str, str, str]] = []
@@ -165,7 +210,7 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
         part["resources"] = part_res
 
     # the parent: the selection becomes one use
-    use_ports = ["trigger", "complete", *[f"in_{n}" for n in in_names.values()], *[f"out_{n}" for n in out_names.values()]]
+    use_ports = ["trigger", "complete", *named, *[f"in_{n}" for n in in_names.values()], *[f"out_{n}" for n in out_names.values()]]
     use = {"id": name, "type": "SUBGRAPH", "ports": use_ports, "config": {"part": f"parts.{name}"}}
     first = min(data["nodes"].index(nodes[i]) for i in sel)
     parent = copy.deepcopy({k: v for k, v in data.items() if k not in ("nodes", "edges")})
@@ -182,6 +227,9 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
         add(e["source"], f"{name}.trigger", "triggers")
     for tgt in sorted(next(iter(targets), frozenset())):
         add(f"{name}.complete", tgt, "triggers")
+    for xname, srcs in named.items():
+        for tgt in sorted(goes_to[srcs[0]]):
+            add(f"{name}.{xname}", tgt, "triggers")
     for e in in_edges:
         add(e["source"], f"{name}.in_{in_names[e['source']]}", "binds")
     for e in out_edges:

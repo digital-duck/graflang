@@ -275,3 +275,106 @@ def test_ungroup_keeps_the_parts_own_uses_as_uses(tmp_path):
     assert {n["id"] for n in back["nodes"] if n["type"] == "SUBGRAPH"} == {"analyze", "write", "review"}
     assert _same_graph({**back, "nodes": [n for n in back["nodes"]]}, {**data})
     assert back["resources"]["parts"]["write_code"] == data["resources"]["parts"]["write_code"]
+
+
+# ---- several ways out: the failures become named error exits -----------------------------------------------------------------
+
+BRANCHY = """
+version: "1.0-graph"
+workflow:
+  name: sign
+  inputs: [{name: n, type: INTEGER}]
+  outputs: [{name: result, type: TEXT}]
+steps:
+  - check: {evaluate: "@in_n > 0", in: {n: $in.n}}
+  - twice: {solve: "str(@in_n * 2)", in: {n: $in.n}, on: check.pass, out: v}
+  - sorry: {solve: "'negative'", on: check.fail, out: r}
+  - done: {output: {result: twice.v}, on: twice}
+  - done2: {output: {result: sorry.r}, on: sorry}
+"""
+
+
+def branchy():
+    from ruamel.yaml import YAML
+    return expand(YAML(typ="safe").load(BRANCHY))          # YAML 1.2, as the app reads files: PyYAML would read `on:` as True
+
+
+def test_two_different_ways_out_are_refused_unless_one_is_named_an_error_exit():
+    data = branchy()
+    with pytest.raises(GroupError, match="several ways out"):
+        group(data, ["check", "twice"], "front")
+    with pytest.raises(GroupError, match="not a control port that leaves"):
+        group(data, ["check", "twice"], "front", exits={"bad": ["check.nope"]})
+    with pytest.raises(GroupError, match="must stay the normal one"):
+        group(data, ["check", "twice"], "front", exits={"a": ["check.fail"], "b": ["twice.complete"]})
+    with pytest.raises(GroupError, match="lead to different nodes; give each its own name"):
+        group(data, ["check", "twice"], "front", exits={"bad": ["check.fail", "twice.complete"]})
+
+
+def test_a_named_exit_becomes_an_error_exit_and_the_answer_is_unchanged(tmp_path):
+    from graphlang.grafr.runtime import GraphLangRuntime
+    original = tmp_path / "orig.graph.yaml"
+    original.write_text(BRANCHY)
+    want = {n: GraphLangRuntime(load_graph(original), verbose=False).execute({"n": n}) for n in (4, -2)}
+    folder = tmp_path / "app"
+    folder.mkdir()
+    graph = folder / "sign.graph.yaml"
+    graph.write_text(BRANCHY)
+    from click.testing import CliRunner
+    from graphlang.cli import main
+    r = CliRunner().invoke(main, ["group", str(graph), "--nodes", "check,twice", "--name", "front", "--exit", "negative=check.fail"])
+    assert r.exit_code == 0, r.output
+    part = yaml.safe_load((folder / "front" / "front.graph.yaml").read_text())
+    assert [e["name"] for e in part["workflow"]["errors"]] == ["negative"]
+    assert any((n.get("config") or {}).get("exit") == "negative" for n in part["nodes"])
+    got = {n: GraphLangRuntime(load_graph(graph), verbose=False).execute({"n": n}) for n in (4, -2)}
+    assert got == want == {4: {"result": "8"}, -2: {"result": "negative"}}
+    assert check(load_graph(graph))[0] == []
+    assert "negative" in graph.read_text()                                      # the use's `ports: [negative]` and its `on:`
+
+
+def test_graf_group_rejects_a_malformed_exit(tmp_path):
+    from click.testing import CliRunner
+    from graphlang.cli import main
+    graph = tmp_path / "sign.graph.yaml"
+    graph.write_text(BRANCHY)
+    r = CliRunner().invoke(main, ["group", str(graph), "--nodes", "check,twice", "--name", "front", "--exit", "oops"])
+    assert r.exit_code == 1 and "NAME=node.port" in r.output
+    assert graph.read_text() == BRANCHY and not (tmp_path / "front").exists()
+
+
+def test_ungroup_of_a_composite_with_an_error_exit_gives_the_original_graph(tmp_path):
+    from graphlang.grafr.group import ungroup
+    original = branchy()
+    parent, part, files = group(original, ["check", "twice"], "front", exits={"negative": ["check.fail"]})
+    write_group(tmp_path, "front", part, files, tmp_path)
+    back = ungroup(parent, "front", tmp_path)
+    assert _same_graph(back, original)
+
+
+# ---- the interface keeps the types the graph declares ---------------------------------------------------------------------
+
+def test_a_grouped_part_keeps_the_types_of_its_inputs_and_outputs():
+    # `n` is an INTEGER workflow input and `a` takes it straight from there: the interface says INTEGER; the output of `b` is untyped: TEXT
+    _, part, _ = group(long_form(), ["a", "b"], "head")
+    assert [(i["name"], i["type"]) for i in part["workflow"]["inputs"]] == [("n", "INTEGER")]
+    assert [(o["name"], o["type"]) for o in part["workflow"]["outputs"]] == [("v", "TEXT")]
+
+
+def test_a_typed_port_gives_the_interface_its_type():
+    g = long_form()
+    c = next(n for n in g["nodes"] if n["id"] == "c")
+    c["ports"] = {"trigger": "CONTROL", "complete": "CONTROL", "in_n": "INTEGER", "out_v": "FLOAT!"}
+    _, part, _ = group(g, ["b", "c"], "tail")
+    assert [(o["name"], o["type"]) for o in part["workflow"]["outputs"]] == [("v", "FLOAT")]
+
+
+def test_editor_group_takes_a_description_and_exits(tmp_path):
+    from graphlang.grafv.editor import GraphEditor
+    graph = tmp_path / "sign.graph.yaml"
+    graph.write_text(dump_readable(branchy()))
+    ed = GraphEditor(graph)
+    ed.group(["check", "twice"], "front", "doubles a positive number", {"negative": ["check.fail"]})
+    part = yaml.safe_load((tmp_path / "front" / "front.graph.yaml").read_text())
+    assert part["workflow"]["description"] == "doubles a positive number" and [e["name"] for e in part["workflow"]["errors"]] == ["negative"]
+    assert ed.problems()[0] == []

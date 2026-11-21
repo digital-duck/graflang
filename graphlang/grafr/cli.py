@@ -367,8 +367,11 @@ def cmd_compact(graph, out_file):
 @click.option("--nodes", required=True, help="comma-separated node ids (steps) to group")
 @click.option("--name", required=True, help="the composite's name: its subfolder and its node id")
 @click.option("--description", default="", help="one line saying what the composite does (its interface, shown by `graf parts`)")
+@click.option("--exit", "exits", multiple=True, metavar="NAME=node.port",
+              help="a way out that is an error exit of the composite: control port node.port leaves by exit NAME (repeat; several ports may share a name). "
+                   "The ways out that are left must share one `complete`")
 @click.option("--dry-run", is_flag=True, help="check the selection and show the interface; write nothing")
-def cmd_group(graph, nodes, name, description, dry_run):
+def cmd_group(graph, nodes, name, description, exits, dry_run):
     """Replace the selected nodes by one SUBGRAPH node whose body is a new part in `<graph folder>/<name>/`. The selection needs one entry
     and one way out; data crossing the boundary becomes the part's inputs and outputs. A file written with `steps:` stays so. The result
     is validated; if it does not validate, nothing is left behind."""
@@ -387,13 +390,21 @@ def cmd_group(graph, nodes, name, description, dry_run):
     compact = is_compact(original)
     data = expand_compact(original) if compact else original
     try:
-        parent, part, files = group(data, [i.strip() for i in nodes.split(",") if i.strip()], name, description)
+        wanted: dict = {}
+        for item in exits:
+            xname, eq, src = item.partition("=")
+            if not eq or "." not in src:
+                raise GroupError(f"--exit {item!r}: write NAME=node.port")
+            wanted.setdefault(xname.strip(), []).append(src.strip())
+        parent, part, files = group(data, [i.strip() for i in nodes.split(",") if i.strip()], name, description, wanted)
     except GroupError as ex:
         console.print(f"[red]Error:[/red] {ex}")
         sys.exit(1)
     ins = ", ".join(i["name"] for i in part["workflow"]["inputs"]) or "none"
     outs = ", ".join(o["name"] for o in part["workflow"]["outputs"]) or "none"
-    console.print(f"composite {name!r}: {len(part['nodes']) - 2} nodes; inputs: {ins}; outputs: {outs}")
+    errs = ", ".join(e["name"] for e in part["workflow"].get("errors", []))
+    console.print(f"composite {name!r}: {sum(1 for n in part['nodes'] if n['type'] not in ('INPUT', 'OUTPUT'))} nodes; inputs: {ins}; outputs: {outs}"
+                  + (f"; error exits: {errs}" if errs else ""))
     if dry_run:
         return
     folder = graph_path.resolve().parent

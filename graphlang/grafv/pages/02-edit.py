@@ -294,9 +294,21 @@ def group_box(editor: GraphEditor) -> None:
         picked = st.multiselect("Nodes", ids, key="group_ids", format_func=lambda i: labels.get(i, i),
                                 help="one entry (outside nodes trigger one of them) and one way out; data crossing the cut becomes the composite's inputs and outputs")
         name = st.text_input("Name (its subfolder and node id)", key="group_name")
+        description = st.text_input("What it does (one line, optional)", key="group_description")
+        exits = st.text_input("Error exits (optional)", key="group_exits", placeholder="invalid=check.fail, other=step.error",
+                              help="NAME=node.port, comma separated: a control port that leaves the selection and is a failure. The ways out "
+                                   "that are left must share one normal way out.")
         if st.button("Group", key="group_go", disabled=not picked or not name.strip(),
                      help="Writes the new subfolder now; the graph changes until Save. Undo removes the folder."):
-            if attempt(lambda: editor.group(picked, name.strip()), f"grouped into {name.strip()}/"):
+            def go():
+                wanted: dict = {}
+                for item in [x.strip() for x in exits.split(",") if x.strip()]:
+                    xname, eq, src = item.partition("=")
+                    if not eq or "." not in src:
+                        raise EditError(f"error exit {item!r}: write NAME=node.port")
+                    wanted.setdefault(xname.strip(), []).append(src.strip())
+                editor.group(picked, name.strip(), description, wanted)
+            if attempt(go, f"grouped into {name.strip()}/"):
                 st.rerun()
 
 

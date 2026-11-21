@@ -106,7 +106,7 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
 
 ## 9. Build status
 
-This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: `phases.pre.map`). Statuses: done (committed,
+This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: multi-exit and typed Group). Statuses: done (committed,
 tests pass), partial, open. The gap table in `zinets/docs/graph-vision/claude/readme-design.md` is updated once the whole refactoring is
 tested and finished, not before.
 
@@ -125,9 +125,10 @@ tested and finished, not before.
 | 7 | Error `code` (optional, unique per part and per composed graph), logged as `part.error` | done | `24b5d0a` |
 | 8 | Catalogue `graflang.errors.yaml` (shipped plus one beside the graph), `graf errors` | done | `3c97241` |
 | 9 | `spl2graph` (SPL.py) writes `state:` | done | SPL.py `994c5964` |
-| 10 | Group with several ways out (creates error exits) | open | one way out is refused today |
-| 11 | Editor Group: description field; keep the file's comments | open | comments are dropped, as for a source edit |
-| 12 | Typed inputs and outputs on a grouped part (all `TEXT` today) | open | |
+| 10 | Group with several ways out: the failures are named error exits (`--exit NAME=node.port`, an editor field); the rest must share one normal way out; Ungroup round-trips them | done | this commit |
+| 11 | Editor Group: description and exits fields | done | this commit |
+| 11a | Editor Group/Ungroup keep the graph file's comments | open | comments are dropped, as for a source edit |
+| 12 | A grouped part's inputs and outputs keep the types the graph declares (workflow inputs, typed `ports:`, `port_types`); `TEXT` only where nothing is declared | done | this commit |
 | 13 | Scoped context and `inherits` (section 4) | open | |
 | 14 | Cookbook rewrite as layered folders (section 10); about 54 recipes in `cookbook_pocketflow/` and `cookbook_solvers/` still warn on `outputs.from` | open | |
 | 15 | Recursion (section 7) | open, later | |

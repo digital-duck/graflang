@@ -354,14 +354,14 @@ class GraphEditor:
             self.doc.setdefault("edges", [])
         self._edit(change)
 
-    def group(self, ids: List[str], name: str) -> Path:
+    def group(self, ids: List[str], name: str, description: str = "", exits: "Dict[str, List[str]] | None" = None) -> Path:
         """Turn the selected nodes into a composite: a part in a new subfolder `<recipe>/<name>/`, used as one SUBGRAPH node (`graf group`).
         The folder is written now (new files only, nothing is overwritten) because the graph cannot be checked without it; the graph
         itself changes in memory until Save. Undo removes the folder. Comments of the graph file are not kept (as for a source edit)."""
         from ..grafr.group import GroupError, group, write_group
         folder = self.path.resolve().parent
         try:
-            parent, part, files = group(_plain(self.doc), [str(i) for i in ids], name)
+            parent, part, files = group(_plain(self.doc), [str(i) for i in ids], name, description, exits)
             made = write_group(folder, name, part, files, folder)
         except GroupError as e:
             raise EditError(str(e)) from None
