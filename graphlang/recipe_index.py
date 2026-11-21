@@ -140,7 +140,7 @@ def describe(root: str, folder: Path, writable: bool) -> Optional[Entry]:
     workflow = raw.get("workflow") if isinstance(raw, dict) and isinstance(raw.get("workflow"), dict) else {}
     inputs = [str(i.get("name")) for i in workflow.get("inputs", []) if isinstance(i, dict) and i.get("name")]
     outputs = [str(i.get("name")) for i in workflow.get("outputs", []) if isinstance(i, dict) and i.get("name")]
-    prompts = [p.read_text(encoding="utf-8", errors="replace") for p in sorted(folder.rglob("prompts/*.md")) if "output" not in p.parts]
+    prompts = [p.read_text(encoding="utf-8", errors="replace") for p in sorted(folder.rglob("prompts/*.md")) if "output" not in p.parts and ".graf" not in p.parts]
     for n in nodes if isinstance(nodes, list) else []:
         cfg = n.get("config") if isinstance(n, dict) else None
         if isinstance(cfg, dict) and isinstance(cfg.get("prompt_inline"), str):
@@ -225,7 +225,7 @@ class RecipeIndex:
         for root in workspace.roots:
             if root.path.is_dir():
                 for p in root.path.glob("*/**/*"):
-                    if p.is_file() and p.suffix in {".yaml", ".md"} and "output" not in p.parts:
+                    if p.is_file() and p.suffix in {".yaml", ".md"} and "output" not in p.parts and ".graf" not in p.parts:
                         sig.append((str(p), p.stat().st_mtime_ns))
         return tuple(sorted(sig))
 

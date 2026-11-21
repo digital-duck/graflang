@@ -81,7 +81,7 @@ def transfer_page() -> None:
     st.download_button("Download the recipe (zip: graph, prompts, procedures)", ws.export_zip(picked.folder), file_name=f"{picked.folder.name}.zip",
                        mime="application/zip", key="export_zip")
     st.download_button("Download only the graph file", picked.graph.read_bytes(), file_name=picked.graph.name, mime="text/yaml", key="export_graph")
-    st.caption("Run output (`output/`), caches and hidden files are left out. Your API keys are in `settings.json`, which is never part of a recipe.")
+    st.caption("Run output (`.graf/`), caches and hidden files are left out. Your API keys are in `settings.json`, which is never part of a recipe.")
 
 
 if __name__ == "__main__":                # Streamlit runs a page file as a script; tests import the function

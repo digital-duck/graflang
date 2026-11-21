@@ -1,4 +1,4 @@
-"""Where a run's results go: `<graph folder>/output/<graph>-<adapter>[-<model>]-<timestamp>/`
+"""Where a run's results go: `<graph folder>/.graf/outputs/<graph>-<adapter>[-<model>]-<timestamp>/`
 (the model part is the one asked for with --llm/--model, named the same way as the log files).
 
     run.json                 what produced it: graph, adapter, model, parameters, start time
@@ -21,6 +21,16 @@ from typing import Any, Dict, List
 from ..logging_config import get_logger, log_event
 
 _log = get_logger("grafr.output")
+
+STATE_DIR = ".graf"                    # everything a run leaves beside a recipe: .graf/outputs/<run>/ (results) and .graf/logs/ (a procedure's side files); git-ignored
+
+
+def outputs_dir(graph_folder: Path) -> Path:
+    return Path(graph_folder) / STATE_DIR / "outputs"
+
+
+def logs_dir(graph_folder: Path) -> Path:
+    return Path(graph_folder) / STATE_DIR / "logs"
 
 
 def _slug(text: str) -> str:

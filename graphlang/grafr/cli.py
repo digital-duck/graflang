@@ -16,7 +16,7 @@ from ..logging_config import disable_logging, setup_logging
 from .adapters import default_model, make_llm
 from .metering import CassetteError, LimitExceeded, MeteredLLM, RecordingLLM, ReplayLLM
 from .bindings import bind_graph, load_bindings
-from .output import RunOutput
+from .output import RunOutput, outputs_dir
 from .runtime import load_graph, GraphLangRuntime
 from .topology import check
 
@@ -70,7 +70,7 @@ def _load_or_exit(graph_path: Path, levels: "int | None" = None) -> dict:
               help="where log files go (default ~/.graflang/logs, or $DD_LOG_DIR); e.g. --log-dir . for the current folder")
 @click.option("--no-log", is_flag=True, help="do not write a log file")
 @click.option("--output-dir", type=click.Path(file_okay=False), default=None,
-              help="where results go (default: the output/ folder next to the .graph.yaml): a folder per run with result.json and one file per output")
+              help="where results go (default: .graf/outputs/ next to the .graph.yaml): a folder per run with result.json and one file per output")
 @click.option("--save-nodes/--no-save-nodes", default=True, show_default=True,
               help="save every node's output (LLM responses included) under <run folder>/nodes/ (--no-save-nodes keeps only the workflow outputs)")
 @click.option("--no-output", is_flag=True, help="do not write result files")
@@ -147,7 +147,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, re
 
     run_output = None
     if not no_output:
-        run_output = RunOutput(output_dir or graph_path.resolve().parent / "output",
+        run_output = RunOutput(output_dir or outputs_dir(graph_path.resolve().parent),
                                graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml"), adapter,
                                model=model or "", params=params, save_nodes=save_nodes)
 

@@ -228,7 +228,7 @@ GRAF_LOCK = ROOT / "experiments" / "code_pipeline" / "logs" / ".graflang.lock"
 
 
 def run_graflang(spec: str, model: str, run_dir: Path) -> ArmResult:
-    """The graph's procedures write their artifacts to one shared folder (graphlang's `.grafr/logs`), so only one graflang
+    """The graph's procedures write their artifacts to one shared folder (graphlang's `.graf/logs`), so only one graflang
     run may be in progress at a time, across processes: a second run would clear and overwrite the first one's code. The
     other arms do not share anything and can run in parallel with it."""
     GRAF_LOCK.parent.mkdir(parents=True, exist_ok=True)
@@ -241,7 +241,7 @@ def run_graflang(spec: str, model: str, run_dir: Path) -> ArmResult:
 
 
 def _run_graflang(spec: str, model: str, run_dir: Path) -> ArmResult:
-    shared = GRAPH.parent / ".grafr" / "logs"          # where the procedures write their artifacts (one folder for every run)
+    shared = GRAPH.parent / ".graf" / "logs"          # where the procedures write their artifacts (one folder for every run)
     for sub in ("spec", "target", "tests"):
         shutil.rmtree(shared / sub, ignore_errors=True)
     start = time.time()

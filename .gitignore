@@ -225,6 +225,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # grafr run artifacts (procedure logs)
+.graf/
 .grafr/
 # grafr run results (<graph folder>/output/)
 outputs/

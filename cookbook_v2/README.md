@@ -77,6 +77,16 @@ graf run cookbook_v2/self_heal/self_heal.graph.yaml --param text="Please mail Ma
 
 Not checked offline: real model output. The equivalence tests show the structure matches the original, not that a real run gives the same text.
 
+## Where a run leaves its files
+
+Everything a run produces sits in `.graf/` beside the recipe's top graph (git-ignored), never among the recipe's own files:
+
+- `.graf/outputs/<recipe>-<adapter>-<model>-<time>/`: `result.json`, one file per workflow output (e.g. `docs.md`), and `nodes/`, one file per node output
+  in firing order (`004-generate.out_code.md`, `006-improve.out_improved_code.md`, ...). Change the place with `--output-dir`.
+- `.graf/logs/`: the side files a `procedure_ref` step writes (code_pipeline: `target/python/code.py` is the first draft, `tests/`, `spec/`).
+
+(A recipe's own data files, such as heartbeat's `output/state.txt`, are not run results and stay where the recipe puts them.)
+
 ## Known differences from the originals
 
 - **heartbeat** has an extra input `state_file` (default `output/state.txt`); its alerts log is in `announce/output/`.

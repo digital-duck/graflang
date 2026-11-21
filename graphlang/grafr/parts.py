@@ -153,7 +153,7 @@ def folder_hash(folder: Path) -> str:
     """A short hash of a recipe's files (graph, prompts, policies, procedures; not `output/`), to pin a part to the version you tried."""
     import hashlib
     h = hashlib.sha256()
-    for f in sorted(p for p in folder.rglob("*") if p.is_file() and not (set(p.relative_to(folder).parts) & {"output", "__pycache__", ".git"})
+    for f in sorted(p for p in folder.rglob("*") if p.is_file() and not (set(p.relative_to(folder).parts) & {"output", ".graf", "__pycache__", ".git"})
                     and p.suffix in (".yaml", ".yml", ".md", ".cedar", ".spl", ".json", ".py", ".txt")):
         h.update(f.relative_to(folder).as_posix().encode() + b"\0" + f.read_bytes() + b"\0")
     return h.hexdigest()[:12]

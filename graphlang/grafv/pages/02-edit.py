@@ -391,7 +391,7 @@ def logs_tab(editor: GraphEditor) -> None:
     latest = st.session_state.get("run_result")
     options = (["latest"] if latest else []) + [str(f) for f in past]
     if not options:
-        st.caption("Nothing has run yet. Use the Run tab; real runs are kept in the `output/` folder beside the graph and listed here.")
+        st.caption("Nothing has run yet. Use the Run tab; real runs are kept in the `.graf/outputs/` folder beside the graph and listed here.")
         return
     pick = st.selectbox("Run", options, key="logs_pick", format_func=lambda o: "Latest run (this session)" if o == "latest" else runs.label(Path(o)),
                         help="runs saved in the output folder beside this graph, newest first (dry runs are not saved)")

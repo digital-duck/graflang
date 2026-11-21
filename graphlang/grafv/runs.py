@@ -1,4 +1,4 @@
-"""Past runs for the Logs tab: the folders `graf run` (and the editor's Run tab) leave in `<graph folder>/output/`, read back
+"""Past runs for the Logs tab: the folders `graf run` (and the editor's Run tab) leave in `<graph folder>/.graf/outputs/`, read back
 into the same shape `GraphEditor.run` returns, so one page shows a fresh run and an old one alike."""
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ..grafr.output import outputs_dir
+
 
 def run_folders(graph_path: Path) -> List[Path]:
     """The run folders beside a graph (they hold a run.json), newest first."""
-    root = Path(graph_path).resolve().parent / "output"
+    root = outputs_dir(Path(graph_path).resolve().parent)
     if not root.is_dir():
         return []
     stem = Path(graph_path).name.removesuffix(".graph.yaml").removesuffix(".yaml")

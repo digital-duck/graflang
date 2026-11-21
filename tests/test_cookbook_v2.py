@@ -91,7 +91,7 @@ class Scripted:
 
 
 def copy_recipe(src: Path, dst: Path) -> Path:
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("output", "logs", "__pycache__", ".grafr", "node_modules"))
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("output", ".graf", "logs", "__pycache__", ".grafr", "node_modules"))
     modules = ROOT / "cookbook" / src.name / "node_modules"        # the ports share the original's npm install
     if modules.is_dir():
         (dst / "node_modules").symlink_to(modules)

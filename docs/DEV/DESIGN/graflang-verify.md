@@ -124,11 +124,11 @@ graf run $G --param topic=ducks --output-dir /tmp/verify/out     # 3 model calls
 
 Check `/tmp/verify/out/self_refine-claude_cli-claude-sonnet-5-5-<time>/`: `essay.md`, `result.json`, `run.json`, `summary.json` (steps 4, 3 calls), and `nodes/` with one file per node output (saved by default; `--no-save-nodes` keeps only the workflow outputs).
 
-Without `--output-dir`, results go to the `output/` folder next to the `.graph.yaml` (for this graph `cookbook/self_refine/output/<run>/`, ignored by git); each run gets its own subfolder. Try it, and `--no-save-nodes`, `--no-output`:
+Without `--output-dir`, results go to `.graf/outputs/` next to the `.graph.yaml` (for this graph `cookbook/self_refine/.graf/outputs/<run>/`, ignored by git); each run gets its own subfolder. Try it, and `--no-save-nodes`, `--no-output`:
 
 ```bash
-graf run $G --param topic=ducks --no-save-nodes   # 3 calls; the new run folder under cookbook/self_refine/output/ has no nodes/
-ls cookbook/self_refine/output/
+graf run $G --param topic=ducks --no-save-nodes   # 3 calls; the new run folder under cookbook/self_refine/.graf/outputs/ has no nodes/
+ls cookbook/self_refine/.graf/outputs/
 ```
 
 ```bash
@@ -457,7 +457,7 @@ Do **not** run `017_judge` from the PocketFlow set unattended: the lifter skips 
 - `ModuleNotFoundError: zinet` → you are using the system Python; use the `graf` env.
 - `kernel` SOLVE hangs or errors → `pip install -e ".[kernel]"`; the first kernel call takes a few seconds.
 - A real run seems stuck → it may be a loop; Ctrl-C, then rerun with `--max-steps 50` and a `max_llm_calls` budget (`--bind`, section 7) and read the step count.
-- `graf run` writes into the repo → results go to `<graph folder>/output/`; pass `--output-dir /tmp/...` or `--no-output`. `cookbook/*/output/` is ignored by git.
+- `graf run` writes into the repo → results go to `<graph folder>/.graf/outputs/`; pass `--output-dir /tmp/...` or `--no-output`. `cookbook/*/output/` is ignored by git.
 - A cassette replay fails with `no recording` → the prompt or model changed; re-record with `--record` (small budget).
 - Logs: `~/.graflang/logs/<name>-<adapter>-<time>.log` and `.jsonl`; use `--log-level debug` for every node firing.
 - To see what a compact, parts or expand file becomes: `graf expand FILE`.

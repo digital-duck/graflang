@@ -71,7 +71,7 @@ Check with `dot -V` (it prints the version), then `graf vis --list-engines`: the
 | `--adapter NAME` | `claude_cli` (default), or another dd-llm adapter: `ollama`, `openrouter`, `openai`, `anthropic`, ... |
 | `--model ID` | run-wide model for every `GENERATE` node that has no `llm:` of its own. A node's `llm:` beats it (see below). With neither, the default: `claude-sonnet-5-5` for `claude_cli`; none for other adapters (`ollama`, ...), which use their own |
 | `--max-steps N` | stop after N node firings (default 1000) |
-| `--output-dir DIR` | where results go (default `<graph folder>/output`); see [Results](#results-the-output-folder) |
+| `--output-dir DIR` | where results go (default `<graph folder>/.graf/outputs`); see [Results](#results-the-output-folder) |
 | `--save-nodes` / `--no-save-nodes` | save every node's output, LLM responses included (the default); `--no-save-nodes` keeps only the workflow outputs |
 | `--no-output` | write no result files |
 | `--log-level LEVEL` | `debug`, `info` (default), `warning`, `error`; see [Logging](#logging) |
@@ -93,7 +93,7 @@ A run ends with the workflow output. If no `OUTPUT` node was reached (a gate rou
 
 Order, highest first: the node's `llm:`, then `--llm` (or `--adapter`/`--model`, or `llm:` in a bindings file), then the adapter's default (`claude-sonnet-5-5` for `claude_cli`). A node that names only an adapter other than the run's (`llm: ollama`) gets that adapter's default model; the run's `--llm` model belongs to the run's adapter. An adapter a node names is created on first use, so its requirements (a running Ollama, an API key) apply from then on. `llm.call` in the log shows the adapter and model each node used. `model:` on a node is no longer accepted: `graf validate` says to write `llm:`. Under the `mock` adapter every node is answered by the mock.
 
-Each run writes its results to a new folder, `<graph folder>/output/<graph>-<adapter>[-<model>]-<timestamp>/`. For `graf run cookbook/self_refine/self_refine.graph.yaml --llm ollama:gemma3 ...` that is `cookbook/self_refine/output/self_refine-ollama-gemma3-20261024-111347/`:
+Each run writes its results to a new folder, `<graph folder>/.graf/outputs/<graph>-<adapter>[-<model>]-<timestamp>/`. For `graf run cookbook/self_refine/self_refine.graph.yaml --llm ollama:gemma3 ...` that is `cookbook/self_refine/.graf/outputs/self_refine-ollama-gemma3-20261024-111347/`:
 
 ```
 run.json                          what produced it: graph, adapter, model, parameters, start time
@@ -107,9 +107,9 @@ An output declared `type: FILES` in `workflow.outputs` holds a mapping `{relativ
 
 - Every node's output ports are saved (unless you pass `--no-save-nodes`) under `nodes/`, numbered in firing order (`001-`, `002-`, ...). Nodes that fire again in a `LOOP` get a new number each time. This is where intermediate LLM responses go. Prompts are not saved.
 - The model part is the one you asked for with `--llm` or `--model` (characters other than letters, digits, `.`, `_`, `-` become `-`, so `gemma3:12b` shows as `gemma3-12b`); log files use the same naming. Without one the name still carries the default (`claude-sonnet-5-5` under `claude_cli`), even if some nodes name a model of their own. Only adapters with no default (`ollama`, ...) give a folder without a model part and `"model": null` in `run.json`.
-- `--output-dir DIR` replaces `<graph folder>/output`. Each run still gets its own subfolder, so runs never overwrite each other.
+- `--output-dir DIR` replaces `<graph folder>/.graf/outputs`. Each run still gets its own subfolder, so runs never overwrite each other.
 - `--no-output` writes nothing. A run that fails, or ends without reaching an `OUTPUT` node, writes no result files.
-- `output/` is in `.gitignore`.
+- `.graf/` (the run results in `.graf/outputs/` and a procedure's side files in `.graf/logs/`) is in `.gitignore`.
 
 LLM text is kept out of the log on purpose: it is a result of the run, not a diagnostic. The log records the folder and file names instead.
 

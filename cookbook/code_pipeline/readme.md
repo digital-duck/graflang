@@ -50,7 +50,7 @@ graf run cookbook/code_pipeline/code_pipeline.graph.yaml --llm ollama:gemma3 --p
 
 - **Console:** the firing order, with the loop body indented. The loop nodes repeat once per cycle.
 - **Result:** `cookbook/code_pipeline/output/code_pipeline-<adapter>[-<model>]-<time>/docs.md` (also `result.json`).
-- **The generated code and the SPL artifacts** are written by the procedures into `cookbook/code_pipeline/.grafr/logs/` (git-ignored):
+- **The generated code and the SPL artifacts** are written by the procedures into `cookbook/code_pipeline/.graf/logs/` (git-ignored):
 
   | File | From |
   |---|---|
@@ -70,7 +70,7 @@ graf run cookbook/code_pipeline/code_pipeline.graph.yaml --llm ollama:gemma3 --p
 - **Loop:** `loop.end` shows `iterations` at most `max_cycles`. Try `--param max_cycles=1`: if the test verdict is `[FAILED]`, the run still reaches `document` after one cycle.
 - **Guard:** `guard.decision` appears only after a failed test. It is `allowed=True` while `cycle < max_cycles`, then a warning with `allowed=False` (the loop stops by `denied`).
 - **Closure:** `--param check_closure=false` skips `judge`, and `docs.md` has no closure report; with `true`, the report is appended.
-- **Files:** `.grafr/logs/target/python/code.py` is the code that went into the documentation, and `tests/python/result.md` starts with the verdict the gate saw.
+- **Files:** `.graf/logs/target/python/code.py` is the code that went into the documentation, and `tests/python/result.md` starts with the verdict the gate saw.
 
 ## Known limits
 

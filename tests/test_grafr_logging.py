@@ -91,7 +91,7 @@ def test_cli_default_dir_is_graflang_logs_in_home(tmp_path, monkeypatch):
     result = CliRunner().invoke(main, ["run", str(SELF_REFINE), "--adapter", "mock", "--param", "topic=ducks", "--no-output", "--log-format", "jsonl"])
     assert result.exit_code == 0, result.output
     assert len(list((tmp_path / ".graflang" / "logs").glob("self_refine-mock-*.jsonl"))) == 1
-    assert not (SELF_REFINE.parent / ".grafr").exists()
+    assert not (SELF_REFINE.parent / ".graf").exists()
 
 
 def test_cli_log_dir_can_be_the_current_folder(tmp_path, monkeypatch):

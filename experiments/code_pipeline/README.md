@@ -199,7 +199,7 @@ The graph, run by `graf run`.
 ```bash
 python run.py --arms graflang --n 2 --model $MODEL --db results/try.db
 
-# by hand: the code lands in cookbook/code_pipeline/.grafr/logs/target/python/code.py, which every run shares (clear it between runs)
+# by hand: the code lands in cookbook/code_pipeline/.graf/logs/target/python/code.py, which every run shares (clear it between runs)
 (cd ~/projects/digital-duck/graflang &&
  graf run cookbook/code_pipeline/code_pipeline.graph.yaml --llm claude_cli:$MODEL --no-log \
      --output-dir /tmp/graf_out --param spec="$SPEC" --param check_closure=false)

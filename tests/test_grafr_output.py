@@ -1,4 +1,4 @@
-"""grafr run results: <graph folder>/output/<run>/ holds the workflow outputs (and, with --save-nodes, every node's
+"""grafr run results: <graph folder>/.graf/outputs/<run>/ holds the workflow outputs (and, with --save-nodes, every node's
 output); LLM text never goes to the log."""
 import json
 import shutil
@@ -17,7 +17,7 @@ SELF_REFINE_DIR = Path(__file__).resolve().parent.parent / "cookbook" / "self_re
 def app(tmp_path):
     """A copy of the self_refine app, so output/ lands in tmp_path."""
     dest = tmp_path / "app"
-    shutil.copytree(SELF_REFINE_DIR, dest, ignore=shutil.ignore_patterns("output", ".grafr", "__pycache__"))
+    shutil.copytree(SELF_REFINE_DIR, dest, ignore=shutil.ignore_patterns("output", ".graf", "__pycache__"))
     yield dest
     disable_logging()
 
@@ -48,7 +48,7 @@ def run_dirs(root):
 def test_default_output_dir_is_next_to_the_graph(app):
     result = run(app)
     assert result.exit_code == 0, result.output
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     assert run_dir.name.startswith("self_refine-mock-")
     assert json.loads((run_dir / "result.json").read_text())["essay"].startswith("[Mock LLM response")
     assert (run_dir / "essay.md").read_text().startswith("[Mock LLM response")
@@ -59,29 +59,29 @@ def test_default_output_dir_is_next_to_the_graph(app):
 def test_output_dir_flag(app, tmp_path):
     result = run(app, "--output-dir", str(tmp_path / "elsewhere"))
     assert result.exit_code == 0, result.output
-    assert len(run_dirs(tmp_path / "elsewhere")) == 1 and not (app / "output").exists()
+    assert len(run_dirs(tmp_path / "elsewhere")) == 1 and not (app / ".graf").exists()
 
 
 def test_no_output_writes_nothing(app):
     assert run(app, "--no-output").exit_code == 0
-    assert not (app / "output").exists()
+    assert not (app / ".graf").exists()
 
 
 def test_no_save_nodes_keeps_only_the_workflow_outputs(app):
     assert run(app, "--no-save-nodes").exit_code == 0
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     assert (run_dir / "result.json").exists() and not (run_dir / "nodes").exists()
 
 
 def test_save_nodes_flag_is_still_accepted(app):
     assert run(app, "--save-nodes").exit_code == 0
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     assert (run_dir / "nodes").is_dir()
 
 
 def test_node_outputs_are_saved_by_default_in_firing_order(app):
     assert run(app).exit_code == 0                               # no flag needed
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     names = sorted(p.name for p in (run_dir / "nodes").iterdir())
     assert names[0].startswith("001-") and any("draft.out_essay.md" in n for n in names)
     assert any("critique.out_feedback.md" in n for n in names) and any("refine.out_essay.md" in n for n in names)
@@ -96,19 +96,19 @@ def test_llm_text_is_in_output_files_not_in_the_log(app):
     saved = [e for e in events if e.get("event") == "node.saved"]
     assert saved and all(Path(e["file"]).is_file() for e in saved)
     out = next(e for e in events if e.get("event") == "run.output")
-    assert Path(out["dir"]) == run_dirs(app / "output")[0] and "result.json" in out["files"]
+    assert Path(out["dir"]) == run_dirs(app / ".graf" / "outputs")[0] and "result.json" in out["files"]
 
 
 def test_failed_run_writes_no_result_files(app):
     result = CliRunner().invoke(main, ["run", str(app / "self_refine.graph.yaml"), "--adapter", "mock",
                                        "--log-dir", str(app.parent / "logs")])       # required --param missing
     assert result.exit_code != 0
-    assert not (app / "output").exists()
+    assert not (app / ".graf").exists()
 
 
 def test_folder_name_carries_the_model_and_run_json_records_it(app):
     assert run(app, "--llm", "mock:demo/model:7b").exit_code == 0
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     assert run_dir.name.startswith("self_refine-mock-demo-model-7b-")
     meta = json.loads((run_dir / "run.json").read_text())
     assert meta["adapter"] == "mock" and meta["model"] == "demo/model:7b" and meta["params"] == {"topic": "ducks"}
@@ -116,7 +116,7 @@ def test_folder_name_carries_the_model_and_run_json_records_it(app):
 
 def test_folder_name_without_a_model_has_no_model_part(app):
     assert run(app).exit_code == 0
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     assert run_dir.name.startswith("self_refine-mock-2") and json.loads((run_dir / "run.json").read_text())["model"] is None
 
 
@@ -143,7 +143,7 @@ def test_default_model_reaches_the_run_name_and_the_llm(app, monkeypatch):
 
     monkeypatch.setattr("graphlang.grafr.adapters.DDLLM", lambda name, model=None, default=None: Fake(model, default))
     assert run(app, "--adapter", "claude_cli").exit_code == 0
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     assert run_dir.name.startswith("self_refine-claude_cli-claude-sonnet-5-5-")
     assert json.loads((run_dir / "run.json").read_text())["model"] == "claude-sonnet-5-5"
     assert seen["model"] is None and seen["default"] == "claude-sonnet-5-5"     # a default, not an override
@@ -155,7 +155,7 @@ def test_explicit_model_beats_the_default(app, monkeypatch):
         "F", (), {"name": "claude_cli", "adapter_name": "claude_cli", "model_override": model, "default_model": default,
                   "generate": lambda self, p, model=None, **k: "t"})())
     assert run(app, "--llm", "claude_cli:claude-haiku-5-5").exit_code == 0
-    (run_dir,) = run_dirs(app / "output")
+    (run_dir,) = run_dirs(app / ".graf" / "outputs")
     assert "claude-haiku-5-5" in run_dir.name and "sonnet" not in run_dir.name
 
 

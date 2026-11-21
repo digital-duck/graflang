@@ -118,8 +118,8 @@ class GraphEditor:
             max_calls: int | None = None, save: bool = False) -> Dict[str, Any]:
         """Run the graph as it is now (saved or not) and report {ok, outputs, error, summary}. Never raises for a failed run.
         `max_calls` caps the model calls (a run that would make more fails with the reason); None is no cap, as for the mock.
-        With `save` the run is written to `output/` beside the graph, as `graf run` does (the Logs tab reads it back later)."""
-        from graphlang.grafr.output import RunOutput
+        With `save` the run is written to `.graf/outputs/` beside the graph, as `graf run` does (the Logs tab reads it back later)."""
+        from graphlang.grafr.output import RunOutput, outputs_dir
         from graphlang.grafr.adapters import make_llm
         from graphlang.grafr.metering import MeteredLLM
         from graphlang.grafr.runtime import GraphLangRuntime
@@ -127,7 +127,7 @@ class GraphEditor:
         if errors:
             return {"ok": False, "outputs": None, "error": "fix these first: " + "; ".join(errors), "summary": None}
         stem = self.path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
-        out = RunOutput(self.path.resolve().parent / "output", stem, adapter, model=model or "", params=params or {}, save_nodes=True) if save else None
+        out = RunOutput(outputs_dir(self.path.resolve().parent), stem, adapter, model=model or "", params=params or {}, save_nodes=True) if save else None
         try:
             rt = GraphLangRuntime(self.data(), llm=MeteredLLM(make_llm(adapter, model), max_calls=max_calls), max_steps=max_steps, verbose=False,
                                   node_output=out)

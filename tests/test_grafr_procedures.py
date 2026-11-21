@@ -59,9 +59,9 @@ def test_a_node_maps_ports_to_spl_parameters_and_runs_the_procedure(tmp_path, mo
                           llm=make_llm("echo"), verbose=False)
     out = rt.execute({"a": "ORIGINAL-SPEC", "b": "DERIVED-SPEC"})
     assert "ORIGINAL-SPEC" in out["r"] and "DERIVED-SPEC" in out["r"]
-    assert (CODE / ".grafr" / "logs").exists()                       # side files land beside the graph...
+    assert (CODE / ".graf" / "logs").exists()                       # side files land beside the graph...
     import shutil
-    shutil.rmtree(CODE / ".grafr")                                    # ...(git-ignored); clean up after the test
+    shutil.rmtree(CODE / ".graf")                                    # ...(git-ignored); clean up after the test
 
 
 def test_a_bad_params_mapping_is_an_error():
@@ -86,7 +86,7 @@ def test_flagship_runs_end_to_end_with_echo_procedures(tmp_path, monkeypatch):
     out = rt.execute({"spec": "add two numbers", "max_cycles": 1, "check_closure": True})
     assert rt.fired["analyze"] == 1 and rt.fired["judge"] == 1 and "docs" in out
     import shutil
-    shutil.rmtree(CODE / ".grafr", ignore_errors=True)
+    shutil.rmtree(CODE / ".graf", ignore_errors=True)
 
 
 def test_a_tools_py_next_to_the_procedure_is_loaded_for_its_call_statements(tmp_path):

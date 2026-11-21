@@ -26,7 +26,7 @@ One tension to settle: a `MUTATE` changes the graph, so it changes the state spa
 |---|---|
 | a discrete state space | nodes and ports; token-passing dataflow |
 | the observed choices | the `route` of every `node.done` event in the run log (`route=fail`), and per-node firing counts in `summary.json` |
-| many recorded runs | `output/<graph>-<model>-<time>/` folders (`run.json`, `summary.json`, `result.json`, `nodes/`), now also written by the editor's Run tab and read back by its Logs tab |
+| many recorded runs | `.graf/outputs/<graph>-<model>-<time>/` folders (`run.json`, `summary.json`, `result.json`, `nodes/`), now also written by the editor's Run tab and read back by its Logs tab |
 | cheap repeats | record and replay of model answers (`--record`, `--replay`), the `mock` adapter |
 | a safe way to change the graph | `MUTATE` deltas, validated (schema, Cedar, budget, invariants on a trial copy) |
 | bounds | `--max-steps`, `limits.max_llm_calls`, cost and wall-time limits |

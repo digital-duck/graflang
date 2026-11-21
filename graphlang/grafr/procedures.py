@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..logging_config import ERROR, active_settings, get_logger, log_event
+from .output import logs_dir
 
 _log = get_logger("grafr.procedures")
 
@@ -206,5 +207,5 @@ def run_node_procedure(node_data: Dict, in_data: Dict[str, Any], resolver, llm) 
             raise ValueError(f"node {node_id!r}: params maps {spl_name!r} to {port!r}, which has no value")
         args[spl_name] = in_data[port]
     out = run_procedure(path, args, llm.adapter_name, getattr(llm, 'model_override', None) or getattr(llm, 'default_model', None),
-                        log_dir=resolver.base_dir / '.grafr' / 'logs', workflow=workflow)
+                        log_dir=logs_dir(resolver.base_dir), workflow=workflow)
     return {output_ports[0]: out} if output_ports else {}
