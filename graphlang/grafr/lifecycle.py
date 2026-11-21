@@ -1,11 +1,13 @@
 """Node lifecycle: `pre -> exec -> post`, declared under `config.phases` (design E1).
 
     phases:
-      pre:  {require: [in_topic], defaults: {in_style: concise}}
+      pre:  {require: [in_topic], defaults: {in_style: concise}, map: {in_topic: "strip(@in_topic)"}}
       exec: {timeout_s: 60, retry: {max: 3, wait_s: 2, on: [transient, invalid_output]}, fallback: {route: error} | {value: ""}}
       post: {out_schema: {type: object, required: [summary]}, route: {retry: "@out_summary == ''"}}
 
-* `pre` checks that the required in_* values are present (not None) and fills the defaults.
+* `pre` fills the defaults, checks that the required in_* values are present (not None), then applies `map`: each in_* port named there
+  gets the value of its expression (the safe expression language, over the node's in_* values as they were before any map ran). A map
+  written on an edge (`graf` long form, `map:` beside `type:`) is moved here when the graph loads (edgemap.py).
 * `exec` is the node's executor, the only retried step. Failures are `transient` (an adapter or OS error, a
   timeout), `invalid_output` (post rejected the result) or `permanent` (bad configuration: never retried).
   Retries are `max` extra attempts, waiting `wait_s` between them; `on` says which classes are retried
@@ -33,12 +35,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from jsonschema import Draft202012Validator
 
-from .expr import ExpressionError, evaluate_condition, variables
+from .expr import ExpressionError, evaluate, evaluate_condition, variables
 from ..logging_config import WARNING, get_logger, log_event
 
 _log = get_logger("grafr.lifecycle")
 
-PHASE_KEYS = {"pre": {"require", "defaults"}, "exec": {"timeout_s", "retry", "fallback"}, "post": {"out_schema", "route"}}
+PHASE_KEYS = {"pre": {"require", "defaults", "map"}, "exec": {"timeout_s", "retry", "fallback"}, "post": {"out_schema", "route"}}
 RETRY_KEYS = {"max", "wait_s", "on"}
 ERROR_CLASSES = {"transient", "invalid_output"}
 FENCE = re.compile(r"^```[a-zA-Z]*\s*\n(.*?)\n```\s*$", re.DOTALL)
@@ -72,6 +74,14 @@ def _pre(node_data: Dict, in_data: Dict, spec: Dict) -> Dict:
     missing = [p for p in spec.get("require", []) if data.get(p) is None]
     if missing:
         raise ValueError(f"node {node_data['id']!r}: required input(s) {missing} have no value")
+    maps = spec.get("map") or {}
+    if maps:
+        before = dict(data)
+        for port, expression in maps.items():
+            try:
+                data[port] = evaluate(expression, before)
+            except ExpressionError as e:
+                raise ValueError(f"node {node_data['id']!r}: phases.pre.map.{port}: {e}") from None
     return data
 
 
@@ -191,9 +201,24 @@ def check_phases(node_data: Dict) -> List[str]:
                        for k in spec if k not in PHASE_KEYS[name]]
     section = lambda k: phases[k] if isinstance(phases.get(k), dict) else {}
     pre, ex, post = section("pre"), section("exec"), section("post")
-    for p in [*pre.get("require", []), *pre.get("defaults", {})]:
+    maps = pre.get("map", {})
+    if not isinstance(maps, dict):
+        errors.append("phases.pre.map must map an in_* port to an expression")
+        maps = {}
+    for p in [*pre.get("require", []), *pre.get("defaults", {}), *maps]:
         if p not in ports or not p.startswith("in_"):
             errors.append(f"phases.pre names {p!r}, which is not an in_* port of the node")
+    in_known = {p for p in ports if p.startswith("in_")}
+    if maps and node_data.get("type") in ("LOOP", "BATCH", "MUTATE"):
+        errors.append(f"phases.pre.map is not applied to a {node_data['type']} node (it does not run phases); map the value on the node that feeds it")
+    for port, expression in maps.items():
+        try:
+            unknown = variables(expression) - in_known
+        except (ExpressionError, TypeError) as e:
+            errors.append(f"phases.pre.map.{port}: {e}")
+            continue
+        if unknown:
+            errors.append(f"phases.pre.map.{port}: uses {sorted('@' + u for u in unknown)}, not an in_* port of the node")
     if "timeout_s" in ex and (not isinstance(ex["timeout_s"], (int, float)) or ex["timeout_s"] <= 0):
         errors.append("phases.exec.timeout_s must be a number > 0")
     routes = post.get("route", {})

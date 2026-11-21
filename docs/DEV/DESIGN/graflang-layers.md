@@ -106,7 +106,7 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
 
 ## 9. Build status
 
-This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: `graf expand --depth`). Statuses: done (committed,
+This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: `phases.pre.map`). Statuses: done (committed,
 tests pass), partial, open. The gap table in `zinets/docs/graph-vision/claude/readme-design.md` is updated once the whole refactoring is
 tested and finished, not before.
 
@@ -119,6 +119,7 @@ tested and finished, not before.
 | 4a | `--depth N\|all` on `describe` (not with `--llm`) and `info`; a closed part is named in reads, not its inner nodes | done | this commit |
 | 4b | Composites inside composites are a depth each (the loader now records `_part_of` innermost, `_use_parent`, `_use_part`); before, depth 1, 2 and `all` drew the same graph | done | this commit |
 | 4c | `graf expand --depth N\|all` is the logical-to-physical step (section 2): `all` is the flat graph the runtime runs; no `compile --lang graf` (it would duplicate `expand`) | done | this commit |
+| 4d | `phases.pre.map` and the edge `map:` (semantics R15, 5a): simple pure input transforms; the logical form reads as f on the arrow, the runtime sees it inside the node | done (simple form) | this commit |
 | 5 | Neighbour rule enforced (an edge into a composite's inner node is refused); it was not enforced before | done | `906d85f` |
 | 6 | Interface block: `workflow.description`, `workflow.errors` as named exits (a control port of the use), `ports: [name]` in compact `use` | done | `906d85f` |
 | 7 | Error `code` (optional, unique per part and per composed graph), logged as `part.error` | done | `24b5d0a` |

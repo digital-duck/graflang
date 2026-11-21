@@ -77,6 +77,8 @@ def _load_part(path: Path, stack: Tuple[Path, ...], inner: Optional[int] = None)
         raise PartError(f"{path.name} is not a workflow file (needs workflow:, nodes:, edges:)")
     data.setdefault("edges", [])
     data["_source_dir"] = str(path.parent)
+    from .edgemap import inject_edge_maps
+    inject_edge_maps(data)                                 # an edge `map:` becomes the target node's phases.pre.map, before anything copies the edges
     if inner != 0:                                         # `inner`: how many levels of the part's own uses to expand (None: all)
         flatten_parts(data, _stack=(*stack, path), levels=inner)
     return data
@@ -475,6 +477,8 @@ def _flatten_scope(parent: Dict, nodes: List[Dict], edges: List[Dict], base: Pat
 
 def flatten_parts(graph_data: Dict[str, Any], base_dir: Optional[Path] = None, _stack: Tuple[Path, ...] = (), levels: Optional[int] = None) -> None:
     """Expand every SUBGRAPH node of the graph in place (`levels`: only that many levels of composites; None: all). Does nothing when there are none."""
+    from .edgemap import inject_edge_maps
+    inject_edge_maps(graph_data)                           # always: an edge map is the node's, whatever the levels
     if levels == 0:
         return
     if "elaborate" in graph_data and "expand" not in graph_data:
