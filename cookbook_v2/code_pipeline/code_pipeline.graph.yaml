@@ -1,6 +1,8 @@
-# code_pipeline (layered, repository-capable): understand the spec, build a project (write, review, improve, run it, retry), document it, check it against the spec.
-# The build is code_parts' loop: the model writes a folder of files, a program splits the reply into them and RUNS them (syntax, imports, the project's own tests,
-# an optional smoke test), and what failed goes back into the next improve. The files are written as real files in .graf/codes/<run>/, in any layout.
+# code_pipeline (layered, repository-capable): analyze the spec into a build plan (a list of small tasks), build the project one task at a time, document it, check it against the spec.
+#   analyze  drafts the plan; a checker judges it; what it finds wrong goes back for another draft (self-healing), up to max_plan_rounds.
+#   build    a loop over the plan's tasks: write the task's files, merge them into the project, RUN the whole project in a container (syntax, imports, the project's
+#            own tests, an optional smoke test), one fix pass when it fails. Small tasks get past the size limit of a one-shot reply.
+# The files are written as real files in .graf/codes/<run>/, in any layout.
 #   graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --param spec="..." --bind cookbook_v2/code_pipeline/cheap.bind.yaml
 #   graf vis ... --depth 1      graf expand ... --depth all
 # (cookbook_v2/code_pipeline_spl is the faithful port of cookbook/code_pipeline: SPL procedures, one block of code.)
@@ -8,28 +10,41 @@ version: "1.0-graph"
 
 workflow:
   name: code_pipeline
-  description: Turns a plain-language spec into a project folder (written, reviewed, improved, run and retried until its checks pass), documents it, and optionally checks that the code still matches the spec.
+  description: Turns a plain-language spec into a build plan of small tasks, builds the project folder task by task (each task written, merged and run in a container, with a fix pass on failure), documents it, and optionally checks that the code still matches the spec.
   inputs:
     - {name: spec, type: TEXT}
     - {name: lang, type: TEXT, default: python}
     - {name: reference, type: TEXT, default: ""}        # API facts the model cannot know (a library's call signatures); given to write and improve
-    - {name: smoke, type: TEXT, default: ""}            # Python run against the real dependencies after the tests (optional)
-    - {name: max_cycles, type: INTEGER, default: 3}     # improve + verify rounds at most
+    - {name: smoke, type: TEXT, default: ""}            # Python run against the real dependencies after each task's tests (optional)
+    - {name: max_plan_rounds, type: INTEGER, default: 3}   # drafts of the build plan at most
     - {name: check_closure, type: BOOL, default: true}
   outputs:
     - {name: docs, type: TEXT}
+    - {name: plan, type: TEXT}                          # the build plan (JSON)
     - {name: code, type: FILES}                         # the project: real files in .graf/codes/<run>/
     - {name: report, type: TEXT}                        # what the last verification found
 
 resources:
   parts:
-    understand: ./understand/understand.graph.yaml     # is the spec clear enough? (error exit `vague`)
-    build: ./build/build.graph.yaml                    # write, review, improve, run it, retry
+    analyze: ./analyze/analyze.graph.yaml              # the spec -> a build plan; self-healing (error exit `vague`)
+    build: ./build/build.graph.yaml                    # a loop over the plan's tasks: write, merge, run it, fix
     finish: ./finish/finish.graph.yaml                 # document, and optionally check closure
 
 steps:
-  - understand: {use: parts.understand, in: {spec: $in.spec}, out: [analysis], ports: [vague]}
-  - stop:       {node: RECOVER, on: understand.vague, action: halt, message: "Spec is too vague. Please refine and retry.", in: {message: understand.analysis}, out: error}
-  - build:      {use: parts.build, on: understand, inherits: [spec, lang, reference, smoke, max_cycles], out: [code, files, report]}
+  - preflight:                                          # the verify container works (docker, the image) before any model call is paid for
+      node: SOLVE
+      in: {files: {value: {"ok.py": "x = 1\n"}}, lang: python, smoke: ""}
+      ports: [trigger, complete, in_files, in_lang, in_smoke, out_check]
+      out: check
+      backend: subprocess
+      command: ["python", "tools/verify_project.py"]
+      container: {image: "graflang-verify:py3.12", memory_mb: 1024, cpus: 2, pids: 256}
+      parse: first_line
+      out_type: TEXT
+      timeout: 120
+      label: Check the verify container
+  - analyze:    {use: parts.analyze, inherits: [spec, lang, reference, max_plan_rounds], out: [plan], ports: [vague]}
+  - stop:       {node: RECOVER, on: analyze.vague, action: halt, message: "No usable build plan: the spec is too vague. Please refine and retry.", in: {message: analyze.plan}, out: error}
+  - build:      {use: parts.build, on: analyze, inherits: [spec, lang, reference, smoke], in: {plan: analyze.plan}, out: [code, files, report]}
   - finish:     {use: parts.finish, inherits: [spec, check_closure], in: {code: build.code}, out: [docs]}
-  - done:       {output: {docs: finish.docs, code: build.files, report: build.report}}
+  - done:       {output: {docs: finish.docs, plan: analyze.plan, code: build.files, report: build.report}}

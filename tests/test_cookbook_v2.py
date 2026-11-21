@@ -74,6 +74,7 @@ def test_the_layered_pipeline_reads_as_three_composites():
 # The model answers by the number of the call (the two runs make their calls in the same order), so a retry, a revision or an escalation
 # is exercised, not only the happy path. Outputs must be equal.
 import json
+import os
 import shutil
 
 
@@ -193,6 +194,38 @@ CORE_OK = ("demo/core.py", "def add(a, b):\n    return a + b\n")
 TEST = ("tests/test_core.py", "import unittest\nfrom demo.core import add\n\nclass T(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(1, 2), 3)\n")
 
 
+DOCKER_STUB = '''#!{python}
+import json, subprocess, sys
+args = sys.argv[1:]
+if args[0] == "info":
+    print("Ubuntu 22.04"); sys.exit(0)
+if args[:2] == ["rm", "-f"]:
+    sys.exit(0)
+i = args.index("graflang-verify:py3.12")
+mount = next(a for a in args if a.endswith(":/work:ro")).split(":/work")[0]
+open({log!r}, "a").write(json.dumps({{"flags": " ".join(args[:i]), "command": args[i + 1:]}}) + "\\n")
+command = [{python!r} if c == "python" else c for c in args[i + 1:]]
+sys.exit(subprocess.run(command, stdin=sys.stdin, cwd=mount).returncode)        # runs the program here, in the mounted folder, as the container would
+'''
+
+
+@pytest.fixture
+def docker(tmp_path, monkeypatch):
+    """A stub `docker` on PATH (no daemon needed): it logs how it was asked to run the program and runs it locally. Returns a function giving the log."""
+    import json as _json
+    import stat
+    import sys
+    from graphlang.grafr.solver import _docker_desktop
+    bin_dir, log = tmp_path / "bin", tmp_path / "docker.log"
+    bin_dir.mkdir()
+    stub = bin_dir / "docker"
+    stub.write_text(DOCKER_STUB.format(python=sys.executable, log=str(log)))
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    _docker_desktop.cache_clear()
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    return lambda: [_json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
 def run_new(name, params, script, tmp_path, monkeypatch):
     graph = copy_recipe(V2 / name, tmp_path / name)
     monkeypatch.chdir(graph.parent)
@@ -206,23 +239,125 @@ def test_code_gen_splits_the_reply_into_a_project_with_modules_and_a_readme(tmp_
     assert llm.calls == 1 and set(out["code"]) == {"backend/app.py", "backend/__init__.py", "frontend/index.html", "README.md"}      # a README is added from the spec
 
 
-def test_the_capable_pipeline_runs_the_project_retries_on_a_failed_check_and_gives_the_files(tmp_path, monkeypatch):
-    script = {1: "[READY] the spec is clear", 2: reply(APP, CORE_BAD, TEST), 3: "looks fine",
-              4: reply(APP, CORE_BAD, TEST),                   # round 1: the project's own test fails
-              5: reply(APP, CORE_OK, TEST)}                    # round 2: fixed
-    rt, out, llm = run_new("code_pipeline", {"spec": "add two numbers", "max_cycles": 3, "check_closure": False}, script, tmp_path, monkeypatch)
-    assert rt.loop_iterations["build__repair"] == 2 and out["report"].lstrip().startswith("[PASSED]")
-    assert out["code"]["demo/core.py"] == CORE_OK[1] and "tests/test_core.py" in out["code"] and "demo/__init__.py" in out["code"]
-    assert out["docs"]                                          # the documentation step ran on the improved project
+def plan(*tasks, ready=True):
+    return json.dumps({"ready": ready, "summary": "a demo package", "assumptions": [], "tasks": list(tasks)})
 
 
-def test_the_capable_pipeline_stops_on_a_vague_spec_without_building(tmp_path, monkeypatch):
-    rt, out, llm = run_new("code_pipeline", {"spec": "do things"}, {1: "[VAGUE] what things?"}, tmp_path, monkeypatch)
-    assert llm.calls == 1 and not out.get("code") and rt.loop_iterations.get("build__repair", 0) == 0
-    assert any(x["code"] == "E_SPEC_VAGUE" for x in load_graph(V2 / "code_pipeline" / "code_pipeline.graph.yaml")["_error_exits"])
+def task(tid, files, deps=(), description="Implement the module: its public functions with their signatures and behaviour."):
+    return {"id": tid, "title": f"task {tid}", "description": description, "files": list(files), "depends_on": list(deps), "acceptance": "its tests pass"}
 
 
-def test_the_capable_pipeline_gives_up_after_max_cycles_with_the_last_report(tmp_path, monkeypatch):
-    script = {1: "[READY]", 2: reply(APP, CORE_BAD, TEST), 3: "ok", 4: reply(APP, CORE_BAD, TEST), 5: reply(APP, CORE_BAD, TEST)}
-    rt, out, llm = run_new("code_pipeline", {"spec": "add", "max_cycles": 2, "check_closure": False}, script, tmp_path, monkeypatch)
-    assert rt.loop_iterations["build__repair"] == 2 and out["report"].lstrip().startswith("[FAILED]") and "demo/core.py" in out["code"]
+T1 = task("t1", ["demo/core.py", "tests/test_core.py"])
+T2 = task("t2", ["demo/cli.py", "tests/test_cli.py"], ["t1"])
+GOOD_PLAN = plan(T1, T2)
+THIN_PLAN = plan({"id": "t1", "title": "everything", "description": "do it", "files": ["demo.py"]})          # no acceptance, too thin, no test file
+CLI_TEST = ("tests/test_cli.py", "import unittest\nfrom demo.cli import shout\n\nclass T(unittest.TestCase):\n    def test_shout(self):\n        self.assertEqual(shout('a'), 'A!')\n")
+CLI_BAD = ("demo/cli.py", "def shout(s):\n    return s.upper()\n")
+CLI_OK = ("demo/cli.py", "from demo.core import add\n\ndef shout(s):\n    return s.upper() + '!'\n")
+PARAMS = {"spec": "add numbers and shout", "check_closure": False}
+
+
+def test_the_plan_heals_itself_and_the_project_is_built_task_by_task(docker, tmp_path, monkeypatch):
+    script = {1: THIN_PLAN,                                   # draft 1: the checker refuses it, and says why
+              2: GOOD_PLAN,                                   # draft 2 (told what was wrong): two tasks
+              3: reply(CORE_OK, TEST),                        # task 1
+              4: reply(CLI_BAD, CLI_TEST),                    # task 2: its test fails
+              5: reply(CLI_OK)}                               # the fix pass
+    prompts = []
+    llm_cls = Scripted
+
+    class Recording(llm_cls):
+        def generate(self, prompt, model=None, **opts):
+            prompts.append(prompt)
+            return super().generate(prompt, model, **opts)
+
+    graph = copy_recipe(V2 / "code_pipeline", tmp_path / "cp")
+    monkeypatch.chdir(graph.parent)
+    llm = Recording(script)
+    rt = GraphLangRuntime(load_graph(graph), llm=llm, verbose=False)
+    out = rt.execute(dict(PARAMS))
+    assert rt.loop_iterations["analyze__planning"] == 2 and rt.loop_iterations["build__tasks"] == 2
+    assert "not good enough yet" in prompts[1] and "`acceptance` is missing" in prompts[1]               # the checker's complaints reached the second draft
+    assert "Task t1 of 2" in prompts[2] and "(nothing written yet)" in prompts[2]                          # task 1 sees its own task, no files yet
+    assert "Task t2 of 2" in prompts[3] and "=== FILE: demo/core.py ===" in prompts[3]                     # task 2 sees what task 1 wrote
+    assert "FAILED" in prompts[4] and "Task t2" in prompts[4] and "=== FILE: demo/cli.py ===" in prompts[4]     # the fix pass sees the failure and the project
+    assert out["report"].lstrip().startswith("[PASSED]") and llm.calls == 5
+    assert set(out["code"]) >= {"demo/core.py", "demo/cli.py", "demo/__init__.py", "tests/test_core.py", "tests/test_cli.py", "tests/__init__.py", "README.md"}
+    assert out["code"]["demo/cli.py"] == CLI_OK[1] and json.loads(out["plan"])["tasks"][1]["id"] == "t2" and out["docs"]
+
+
+def test_a_plan_that_never_gets_good_ends_in_the_vague_exit_without_building(docker, tmp_path, monkeypatch):
+    rt, out, llm = run_new("code_pipeline", {**PARAMS, "max_plan_rounds": 2}, {1: THIN_PLAN, 2: THIN_PLAN}, tmp_path, monkeypatch)
+    assert llm.calls == 2 and rt.loop_iterations["analyze__planning"] == 2 and not out.get("code") and "build__tasks" not in rt.loop_iterations
+    assert any(x["code"] == "E_PLAN_VAGUE" and x["use"] == "analyze" for x in load_graph(V2 / "code_pipeline" / "code_pipeline.graph.yaml")["_error_exits"])
+
+
+def test_a_planner_that_says_not_ready_is_asked_again(docker, tmp_path, monkeypatch):
+    rt, out, llm = run_new("code_pipeline", PARAMS, {1: plan(T1, ready=False), 2: GOOD_PLAN, 3: reply(CORE_OK, TEST), 4: reply(CLI_OK, CLI_TEST)}, tmp_path, monkeypatch)
+    assert rt.loop_iterations["analyze__planning"] == 2 and out["report"].lstrip().startswith("[PASSED]")
+
+
+def test_a_task_the_fix_cannot_repair_goes_on_and_the_report_says_failed(docker, tmp_path, monkeypatch):
+    script = {1: GOOD_PLAN, 2: reply(CORE_OK, TEST), 3: reply(CLI_BAD, CLI_TEST), 4: reply(CLI_BAD)}
+    rt, out, llm = run_new("code_pipeline", PARAMS, script, tmp_path, monkeypatch)
+    assert llm.calls == 4 and out["report"].lstrip().startswith("[FAILED]") and "demo/cli.py" in out["code"]
+
+
+def test_a_reply_without_file_markers_goes_into_the_tasks_first_file(docker, tmp_path, monkeypatch):
+    one = plan(task("t1", ["demo/core.py", "tests/test_core.py"]))
+    rt, out, llm = run_new("code_pipeline", PARAMS, {1: one, 2: "def add(a, b):\n    return a + b\n"}, tmp_path, monkeypatch)
+    assert out["code"]["demo/core.py"] == "def add(a, b):\n    return a + b\n"
+
+
+def test_every_verify_runs_in_a_locked_down_container_and_the_preflight_comes_first(docker, tmp_path, monkeypatch):
+    run_new("code_pipeline", PARAMS, {1: GOOD_PLAN, 2: reply(CORE_OK, TEST), 3: reply(CLI_BAD, CLI_TEST), 4: reply(CLI_OK)}, tmp_path, monkeypatch)
+    runs = docker()
+    assert len(runs) == 4, runs                                                   # the preflight, task 1, task 2, the fixed task 2
+    for run in runs:
+        assert run["command"] == ["python", "tools/verify_project.py"]
+        for flag in ("--network none", "--read-only", "--cap-drop ALL", "--memory 1024m", "--cpus 2", "--pids-limit 256"):
+            assert flag in run["flags"], (flag, run["flags"])
+
+
+def test_a_broken_container_stops_the_run_before_any_model_call(tmp_path, monkeypatch):
+    """No docker on PATH: the preflight fails first, so nothing is billed."""
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    graph = copy_recipe(V2 / "code_pipeline", tmp_path / "cp")
+    monkeypatch.chdir(graph.parent)
+    llm = Scripted({1: GOOD_PLAN})
+    with pytest.raises(Exception, match="preflight"):
+        GraphLangRuntime(load_graph(graph), llm=llm, verbose=False).execute(dict(PARAMS))
+    assert llm.calls == 0
+
+
+# ---- the tools of code_pipeline, on their own ---------------------------------------------------------------------------------------
+
+def tool(name, payload):
+    import subprocess
+    import sys
+    done = subprocess.run([sys.executable, "-I", str(V2 / "code_pipeline" / "tools" / name)], input=json.dumps(payload), capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_check_plan_names_what_is_missing():
+    assert tool("check_plan.py", {"plan": GOOD_PLAN, "lang": "python"}) == {"ok": True, "report": "[READY] 2 tasks", "tasks": 2}
+    bad = tool("check_plan.py", {"plan": THIN_PLAN, "lang": "python"})
+    assert not bad["ok"] and all(w in bad["report"] for w in ("`description` is too thin", "`acceptance` is missing", "no task writes a test file"))
+    twice = tool("check_plan.py", {"plan": plan(T1, task("t2", ["demo/core.py"], ["t9"])), "lang": "python"})["report"]
+    assert "also written by task t1" in twice and "depends_on 't9'" in twice
+    assert not tool("check_plan.py", {"plan": "just some words", "lang": "python"})["ok"]
+    assert tool("check_plan.py", {"plan": "```json\n" + GOOD_PLAN + "\n```", "lang": "python"})["ok"]            # a code fence around the JSON is fine
+
+
+def test_task_context_shows_one_task_and_the_files_so_far():
+    first = tool("task_context.py", {"plan": GOOD_PLAN, "task_index": 0, "files": {}})
+    assert "Task t1 of 2" in first["task"] and first["project"] == "(nothing written yet)" and first["first_file"] == "demo/core.py" and not first["last"]
+    second = tool("task_context.py", {"plan": GOOD_PLAN, "task_index": 1, "files": {"demo/core.py": "x = 1\n"}})
+    assert "Builds on: t1" in second["task"] and "=== FILE: demo/core.py ===\nx = 1" in second["project"] and second["last"] and second["summary"] == "a demo package"
+
+
+def test_collect_files_adds_to_the_project_and_replaces_a_file_of_the_same_path():
+    old = {"a/x.py": "old\n", "b.txt": "keep\n", "README.md": "# mine\n"}
+    got = tool("collect_files.py", {"text": reply(("a/x.py", "new\n"), ("a/y.py", "y\n")), "lang": "python", "spec": "s", "files": old})
+    assert got["a/x.py"] == "new\n" and got["a/y.py"] == "y\n" and got["b.txt"] == "keep\n" and got["README.md"] == "# mine\n" and "a/__init__.py" in got

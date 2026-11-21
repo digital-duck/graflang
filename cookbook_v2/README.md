@@ -7,7 +7,7 @@ policies it uses. The originals in `cookbook/` are left alone (the experiments a
 | Recipe | Top level reads | Composites |
 |---|---|---|
 | code_gen | write, split | none: one model call and a file splitter; the output is a project folder (`.graf/codes/<run>/`) |
-| code_pipeline | understand, build, finish | **repository-capable** (uses `code_parts`' loop): `understand` (exit `vague`), `build` (write, review, improve, split into files, RUN them, retry), `finish`; outputs `docs`, `code` (FILES), `report` |
+| code_pipeline | preflight, analyze, build, finish | **repository-capable**: `analyze` (the spec -> a build plan of small tasks, self-healing, exit `vague`), `build` (a loop over the tasks: write, merge, RUN the project in a container, fix), `finish`; outputs `docs`, `plan`, `code` (FILES), `report` |
 | code_pipeline_spl | understand, build, finish | the faithful port of `cookbook/code_pipeline` (SPL procedures, one block of code; needs SPL.py) |
 | compliance_audit | load, assess, remediate, guard, release or escalate | `assess` (used twice), `remediate` (exit `unfixed`) |
 | your_book | outline, chapters, compile | `outline`, `chapters` (the loop), `compile` |
@@ -64,15 +64,41 @@ The editor was checked only by loading all eleven recipes and drawing the depth-
 
 ## 4. Real model runs (billed: always cap them)
 
-Put a `--bind` file with `limits.max_llm_calls` beside the run. One is shipped for `code_pipeline` and `code_pipeline_spl`:
+Every real run needs a `--bind` file with `limits.max_llm_calls` (a loop that never converges would otherwise keep spending). `cheap.bind.yaml` in `code_pipeline/` and
+`code_pipeline_spl/` is a ready one (a model, a small spec, 20 calls); `--param` on the command line beats its `params`. For the other recipes copy it, change `params`, and set
+`max_llm_calls` from what `graf validate` suggests ("Model calls per run").
+
+**`code_pipeline` runs the generated project in a Docker container** (no network, read-only root, 1 GB, 2 CPUs), so a model's tests cannot reach the network or touch your files.
+Build the image once, with Docker running (the recipe folder must be under your home directory with Docker Desktop):
 
 ```bash
-graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml     # writes the project to .graf/codes/<run>/
-graf run cookbook_v2/code_gen/code_gen.graph.yaml --llm claude_cli:claude-haiku-5-5 --param spec="a Flask backend with /api/todos and a plain HTML/JS frontend"
+docker build -t graflang-verify:py3.12 -f cookbook_v2/code_pipeline/tools/verify.Dockerfile cookbook_v2/code_pipeline/tools
 ```
 
-(`code_pipeline_spl`'s `understand` step names `ollama:gemma3` itself, so a local Ollama must be running there; `code_pipeline` has no such step). For the others, copy that file, change `params`, and set
-`max_llm_calls` from what `graf validate` suggests ("Model calls per run").
+The run's first step, `preflight`, checks the container before any model call is paid for. The image carries the libraries a generated project may import (pytest, click, streamlit,
+networkx, flask, fastapi, pandas, ...); the container has no network, so add yours to `tools/verify.Dockerfile` and rebuild.
+
+```bash
+SPEC="write a documentation app called doc-agent: given a github URL or a local path it builds a knowledge graph of the codebase and generates a styled .md document
+(styles: tutorial, user-guide, slide-deck); a streamlit UI with preview; a slide-deck can be converted from .md to an .html app; a well-structured python repo, with
+a click CLI that generates documents for a list of repos in batch"
+
+# the repository-capable pipeline: a build plan of small tasks, then the project task by task. Files: .graf/codes/<run>/; the plan, the report and every step's output: .graf/outputs/<run>/
+graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml \
+    --llm claude_cli:claude-sonnet-5-5 --param spec="$SPEC" --param check_closure=false
+```
+
+Raise `max_llm_calls` in a copy of the bind file for a big spec: about 3 for the plan, 2 per planned task and 3 for `finish`. Read the `plan` output first (`.graf/outputs/<run>/plan.md`): it shows how the work was split.
+
+```bash
+# the one-call version: no plan, no review, no run, no container
+graf run cookbook_v2/code_gen/code_gen.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml \
+    --llm claude_cli:claude-sonnet-5-5 --param spec="a Flask backend with /api/todos and a plain HTML/JS frontend"
+```
+
+(`code_pipeline_spl`'s `understand` step names `ollama:gemma3` itself, so a local Ollama must be running there.)
+
+Another example, a small recipe:
 
 ```bash
 graf run cookbook_v2/self_heal/self_heal.graph.yaml --param text="Please mail Maria Lopez (maria@acme.example)" --param max_rounds=2 --llm claude_cli:claude-haiku-5-5

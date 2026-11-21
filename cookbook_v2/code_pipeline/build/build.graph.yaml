@@ -1,58 +1,115 @@
 version: "1.0-graph"
 workflow:
   name: build
-  description: Writes the project as a folder of files, has a model review it, then rounds of improve, split into files, and run (syntax, imports, the project's own tests, an optional smoke test) until the checks pass or max_cycles is reached.
+  description: Builds the project one planned task at a time. Each round writes the task's files, merges them into the project, and runs the whole project in a container (syntax, imports, the project's own tests, an optional smoke test); a failed check gets one fix pass before the next task.
   inputs:
     - {name: spec, type: TEXT}
+    - {name: plan, type: TEXT}
     - {name: lang, type: TEXT, default: python}
     - {name: reference, type: TEXT, default: ""}
     - {name: smoke, type: TEXT, default: ""}
-    - {name: max_cycles, type: INTEGER, default: 3}
   outputs:
-    - {name: code, type: TEXT}                  # the model's last reply: every file with its `=== FILE: path ===` line
+    - {name: code, type: TEXT}                  # every file of the project with its `=== FILE: path ===` line
     - {name: files, type: JSON}                 # the same as a mapping of path to text (what is written to .graf/codes/<run>/)
-    - {name: report, type: TEXT}                # what the last verification found; starts with [PASSED] or [FAILED]
+    - {name: report, type: TEXT}                # the last verification of the whole project; starts with [PASSED] or [FAILED]
 resources:
   prompts:
-    write_code: ./prompts/write_code.md
-    review_code: ./prompts/review_code.md
-    improve_code: ./prompts/improve_code.md
+    write_task: ./prompts/write_task.md
+    fix_task: ./prompts/fix_task.md
 steps:
-  - write:  {generate: prompts.write_code, in: {spec: $in.spec, lang: $in.lang, prior_code: "", prior_test: "", reference: $in.reference}, out: code, label: Write the project}
-  - review: {generate: prompts.review_code, in: {code: write.code, lang: $in.lang}, out: feedback, label: Review it}
-  - repair:
-      loop: "@in_max_cycles"
-      while: "NOT @passed"
-      in: {spec: $in.spec, lang: $in.lang, reference: $in.reference, smoke: $in.smoke, max_cycles: $in.max_cycles, feedback: review.feedback, code: write.code}
+  - count: {solve: "len(json_get(@in_plan, 'tasks'))", in: {plan: $in.plan}, out: n}
+  - tasks:
+      loop: "@in_n"
+      while: "@task_index < @in_n"
+      index: task_index                                    # 0-based: the task this round builds
+      in: {spec: $in.spec, plan: $in.plan, lang: $in.lang, reference: $in.reference, smoke: $in.smoke, n: count.n}
       state:
-        code: {from: improve.code}                  # the reply of the latest round, read by the next round
-        test_result: {from: report.result}          # what verification said about it
-        files: {from: collect.files}
-      out:
-        passed: {fired: ok.pass}
+        files: {from: [merge.files, merge_fix.files], init: {}}        # the project so far (the fixed one when a fix ran)
+        report: {from: [note.result, note_fix.result], init: ""}      # what the last check of it found
       steps:
-        - improve: {generate: prompts.improve_code, in: {spec: $loop.spec, code: $loop.code, feedback: $loop.feedback, test_result: $loop.test_result, lang: $loop.lang, reference: $loop.reference}, out: code, label: Improve it}
-        - collect:
+        - context:
             node: SOLVE
-            in: {text: improve.code, lang: $loop.lang, spec: $loop.spec}
-            ports: [trigger, complete, in_text, in_lang, in_spec, out_files]
+            in: {plan: $loop.plan, task_index: $loop.task_index, files: $loop.files}
+            ports: [trigger, complete, in_plan, in_task_index, in_files, out_context]
+            out: context
+            backend: subprocess
+            command: ["python3", "-I", "tools/task_context.py"]
+            out_type: JSON
+            timeout: 30
+            label: Pick the task and the files written so far
+        - task:    {solve: "json_get(@in_context, 'task')", in: {context: context.context}, out: task}
+        - summary: {solve: "json_get(@in_context, 'summary')", in: {context: context.context}, out: summary}
+        - project: {solve: "json_get(@in_context, 'project')", in: {context: context.context}, out: project}
+        - first:   {solve: "json_get(@in_context, 'first_file')", in: {context: context.context}, out: first}
+        - write:   {generate: prompts.write_task, in: {spec: $loop.spec, lang: $loop.lang, reference: $loop.reference, summary: summary.summary, task: task.task, project: project.project, report: $loop.report}, out: reply, label: Write the task}
+        - merge:
+            node: SOLVE
+            in: {text: write.reply, lang: $loop.lang, spec: $loop.spec, files: $loop.files, default_path: first.first}
+            ports: [trigger, complete, in_text, in_lang, in_spec, in_files, in_default_path, out_files]
             out: files
             backend: subprocess
             command: ["python3", "-I", "tools/collect_files.py"]
             out_type: JSON
             timeout: 30
-            label: Split the reply into the project's files
+            label: Add the task's files to the project
         - verify:
             node: SOLVE
-            in: {files: collect.files, lang: $loop.lang, smoke: $loop.smoke}
+            in: {files: merge.files, lang: $loop.lang, smoke: $loop.smoke}
             ports: [trigger, complete, in_files, in_lang, in_smoke, out_check]
             out: check
             backend: subprocess
-            command: ["python3", "-I", "tools/verify_project.py"]
+            command: ["python", "tools/verify_project.py"]                      # looked up inside the image; /work is this recipe's folder, read-only
+            container: {image: "graflang-verify:py3.12", memory_mb: 1024, cpus: 2, pids: 256}      # no network, read-only root; build the image: tools/verify.Dockerfile
             parse: first_line
             out_type: TEXT
             timeout: 600
             label: "Run the project: syntax, imports, tests, smoke"
-        - ok:     {evaluate: "json_get(@in_check, 'passed') == TRUE", in: {check: verify.check}}
-        - report: {solve: "json_get(@in_check, 'report')", in: {check: verify.check}, on: verify}
-  - done: {output: {code: repair.code, files: repair.files, report: repair.test_result}}
+        - passed:  {evaluate: "json_get(@in_check, 'passed') == TRUE", in: {check: verify.check}}
+        - note:    {solve: "json_get(@in_check, 'report')", in: {check: verify.check}, on: verify, out: result}
+        # the check failed: show the model the whole project and the report, once
+        - view:
+            node: SOLVE
+            on: passed.fail
+            in: {files: merge.files}
+            ports: [trigger, complete, in_files, out_text]
+            out: text
+            backend: subprocess
+            command: ["python3", "-I", "tools/render_files.py"]
+            out_type: JSON
+            timeout: 30
+            label: The project as text
+        - fix:     {generate: prompts.fix_task, in: {lang: $loop.lang, reference: $loop.reference, task: task.task, project: view.text, report: note.result}, out: reply, label: Fix the failure}
+        - merge_fix:
+            node: SOLVE
+            in: {text: fix.reply, lang: $loop.lang, spec: $loop.spec, files: merge.files, default_path: first.first}
+            ports: [trigger, complete, in_text, in_lang, in_spec, in_files, in_default_path, out_files]
+            out: files
+            backend: subprocess
+            command: ["python3", "-I", "tools/collect_files.py"]
+            out_type: JSON
+            timeout: 30
+            label: Apply the fix
+        - verify_fix:
+            node: SOLVE
+            in: {files: merge_fix.files, lang: $loop.lang, smoke: $loop.smoke}
+            ports: [trigger, complete, in_files, in_lang, in_smoke, out_check]
+            out: check
+            backend: subprocess
+            command: ["python", "tools/verify_project.py"]
+            container: {image: "graflang-verify:py3.12", memory_mb: 1024, cpus: 2, pids: 256}
+            parse: first_line
+            out_type: TEXT
+            timeout: 600
+            label: Run the fixed project
+        - note_fix: {solve: "json_get(@in_check, 'report')", in: {check: verify_fix.check}, on: verify_fix, out: result}
+  - render:
+      node: SOLVE
+      in: {files: tasks.files}
+      ports: [trigger, complete, in_files, out_text]
+      out: text
+      backend: subprocess
+      command: ["python3", "-I", "tools/render_files.py"]
+      out_type: JSON
+      timeout: 30
+  - code: {solve: "json_get(@in_text, 'text')", in: {text: render.text}, out: code}
+  - done: {output: {code: code.code, files: tasks.files, report: tasks.report}}

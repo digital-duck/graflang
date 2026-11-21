@@ -38,10 +38,12 @@ Named lookups (`cookbook:name`) and the Browse page see only `cookbook/`; run a 
 | chat_memory | `cookbook/chat_memory` | `cookbook_v2/chat_memory` | **ported, offline-equivalent** | guard, `recall`, `reply`, `remember` | same output |
 
 | code_gen | new (uses `code_parts`' prompt and splitter) | `cookbook_v2/code_gen` | **new, offline-tested** (scripted model) | one graph: write, split | the reply becomes a project folder (modules, `__init__.py`, README) |
-| code_pipeline | `cookbook/code_pipeline` + `cookbook/code_parts` | `cookbook_v2/code_pipeline` | **new, offline-tested; not run with a real model**. Deliberately NOT equivalent to the original | top / `understand` (prompt, exit `vague`), `build` (write, review, improve, split, run, retry), `finish` (SPL 05-07) | scripted model: retries after a failing project test then passes, gives up with `[FAILED]`, stops on a vague spec; output `code` is FILES, written to `.graf/codes/<run>/` |
+| code_pipeline | `cookbook/code_pipeline` + `cookbook/code_parts` | `cookbook_v2/code_pipeline` | **new, offline-tested (stub and real Docker); not run with a real model**. Deliberately NOT equivalent to the original | top / `analyze` (build plan, self-healing, exit `vague`), `build` (a loop over the plan's tasks), `finish` (SPL 05-07) | scripted model: a thin plan is refused and healed, the project is built task by task with a fix pass, vague plans stop the run; verify runs in a container (preflight first); output `code` is FILES in `.graf/codes/<run>/` |
 
-`code_pipeline` is the repository-capable recipe: the build is `code_parts`' loop (the model writes a folder of files, a program splits the reply and runs them: syntax,
-imports, the project's own tests, an optional smoke test). The faithful port of the original is `code_pipeline_spl`, kept for the equivalence check.
+`code_pipeline` is the repository-capable recipe. A one-shot reply cannot hold a repository, so `analyze` first turns the spec into a build plan (JSON list of small tasks,
+each with files and an acceptance test; a checker judges it and its complaints feed the next draft), then `build` loops over the tasks: each writes its files, they are merged
+into the project, and the whole project is run (syntax, imports, its tests, an optional smoke test) in a Docker container with no network; a failed check gets one fix pass.
+The faithful port of the original is `code_pipeline_spl`, kept for the equivalence check.
 
 ### code_pipeline_spl: what to try
 

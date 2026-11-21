@@ -1,7 +1,8 @@
 """Turn the model's reply into a project folder's files (Python, run by a SOLVE node with backend: subprocess).
 
-stdin   {"text": the reply, "lang": "python", "spec": the specification}
-stdout  one line of JSON: {relative path: content, ...}
+stdin   {"text": the reply, "lang": "python", "spec": the specification, "files": {path: text} the project so far (optional),
+        "default_path": where a reply with no `=== FILE: ===` line goes (optional)}
+stdout  one line of JSON: {relative path: content, ...}: the existing files, with the reply's files added or replaced
 
 The reply is a list of files, each introduced by a line `=== FILE: path/to/file.py ===`. A reply with no such line is taken
 as the single source file `main.<ext>`. Whole-file code fences are removed, paths are made safe (relative, no `..`), and for
@@ -38,10 +39,13 @@ def split(text):
 def main():
     data = json.load(sys.stdin)
     text, lang = data.get("text") or "", (data.get("lang") or "python").lower()
+    existing = data.get("files") if isinstance(data.get("files"), dict) else {}
     files = split(text)
-    if not files:                                          # a single-file reply, no markers
+    if not files and text.strip():                         # a reply with no markers: one file, the task's first file if one is given, else main.<ext>
         fenced = FENCE.match(text)
-        files = {f"main.{EXT.get(lang, 'txt')}": ((fenced.group(1) if fenced else text).strip() + "\n")}
+        name = safe(data["default_path"]) if data.get("default_path") else f"main.{EXT.get(lang, 'txt')}"
+        files = {name: ((fenced.group(1) if fenced else text).strip() + "\n")}
+    files = {**existing, **files}
     if lang == "python":
         for folder in {posixpath.dirname(p) for p in files if p.endswith(".py")} - {""}:
             parts = folder.split("/")
