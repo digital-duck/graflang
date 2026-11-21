@@ -154,34 +154,73 @@ def _order(nodes: List[dict], edges: List[dict]) -> List[dict]:
     return [by_id[i] for i in order]
 
 
-def _reads(node_id: str, edges: List[dict], kinds: Dict[str, str]) -> List[str]:
+def _reads(node_id: str, edges: List[dict], kinds: Dict[str, str], alias: Optional[Dict[str, str]] = None) -> List[str]:
+    """What a node reads and from where; `alias` renames a source (a node inside a closed part is the part's use)."""
     out = []
     for e in edges:
         if e.get("type") == "binds" and str(e["target"]).split(".")[0] == node_id:
             port = str(e["target"]).partition(".")[2].removeprefix("in_")
             src, _, sport = str(e["source"]).partition(".")
+            src = (alias or {}).get(src, src)
             out.append(f"{port} (from the workflow's input)" if kinds.get(src) == "INPUT" else f"{port} (from {src}'s {sport.removeprefix('out_')})")
     return out
 
 
-def _steps(nodes: List[dict], edges: List[dict], resolver: ResourceResolver, depth: int) -> List[str]:
+def _chain(node_id: str, part_of: Dict[str, Any], use_parent: Dict[str, str]) -> List[str]:
+    """The uses a node sits in, outermost first."""
+    use = (part_of.get(node_id) or [None])[0]
+    out: List[str] = []
+    while use:
+        out.insert(0, use)
+        use = use_parent.get(use)
+    return out
+
+
+def _steps(nodes: List[dict], edges: List[dict], resolver: ResourceResolver, depth: int, max_depth: Optional[int] = None,
+           part_of: Optional[Dict[str, Any]] = None, use_parent: Optional[Dict[str, str]] = None,
+           use_part: Optional[Dict[str, str]] = None) -> List[str]:
+    """The steps of one level. `max_depth` opens that many levels (0: this level only; None: everything): a loop or a part used here beyond it
+    is one line saying how many steps it holds. `part_of` (node id -> (use, part)) is what `load_graph` records for the part uses it expanded."""
     lines: List[str] = []
     pad = "   " * depth
     number = 0
+    closed = max_depth is not None and depth >= max_depth
+    part_of, use_parent, use_part = part_of or {}, use_parent or {}, use_part or {}
+
+    def shut(nid: str) -> Optional[str]:
+        """The outermost use around the node that is closed at this depth (the n-th use in is shown at level depth + n), if any."""
+        for j, use in enumerate(_chain(nid, part_of, use_parent)):
+            if max_depth is not None and depth + j >= max_depth:
+                return use
+        return None
+    shown_uses: set = set()
     for node in _order(nodes, edges):
         if node["type"] in ("INPUT", "OUTPUT"):
+            continue
+        use = shut(str(node["id"]))
+        if use:                                              # a closed part is one line, at the place of its first step
+            if use not in shown_uses:
+                shown_uses.add(use)
+                inside = sum(1 for n in nodes if n["type"] not in ("INPUT", "OUTPUT") and use in _chain(str(n["id"]), part_of, use_parent))
+                number += 1
+                lines.append(f"{pad}{number}. **{use}** (part `{use_part.get(use, part_of.get(str(node['id']), ['', ''])[1])}`) holds {inside} "
+                             f"step{'s' if inside != 1 else ''}; open it with a larger --depth")
             continue
         number += 1
         did = _does(node, resolver, pad)
         lines.append(f"{pad}{number}. **{node['id']}** ({node['type']}) " + did[0])
         lines += did[1:]
-        reads = _reads(str(node["id"]), edges, {str(n["id"]): n["type"] for n in nodes})
+        alias = {n["id"]: shut(str(n["id"])) for n in nodes if shut(str(n["id"]))}
+        reads = _reads(str(node["id"]), edges, {str(n["id"]): n["type"] for n in nodes}, alias)
         if reads:
             lines.append(f"{pad}   - reads: " + ", ".join(reads))
         cfg = node.get("config") or {}
         body = cfg.get("subgraph")
-        if isinstance(body, dict) and body.get("nodes"):
-            lines += _steps(body["nodes"], body.get("edges", []), resolver, depth + 1)
+        if isinstance(body, dict) and body.get("nodes") and closed:
+            inside = sum(1 for _ in _walk(body["nodes"]))
+            lines.append(f"{pad}   - holds {inside} step{'s' if inside != 1 else ''}; open it with a larger --depth")
+        elif isinstance(body, dict) and body.get("nodes"):
+            lines += _steps(body["nodes"], body.get("edges", []), resolver, depth + 1, max_depth, part_of, use_parent, use_part)
             collected = [f"{k} from {v.get('collect') or v.get('from')}" for k, v in {**(cfg.get("state") or {}), **(cfg.get("outputs") or {})}.items() if isinstance(v, dict)]
             if collected:
                 lines.append(f"{pad}   - keeps: " + ", ".join(collected))
@@ -196,8 +235,9 @@ def _walk(nodes: List[dict]) -> Iterator[dict]:
             yield from _walk(body.get("nodes", []))
 
 
-def describe_graph(graph: Dict[str, Any], source: Optional[Path] = None) -> str:
-    """The description of a loaded graph (`load_graph`) as markdown. `source` is the graph file: its folder gives the readme and the prompt files."""
+def describe_graph(graph: Dict[str, Any], source: Optional[Path] = None, depth: Optional[int] = None) -> str:
+    """The description of a loaded graph (`load_graph`) as markdown. `source` is the graph file: its folder gives the readme and the prompt files.
+    `depth` opens that many levels of loops and parts (0: the top level only; None: all, as before)."""
     wf = graph.get("workflow") or {}
     folder = Path(source).resolve().parent if source else None
     resolver = ResourceResolver(Path(graph.get("_source_dir", folder or ".")), graph.get("resources"))
@@ -211,7 +251,7 @@ def describe_graph(graph: Dict[str, Any], source: Optional[Path] = None) -> str:
             for i in wf.get("inputs") or []] or ["- none"]
     out += ["", "## Output"]
     out += [f"- `{o['name']}` ({o.get('type', 'TEXT')})" for o in wf.get("outputs") or []] or ["- none"]
-    out += ["", "## What it does, step by step", ""] + _steps(nodes, edges, resolver, 0)
+    out += ["", "## What it does, step by step", ""] + _steps(nodes, edges, resolver, 0, depth, graph.get("_part_of"), graph.get("_use_parent"), graph.get("_use_part"))
     every = list(_walk(nodes))
     models = sum(n["type"] == "GENERATE" for n in every)
     programs = sum(n["type"] == "RUN" or is_code_backend((n.get("config") or {}).get("backend")) for n in every)
@@ -257,13 +297,13 @@ def recipe_files(folder: Path, skip: Optional[Path] = None) -> Dict[str, str]:
     return found
 
 
-def describe_recipe(folder: Path) -> str:
+def describe_recipe(folder: Path, depth: Optional[int] = None) -> str:
     """The description of a recipe folder: its main graph as `describe_graph` writes it, then the other graphs and the files that come with it."""
     from ..grafr.runtime import load_graph
     from ..workspace import graphs_in
     folder = Path(folder)
     graph = main_graph(folder)
-    text = describe_graph(load_graph(graph), graph).rstrip()
+    text = describe_graph(load_graph(graph), graph, depth).rstrip()
     others = [g.relative_to(folder).as_posix() for g in graphs_in(folder) if g != graph]
     if others:
         text += "\n\n## Other graphs in this recipe\n" + "\n".join(f"- `{o}`" for o in others)

@@ -1,6 +1,7 @@
 # Layers: a logical graph that compiles to a flat one (DRAFT, nothing here is implemented)
 
 Date: 2026-11-21
+Related: `graflang-semantics.md`
 
 Status: proposal for discussion. Where it says "today" it describes the code as it is; where it says "proposed" it is open for change. When a
 part of this is accepted, its rules move to `graflang-semantics.md` (with tests in `tests/test_semantics.py`) and the gap table in
@@ -105,7 +106,7 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
 
 ## 9. Build status
 
-This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21. Statuses: done (committed,
+This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: depth on describe/info, nested levels). Statuses: done (committed,
 tests pass), partial, open. The gap table in `zinets/docs/graph-vision/claude/readme-design.md` is updated once the whole refactoring is
 tested and finished, not before.
 
@@ -115,7 +116,8 @@ tested and finished, not before.
 | 2 | `graf group` / `graf ungroup`: composite as a subfolder, prompts and part references move with it, composites of composites round-trip | done | `0dcf732`, `6687f4c` |
 | 3 | Editor: Group and "Open a composite again" (Add node tab); Undo removes the folder | done | `6687f4c` |
 | 4 | `graf vis --depth N\|all` (default 0); editor canvas Levels choice | done for `vis` | `7fa94ee`, `26995e0` |
-| 4a | `--depth` on `describe` and `info` | open | |
+| 4a | `--depth N\|all` on `describe` (not with `--llm`) and `info`; a closed part is named in reads, not its inner nodes | done | this commit |
+| 4b | Composites inside composites are a depth each (the loader now records `_part_of` innermost, `_use_parent`, `_use_part`); before, depth 1, 2 and `all` drew the same graph | done | this commit |
 | 5 | Neighbour rule enforced (an edge into a composite's inner node is refused); it was not enforced before | done | `906d85f` |
 | 6 | Interface block: `workflow.description`, `workflow.errors` as named exits (a control port of the use), `ports: [name]` in compact `use` | done | `906d85f` |
 | 7 | Error `code` (optional, unique per part and per composed graph), logged as `part.error` | done | `24b5d0a` |

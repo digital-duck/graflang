@@ -280,8 +280,19 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
     for x in part.get("_error_exits") or []:                      # error exits of parts used inside this part, under their new names
         parent.setdefault("_error_exits", []).append({**x, "source": prefix + x["source"], "target": prefix + x["target"], "use": prefix + x["use"]})
     new_nodes = [_anchor_paths(rewrite(n), part_dir) for n in inner]
-    members = parent.setdefault("_part_of", {})                      # for `graf vis`: which use each copied node came from
-    members.update({n["id"]: (uid, pname) for n in new_nodes})
+    # for `graf vis` / `describe` / `info`: which use each copied node came from (the innermost one), which use sits inside which, and each use's part
+    members, uses_in = parent.setdefault("_part_of", {}), parent.setdefault("_use_parent", {})
+    use_part = parent.setdefault("_use_part", {})
+    inner_of, inner_in, inner_part = part.get("_part_of") or {}, part.get("_use_parent") or {}, part.get("_use_part") or {}
+    for n in new_nodes:
+        sub = inner_of.get(n["id"][len(prefix):])
+        members[n["id"]] = (prefix + sub[0], sub[1]) if sub else (uid, pname)
+    for u, outer in inner_in.items():
+        uses_in[prefix + u] = prefix + outer
+    for u in {use for use, _ in inner_of.values()} - set(inner_in):      # the uses that stand directly in this part sit inside this use
+        uses_in[prefix + u] = uid
+    use_part.update({prefix + u: name for u, name in inner_part.items()})
+    use_part[uid] = pname
 
     p_edges = part["edges"]
     entry_id, exit_ids = entry["id"], {x["id"] for x in exits}

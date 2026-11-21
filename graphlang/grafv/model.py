@@ -93,12 +93,21 @@ def _edge_label(etype: str, sport: str, tport: str) -> str:
 
 
 def _add(G: nx.MultiDiGraph, nodes: List[Dict], edges: List[Dict], prefix: str, parent: str | None,
-         notes: List[str], part_of: Dict[str, Tuple[str, str]] | None = None) -> None:
+         notes: List[str], part_of: Dict[str, Tuple[str, str]] | None = None, use_parent: Dict[str, str] | None = None,
+         use_part: Dict[str, str] | None = None) -> None:
     ids = {}
     part_of = part_of or {}
-    for use, pname in dict.fromkeys(tuple(part_of[n["id"]]) for n in nodes if n["id"] in part_of):    # a used part is drawn as a box
+    use_parent, use_part = use_parent or {}, use_part or {}
+    used = list(dict.fromkeys(tuple(part_of[n["id"]]) for n in nodes if n["id"] in part_of))      # a used part is drawn as a box
+    for use, pname in list(used):                                                                     # and so is every use that encloses one
+        while use in use_parent:
+            use = use_parent[use]
+            if (use, use_part.get(use, use)) not in used:
+                used.append((use, use_part.get(use, use)))
+    for use, pname in used:
+        outer = prefix + use_parent[use] if use in use_parent else parent
         G.add_node(prefix + use, label=f"{use} ({pname})", kind="SUBGRAPH", color=color("SUBGRAPH"), info=f"part {pname}",
-                   **({"parent": parent} if parent else {}))
+                   **({"parent": outer} if outer else {}))
     for n in nodes:
         qid = prefix + n["id"]
         ids[n["id"]] = qid
@@ -135,6 +144,7 @@ def collapse(G: nx.MultiDiGraph, depth: int) -> None:
     """Show `depth` levels: every box with `depth` or more boxes around it becomes a single node (its body hidden, its links kept).
     `depth=0` draws the top level only, each composite as one node; `depth=1` opens those and closes the ones inside them."""
     boxes = sorted({d["parent"] for _, d in G.nodes(data=True) if d.get("parent")}, key=lambda b: _level(G, b))
+    is_box = set(boxes)                                  # a box inside a box is not a step: the count says how many steps are hidden
     for box in boxes:
         if box not in G or _level(G, box) < depth:
             continue
@@ -147,11 +157,12 @@ def collapse(G: nx.MultiDiGraph, depth: int) -> None:
                 a, b = (box if u in inside else u), (box if v in inside else v)
                 if a != b:
                     links.append((a, b, d["relation"]))
+        hidden = sum(1 for n in inside if n not in is_box)           # the steps, not the boxes around them
         G.remove_nodes_from(inside)
         for a, b, relation in dict.fromkeys(links):
             G.add_edge(a, b, relation=relation, sport="", tport="", label="")
-        G.nodes[box]["label"] = f"{G.nodes[box].get('label', box)} · {len(inside)} node{'s' if len(inside) != 1 else ''}"
-        G.nodes[box]["collapsed_nodes"] = len(inside)
+        G.nodes[box]["label"] = f"{G.nodes[box].get('label', box)} · {hidden} node{'s' if hidden != 1 else ''}"
+        G.nodes[box]["collapsed_nodes"] = hidden
 
 
 def _is_inside(G: nx.MultiDiGraph, node: str, box: str) -> bool:
@@ -166,7 +177,8 @@ def build(graph_data: Dict[str, Any], depth: "int | None" = None) -> Tuple[nx.Mu
     loop bodies are opened (None: all)."""
     G = nx.MultiDiGraph(name=graph_data.get("workflow", {}).get("name", "workflow"))
     notes: List[str] = []
-    _add(G, graph_data.get("nodes", []), graph_data.get("edges", []), "", None, notes, graph_data.get("_part_of"))
+    _add(G, graph_data.get("nodes", []), graph_data.get("edges", []), "", None, notes, graph_data.get("_part_of"),
+         graph_data.get("_use_parent"), graph_data.get("_use_part"))
     if depth is not None:
         collapse(G, int(depth))
     return G, "; ".join(notes)

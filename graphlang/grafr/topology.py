@@ -473,7 +473,7 @@ def check(graph_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                 errors.append(f"INPUT {n['id']!r}: port {p!r} is not a declared workflow input")
         for d in sorted(declared - {p[4:] for p in n["ports"] if p.startswith("out_")}):
             warnings.append(f"INPUT {n['id']!r}: declared input {d!r} has no out_{d} port")
-    _check_ids(nodes, {use for use, _ in (graph_data.get("_part_of") or {}).values()}, "", errors)
+    _check_ids(nodes, set(graph_data.get("_use_part") or {}) | {use for use, _ in (graph_data.get("_part_of") or {}).values()}, "", errors)
     _check_scope(nodes, edges, "", resolver, set(), set(), errors, warnings)
     _check_guarded(nodes, edges, errors)
     warnings += gate_dead_ends(nodes, edges)

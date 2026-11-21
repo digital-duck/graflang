@@ -40,7 +40,10 @@ def _problems(graph_data) -> None:
 @click.option("--llm", "llm_spec", is_flag=False, flag_value="claude_cli", default=None, metavar="[ADAPTER[:MODEL]]",
               help="have a model write the specification from the graph and the recipe's files (one real, billed call); without this option "
                    "the description is built from the graph alone and no model is called. A bare --llm means claude_cli (put it after PATH)")
-def cmd_describe(path, output, force, llm_spec):
+@click.option("--depth", default="all", show_default=True, metavar="N|all",
+              help="levels to open: 0 describes the top level only (a loop or part is one line saying how many steps it holds); N opens N levels down. "
+                   "Not with --llm: a specification must describe every step")
+def cmd_describe(path, output, force, llm_spec, depth):
     """What PATH does: a .graph.yaml file, or a recipe folder (its main graph plus its readme, prompts, procedures, tools and policies).
 
     Without --llm the text is built from the graph alone: inputs, output, the steps in order (prompts, function names, tests), where each
@@ -55,7 +58,12 @@ def cmd_describe(path, output, force, llm_spec):
     graf create --name stock_copy --spec @cookbook/stock_analysis/stock_analysis.spec.md --allow-code
     """
     from ..grafr.runtime import load_graph
+    from ..grafv.cli import _depth
     from .describe import describe_graph, describe_recipe, write_spec
+    levels = _depth(depth)
+    if levels is not None and llm_spec is not None:
+        err.print("[red]✗[/red] --depth cannot be used with --llm: the specification has to describe every step")
+        sys.exit(1)
     target = Path(path)
     if output == "-":
         dest = None
@@ -78,9 +86,9 @@ def cmd_describe(path, output, force, llm_spec):
             err.print(f"[bold blue]⚡ Describing[/bold blue] {escape(str(target))} with {adapter}{':' + used if used else ''} (one call)", highlight=False)
             text = write_spec(target, llm, used)
         elif target.is_dir():
-            text = describe_recipe(target)
+            text = describe_recipe(target, levels)
         else:
-            text = describe_graph(load_graph(target), target)
+            text = describe_graph(load_graph(target), target, levels)
     except (ValueError, OSError, RuntimeError, ImportError) as e:
         err.print(f"[red]✗ Cannot describe {escape(str(path))}:[/red] {escape(str(e))}")
         sys.exit(1)

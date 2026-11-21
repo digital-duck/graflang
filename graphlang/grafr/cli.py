@@ -258,7 +258,9 @@ def cmd_validate(graph):
 
 @click.command("info", short_help="Show a workflow's nodes, edges, inputs and outputs.")
 @click.argument("graph")
-def cmd_info(graph):
+@click.option("--depth", default=None, metavar="N|all",
+              help="also show the workflow as `graf vis --depth N` draws it: its node and edge counts, and the loops and parts left closed")
+def cmd_info(graph, depth):
     """Display information about a GraphLang workflow."""
     graph_path = Path(graph)
     if not graph_path.exists():
@@ -276,6 +278,21 @@ def cmd_info(graph):
     table.add_row("Inputs", ", ".join([i['name'] for i in graph_data['workflow'].get('inputs', [])]))
     table.add_row("Outputs", ", ".join([o['name'] for o in graph_data['workflow'].get('outputs', [])]))
 
+    if depth is not None:
+        from ..grafv.cli import _depth
+        from ..grafv.model import build
+        try:
+            levels = _depth(depth)
+        except click.BadParameter as ex:
+            console.print(f"[red]Error:[/red] {ex.message}")
+            sys.exit(1)
+        G, _ = build(graph_data, levels)
+        label = "all" if levels is None else str(levels)
+        table.add_row(f"Nodes at depth {label}", str(G.number_of_nodes()))
+        table.add_row(f"Edges at depth {label}", str(G.number_of_edges()))
+        for node, attrs in G.nodes(data=True):
+            if attrs.get("collapsed_nodes"):
+                table.add_row("Closed", f"{node} ({attrs['kind']}): {attrs['collapsed_nodes']} node{'s' if attrs['collapsed_nodes'] != 1 else ''} inside")
     console.print(table)
 
     if 'resources' in graph_data:
@@ -297,9 +314,8 @@ def cmd_expand(graph):
         console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
         sys.exit(1)
     data = _load_or_exit(graph_path)
-    data.pop("_source_dir", None)
-    data.pop("_part_of", None)
-    data.pop("_parts_calls", None)
+    for key in [k for k in data if str(k).startswith("_")]:          # the loader's bookkeeping is not part of the graph
+        del data[key]
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
     yaml.sort_base_mapping_type_on_output = False
