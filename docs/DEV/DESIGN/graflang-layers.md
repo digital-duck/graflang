@@ -89,9 +89,20 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
 4. Where do `triggers` across the interface end up when a body has several entry points?
 5. Does a MUTATE inside a body see the level above? Proposed no: it edits its own level (compare gap #32 for LOOP bodies).
 
+6. **Loop-carried state (found while starting step 1).** The unbound-port fallback is not only accidental leakage: `runtime.py`
+   (`_inputs_for`, ~line 470) uses it on purpose for loop state. A `from` output starts as the LOOP's input of the same name, each
+   iteration's value is read by an unbound body `in_X`, and R10 depends on it. Dropping the fallback therefore needs an explicit
+   replacement, not just a validate error. Proposed: a LOOP declares `state:` (name -> initial value or input, type), the body reads
+   only `state` keys and the keys the interface passes in, and each iteration writes new values through declared `outputs`. A body
+   `in_X` with no binding and no `state`/interface key is a `validate` error. This turns the 77 implicit reads into either `state:`
+   entries (loop-carried) or explicit inputs (constants from the level above, e.g. `spec`, `lang`).
+   Needs your decision before the runtime changes; it rewrites R7 and R10 in `graflang-semantics.md`.
+
 ## 9. Suggested order
 
-1. Interface block and the neighbour rule in `validate`, on existing parts.
+1. Interface block and the neighbour rule in `validate`, on existing parts. (Parts already satisfy it by construction: a use is wired only
+   through its INPUT/OUTPUT ports and the expanded ids do not exist before load. Checked by reading `parts.py`, not yet by a test.)
+   Then question 6 (loop state), which is the real first change to the runtime.
 2. Scoped context and `inherits`.
 3. Composite as a subfolder; Group/Ungroup in the editor (create the subfolder, move the nodes).
 4. `--depth` on the tools.
