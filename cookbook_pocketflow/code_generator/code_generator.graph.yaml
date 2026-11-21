@@ -182,7 +182,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_iterations
-    outputs:
+    state:
       test_results:
         from: tool_1.out_test_results
       all_passed:

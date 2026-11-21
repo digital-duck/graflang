@@ -338,7 +338,7 @@ nodes:
     type: LOOP
     config:
       condition: latest(@in_tries, @tries) < @in_max_tries
-      outputs:
+      state:
         tries:
           from:
             - set_7.out_tries
@@ -1172,7 +1172,7 @@ nodes:
     type: LOOP
     config:
       condition: latest(@in_tries, @tries) < @in_max_tries
-      outputs:
+      state:
         tries:
           from:
             - set_25.out_tries
@@ -2155,7 +2155,7 @@ nodes:
     type: LOOP
     config:
       condition: latest(@in_i, @i) < int(@in_n_steps)
-      outputs:
+      state:
         step:
           from: tool_36.out_step
         step_summary:

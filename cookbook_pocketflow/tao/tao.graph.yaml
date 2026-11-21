@@ -43,7 +43,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_iterations
-    outputs:
+    state:
       action_json:
         from: gen_1.out_action_json
       observation:

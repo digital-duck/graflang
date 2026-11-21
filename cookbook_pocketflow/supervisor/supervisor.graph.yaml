@@ -45,7 +45,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_retry_i, @retry_i) < @in_max_retries
-    outputs:
+    state:
       search_history:
         from: loop_1.out_search_history
       inner_i:
@@ -92,7 +92,7 @@ nodes:
         type: LOOP
         config:
           condition: latest(@in_inner_i, @inner_i) < @in_max_search_iterations
-          outputs:
+          state:
             inner_decision:
               from: gen_1.out_inner_decision
             query:

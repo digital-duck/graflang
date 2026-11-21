@@ -124,7 +124,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_nodes
-    outputs:
+    state:
       current_node:
         from: tool_3.out_current_node
       no_more:

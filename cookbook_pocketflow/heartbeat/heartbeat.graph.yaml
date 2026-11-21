@@ -56,7 +56,7 @@ nodes:
   type: LOOP
   config:
     condition: '@cycle < @in_max_cycles'
-    outputs:
+    state:
       emails:
         from: tool_1.out_emails
       run_log:

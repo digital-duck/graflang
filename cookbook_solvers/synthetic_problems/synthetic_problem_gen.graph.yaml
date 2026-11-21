@@ -274,7 +274,7 @@ nodes:
     type: LOOP
     config:
       condition: NOT latest(@in_tool_4, @tool_5) AND latest(@in_attempts, @attempts) < 3
-      outputs:
+      state:
         parse_error:
           from: tool_2.out_parse_error
         variants_raw:

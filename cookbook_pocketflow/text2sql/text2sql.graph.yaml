@@ -118,7 +118,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_attempt, @attempt) < @in_max_attempts
-    outputs:
+    state:
       exec_result:
         from: tool_2.out_exec_result
       attempt:

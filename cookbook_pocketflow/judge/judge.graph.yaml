@@ -168,7 +168,7 @@ nodes:
     condition: >-
       latest(@in_attempts, @attempts) < 3 AND latest(@in_early_exit_1,
       @early_exit_1) == FALSE
-    outputs:
+    state:
       draft:
         from: gen_3.out_draft
       judgment:

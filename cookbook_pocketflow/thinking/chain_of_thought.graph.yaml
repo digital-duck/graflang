@@ -91,7 +91,7 @@ nodes:
     condition: >-
       latest(@in_next_thought_needed, @next_thought_needed) == 'true' AND
       latest(@in_iteration, @iteration) < @in_max_iterations
-    outputs:
+    state:
       thought_number:
         from: set_8.out_thought_number
       iteration:
@@ -237,7 +237,7 @@ nodes:
           condition: >-
             latest(@in_yaml_valid, @yaml_valid) == 'false' AND
             latest(@in_retry_count, @retry_count) < 3
-          outputs:
+          state:
             thought_data:
               from: gen_1.out_thought_data
             yaml_valid:

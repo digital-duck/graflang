@@ -267,7 +267,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_yaml_retries
-    outputs:
+    state:
       yaml_result:
         from: tool_4.out_yaml_result
       output_record:

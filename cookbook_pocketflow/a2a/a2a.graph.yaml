@@ -72,7 +72,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_iterations
-    outputs:
+    state:
       reasoning:
         from: gen_1.out_reasoning
       query:

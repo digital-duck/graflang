@@ -126,7 +126,7 @@ nodes:
     type: LOOP
     config:
       condition: latest(@in_tries, @tries) < @in_max_tries
-      outputs:
+      state:
         pytest_result:
           from: tool_3.out_pytest_result
         run_status:

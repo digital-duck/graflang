@@ -192,7 +192,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_sections
-    outputs:
+    state:
       section_title:
         from: tool_5.out_section_title
       is_blank:

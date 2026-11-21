@@ -147,7 +147,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_iterations
-    outputs:
+    state:
       action_decision:
         from: gen_1.out_action_decision
       action_type:

@@ -89,7 +89,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_iterations
-    outputs:
+    state:
       i2:
         from: set_3.out_i2
       i3:

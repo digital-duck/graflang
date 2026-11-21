@@ -54,7 +54,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_turn, @turn) < @in_max_turns
-    outputs:
+    state:
       hint:
         from: gen_1.out_hint
       guess:

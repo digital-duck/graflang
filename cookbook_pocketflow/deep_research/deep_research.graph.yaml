@@ -83,7 +83,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_loop_count, @loop_count) < 3
-    outputs:
+    state:
       report:
         from:
         - gen_2.out_report

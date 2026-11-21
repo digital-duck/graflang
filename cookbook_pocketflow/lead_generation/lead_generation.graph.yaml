@@ -112,7 +112,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_leads
-    outputs:
+    state:
       lead:
         from: tool_3.out_lead
       is_empty:

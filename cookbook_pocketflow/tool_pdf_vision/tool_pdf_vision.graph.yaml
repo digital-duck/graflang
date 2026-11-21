@@ -121,7 +121,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_pdf_idx, @pdf_idx) < @in_max_pdfs
-    outputs:
+    state:
       pdf_path:
         from: tool_3.out_pdf_path
       pdf_done:
@@ -289,7 +289,7 @@ nodes:
         type: LOOP
         config:
           condition: latest(@in_page_idx, @page_idx) < @in_max_pages
-          outputs:
+          state:
             image_path:
               from: tool_6.out_image_path
             page_done:

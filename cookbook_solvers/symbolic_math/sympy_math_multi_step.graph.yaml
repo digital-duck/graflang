@@ -185,7 +185,7 @@ nodes:
     type: LOOP
     config:
       condition: latest(@in_i, @i) < int(@in_n_steps)
-      outputs:
+      state:
         step:
           from: tool_2.out_step
         step_summary:

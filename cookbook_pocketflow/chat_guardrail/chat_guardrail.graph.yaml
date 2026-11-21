@@ -47,7 +47,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_turns
-    outputs:
+    state:
       current_message:
         from: tool_1.out_current_message
       is_blank:

@@ -130,7 +130,8 @@ tested and finished, not before.
 | 11a | Editor Group/Ungroup keep the graph file's comments | open | comments are dropped, as for a source edit |
 | 12 | A grouped part's inputs and outputs keep the types the graph declares (workflow inputs, typed `ports:`, `port_types`); `TEXT` only where nothing is declared | done | this commit |
 | 13 | Scoped context and `inherits` (section 4) | open | |
-| 14 | Cookbook rewrite as layered folders (section 10); about 54 recipes in `cookbook_pocketflow/` and `cookbook_solvers/` still warn on `outputs.from` | open | |
+| 14a | The 54 recipes in `cookbook_pocketflow/` and `cookbook_solvers/` that warned on `outputs.from` now use `state:` (only that key line changed in each; all validate, no warnings) | done | this commit |
+| 14 | Cookbook rewrite as layered folders (section 10) | open | |
 | 15 | Recursion (section 7) | open, later | |
 | 16 | Update the gap table in zinets `readme-design.md` | after the refactoring is tested and done | |
 

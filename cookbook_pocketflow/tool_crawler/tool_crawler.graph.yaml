@@ -92,7 +92,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_crawler_i, @crawler_i) < @in_max_pages
-    outputs:
+    state:
       q_status:
         from: tool_2.out_q_status
       crawler_i:
@@ -702,7 +702,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_batch_i, @batch_i) < @in_max_batches
-    outputs:
+    state:
       batch:
         from: tool_14.out_batch
       batch_empty:

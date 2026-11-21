@@ -65,7 +65,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_turn_idx, @turn_idx) < @in_max_turns
-    outputs:
+    state:
       user_input:
         from: tool_1.out_user_input
       query_embedding:

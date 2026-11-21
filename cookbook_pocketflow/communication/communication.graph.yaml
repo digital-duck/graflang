@@ -72,7 +72,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_inputs
-    outputs:
+    state:
       current_input:
         from: tool_2.out_current_input
       check_input:

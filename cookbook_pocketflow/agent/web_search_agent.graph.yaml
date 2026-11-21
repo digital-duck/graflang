@@ -65,7 +65,7 @@ nodes:
     condition: >-
       latest(@in_done, @done) != 'true' AND latest(@in_iteration, @iteration)
       < 10 AND latest(@in_early_exit_1, @early_exit_1) == FALSE
-    outputs:
+    state:
       iteration:
         from: set_6.out_iteration
       raw_response:

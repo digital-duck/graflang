@@ -353,7 +353,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_idx, @idx) < float(@in_file_count)
-    outputs:
+    state:
       file_path:
         from: tool_8.out_file_path
       file_result:

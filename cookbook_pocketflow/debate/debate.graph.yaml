@@ -109,7 +109,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_iterations
-    outputs:
+    state:
       review:
         from: gen_3.out_review
       score:

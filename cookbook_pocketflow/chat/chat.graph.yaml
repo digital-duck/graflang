@@ -40,7 +40,7 @@ nodes:
   type: LOOP
   config:
     condition: latest(@in_i, @i) < @in_max_turns
-    outputs:
+    state:
       user_input:
         from: tool_1.out_user_input
       is_exit:
