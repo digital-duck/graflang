@@ -1,0 +1,78 @@
+-- 07_spec_judge.spl  [Step 3c]
+-- Sub-workflow: LLM-as-judge comparing the original spec against the spec
+-- reverse-engineered from the implementation (closure check).
+--
+-- Closure principle: if extract_spec(generate(spec)) ≈ spec, the system has
+-- reached a fixed point — the implementation faithfully captured the intent.
+-- Divergence reveals semantic drift between what was asked and what was built.
+--
+-- Output tokens:
+--   [CLOSED]   — implementation matches the original intent
+--   [DIVERGED] — implementation drifts from the original spec (see analysis)
+
+CREATE FUNCTION judge_closure(original_spec TEXT, derived_spec TEXT)
+RETURN TEXT
+AS $$
+You are a rigorous software architect acting as a closure judge.
+Your job is to determine whether a derived spec (reverse-engineered from code)
+faithfully captures every constraint in the original spec.
+
+ORIGINAL SPEC:
+{original_spec}
+
+DERIVED SPEC (reverse-engineered from implementation):
+{derived_spec}
+
+Follow these steps exactly:
+
+Step 1 — CONSTRAINT INVENTORY
+List every distinct constraint in the ORIGINAL SPEC as a numbered checklist.
+Include: purpose, inputs, outputs, behavioural rules, edge cases, assumptions.
+Each item must be atomic (one fact per line).
+
+Step 2 — COVERAGE CHECK
+For each constraint from Step 1, quote the exact sentence(s) in DERIVED SPEC
+that cover it. If no sentence covers it, mark the item [MISSING].
+
+Step 3 — ADDITIONS
+List any constraints in DERIVED SPEC that are NOT present in ORIGINAL SPEC.
+Mark each [ADDED]. If none, write "No additions."
+
+Step 4 — VERDICT
+Count the [MISSING] items.
+- Zero [MISSING]: first line must be exactly [CLOSED]
+- One or more [MISSING]: first line must be exactly [DIVERGED]
+
+After the verdict line, write a one-sentence summary.
+Then include the full Step 1 checklist with coverage annotations.
+$$;
+
+
+WORKFLOW spec_judge
+    INPUT:
+        @spec     TEXT,
+        @out_spec TEXT,
+        @judge_model    TEXT DEFAULT 'gemma4',
+        @log_dir  TEXT DEFAULT 'cookbook/50_code_pipeline/logs-spl'
+    OUTPUT: @closure_report TEXT
+DO
+    LOGGING '[07_spec_judge] comparing original spec vs derived spec ...' LEVEL INFO
+    GENERATE judge_closure(@spec, @out_spec)
+        WITH OUTPUT BUDGET 2048 TOKENS
+        USING MODEL @judge_model
+        INTO @closure_report
+    CALL write_file(f'{@log_dir}/spec/closure_report.md', @closure_report) INTO NONE
+    EVALUATE @closure_report
+        WHEN contains('[CLOSED]') THEN
+            LOGGING '[07_spec_judge] verdict: CLOSED — implementation matches intent' LEVEL INFO
+        ELSE
+            LOGGING '[07_spec_judge] verdict: DIVERGED — semantic drift detected' LEVEL WARN
+    END
+    LOGGING f'[07_spec_judge] closure report written to {@log_dir}/spec/closure_report.md' LEVEL INFO
+    LOGGING f'[07_spec_judge] report:\n{@closure_report}' LEVEL DEBUG
+    RETURN @closure_report
+EXCEPTION
+    WHEN ModelUnavailable THEN
+        LOGGING '[07_spec_judge] model unavailable' LEVEL ERROR
+        RETURN '[ERROR] Spec judge model unavailable.' WITH status = 'failed'
+END

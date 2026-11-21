@@ -230,6 +230,14 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
         in_edges: List[Tuple[Tuple[str, str], str]] = []
         defaults: Dict[str, Any] = {}
         in_map = dict(body.get("in", {}))
+        if kind == "use" and cfg.get("inherits") is not None:        # `inherits: [budget]`: pass the enclosing level's value of that name, as `in: {budget: $in.budget}`
+            names = cfg["inherits"]
+            if not isinstance(names, list) or not all(isinstance(k, str) for k in names):
+                raise CompactError(f"step {sid!r}: inherits is a list of input names, e.g. [budget, lang]")
+            for k in names:
+                ref_k = f"$in.{k}" if root else f"$loop.{k}"
+                if in_map.setdefault(k, ref_k) != ref_k:
+                    raise CompactError(f"step {sid!r}: inherits names {k!r}, but `in:` already gives it another value")
         if kind == "output":
             single = arg if isinstance(arg, dict) else ({outputs[0]: arg} if len(outputs) == 1 else None)
             if single is None:

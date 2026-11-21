@@ -201,7 +201,8 @@ def _steps(nodes: List[dict], edges: List[dict], resolver: ResourceResolver, dep
         if use:                                              # a closed part is one line, at the place of its first step
             if use not in shown_uses:
                 shown_uses.add(use)
-                inside = sum(1 for n in nodes if n["type"] not in ("INPUT", "OUTPUT") and use in _chain(str(n["id"]), part_of, use_parent))
+                inside = sum(sum(1 for _ in _walk([n])) for n in nodes
+                             if n["type"] not in ("INPUT", "OUTPUT") and use in _chain(str(n["id"]), part_of, use_parent))      # a loop counts with its body
                 number += 1
                 lines.append(f"{pad}{number}. **{use}** (part `{use_part.get(use, part_of.get(str(node['id']), ['', ''])[1])}`) holds {inside} "
                              f"step{'s' if inside != 1 else ''}; open it with a larger --depth")

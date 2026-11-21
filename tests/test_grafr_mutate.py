@@ -359,3 +359,16 @@ def test_persist_mutations_carries_the_changed_body_to_the_next_iteration(tmp_pa
     rt.execute({})
     first, second = rt.values[("lp", "out_reasons")]
     assert first.startswith("add_node") and "extra" in second and not second.startswith("add_node")
+
+
+def test_a_mutate_in_a_loop_body_cannot_touch_a_node_of_the_level_above(tmp_path):
+    """Decided 2026-11-21 (layers note, question 5): a MUTATE edits its own level; the body does not see the level above, so a delta naming a
+    node there finds nothing, is refused, and the outer node is untouched."""
+    g = loop_adding_a_node(tmp_path, False)
+    g["nodes"].append({"id": "outer", "type": "OBSERVE", "ports": ["trigger", "complete"]})
+    g["workflow"]["inputs"][0]["default"] = {"action": "remove_node", "payload": {"id": "outer"}}
+    rt = GraphLangRuntime(g, verbose=False)
+    rt.execute({})
+    reasons = rt.values[("lp", "out_reasons")]
+    assert len(reasons) == 2 and all("outer" in r and not r.startswith("remove_node") for r in reasons), reasons
+    assert "outer" in rt.G and rt.budget.mutations == 0

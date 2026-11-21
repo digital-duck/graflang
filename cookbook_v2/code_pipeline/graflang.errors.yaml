@@ -1,0 +1,5 @@
+errors:
+  - code: E_SPEC_VAGUE
+    description: the specification is too vague to build from
+    cause: the analysis of the specification did not contain [READY]
+    remedy: say what the function is called, what it takes and returns, and the cases that matter; then run again

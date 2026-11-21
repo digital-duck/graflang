@@ -1,0 +1,27 @@
+# code_pipeline (layered): the same workflow as cookbook/code_pipeline, written as three composites, each in its own folder.
+#   graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --param spec="..."      graf vis ... --depth 1      graf expand ... --depth all
+version: "1.0-graph"
+
+workflow:
+  name: code_pipeline
+  description: Turns a plain-language spec into code (written, reviewed, improved, tested, retried under a policy guard), documents it, and optionally checks that the code still matches the spec.
+  inputs:
+    - {name: spec, type: TEXT}
+    - {name: lang, type: TEXT, default: python}
+    - {name: max_cycles, type: INTEGER, default: 3}
+    - {name: check_closure, type: BOOL, default: true}
+  outputs:
+    - {name: docs, type: TEXT}
+
+resources:
+  parts:
+    understand: ./understand/understand.graph.yaml     # is the spec clear enough? (error exit `vague`)
+    build: ./build/build.graph.yaml                    # write, review, improve, test, retry
+    finish: ./finish/finish.graph.yaml                 # document, and optionally check closure
+
+steps:
+  - understand: {use: parts.understand, in: {spec: $in.spec}, out: [analysis], ports: [vague]}
+  - stop:       {node: RECOVER, on: understand.vague, action: halt, message: "Spec is too vague. Please refine and retry.", in: {message: understand.analysis}, out: error}
+  - build:      {use: parts.build, on: understand, inherits: [spec, lang, max_cycles], out: [code]}                  # inherits: the same-named inputs of this workflow
+  - finish:     {use: parts.finish, inherits: [spec, check_closure], in: {code: build.code}, out: [docs]}
+  - done:       {output: finish.docs}

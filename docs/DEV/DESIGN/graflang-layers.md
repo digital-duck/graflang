@@ -88,9 +88,9 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
    through its interface or `inherits`. GraphLang has no user base yet, so there is no migration path and no compatibility flag; the
    cookbook is rewritten (section 10).
 2. (Decided: subfolder, no inline body.) Left to settle: the folder layout (`<recipe>/<name>/<name>.graph.yaml` plus its own prompts).
-3. (Reassessed, see row 13.) `inherits` would be a convenience for a key passed down several levels; it is not needed for isolation. If built: it needs a type and a default owned by the level that declares it.
+3. (Decided 2026-11-21: build it.) `inherits` is a convenience, not needed for isolation; the part's input declaration owns the type and default (row 13a).
 4. (Answered by the code.) Every node the part's INPUT node triggers starts when the use is triggered (`parts._expand_use`, `starts`); a part's way out is `complete` plus its declared error exits.
-5. Does a MUTATE inside a body see the level above? Proposed no: it edits its own level (compare gap #32 for LOOP bodies).
+5. (Decided 2026-11-21: no.) A MUTATE edits its own level; a delta naming a node of the level above is refused (pinned by `test_a_mutate_in_a_loop_body_cannot_touch_a_node_of_the_level_above`).
 
 6. **Loop-carried state (corrected after measuring).** An earlier version of this note counted 77 "implicit cross-level reads" in LOOP
    bodies. Classified by what each unbound body `in_X` resolves to, they are: 52 the LOOP's own `in_X` port (already an explicit
@@ -106,7 +106,7 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
 
 ## 9. Build status
 
-This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: multi-exit and typed Group). Statuses: done (committed,
+This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: `inherits`, `cookbook_v2/code_pipeline`). Statuses: done (committed,
 tests pass), partial, open. The gap table in `zinets/docs/graph-vision/claude/readme-design.md` is updated once the whole refactoring is
 tested and finished, not before.
 
@@ -129,14 +129,14 @@ tested and finished, not before.
 | 11 | Editor Group: description and exits fields | done | this commit |
 | 11a | Editor Group/Ungroup keep the graph file's comments | open | comments are dropped, as for a source edit |
 | 12 | A grouped part's inputs and outputs keep the types the graph declares (workflow inputs, typed `ports:`, `port_types`); `TEXT` only where nothing is declared | done | this commit |
-| 13 | Scoped context (section 4), reassessed: a part sees only its declared inputs (it cannot read the level above, as `code_parts` notes), a loop body only its `in_*` ports, `state:` and the counter (validate refuses the rest). So isolation already holds. What is left is `inherits`, shorthand for passing one key down several levels | reassessed; `inherits` not built, waiting for a real recipe that needs it | |
+| 13a | `inherits: [name]` on a `use` (compact; `config.inherits`): passes the level's same-named input without writing the binding; the part's declaration owns the type and default, the level's value must be assignable | done | this commit |
+| 13 | Scoped context (section 4), reassessed: a part sees only its declared inputs (it cannot read the level above, as `code_parts` notes), a loop body only its `in_*` ports, `state:` and the counter (validate refuses the rest). So isolation already holds. What is left is `inherits`, shorthand for passing one key down several levels | reassessed; `inherits` built as 13a after the owner's go-ahead | |
 | 14a | The 54 recipes in `cookbook_pocketflow/` and `cookbook_solvers/` that warned on `outputs.from` now use `state:` (only that key line changed in each; all validate, no warnings) | done | this commit |
-| 14 | Cookbook rewrite as layered folders (section 10) | open | |
+| 14 | Cookbook rewrite as layered folders (section 10): ported recipes live in `cookbook_v2/`, tracked in `graflang-recipes.md` | in progress: `code_pipeline` ported (offline-equivalent, not run with a real model) | this commit |
 | 15 | Recursion (section 7) | open, later | |
 | 16 | Update the gap table in zinets `readme-design.md` | after the refactoring is tested and done | |
 
-Open questions still to settle: 3 (type and owner of `inherits` keys), 4 (triggers across the interface with several entry points), 5
-(does a MUTATE inside a body see the level above).
+Section 8's questions 3 and 5 are decided and 4 is answered by the code (the owner replied "no" to 4, which I read as no change; to be confirmed).
 
 ## 10. Cookbook rewrite
 

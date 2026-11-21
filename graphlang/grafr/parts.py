@@ -243,6 +243,20 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
         if name in ins and declared and mine != "ANY" and not assignable(mine.split("!")[0].upper(), declared):
             raise PartError(f"{where}: in_{name} is {mine} but the part expects {declared}")
 
+    for name in cfg.get("inherits") or []:                 # `inherits: [k]`: the part declares input k (its type and default are the part's), the level above gives it
+        if f"in_{name}" not in bound_in:                   # (an undeclared name is already refused above: in_<name> is not an input of the part)
+            raise PartError(f"{where}: inherits {name!r}, but nothing feeds in_{name}")
+        for e in edges:
+            if e["type"] == "binds" and e["target"] == f"{uid}.in_{name}":
+                src_node = next((n for n in nodes if n["id"] == e["source"].partition(".")[0]), None)
+                if src_node is not None and src_node.get("type") == "INPUT":        # from the level's own workflow input: its type must fit the part's
+                    mine = next((i for i in (parent.get("workflow") or {}).get("inputs", []) if i["name"] == name), None)
+                    theirs = INPUT_TYPES.get(str(inputs[name].get("type", "TEXT")).upper())
+                    have = INPUT_TYPES.get(str((mine or {}).get("type", "TEXT")).upper())
+                    if mine is None or (have and theirs and not assignable(have, theirs)):
+                        raise PartError(f"{where}: inherits {name!r}: the level above has "
+                                        + (f"no input {name!r}" if mine is None else f"{have} but the part declares {theirs}"))
+
     from .partinfo import capabilities, check_policy
     try:
         parent["_parts_calls"] = check_policy(capabilities(part["nodes"]), (parent.get("workflow") or {}).get("parts_policy"),
@@ -391,7 +405,15 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
                 post.setdefault("out_schema", schema)
 
     kept = [n for n in nodes if n["id"] != uid]
-    return kept + new_nodes, rest + new_edges
+    seen_binds: set = set()
+    unique = []
+    for e in new_edges:                                  # two OUTPUT nodes that give one output make the same data wire twice; once is enough
+        key = (e["source"], e["target"], e["type"])
+        if e["type"] == "binds" and key in seen_binds:
+            continue
+        seen_binds.add(key)
+        unique.append(e)
+    return kept + new_nodes, rest + unique
 
 
 PATH_NODES = ("QUERY", "EMIT")          # nodes whose `file` is a path that belongs to the part that wrote it

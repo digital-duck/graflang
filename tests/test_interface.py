@@ -291,3 +291,59 @@ def test_graf_errors_lists_and_looks_up_codes(tmp_path):
 def test_the_shipped_catalogue_loads():
     from graphlang.grafr.errors_catalogue import SHIPPED, load
     assert SHIPPED.is_file() and isinstance(load(SHIPPED), dict)
+
+
+# ---- inherits: pass a key of the level above down without writing the binding ---------------------------------------------------
+
+def inherit_app(tmp_path, inherits="[n]", part_type="INTEGER", top_type="INTEGER", extra="", also=""):
+    (tmp_path / "checker.graph.yaml").write_text(PART.replace("inputs: [{name: n, type: INTEGER}]", f"inputs: [{{name: n, type: {part_type}}}]"))
+    app = tmp_path / "app.graph.yaml"
+    app.write_text(f'''version: "1.0-graph"
+workflow:
+  name: app
+  inputs: [{{name: n, type: {top_type}}}{also}]
+  outputs: [{{name: result, type: TEXT}}]
+resources: {{parts: {{checker: ./checker.graph.yaml}}}}
+steps:
+  - chk: {{use: parts.checker, inherits: {inherits}, out: [n], ports: [invalid]{extra}}}
+  - good: {{solve: "'accepted'", on: chk}}
+  - sorry: {{solve: "'refused'", on: chk.invalid, out: r}}
+  - done: {{output: {{result: good.result}}, on: good}}
+  - done2: {{output: {{result: sorry.r}}, on: sorry}}
+''')
+    return app
+
+
+def test_inherits_passes_the_levels_input_down_like_an_explicit_in(tmp_path):
+    from graphlang.grafr.runtime import GraphLangRuntime
+    g = load_graph(inherit_app(tmp_path))
+    assert GraphLangRuntime(g, verbose=False).execute({"n": 4}) == {"result": "accepted"}
+    assert GraphLangRuntime(load_graph(tmp_path / "app.graph.yaml"), verbose=False).execute({"n": -1}) == {"result": "refused"}
+
+
+def test_inherits_survives_graf_compact_and_expands_the_same(tmp_path):
+    from click.testing import CliRunner
+    from graphlang.cli import main
+    app = inherit_app(tmp_path)
+    r = CliRunner().invoke(main, ["compact", str(app), "-o", str(tmp_path / "again.graph.yaml")])
+    assert r.exit_code == 0, r.output
+    a, b = load_graph(app), load_graph(tmp_path / "again.graph.yaml")
+    key = lambda e: (e["source"], e["target"], e["type"])      # noqa: E731
+    assert sorted(map(key, a["edges"])) == sorted(map(key, b["edges"]))
+
+
+def test_inherits_a_name_the_part_does_not_declare_or_a_type_that_does_not_fit_is_refused(tmp_path):
+    from graphlang.grafr.compact import CompactError
+    with pytest.raises(CompactError, match="not a workflow input"):                        # the level above has no such input
+        load_graph(inherit_app(tmp_path, inherits="[n, budget]"))
+    with pytest.raises(PartError, match="is not an input of the part"):                  # the level above has it, the part does not
+        load_graph(inherit_app(tmp_path, inherits="[n, budget]", also=", {name: budget, type: TEXT}"))
+    with pytest.raises(PartError, match="has TEXT but the part declares INTEGER"):
+        load_graph(inherit_app(tmp_path, top_type="TEXT"))
+    assert load_graph(inherit_app(tmp_path, part_type="FLOAT", top_type="INTEGER"))        # an INTEGER fits a FLOAT input: the part's type is the one that counts
+
+
+def test_inherits_and_in_that_disagree_are_refused(tmp_path):
+    from graphlang.grafr.compact import CompactError
+    with pytest.raises(CompactError, match="already gives it another value"):
+        load_graph(inherit_app(tmp_path, extra=", in: {n: sorry}"))
