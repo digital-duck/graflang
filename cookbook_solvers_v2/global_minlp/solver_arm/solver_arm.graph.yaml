@@ -1,0 +1,317 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_global_minlp:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+    out: result_json
+    tool: solve_global_minlp
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      import math
+
+      def _net_yield(T: float, C: float, use_cat: int, p: dict) -> float:
+          """Compute net yield (revenue - cost). Non-convex in T."""
+          Ea, R = (p['Ea'], p['R'])
+          k = math.exp(-Ea / (R * T))
+          main_yield = C * k / (1.0 + 0.15 * C * k)
+          side = 0.18 * C * math.exp(-11000.0 / (R * T))
+          cat_factor = 1.7 if use_cat else 1.0
+          gross = cat_factor * main_yield - side
+          energy = p['energy_cost_per_K'] * (T - 300.0)
+          catalyst = p['catalyst_cost'] * use_cat
+          material = p['material_cost_per_mol'] * C
+          return gross - energy - catalyst - material
+
+      def solve_global_minlp(problem_json: str) -> str:
+          """Solve via Pyomo + Couenne or Bonmin (global MINLP).
+
+          Falls back to scipy with local-only flag if global solver absent.
+          Returns JSON with global_obj, local_obj, best_params, solver_used, certified.
+          """
+          try:
+              import pyomo.environ as pyo
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'Pyomo not installed — run: conda install -c conda-forge pyomo'})
+          p = json.loads(problem_json)
+          Ea, R = (p['Ea'], p['R'])
+          cat_cost = p['catalyst_cost']
+          eng_cost = p['energy_cost_per_K']
+          mat_cost = p['material_cost_per_mol']
+          m = pyo.ConcreteModel()
+          m.use_cat = pyo.Var(domain=pyo.Binary)
+          m.T = pyo.Var(bounds=(300.0, 750.0))
+          m.C = pyo.Var(bounds=(0.1, 2.0))
+          m.k = pyo.Var(bounds=(0.0, 1.0))
+          m.main_yield = pyo.Var(bounds=(0.0, 5.0))
+          m.side = pyo.Var(bounds=(0.0, 1.0))
+          m.gross = pyo.Var(bounds=(-2.0, 5.0))
+          m.arr_con = pyo.Constraint(expr=m.k == pyo.exp(-Ea / (R * m.T)))
+          m.main_con = pyo.Constraint(expr=m.main_yield * (1.0 + 0.15 * m.C * m.k) == m.C * m.k)
+          m.side_con = pyo.Constraint(expr=m.side == 0.18 * m.C * pyo.exp(-11000.0 / (R * m.T)))
+          m.gross_con = pyo.Constraint(expr=m.gross == 1.7 * m.use_cat * m.main_yield + (1.0 - m.use_cat) * m.main_yield - m.side)
+          m.obj = pyo.Objective(expr=-(m.gross - eng_cost * (m.T - 300.0) - cat_cost * m.use_cat - mat_cost * m.C), sense=pyo.minimize)
+          result_local = _solve_local_scipy(p)
+          local_obj = result_local['net_yield']
+          for solver_name in ('couenne', 'bonmin'):
+              try:
+                  solver = pyo.SolverFactory(solver_name)
+                  if not solver.available():
+                      continue
+                  sol = solver.solve(m, tee=False)
+                  if sol.solver.termination_condition in (pyo.TerminationCondition.optimal, pyo.TerminationCondition.feasible):
+                      T_val = pyo.value(m.T)
+                      C_val = pyo.value(m.C)
+                      cat_val = int(round(pyo.value(m.use_cat)))
+                      global_obj = _net_yield(T_val, C_val, cat_val, p)
+                      gap = pyo.value(sol.problem.lower_bound) if hasattr(sol.problem, 'lower_bound') else None
+                      return json.dumps({'status': 'OK', 'solver_used': solver_name, 'certified': True, 'global_obj': round(global_obj, 4), 'local_obj': round(local_obj, 4), 'gap_from_lb': round(gap, 4) if gap is not None else None, 'best_params': {'use_catalyst': cat_val, 'temperature_K': round(T_val, 1), 'concentration_mol_L': round(C_val, 3)}, 'local_params': result_local['params']})
+              except Exception:
+                  continue
+          result_global = _grid_search_global(p)
+          return json.dumps({'status': 'OK', 'solver_used': 'grid_search_fallback', 'certified': False, 'note': 'Couenne/Bonmin not found — grid search used to show gap. Install: conda install -c conda-forge coinor-couenne pyomo', 'global_obj': round(result_global['net_yield'], 4), 'local_obj': round(local_obj, 4), 'best_params': result_global['params'], 'local_params': result_local['params']})
+
+      def _solve_local_scipy(p: dict) -> dict:
+          """scipy.optimize local solver starting from a midpoint (finds local min)."""
+          try:
+              from scipy.optimize import minimize
+          except ImportError:
+              return {'net_yield': 0.0, 'params': {}}
+
+          def neg_yield_continuous(x):
+              T, C = x
+              return -_net_yield(T, C, 0, p)
+          res = minimize(neg_yield_continuous, x0=[480.0, 0.8], bounds=[(300.0, 750.0), (0.1, 2.0)], method='L-BFGS-B')
+          T_val, C_val = res.x
+          return {'net_yield': round(_net_yield(T_val, C_val, 0, p), 4), 'params': {'use_catalyst': 0, 'temperature_K': round(T_val, 1), 'concentration_mol_L': round(C_val, 3)}}
+
+      def _grid_search_global(p: dict) -> dict:
+          """Dense grid search over all combinations — finds global, not certified."""
+          best, best_params = (-1000000000.0, {})
+          for use_cat in (0, 1):
+              for T in range(300, 751, 10):
+                  for C_int in range(1, 21):
+                      C = C_int * 0.1
+                      val = _net_yield(float(T), C, use_cat, p)
+                      if val > best:
+                          best = val
+                          best_params = {'use_catalyst': use_cat, 'temperature_K': T, 'concentration_mol_L': round(C, 1)}
+          return {'net_yield': round(best, 4), 'params': best_params}
+      _spl_result = solve_global_minlp(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- minlp_certified:
+    node: SOLVE
+    in:
+      result_json: solve_global_minlp
+    out: tool_5
+    tool: minlp_certified
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def minlp_certified(result_json: str) -> bool:
+          """ASSERT: solver ran and global >= local (better or equal solution found)."""
+          try:
+              d = json.loads(result_json)
+              if d.get('status') != 'OK':
+                  return False
+              return d.get('global_obj', -999) >= d.get('local_obj', 999)
+          except Exception:
+              return False
+      _spl_result = minlp_certified(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_minlp_certified:
+    assert: '@in_tool_5'
+    in:
+      result_json: solve_global_minlp
+      tool_5: minlp_certified
+    out: []
+- format_minlp_report:
+    node: SOLVE
+    in:
+      result_json: solve_global_minlp
+    out: result_report
+    on:
+    - assert_minlp_certified
+    - assert_minlp_certified.fail
+    tool: format_minlp_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_minlp_report(result_json: str) -> str:
+          """Markdown report comparing global vs local solution."""
+          try:
+              d = json.loads(result_json)
+              bp = d.get('best_params', {})
+              lp = d.get('local_params', {})
+              certified = 'Yes ✓' if d.get('certified') else 'No (grid search fallback)'
+              note = d.get('note', '')
+              lines = [f'## Global MINLP Report — Chemical Reactor Yield', '', f"**Solver used:** {d.get('solver_used', '?')}  ", f'**Global optimum certified:** {certified}  ']
+              if note:
+                  lines.append(f'> {note}')
+                  lines.append('')
+              lines += ['### Solution Comparison', '', '| | Global Solver | Local Solver (scipy) | Gap |', '|---|---|---|---|', f"| Net yield | **{d.get('global_obj', '?')}** | {d.get('local_obj', '?')} | {round(d.get('global_obj', 0) - d.get('local_obj', 0), 4)} |", f"| Use catalyst | {bp.get('use_catalyst', '?')} | {lp.get('use_catalyst', '?')} | — |", f"| Temperature (K) | {bp.get('temperature_K', '?')} | {lp.get('temperature_K', '?')} | — |", f"| Concentration (mol/L) | {bp.get('concentration_mol_L', '?')} | {lp.get('concentration_mol_L', '?')} | — |", '', '### Why the Gap Exists', '', 'The Arrhenius term `exp(-Ea/RT)` combined with the binary catalyst decision', 'creates a non-convex surface. scipy started near (T=480, no catalyst) and', "converged to the local optimum. Couenne's spatial branch-and-bound builds", 'convex relaxations of the nonlinear terms, progressively tightening the lower', 'bound until the global optimum is certified within the specified gap.']
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_minlp_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: solve_global_minlp
+    out: global_obj
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'global_obj'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'global_obj')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      result_json: solve_global_minlp
+    out: local_obj
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'local_obj'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'local_obj')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_global_result:
+    generate: |-
+      You are an optimization analyst explaining global MINLP results.
+
+      PROBLEM:
+      {{in_problem_description}}
+
+      GLOBAL SOLVER RESULT:
+      {{in_result_report}}
+
+      Explain (≤200 words):
+      1. What is spatial branch-and-bound, and how does it certify a global optimum
+         (unlike scipy which only certifies a local one)?
+      2. Why did the local solver (scipy) land at a suboptimal solution?
+         What made the yield surface non-convex?
+      3. What is the "optimality gap" shown in the report, and when is it safe to stop?
+      4. Name two real industrial processes where certifying the global optimum
+         (not just a local one) is worth the extra compute cost.
+    in:
+      result_report: format_minlp_report
+      problem_description: $in.problem_description
+    out: explanation
+    function: explain_global_result_prompt
+    params:
+    - result_report
+    - problem_description
+    arguments:
+    - '@result_report'
+    - '@problem_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      result_report: format_minlp_report
+      explanation: explain_global_result
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@result_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(result_report: str, explanation: str) -> str:
+          return f'=== Global MINLP — Reactor Optimization (r122) | solver=ON ===\n\n{result_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(result_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

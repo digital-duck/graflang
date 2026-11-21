@@ -1,0 +1,110 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: game_json
+    type: TEXT
+  - name: game_description
+    type: TEXT
+steps:
+- get_default_game:
+    node: SOLVE
+    out: game_json
+    tool: get_default_game
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_GAME = {'game_name': 'Stackelberg Pricing Duopoly', 'description': "A market leader (Firm A) sets price FIRST. The follower (Firm B) observes A's price and responds. Both can choose High ($100/mo) or Low ($70/mo). If both High: Leader=$38K, Follower=$38K (share split, slight leader premium). If Leader High, Follower Low: Leader=$12K (loses share), Follower=$52K. If Leader Low, Follower High: Leader=$50K (follower loses share), Follower=$14K. If both Low: Leader=$28K, Follower=$22K (leader has slight scale advantage). LLM says leader should price High to signal quality. Backward induction: follower always undercutting makes Low the leader's SPNE choice.", 'game_tree': {'type': 'decision', 'player': 'leader', 'choices': [{'action': 'High ($100)', 'node': {'type': 'decision', 'player': 'follower', 'choices': [{'action': 'High ($100)', 'node': {'type': 'terminal', 'payoff_leader': 38, 'payoff_follower': 38, 'label': '(High, High) -> Leader=$38K, Follower=$38K'}}, {'action': 'Low ($70)', 'node': {'type': 'terminal', 'payoff_leader': 12, 'payoff_follower': 52, 'label': '(High, Low) -> Leader=$12K, Follower=$52K'}}]}}, {'action': 'Low ($70)', 'node': {'type': 'decision', 'player': 'follower', 'choices': [{'action': 'High ($100)', 'node': {'type': 'terminal', 'payoff_leader': 50, 'payoff_follower': 14, 'label': '(Low, High) -> Leader=$50K, Follower=$14K'}}, {'action': 'Low ($70)', 'node': {'type': 'terminal', 'payoff_leader': 28, 'payoff_follower': 22, 'label': '(Low, Low) -> Leader=$28K, Follower=$22K'}}]}}]}, 'llm_prediction': 'Leader should price High ($100) to signal quality', 'spne_prediction': 'Leader: Low ($70); Follower: Low ($70) if leader played Low, Low ($70) if leader played High'}
+
+      def get_default_game() -> str:
+          return json.dumps(_DEFAULT_GAME)
+      _spl_result = get_default_game()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      game_json: get_default_game
+    out: game_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@game_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(game_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      game_json: get_default_game
+      game_description: json_get

@@ -1,0 +1,75 @@
+version: 1.0-graph
+workflow:
+  name: retrieve
+  inputs:
+  - name: query
+    type: TEXT
+  - name: index
+    type: TEXT
+  - name: texts
+    type: TEXT
+  outputs:
+  - name: retrieved_document
+    type: TEXT
+steps:
+- embed_query:
+    node: SOLVE
+    in:
+      query: $in.query
+    out: query_embedding
+    tool: embed_query
+    backend: kernel
+    arguments:
+    - '@query'
+    code: |
+      import base64, numpy as np
+      from sentence_transformers import SentenceTransformer
+
+      _MODEL = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+      def embed_query(query):
+          """Embed a single query string; returns encoded float32 vector."""
+          vec = _MODEL.encode([query], convert_to_numpy=True).astype(np.float32)
+          dim = vec.shape[1]
+          return base64.b64encode(vec.tobytes()).decode() + f"||1||{dim}"
+      _spl_result = embed_query(query)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - query
+    tool_returns: TEXT
+- retrieve_document:
+    node: SOLVE
+    in:
+      index: $in.index
+      query_embedding: embed_query
+      texts: $in.texts
+    out: retrieved_document
+    tool: retrieve_document
+    backend: kernel
+    arguments:
+    - '@index'
+    - '@query_embedding'
+    - '@texts'
+    code: |
+      import faiss, base64, json, numpy as np
+
+      def retrieve_document(index, query_embedding, texts):
+          """Return the most relevant chunk from texts using FAISS nearest-neighbour search."""
+          enc, rows, cols = query_embedding.rsplit("||", 2)
+          qvec = np.frombuffer(base64.b64decode(enc), dtype=np.float32).reshape(int(rows), int(cols))
+          idx = faiss.read_index(index)
+          _, I = idx.search(qvec, 1)
+          chunks = json.loads(texts)
+          best = int(I[0][0])
+          return chunks[best] if 0 <= best < len(chunks) else ""
+      _spl_result = retrieve_document(index, query_embedding, texts)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - index
+    - query_embedding
+    - texts
+    tool_returns: TEXT
+- wf_exit:
+    output: retrieve_document

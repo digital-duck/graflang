@@ -1,0 +1,57 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- guess_strategy:
+    generate: |-
+      You are a SaaS growth advisor helping a company optimize its pricing strategy.
+
+      OPTIMIZATION PROBLEM:
+      {{in_problem_description}}
+
+      The company's pricing strategy has three tunable parameters:
+      - monthly_price: the base subscription price ($30–$120/month)
+      - annual_discount_pct: percentage discount for annual plans (0%–40%)
+      - trial_days: length of free trial period (3–30 days)
+
+      The objective is to maximize customer lifetime value (LTV), which depends on:
+      - Conversion rate: how many trial users become paying customers
+      - Monthly revenue: effective revenue per customer after discount
+      - Churn rate: percentage of customers who cancel each month
+
+      Without running an experiment, recommend specific values for all three parameters.
+      Explain the reasoning behind each choice. Be specific with numbers.
+    in:
+      problem_description: $in.problem_description
+    out: llm_guess
+    function: guess_strategy_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_guess: guess_strategy
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_guess'
+    code: |
+      def format_report_solver_off(llm_guess: str) -> str:
+          return f'=== Optuna Black-Box Optimization (r112) | solver=OFF ===\n\n── LLM Heuristic Strategy ──────────────────────────────────\n{llm_guess}\n\nNote: LLM guesses from intuition without exploring the search space.\nRun --param use_solver=true to let Optuna TPE find the optimum in 50 trials.'
+      _spl_result = format_report_solver_off(llm_guess)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_guess
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

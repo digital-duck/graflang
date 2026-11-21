@@ -1,0 +1,15 @@
+Large language models (LLMs) have a fixed context window that limits how much text they can
+process in a single forward pass. For GPT-4o the context window is 128,000 tokens; for
+Claude 3 Sonnet it is 200,000 tokens. Despite these large windows, processing entire
+document corpora within a single prompt is impractical for cost and latency reasons.
+
+RAG solves this by selecting only the most relevant chunks at query time. The quality of
+retrieval directly determines the quality of generation: if the retrieved chunks do not
+contain the answer, even the most capable LLM will produce a hallucinated or incomplete
+response. This makes retrieval quality the most important variable to optimize in a RAG system.
+
+Advanced RAG techniques include hybrid search (combining BM25 keyword search with vector
+search), re-ranking (using a cross-encoder to score retrieved candidates before passing
+them to the LLM), and iterative retrieval (having the LLM decide whether it needs more
+context, as in agentic RAG). Each technique trades additional computational cost for
+improved answer quality on difficult questions.

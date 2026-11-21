@@ -1,0 +1,309 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: game_json
+    type: TEXT
+  - name: game_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- find_nash_equilibria_3p:
+    node: SOLVE
+    in:
+      game_json: $in.game_json
+    out: result_json
+    tool: find_nash_equilibria_3p
+    backend: kernel
+    arguments:
+    - '@game_json'
+    code: |
+      import json
+
+      def find_nash_equilibria_3p(game_json: str) -> str:
+          """Find pure Nash equilibria in a 3-player game using pygambit.
+
+          Falls back to brute-force pure-strategy search if pygambit is unavailable,
+          so the recipe always runs — it just logs which path was taken.
+
+          Returns:
+            {"game_name", "equilibria": [{profile, payoffs, type}],
+             "cooperative", "pd_gap", "solver_used", "status"}
+          """
+          try:
+              game = json.loads(game_json)
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': f'JSON parse: {e}'})
+          payoffs = game['payoffs']
+          strategies = game['strategies']
+          players = game['players']
+
+          def profile_key(a, b, c):
+              return ('P' if a == 0 else 'S') + ('P' if b == 0 else 'S') + ('P' if c == 0 else 'S')
+
+          def payoff(player_idx, a, b, c):
+              return payoffs[profile_key(a, b, c)][player_idx]
+          solver_used = 'pygambit'
+          equilibria = []
+          try:
+              import pygambit as gbt
+              import numpy as np
+              n = 2
+              A = np.array([[[payoff(0, a, b, c) for c in range(n)] for b in range(n)] for a in range(n)], dtype=float)
+              B = np.array([[[payoff(1, a, b, c) for c in range(n)] for b in range(n)] for a in range(n)], dtype=float)
+              C = np.array([[[payoff(2, a, b, c) for c in range(n)] for b in range(n)] for a in range(n)], dtype=float)
+              g = gbt.Game.from_arrays(A, B, C, title='3-player pricing game')
+              for eq in gbt.nash.enumpure_solve(g).equilibria:
+                  profile = []
+                  eq_payoffs = []
+                  for player in g.players:
+                      strats = list(player.strategies)
+                      probs = [float(eq[s]) for s in strats]
+                      chosen = strategies[probs.index(max(probs))]
+                      profile.append(chosen)
+                      eq_payoffs.append(round(float(eq.payoff(player)), 2))
+                  equilibria.append({'profile': profile, 'payoffs': eq_payoffs, 'type': 'pure'})
+          except ImportError:
+              solver_used = 'brute-force (pygambit not installed)'
+              for a in range(2):
+                  for b in range(2):
+                      for c in range(2):
+                          pa = payoff(0, a, b, c)
+                          pb = payoff(1, a, b, c)
+                          pc = payoff(2, a, b, c)
+                          is_nash = True
+                          for a2 in range(2):
+                              if a2 != a and payoff(0, a2, b, c) > pa:
+                                  is_nash = False
+                                  break
+                          if not is_nash:
+                              continue
+                          for b2 in range(2):
+                              if b2 != b and payoff(1, a, b2, c) > pb:
+                                  is_nash = False
+                                  break
+                          if not is_nash:
+                              continue
+                          for c2 in range(2):
+                              if c2 != c and payoff(2, a, b, c2) > pc:
+                                  is_nash = False
+                                  break
+                          if is_nash:
+                              profile = [strategies[a], strategies[b], strategies[c]]
+                              eq_payoffs = [pa, pb, pc]
+                              equilibria.append({'profile': profile, 'payoffs': eq_payoffs, 'type': 'pure'})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e), 'solver_used': solver_used})
+          coop = game['cooperative_optimum']
+          pd_gaps = []
+          for eq in equilibria:
+              gaps = [round(co - ne, 1) for co, ne in zip(coop['payoffs'], eq['payoffs'])]
+              pd_gaps.append(f"Nash {eq['profile']} → each earns ${eq['payoffs'][0]}K; cooperative {coop['profile']} → each earns ${coop['payoffs'][0]}K; gap = ${gaps[0]}K/firm")
+          return json.dumps({'game_name': game['game_name'], 'n_players': len(players), 'players': players, 'n_equilibria': len(equilibria), 'equilibria': equilibria, 'cooperative': coop, 'pd_gap': ' | '.join(pd_gaps) if pd_gaps else 'no equilibria found', 'solver_used': solver_used, 'status': 'OK'})
+      _spl_result = find_nash_equilibria_3p(game_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - game_json
+    tool_returns: TEXT
+- nash_3p_found:
+    node: SOLVE
+    in:
+      result_json: find_nash_equilibria_3p
+    out: tool_5
+    tool: nash_3p_found
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def nash_3p_found(result_json: str) -> bool:
+          """ASSERT gate: at least one pure Nash equilibrium found."""
+          try:
+              data = json.loads(result_json)
+              return data.get('status') == 'OK' and data.get('n_equilibria', 0) > 0
+          except Exception:
+              return False
+      _spl_result = nash_3p_found(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_nash_3p_found:
+    assert: '@in_tool_5'
+    in:
+      result_json: find_nash_equilibria_3p
+      tool_5: nash_3p_found
+    out: []
+- format_gambit_report:
+    node: SOLVE
+    in:
+      result_json: find_nash_equilibria_3p
+    out: nash_report
+    on:
+    - assert_nash_3p_found
+    - assert_nash_3p_found.fail
+    tool: format_gambit_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_gambit_report(result_json: str) -> str:
+          """Markdown report of 3-player Nash equilibrium results."""
+          try:
+              data = json.loads(result_json)
+              eqs = data.get('equilibria', [])
+              coop = data.get('cooperative', {})
+              players = data.get('players', ['A', 'B', 'C'])
+              lines = [f"## 3-Player Nash Equilibrium Report — {data.get('game_name', 'Game')}", '', f"**Solver:** {data.get('solver_used', 'unknown')}  ", f"**Players:** {', '.join(players)}  ", f"**Nash equilibria found:** {data.get('n_equilibria', 0)}", '', '### Nash Equilibria', '', '| # | Firm A | Firm B | Firm C | Payoff A | Payoff B | Payoff C |', '|---|---|---|---|---|---|---|']
+              for i, eq in enumerate(eqs, 1):
+                  p = eq['payoffs']
+                  pf = eq['profile']
+                  lines.append(f'| {i} | {pf[0]} | {pf[1]} | {pf[2]} | ${p[0]}K | ${p[1]}K | ${p[2]}K |')
+              if coop:
+                  cp = coop['payoffs']
+                  cf = coop['profile']
+                  lines += ['', '### Cooperative Optimum (NOT a Nash equilibrium)', '', '| Firm A | Firm B | Firm C | Payoff A | Payoff B | Payoff C |', '|---|---|---|---|---|---|', f'| {cf[0]} | {cf[1]} | {cf[2]} | ${cp[0]}K | ${cp[1]}K | ${cp[2]}K |', '', '> *Collective optimum is unstable: every firm can unilaterally*', '> *gain by defecting to Standard, making Premium unsustainable.*']
+              if data.get('pd_gap'):
+                  lines += ['', "### Prisoner's Dilemma Gap", '', data['pd_gap']]
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_gambit_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: find_nash_equilibria_3p
+    out: n_eq
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_equilibria'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_equilibria')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      result_json: find_nash_equilibria_3p
+    out: solver_used
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'solver_used'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'solver_used')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_3p_nash:
+    generate: |-
+      You are a game theory analyst. The solver just found Nash equilibria for a 3-firm pricing game.
+
+      GAME DESCRIPTION:
+      {{in_game_description}}
+
+      NASH EQUILIBRIUM RESULT:
+      {{in_nash_report}}
+
+      Explain (≤200 words):
+      1. What is the Nash equilibrium, and what does it mean in business terms?
+      2. Why does Standard dominate Premium for every firm, regardless of competitors' choices?
+      3. What is the Prisoner's Dilemma gap — the collective cost of rational self-interest?
+      4. Why is the 3-player dilemma harder to escape than the 2-player version (r110)?
+      5. What real-world mechanisms could sustain Premium pricing across three rivals?
+    in:
+      nash_report: format_gambit_report
+      game_description: $in.game_description
+    out: explanation
+    function: explain_3p_nash_prompt
+    params:
+    - nash_report
+    - game_description
+    arguments:
+    - '@nash_report'
+    - '@game_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      nash_report: format_gambit_report
+      explanation: explain_3p_nash
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@nash_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(nash_report: str, explanation: str) -> str:
+          return f'=== Gambit 3-Player Game Theory (r115) | solver=ON ===\n\n{nash_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(nash_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - nash_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

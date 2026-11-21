@@ -1,0 +1,111 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: policy_json
+    type: TEXT
+  - name: description
+    type: TEXT
+steps:
+- get_default_policy:
+    node: SOLVE
+    out: policy_json
+    tool: get_default_policy
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_POLICY = {'policy_name': 'ComprehensiveAuto_v3', 'description': 'Insurance eligibility for emergency_claim: requires comprehensive policy AND active status AND (deductible_met OR catastrophic_event) AND emergency_event. Alice: comprehensive, active, deductible_met, emergency_event. Bob: basic policy only (no comprehensive, no policy_active). Carol: comprehensive, active, catastrophic_event — but NO emergency_event.', 'predicates': ['has_comprehensive', 'policy_active', 'deductible_met', 'emergency_event', 'catastrophic_event', 'claim_covered', 'eligible_claim', 'emergency_claim'], 'base_predicates': ['has_comprehensive', 'policy_active', 'deductible_met', 'emergency_event', 'catastrophic_event'], 'customers': ['alice', 'bob', 'carol'], 'facts': [['has_comprehensive', 'alice'], ['policy_active', 'alice'], ['deductible_met', 'alice'], ['emergency_event', 'alice'], ['has_comprehensive', 'carol'], ['policy_active', 'carol'], ['catastrophic_event', 'carol']], 'rules': [{'id': 'R2', 'desc': 'Covered if deductible is met', 'head': 'claim_covered', 'body': ['deductible_met']}, {'id': 'R3', 'desc': 'Covered if catastrophic event occurred', 'head': 'claim_covered', 'body': ['catastrophic_event']}, {'id': 'R1', 'desc': 'Eligible if comprehensive + active + covered', 'head': 'eligible_claim', 'body': ['has_comprehensive', 'policy_active', 'claim_covered']}, {'id': 'R4', 'desc': 'Emergency claim approved if eligible + emergency event', 'head': 'emergency_claim', 'body': ['eligible_claim', 'emergency_event']}], 'query': 'emergency_claim'}
+
+      def get_default_policy() -> str:
+          """Return the ComprehensiveAuto_v3 policy JSON."""
+          return json.dumps(_DEFAULT_POLICY)
+      _spl_result = get_default_policy()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      policy_json: get_default_policy
+    out: description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@policy_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(policy_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      policy_json: get_default_policy
+      description: json_get

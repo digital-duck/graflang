@@ -1,0 +1,59 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: game_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- reason_sequential:
+    generate: |-
+      You are a business strategy consultant. A market leader must set its subscription price FIRST.
+      The follower will observe that price and respond.
+
+      GAME DESCRIPTION:
+      {{in_game_description}}
+
+      Payoff table (profits in $K/month):
+      - Leader High + Follower High = Leader $38K, Follower $38K
+      - Leader High + Follower Low  = Leader $12K, Follower $52K   ← follower undercuts
+      - Leader Low  + Follower High = Leader $50K, Follower $14K
+      - Leader Low  + Follower Low  = Leader $28K, Follower $22K
+
+      Without solving formally:
+      1. What price should the leader choose? Why?
+      2. Given the leader's choice, what will the follower do?
+      3. Is the leader's first-mover advantage helpful here?
+      4. What is the final outcome and is it stable?
+
+      Give specific recommendations with reasoning.
+    in:
+      game_description: $in.game_description
+    out: llm_strategy
+    function: reason_sequential_prompt
+    params:
+    - game_description
+    arguments:
+    - '@game_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_strategy: reason_sequential
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_strategy'
+    code: |
+      def format_report_solver_off(llm_strategy: str) -> str:
+          return f'=== Stackelberg Game (r111) | solver=OFF ===\n\n── LLM Sequential Strategy Reasoning ───────────────────────\n{llm_strategy}\n\nNote: LLM reasons intuitively. Run --param use_solver=true for backward induction\n(finds the subgame-perfect Nash equilibrium the LLM often misses).'
+      _spl_result = format_report_solver_off(llm_strategy)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_strategy
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

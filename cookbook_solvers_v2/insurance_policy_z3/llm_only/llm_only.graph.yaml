@@ -1,0 +1,60 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- trace_policy_manually:
+    generate: |-
+      You are an insurance claims analyst performing manual rule tracing.
+
+      POLICY DESCRIPTION:
+      {{in_description}}
+
+      Policy rules (ComprehensiveAuto_v3):
+        R1. eligible_claim(X)  :- has_comprehensive(X), policy_active(X), claim_covered(X)
+        R2. claim_covered(X)   :- deductible_met(X)
+        R3. claim_covered(X)   :- catastrophic_event(X)
+        R4. emergency_claim(X) :- eligible_claim(X), emergency_event(X)
+
+      Customer facts in knowledge base:
+        alice: has_comprehensive, policy_active, deductible_met, emergency_event
+        bob:   (basic policy only — no comprehensive, no policy_active)
+        carol: has_comprehensive, policy_active, catastrophic_event
+
+      For each customer, trace whether emergency_claim is provable step by step.
+      Show which rules fire and which facts are used.
+      Note: LLM traces rules sequentially. Run with --param use_solver=true
+      to verify with Z3 Fixedpoint inference (catches all proof paths).
+    in:
+      description: $in.description
+    out: llm_trace
+    function: trace_policy_manually_prompt
+    params:
+    - description
+    arguments:
+    - '@description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_trace: trace_policy_manually
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_trace'
+    code: |
+      def format_report_solver_off(llm_trace: str) -> str:
+          return f'=== Insurance Policy Z3 Inference (r120) | solver=OFF ===\n\n── LLM Manual Rule Tracing ─────────────────────────────────\n{llm_trace}\n\nNote: LLM traces rules from description only. Run --param use_solver=true\nto verify with Z3 Fixedpoint inference.'
+      _spl_result = format_report_solver_off(llm_trace)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_trace
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

@@ -1,0 +1,58 @@
+version: 1.0-graph
+workflow:
+  name: bayesian_opt
+  inputs:
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    prepare: ./prepare/prepare.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+steps:
+- prepare:
+    use: parts.prepare
+    in:
+      use_solver: $in.use_solver
+    out:
+    - use_solver
+    - problem_json
+    - problem_description
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: prepare
+    out: []
+    branch: 1
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      problem_json: prepare.problem_json
+      problem_description: prepare.problem_description
+    out: report
+- solver_off:
+    evaluate: |-
+      @in_use_solver == 'false'
+    in:
+      use_solver: prepare
+    out: []
+    'on': solver_on.fail
+    branch: 2
+- llm_only:
+    use: parts.llm_only
+    in:
+      problem_description: prepare.problem_description
+    out: report
+- wf_exit:
+    output:
+    - solver_arm
+    - llm_only
+    'on':
+    - solver_off.fail
+    - solver_arm
+    - llm_only

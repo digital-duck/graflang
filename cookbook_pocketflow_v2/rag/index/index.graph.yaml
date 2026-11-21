@@ -1,0 +1,108 @@
+version: 1.0-graph
+workflow:
+  name: index
+  inputs:
+  - name: documents
+    type: LIST
+  outputs:
+  - name: index
+    type: TEXT
+  - name: texts
+    type: TEXT
+steps:
+- chunk_documents:
+    node: SOLVE
+    in:
+      documents: $in.documents
+    out: texts
+    tool: chunk_documents
+    backend: kernel
+    arguments:
+    - '@documents'
+    code: |
+      import json, os
+
+      _CHUNK_SIZE = 500   # characters per chunk
+
+      def chunk_documents(documents):
+          """Split documents into fixed-size text chunks; returns JSON list of strings."""
+          try:
+              docs = json.loads(documents)
+              if not isinstance(docs, list):
+                  docs = [documents]
+          except (json.JSONDecodeError, TypeError):
+              docs = [str(documents)]
+
+          chunks = []
+          for doc in docs:
+              text = str(doc)
+              if os.path.isfile(text):   # a path: index the file's content
+                  text = open(text, encoding='utf-8').read()
+              for i in range(0, len(text), _CHUNK_SIZE):
+                  chunk = text[i:i + _CHUNK_SIZE].strip()
+                  if chunk:
+                      chunks.append(chunk)
+          return json.dumps(chunks)
+      _spl_result = chunk_documents(documents)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - documents
+    tool_returns: TEXT
+- embed_documents:
+    node: SOLVE
+    in:
+      texts: chunk_documents
+    out: embeddings
+    tool: embed_documents
+    backend: kernel
+    arguments:
+    - '@texts'
+    code: |
+      import json, base64, numpy as np
+      from sentence_transformers import SentenceTransformer
+
+      _MODEL = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+      def embed_documents(texts):
+          """Embed a JSON list of text chunks; returns base64-encoded float32 matrix."""
+          chunks = json.loads(texts)
+          vecs = _MODEL.encode(chunks, convert_to_numpy=True).astype(np.float32)
+          return base64.b64encode(vecs.tobytes()).decode() + f"||{vecs.shape[0]}||{vecs.shape[1]}"
+      _spl_result = embed_documents(texts)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - texts
+    tool_returns: TEXT
+- create_faiss_index:
+    node: SOLVE
+    in:
+      embeddings: embed_documents
+    out: index
+    tool: create_faiss_index
+    backend: kernel
+    arguments:
+    - '@embeddings'
+    code: |
+      import faiss, base64, numpy as np, tempfile, os
+
+      def create_faiss_index(embeddings):
+          """Build a flat L2 FAISS index from encoded embeddings; returns path to saved index."""
+          enc, rows, cols = embeddings.rsplit("||", 2)
+          vecs = np.frombuffer(base64.b64decode(enc), dtype=np.float32).reshape(int(rows), int(cols))
+          index = faiss.IndexFlatL2(int(cols))
+          index.add(vecs)
+          tmp = tempfile.NamedTemporaryFile(suffix=".faiss", delete=False)
+          faiss.write_index(index, tmp.name)
+          return tmp.name
+      _spl_result = create_faiss_index(embeddings)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - embeddings
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      index: create_faiss_index
+      texts: chunk_documents

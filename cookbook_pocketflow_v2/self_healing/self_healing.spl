@@ -1,0 +1,99 @@
+CREATE TOOL_API validate_mermaid(mermaid_code TEXT) RETURNS TEXT AS PYTHON $$
+import subprocess, tempfile, os
+
+def validate_mermaid(mermaid_code: str) -> str:
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.mmd', delete=False) as f:
+            f.write(mermaid_code)
+            input_path = f.name
+        output_path = input_path.replace('.mmd', '.svg')
+        result = subprocess.run(
+            ['mmdc', '-i', input_path, '-o', output_path],
+            capture_output=True, text=True, timeout=30
+        )
+        os.unlink(input_path)
+        if os.path.exists(output_path):
+            os.unlink(output_path)
+        if result.returncode == 0:
+            return "VALID_OK"
+        return result.stderr or result.stdout or "validation failed: unknown error"
+    except FileNotFoundError:
+        return "error: mmdc not found; install with: npm install -g @mermaid-js/mermaid-cli"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API retries_reached(current TEXT, maximum TEXT) RETURNS TEXT AS PYTHON $$
+def retries_reached(current: str, maximum: str) -> str:
+    try:
+        return "yes" if int(current) >= int(maximum) else "no"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION generate_mermaid(description TEXT)
+RETURNS TEXT AS $$
+You are an expert in Mermaid diagram syntax.
+Given the following plain-language description, generate valid Mermaid diagram code.
+
+Description: {description}
+
+Return ONLY the raw Mermaid code, starting with the diagram type declaration
+(e.g., flowchart TD, sequenceDiagram, classDiagram, erDiagram).
+Do not include markdown code fences or any explanation.
+$$;
+
+CREATE FUNCTION fix_mermaid(description TEXT, prior_code TEXT, errors TEXT)
+RETURNS TEXT AS $$
+You are an expert in Mermaid diagram syntax.
+A Mermaid diagram was generated for the following description but failed CLI validation.
+
+Description: {description}
+
+Prior code that failed:
+{prior_code}
+
+Compiler errors reported by the Mermaid CLI:
+{errors}
+
+Fix all syntax errors and return ONLY the corrected Mermaid code.
+Do not include markdown code fences or any explanation.
+$$;
+
+WORKFLOW mermaid_from_description
+  INPUT @description TEXT := "A flowchart showing user login: start → enter credentials → validate → if valid go to dashboard else show error → end"
+  INPUT @max_retries INTEGER := 3
+  OUTPUT @output TEXT
+DO
+  @i := 0;
+  @is_valid := "false";
+  @errors := "";
+  @mermaid_code := "";
+
+  GENERATE generate_mermaid(@description) INTO @mermaid_code;
+
+  WHILE @i < @max_retries DO
+    CALL validate_mermaid(@mermaid_code) INTO @validation_result;
+    EVALUATE @validation_result WHEN contains("VALID_OK") THEN
+      @is_valid := "true";
+      @i := @max_retries;
+    ELSE
+      @errors := @validation_result;
+      @i := @i + 1;
+      CALL retries_reached(@i, @max_retries) INTO @retry_status;
+      EVALUATE @retry_status WHEN contains("yes") THEN
+        @i := @max_retries;
+      ELSE
+        GENERATE fix_mermaid(@description, @mermaid_code, @errors) INTO @mermaid_code;
+      END;
+    END;
+  END;
+
+  EVALUATE @is_valid WHEN contains("true") THEN
+    @output := @mermaid_code;
+  ELSE
+    @output := "FAILURE: max retries reached without valid syntax. Last errors: " + @errors;
+  END;
+
+  RETURN @output WITH status = "complete";
+END;

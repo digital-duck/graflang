@@ -1,0 +1,316 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: policy_json
+    type: TEXT
+  - name: policy_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- run_inference:
+    node: SOLVE
+    in:
+      policy_json: $in.policy_json
+    out: result_json
+    tool: run_inference
+    backend: kernel
+    arguments:
+    - '@policy_json'
+    code: |
+      import json
+
+      class KnowledgeBase:
+          """Holds facts (ground atoms) and rules (head :- body)."""
+
+          def __init__(self):
+              self.facts: list[tuple] = []
+              self.rules: list[dict] = []
+
+          def add_fact(self, predicate: str, *args):
+              self.facts.append((predicate, *args))
+
+          def add_rule(self, head: dict, body: list[dict]):
+              self.rules.append({'head': head, 'body': body})
+
+          def query(self, goal: dict, bindings: dict | None=None) -> list[dict]:
+              """Find all binding sets that satisfy the goal (backward chaining)."""
+              if bindings is None:
+                  bindings = {}
+              pred = goal['pred']
+              args = [bindings.get(a, a) for a in goal.get('args', [])]
+              results: list[dict] = []
+              for fact in self.facts:
+                  if fact[0] != pred or len(fact) - 1 != len(args):
+                      continue
+                  new_b = dict(bindings)
+                  match = True
+                  for got, want in zip(fact[1:], args):
+                      if want.startswith('?'):
+                          new_b[want] = got
+                      elif got != want:
+                          match = False
+                          break
+                  if match:
+                      results.append(new_b)
+              for rule in self.rules:
+                  head = rule['head']
+                  if head['pred'] != pred or len(head.get('args', [])) != len(args):
+                      continue
+                  new_b = dict(bindings)
+                  match = True
+                  for got, want in zip(head.get('args', []), args):
+                      if got.startswith('?'):
+                          new_b[got] = want
+                      elif got != want:
+                          match = False
+                          break
+                  if not match:
+                      continue
+                  body_solutions = [new_b]
+                  for body_goal in rule['body']:
+                      next_solutions: list[dict] = []
+                      for sol in body_solutions:
+                          next_solutions.extend(self.query(body_goal, sol))
+                      body_solutions = next_solutions
+                      if not body_solutions:
+                          break
+                  results.extend(body_solutions)
+              return results
+
+      def _build_default_kb() -> KnowledgeBase:
+          kb = KnowledgeBase()
+          kb.add_fact('has_policy', 'alice', 'comprehensive')
+          kb.add_fact('policy_active', 'alice')
+          kb.add_fact('deductible_met', 'alice')
+          kb.add_fact('claim_type', 'alice', 'emergency_repair')
+          kb.add_fact('emergency_event', 'alice')
+          kb.add_fact('has_policy', 'bob', 'basic')
+          kb.add_fact('claim_type', 'bob', 'emergency_repair')
+          kb.add_fact('has_policy', 'carol', 'comprehensive')
+          kb.add_fact('policy_active', 'carol')
+          kb.add_fact('catastrophic_event', 'carol')
+          kb.add_fact('claim_type', 'carol', 'emergency_repair')
+          kb.add_rule(head={'pred': 'eligible_claim', 'args': ['?X', '?Type']}, body=[{'pred': 'has_policy', 'args': ['?X', 'comprehensive']}, {'pred': 'policy_active', 'args': ['?X']}, {'pred': 'claim_covered', 'args': ['?X', '?Type']}])
+          kb.add_rule(head={'pred': 'claim_covered', 'args': ['?X', 'emergency_repair']}, body=[{'pred': 'deductible_met', 'args': ['?X']}])
+          kb.add_rule(head={'pred': 'claim_covered', 'args': ['?X', 'emergency_repair']}, body=[{'pred': 'catastrophic_event', 'args': ['?X']}])
+          kb.add_rule(head={'pred': 'emergency_claim', 'args': ['?X']}, body=[{'pred': 'eligible_claim', 'args': ['?X', 'emergency_repair']}, {'pred': 'emergency_event', 'args': ['?X']}])
+          return kb
+
+      def run_inference(policy_json: str) -> str:
+          """Run backward-chaining inference for all customers in the policy.
+
+          Returns:
+            {"policy_name": str, "n_customers": int, "n_eligible": int,
+             "results": [{customer, eligible, proof_chain}]}
+          """
+          try:
+              policy = json.loads(policy_json)
+              kb = _build_default_kb()
+              query_pred = policy.get('query', 'emergency_claim')
+              results = []
+              for customer in policy.get('customers', []):
+                  solutions = kb.query({'pred': query_pred, 'args': [customer]})
+                  eligible = len(solutions) > 0
+                  results.append({'customer': customer, 'eligible': eligible, 'n_solutions': len(solutions), 'verdict': f"{customer}: {('ELIGIBLE' if eligible else 'NOT ELIGIBLE')} for {query_pred}"})
+              n_eligible = sum((1 for r in results if r['eligible']))
+              return json.dumps({'policy_name': policy.get('policy_name', 'Policy'), 'query': query_pred, 'n_customers': len(results), 'n_eligible': n_eligible, 'status': 'OK', 'results': results})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e), 'n_eligible': 0})
+      _spl_result = run_inference(policy_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - policy_json
+    tool_returns: TEXT
+- inference_succeeded:
+    node: SOLVE
+    in:
+      result_json: run_inference
+    out: tool_5
+    tool: inference_succeeded
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def inference_succeeded(result_json: str) -> bool:
+          """ASSERT gate: inference ran without error and at least one result exists."""
+          try:
+              data = json.loads(result_json)
+              return data.get('status') == 'OK' and data.get('n_customers', 0) > 0
+          except Exception:
+              return False
+      _spl_result = inference_succeeded(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_inference_succeeded:
+    assert: '@in_tool_5'
+    in:
+      result_json: run_inference
+      tool_5: inference_succeeded
+    out: []
+- format_inference_report:
+    node: SOLVE
+    in:
+      result_json: run_inference
+    out: inference_report
+    on:
+    - assert_inference_succeeded
+    - assert_inference_succeeded.fail
+    tool: format_inference_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_inference_report(result_json: str) -> str:
+          """Markdown report of inference results."""
+          try:
+              data = json.loads(result_json)
+              results = data.get('results', [])
+              lines = [f"## Prolog Inference Report — {data.get('policy_name', 'Policy')}", '', f"**Query:** `{data.get('query', '?')}`  ", f"**Customers:** {data.get('n_customers', '?')}  ", f"**Eligible:** {data.get('n_eligible', '?')}", '', '| Customer | Eligible | Verdict |', '|---|---|---|']
+              for r in results:
+                  mark = '✓' if r['eligible'] else '✗'
+                  lines.append(f"| {r['customer']} | {mark} | {r['verdict']} |")
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_inference_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: run_inference
+    out: n_eligible
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_eligible'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_eligible')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      result_json: run_inference
+    out: n_customers
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_customers'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_customers')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_inference:
+    generate: |-
+      You are an insurance compliance analyst. The Prolog inference engine just evaluated 3 customers.
+
+      POLICY:
+      {{in_policy_description}}
+
+      INFERENCE RESULT:
+      {{in_inference_report}}
+
+      Explain (≤150 words):
+      1. Why is carol eligible? Walk through the exact proof chain.
+      2. Why is bob NOT eligible? Which fact is missing?
+      3. What is the risk of manual rule tracing (solver=OFF) for this policy?
+      4. How would adding a 9th rule (e.g. high_value_client → deductible_waived) change the inference?
+    in:
+      inference_report: format_inference_report
+      policy_description: $in.policy_description
+    out: explanation
+    function: explain_inference_prompt
+    params:
+    - inference_report
+    - policy_description
+    arguments:
+    - '@inference_report'
+    - '@policy_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      inference_report: format_inference_report
+      explanation: explain_inference
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@inference_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(inference_report: str, explanation: str) -> str:
+          return f'=== Prolog Inference Engine (r105) | solver=ON ===\n\n{inference_report}\n\n── Explanation ─────────────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(inference_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - inference_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

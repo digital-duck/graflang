@@ -1,0 +1,227 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: game_json
+    type: TEXT
+  - name: game_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- find_nash_equilibria:
+    node: SOLVE
+    in:
+      game_json: $in.game_json
+    out: result_json
+    tool: find_nash_equilibria
+    backend: kernel
+    arguments:
+    - '@game_json'
+    code: |
+      import json
+
+      def find_nash_equilibria(game_json: str) -> str:
+          """Find all Nash equilibria using nashpy support enumeration.
+
+          Returns:
+            {"game_name": str, "n_equilibria": int, "equilibria": [{sigma_A, sigma_B, payoffs}],
+             "joint_optimal": {...}, "gap": str, "status": "OK"|"ERROR"}
+          """
+          try:
+              import nashpy as nash
+              import numpy as np
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'nashpy not installed — run: pip install nashpy'})
+          try:
+              game = json.loads(game_json)
+              A = np.array(game['payoff_matrix_A'], dtype=float)
+              B = np.array(game['payoff_matrix_B'], dtype=float)
+              g = nash.Game(A, B)
+              equilibria = []
+              for eq in g.support_enumeration():
+                  sigma_A, sigma_B = eq
+                  payoff_A = float(sigma_A @ A @ sigma_B)
+                  payoff_B = float(sigma_A @ B @ sigma_B)
+                  strats_A = game['strategies']['Firm A']
+                  strats_B = game['strategies']['Firm B']
+
+                  def label_strategy(sigma, strats):
+                      for i, p in enumerate(sigma):
+                          if abs(p - 1.0) < 1e-06:
+                              return strats[i]
+                      parts = [f'{p:.2f}×{s}' for p, s in zip(sigma, strats) if p > 1e-06]
+                      return ' + '.join(parts)
+                  equilibria.append({'sigma_A': sigma_A.tolist(), 'sigma_B': sigma_B.tolist(), 'label_A': label_strategy(sigma_A, strats_A), 'label_B': label_strategy(sigma_B, strats_B), 'payoff_A': round(payoff_A, 2), 'payoff_B': round(payoff_B, 2)})
+              opt = game.get('joint_optimal', {})
+              opt_payoffs = opt.get('payoffs', [0, 0])
+              gap_lines = []
+              for eq in equilibria:
+                  gap_A = round(opt_payoffs[0] - eq['payoff_A'], 2)
+                  gap_B = round(opt_payoffs[1] - eq['payoff_B'], 2)
+                  gap_lines.append(f"Nash ({eq['label_A']}, {eq['label_B']}): Firm A earns ${eq['payoff_A']}K vs optimal ${opt_payoffs[0]}K (gap=${gap_A}K); Firm B earns ${eq['payoff_B']}K vs optimal ${opt_payoffs[1]}K (gap=${gap_B}K)")
+              return json.dumps({'game_name': game.get('game_name', 'Game'), 'n_equilibria': len(equilibria), 'equilibria': equilibria, 'joint_optimal': opt, 'pd_gap': ' | '.join(gap_lines), 'status': 'OK'})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = find_nash_equilibria(game_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - game_json
+    tool_returns: TEXT
+- nash_found:
+    node: SOLVE
+    in:
+      result_json: find_nash_equilibria
+    out: tool_5
+    tool: nash_found
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def nash_found(result_json: str) -> bool:
+          """ASSERT gate: at least one Nash equilibrium was found."""
+          try:
+              data = json.loads(result_json)
+              return data.get('status') == 'OK' and data.get('n_equilibria', 0) > 0
+          except Exception:
+              return False
+      _spl_result = nash_found(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_nash_found:
+    assert: '@in_tool_5'
+    in:
+      result_json: find_nash_equilibria
+      tool_5: nash_found
+    out: []
+- format_nash_report:
+    node: SOLVE
+    in:
+      result_json: find_nash_equilibria
+    out: nash_report
+    on:
+    - assert_nash_found
+    - assert_nash_found.fail
+    tool: format_nash_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_nash_report(result_json: str) -> str:
+          """Markdown report of Nash equilibrium results."""
+          try:
+              data = json.loads(result_json)
+              eqs = data.get('equilibria', [])
+              opt = data.get('joint_optimal', {})
+              lines = [f"## Nash Equilibrium Report — {data.get('game_name', 'Game')}", '', f"**Nash equilibria found:** {data.get('n_equilibria', 0)}", '', '### Equilibria', '', '| # | Firm A plays | Firm B plays | Payoff A | Payoff B |', '|---|---|---|---|---|']
+              for i, eq in enumerate(eqs, 1):
+                  lines.append(f"| {i} | {eq['label_A']} | {eq['label_B']} | ${eq['payoff_A']}K | ${eq['payoff_B']}K |")
+              if opt:
+                  lines += ['', '### Joint Optimum (cooperative — NOT a Nash equilibrium)', '', f'| Firm A plays | Firm B plays | Payoff A | Payoff B |', '|---|---|---|---|', f"| {opt['strategies'][0]} | {opt['strategies'][1]} | ${opt['payoffs'][0]}K | ${opt['payoffs'][1]}K |"]
+              if data.get('pd_gap'):
+                  lines += ['', "### Prisoner's Dilemma Gap", '', data['pd_gap']]
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_nash_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: find_nash_equilibria
+    out: n_eq
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_equilibria'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_equilibria')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_nash:
+    generate: |-
+      You are a game theory analyst. nashpy just computed the Nash equilibria for this pricing game.
+
+      GAME DESCRIPTION:
+      {{in_game_description}}
+
+      NASH EQUILIBRIUM RESULT:
+      {{in_nash_report}}
+
+      Explain (≤150 words):
+      1. What is the Nash equilibrium outcome and what does it mean in business terms?
+      2. Why does each firm choose Low even though both would be better off at High?
+      3. What is the Prisoner's Dilemma gap — the collective cost of rational self-interest?
+      4. What mechanism could break the dilemma in practice (contract, regulation, reputation)?
+    in:
+      nash_report: format_nash_report
+      game_description: $in.game_description
+    out: explanation
+    function: explain_nash_prompt
+    params:
+    - nash_report
+    - game_description
+    arguments:
+    - '@nash_report'
+    - '@game_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      nash_report: format_nash_report
+      explanation: explain_nash
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@nash_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(nash_report: str, explanation: str) -> str:
+          return f'=== Nash Equilibrium Game Theory (r110) | solver=ON ===\n\n{nash_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(nash_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - nash_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

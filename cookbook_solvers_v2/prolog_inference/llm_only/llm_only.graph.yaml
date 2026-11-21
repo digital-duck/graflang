@@ -1,0 +1,57 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: policy_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- trace_rules_manually:
+    generate: |-
+      You are an insurance compliance analyst. Evaluate whether each customer can file an emergency repair claim.
+
+      POLICY RULES:
+      1. eligible_claim(X, Type) IF has_policy(X, comprehensive) AND policy_active(X) AND claim_covered(X, Type)
+      2. claim_covered(X, emergency_repair) IF deductible_met(X)
+      3. claim_covered(X, emergency_repair) IF catastrophic_event(X)
+      4. emergency_claim(X) IF eligible_claim(X, emergency_repair) AND emergency_event(X)
+
+      CUSTOMER FACTS:
+      {{in_policy_description}}
+
+      For each customer, trace through the rules step-by-step:
+      - Does the rule chain lead to emergency_claim(customer) being provable?
+      - Which rule path proves or refutes the claim?
+      - Are there any indirect proof paths you might miss on a first read?
+
+      Conclude with a table: Customer | Eligible | Reason
+    in:
+      policy_description: $in.policy_description
+    out: llm_trace
+    function: trace_rules_manually_prompt
+    params:
+    - policy_description
+    arguments:
+    - '@policy_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_trace: trace_rules_manually
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_trace'
+    code: |
+      def format_report_solver_off(llm_trace: str) -> str:
+          return f'=== Prolog Inference Engine (r105) | solver=OFF ===\n\n── LLM Manual Rule Tracing ─────────────────────────────────\n{llm_trace}\n\nNote: LLM traces rules sequentially. Run with --param use_solver=true\nto verify with backward-chaining inference (catches indirect proof paths).'
+      _spl_result = format_report_solver_off(llm_trace)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_trace
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

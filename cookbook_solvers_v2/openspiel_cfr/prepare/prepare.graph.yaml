@@ -1,0 +1,107 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: game_description
+    type: TEXT
+steps:
+- get_game_description:
+    node: SOLVE
+    out: game_json
+    tool: get_game_description
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _KUHN_POKER_DESCRIPTION = {'game_name': 'Kuhn Poker', 'n_players': 2, 'cards': ['Jack (J)', 'Queen (Q)', 'King (K)'], 'card_ranking': 'J < Q < K', 'rules': "Each player antes 1 chip and receives one private card (J, Q, or K). Player 1 acts first: Pass or Bet (1 chip). After Player 1 acts, Player 2 responds: Pass or Call/Bet. Showdown if needed — higher card wins the pot. Key tension: betting signals a strong card but also enables bluffing. Since neither player sees the other's card, optimal play requires a mixed (randomized) strategy to remain unexploitable.", 'llm_naive_strategy': 'Bet with K (strong), Pass with J (weak), mix with Q — this is close but not perfectly unexploitable; an opponent can exploit the pure bet-K-only strategy.', 'known_nash_summary': 'Player 1: Bet with K always (1.0), Bet with J at probability 1/3 (bluff), Pass with Q always. Player 2: Call with K always, Call with Q at probability 1/3, Pass with J always.'}
+
+      def get_game_description() -> str:
+          return json.dumps(_KUHN_POKER_DESCRIPTION)
+      _spl_result = get_game_description()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      game_json: get_game_description
+    out: game_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@game_json'
+    - "'rules'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(game_json, 'rules')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      game_description: json_get

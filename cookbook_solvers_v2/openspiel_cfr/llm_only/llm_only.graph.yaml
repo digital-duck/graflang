@@ -1,0 +1,52 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: game_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- reason_poker_strategy:
+    generate: |-
+      You are a poker strategist advising a player in Kuhn Poker.
+
+      GAME RULES:
+      {{in_game_description}}
+
+      Without using game theory algorithms, reason through the optimal strategy:
+      1. When should Player 1 bet vs pass? (Consider: bluffing with J, value-betting with K)
+      2. When should Player 2 call vs fold? (Consider: pot odds, opponent's likely hand range)
+      3. Is there a pure strategy (always bet K, always pass J) that an opponent cannot exploit?
+      4. Why might randomizing (bluffing sometimes with J) be better than always playing the same way?
+
+      Give concrete strategy recommendations. Focus on the hidden-information tension.
+    in:
+      game_description: $in.game_description
+    out: llm_strategy
+    function: reason_poker_strategy_prompt
+    params:
+    - game_description
+    arguments:
+    - '@game_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_strategy: reason_poker_strategy
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_strategy'
+    code: |
+      def format_report_solver_off(llm_strategy: str) -> str:
+          return f'=== OpenSpiel CFR — Kuhn Poker (r116) | solver=OFF ===\n\n── LLM Strategic Reasoning ─────────────────────────────────\n{llm_strategy}\n\nNote: LLM gives intuitive strategy (~0.25 exploitability).\nRun --param use_solver=true to compute the Nash equilibrium\nmixed strategy via CFR (converges to <0.05 exploitability).'
+      _spl_result = format_report_solver_off(llm_strategy)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_strategy
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

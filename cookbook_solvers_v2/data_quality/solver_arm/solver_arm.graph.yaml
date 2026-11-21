@@ -1,0 +1,281 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: suite_json
+    type: TEXT
+  - name: data_csv
+    type: TEXT
+  - name: data_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- run_expectations:
+    node: SOLVE
+    in:
+      suite_json: $in.suite_json
+      data_csv: $in.data_csv
+    out: result_json
+    tool: run_expectations
+    backend: kernel
+    arguments:
+    - '@suite_json'
+    - '@data_csv'
+    code: |
+      import json
+
+      from io import StringIO
+
+      def _run_expectation(df, exp: dict) -> dict:
+          """Execute a single expectation against a DataFrame. Returns result dict."""
+          import pandas as pd
+          col = exp.get('column')
+          etype = exp['type']
+          rows = len(df)
+          if etype == 'expect_column_to_exist':
+              passed = col in df.columns
+              return {'type': etype, 'column': col, 'passed': passed, 'n_failed': 0 if passed else rows, 'message': '' if passed else f"Column '{col}' not found"}
+          if col not in df.columns:
+              return {'type': etype, 'column': col, 'passed': False, 'n_failed': rows, 'message': f"Column '{col}' not found"}
+          series = df[col]
+          if etype == 'expect_column_values_to_not_be_null':
+              mask = series.isna()
+              n_fail = int(mask.sum())
+              samples = series[mask].index[:5].tolist()
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'sample_rows': samples}
+          if etype == 'expect_column_values_to_be_between':
+              mn, mx = (exp.get('min_value'), exp.get('max_value'))
+              mask = pd.Series([False] * rows, index=df.index)
+              if mn is not None:
+                  mask = mask | (series < mn)
+              if mx is not None:
+                  mask = mask | (series > mx)
+              n_fail = int(mask.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'min_value': mn, 'max_value': mx, 'sample_values': series[mask].head(5).tolist()}
+          if etype == 'expect_column_values_to_be_in_set':
+              allowed = set(exp.get('value_set', []))
+              mask = ~series.isin(allowed) & series.notna()
+              n_fail = int(mask.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'value_set': list(allowed), 'unexpected_values': list(series[mask].unique()[:5])}
+          if etype == 'expect_column_values_to_be_unique':
+              dupes = series.duplicated()
+              n_fail = int(dupes.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'sample_dupes': series[dupes].head(5).tolist()}
+          if etype == 'expect_column_values_to_match_regex':
+              pattern = exp.get('regex', '.*')
+              mask = ~series.astype(str).str.match(pattern, na=False)
+              n_fail = int(mask.sum())
+              return {'type': etype, 'column': col, 'passed': n_fail == 0, 'n_failed': n_fail, 'pct_failed': round(n_fail / rows * 100, 2), 'regex': pattern, 'sample_failures': series[mask].head(5).tolist()}
+          return {'type': etype, 'column': col, 'passed': False, 'n_failed': 0, 'message': f'Unknown expectation type: {etype}'}
+
+      def _make_demo_dataframe():
+          """Create a synthetic sales dataset with embedded quality issues."""
+          import pandas as pd
+          import numpy as np
+          rng = np.random.default_rng(42)
+          n = 500
+          df = pd.DataFrame({'transaction_id': [f'TXN{i:05d}' for i in range(n)], 'amount': rng.uniform(1, 9000, n).round(2), 'customer_id': [f'CUST{rng.integers(1, 200):04d}' for _ in range(n)], 'region': rng.choice(['North', 'South', 'East', 'West'], n), 'date': pd.date_range('2024-01-01', periods=n, freq='h').astype(str)})
+          neg_idx = rng.choice(n, size=12, replace=False)
+          df.loc[neg_idx, 'amount'] = rng.uniform(-500, -1, 12).round(2)
+          null_idx = rng.choice(n, size=8, replace=False)
+          df.loc[null_idx, 'customer_id'] = None
+          dupe_idx = rng.choice(n, size=5, replace=False)
+          df.loc[dupe_idx, 'transaction_id'] = 'TXN99999'
+          region_idx = rng.choice(n, size=3, replace=False)
+          df.loc[region_idx, 'region'] = 'Unknown'
+          return df
+
+      def run_expectations(suite_json: str, data_csv: str) -> str:
+          """Run an expectation suite against a CSV-encoded DataFrame.
+
+          Returns:
+            {"suite_name": str, "n_rows": int, "n_expectations": int,
+             "n_passed": int, "n_failed": int, "status": "PASS"|"FAIL",
+             "results": [{type, column, passed, n_failed, ...}]}
+          """
+          try:
+              import pandas as pd
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'pandas not installed'})
+          try:
+              suite = json.loads(suite_json)
+              if data_csv.strip() == '' or data_csv.strip() == 'demo':
+                  df = _make_demo_dataframe()
+              else:
+                  df = pd.read_csv(StringIO(data_csv))
+              results = [_run_expectation(df, exp) for exp in suite['expectations']]
+              n_passed = sum((1 for r in results if r['passed']))
+              n_failed = len(results) - n_passed
+              return json.dumps({'suite_name': suite.get('suite_name', 'unnamed'), 'n_rows': len(df), 'n_expectations': len(results), 'n_passed': n_passed, 'n_failed': n_failed, 'status': 'PASS' if n_failed == 0 else 'FAIL', 'results': results})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = run_expectations(suite_json, data_csv)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - suite_json
+    - data_csv
+    tool_returns: TEXT
+- format_quality_report:
+    node: SOLVE
+    in:
+      result_json: run_expectations
+    out: quality_report
+    tool: format_quality_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_quality_report(result_json: str) -> str:
+          """Markdown report of expectation validation results."""
+          try:
+              data = json.loads(result_json)
+              results = data.get('results', [])
+              lines = [f"## Data Quality Report — {data.get('suite_name', 'Suite')}", '', f"**Dataset:** {data.get('n_rows', '?')} rows  ", f"**Expectations:** {data.get('n_expectations', '?')} total  ", f"**Passed:** {data.get('n_passed', '?')}  ", f"**Failed:** {data.get('n_failed', '?')}  ", f"**Status:** {('✓ PASS' if data.get('status') == 'PASS' else '✗ FAIL')}", '', '| Expectation | Column | Status | Failures |', '|---|---|---|---|']
+              for r in results:
+                  status = 'PASS' if r['passed'] else f"FAIL ({r.get('n_failed', '?')} rows, {r.get('pct_failed', '?')}%)"
+                  details = ''
+                  if not r['passed']:
+                      if 'unexpected_values' in r:
+                          details = f" values={r['unexpected_values'][:3]}"
+                      elif 'sample_values' in r:
+                          details = f" samples={r['sample_values'][:3]}"
+                  lines.append(f"| {r['type']} | {r.get('column', '—')} | {status}{details} | |")
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_quality_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      result_json: run_expectations
+    out: n_failed
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_failed'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_failed')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: run_expectations
+    out: n_rows
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_rows'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_rows')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_failures:
+    generate: |-
+      You are a data quality analyst. The automated expectation engine just validated a sales dataset.
+
+      DATA DESCRIPTION:
+      {{in_data_description}}
+
+      VALIDATION REPORT:
+      {{in_quality_report}}
+
+      Explain the findings in plain English (≤150 words):
+      1. What quality issues were found?
+      2. What is the likely business cause of each issue?
+      3. Which issue is most urgent to fix?
+      4. How would each issue affect downstream analysis if left uncorrected?
+    in:
+      quality_report: format_quality_report
+      data_description: $in.data_description
+    out: explanation
+    function: explain_failures_prompt
+    params:
+    - quality_report
+    - data_description
+    arguments:
+    - '@quality_report'
+    - '@data_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      quality_report: format_quality_report
+      explanation: explain_failures
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@quality_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(quality_report: str, explanation: str) -> str:
+          return f'=== Data Quality Validator (r103) | solver=ON ===\n\n{quality_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(quality_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - quality_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

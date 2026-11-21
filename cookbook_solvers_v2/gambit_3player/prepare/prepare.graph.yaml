@@ -1,0 +1,110 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: game_json
+    type: TEXT
+  - name: game_description
+    type: TEXT
+steps:
+- get_default_game:
+    node: SOLVE
+    out: game_json
+    tool: get_default_game
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_3P_GAME = {'game_name': '3-Firm SaaS Pricing Triopoly', 'description': "Three SaaS firms (A, B, C) simultaneously choose a subscription tier: Premium ($200/mo) or Standard ($120/mo). Premium commands a higher margin but loses customers to any Standard rival. Standard captures share but compresses margins. Payoffs ($K/month per firm):\n  (P,P,P): each earns 200  — mutual premium pricing\n  (S,P,P): S-firm earns 300, each P-firm earns 120  — solo defector wins big\n  (S,S,P): each S-firm earns 260, P-firm earns 80   — solo holdout punished\n  (S,S,S): each earns 120  — race-to-bottom Nash equilibrium\nStandard dominates Premium for every firm regardless of rivals' choices.", 'players': ['Firm A', 'Firm B', 'Firm C'], 'strategies': ['Premium', 'Standard'], 'payoffs': {'PPP': [200, 200, 200], 'PPS': [120, 120, 300], 'PSP': [120, 300, 120], 'PSS': [80, 260, 260], 'SPP': [300, 120, 120], 'SPS': [260, 80, 260], 'SSP': [260, 260, 80], 'SSS': [120, 120, 120]}, 'cooperative_optimum': {'profile': ['Premium', 'Premium', 'Premium'], 'payoffs': [200, 200, 200]}, 'nash_prediction': {'profile': ['Standard', 'Standard', 'Standard'], 'payoffs': [120, 120, 120], 'type': "Dominant strategy equilibrium (3-player Prisoner's Dilemma)"}}
+
+      def get_default_game() -> str:
+          return json.dumps(_DEFAULT_3P_GAME)
+      _spl_result = get_default_game()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      game_json: get_default_game
+    out: game_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@game_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(game_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      game_json: get_default_game
+      game_description: json_get

@@ -1,0 +1,228 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: game_json
+    type: TEXT
+  - name: game_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_stackelberg:
+    node: SOLVE
+    in:
+      game_json: $in.game_json
+    out: result_json
+    tool: solve_stackelberg
+    backend: kernel
+    arguments:
+    - '@game_json'
+    code: |
+      import json
+
+      def _backward_induct(node: dict) -> dict:
+          """Recursively solve a game tree node by backward induction.
+
+          Node format:
+            Terminal: {"type": "terminal", "payoff_leader": float, "payoff_follower": float, "label": str}
+            Decision: {"type": "decision", "player": "leader"|"follower",
+                       "choices": [{"action": str, "node": {...}}]}
+
+          Returns the node annotated with {"best_action": str, "value_leader": float, "value_follower": float}
+          """
+          if node['type'] == 'terminal':
+              return {**node, 'value_leader': node['payoff_leader'], 'value_follower': node['payoff_follower']}
+          player = node['player']
+          solved = [{'action': c['action'], 'node': _backward_induct(c['node'])} for c in node['choices']]
+          key = 'value_leader' if player == 'leader' else 'value_follower'
+          best = max(solved, key=lambda c: c['node'][key])
+          return {**node, 'choices': solved, 'best_action': best['action'], 'value_leader': best['node']['value_leader'], 'value_follower': best['node']['value_follower']}
+
+      def _extract_path(solved_node: dict, path: list | None=None) -> list:
+          """Extract the equilibrium action path from a solved game tree."""
+          if path is None:
+              path = []
+          if solved_node['type'] == 'terminal':
+              return path + [{'label': solved_node.get('label', 'end'), 'payoff_leader': solved_node['payoff_leader'], 'payoff_follower': solved_node['payoff_follower']}]
+          best_action = solved_node.get('best_action')
+          for c in solved_node.get('choices', []):
+              if c['action'] == best_action:
+                  return _extract_path(c['node'], path + [{'player': solved_node['player'], 'action': best_action}])
+          return path
+
+      def solve_stackelberg(game_json: str) -> str:
+          """Solve the extensive-form game by backward induction.
+
+          Returns:
+            {"game_name": str, "spne_path": [{player, action}], "spne_payoffs": {leader, follower},
+             "llm_prediction": str, "spne_vs_llm": str, "status": "OK"}
+          """
+          try:
+              game = json.loads(game_json)
+              solved = _backward_induct(game['game_tree'])
+              path = _extract_path(solved)
+              terminal = next((p for p in path if 'payoff_leader' in p), {})
+              actions = [p for p in path if 'player' in p]
+              spne_payoffs = {'leader': terminal.get('payoff_leader', 0), 'follower': terminal.get('payoff_follower', 0)}
+              return json.dumps({'game_name': game.get('game_name', 'Game'), 'spne_path': actions, 'spne_outcome': terminal.get('label', ''), 'spne_payoffs': spne_payoffs, 'llm_prediction': game.get('llm_prediction', ''), 'spne_vs_llm': f"SPNE: Leader plays '{(actions[0]['action'] if actions else '?')}' (earns ${spne_payoffs['leader']}K) vs LLM: '{game.get('llm_prediction', '')}'", 'status': 'OK'})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = solve_stackelberg(game_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - game_json
+    tool_returns: TEXT
+- spne_solved:
+    node: SOLVE
+    in:
+      result_json: solve_stackelberg
+    out: tool_5
+    tool: spne_solved
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def spne_solved(result_json: str) -> bool:
+          """ASSERT gate: backward induction completed successfully."""
+          try:
+              return json.loads(result_json).get('status') == 'OK'
+          except Exception:
+              return False
+      _spl_result = spne_solved(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_spne_solved:
+    assert: '@in_tool_5'
+    in:
+      result_json: solve_stackelberg
+      tool_5: spne_solved
+    out: []
+- format_stackelberg_report:
+    node: SOLVE
+    in:
+      result_json: solve_stackelberg
+    out: spne_report
+    on:
+    - assert_spne_solved
+    - assert_spne_solved.fail
+    tool: format_stackelberg_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_stackelberg_report(result_json: str) -> str:
+          """Markdown report of the Stackelberg SPNE."""
+          try:
+              data = json.loads(result_json)
+              actions = data.get('spne_path', [])
+              payoffs = data.get('spne_payoffs', {})
+              lines = [f"## Stackelberg Game Report — {data.get('game_name', 'Game')}", '', '### Subgame-Perfect Nash Equilibrium (backward induction)', '', '| Step | Player | Action |', '|---|---|---|']
+              for i, a in enumerate(actions, 1):
+                  lines.append(f"| {i} | {a['player'].title()} | {a['action']} |")
+              lines += ['', f"**Outcome:** {data.get('spne_outcome', '—')}", f"**Leader payoff (SPNE):** ${payoffs.get('leader', '?')}K/mo", f"**Follower payoff (SPNE):** ${payoffs.get('follower', '?')}K/mo", '', '### LLM Prediction vs SPNE', '', f"- **LLM:** {data.get('llm_prediction', '—')}", f"- **SPNE:** {data.get('spne_vs_llm', '—')}"]
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_stackelberg_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: solve_stackelberg
+    out: comparison
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'spne_vs_llm'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'spne_vs_llm')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_spne:
+    generate: |-
+      You are a game theory analyst. Backward induction just solved a Stackelberg pricing game.
+
+      GAME DESCRIPTION:
+      {{in_game_description}}
+
+      BACKWARD INDUCTION RESULT:
+      {{in_spne_report}}
+
+      Explain (≤150 words):
+      1. Why does the leader choose Low even though (High, High) gives both players more?
+      2. Walk through the backward induction argument step by step.
+      3. What is "first-mover advantage" in this game — and does the leader actually benefit from it?
+      4. How does this differ from the simultaneous Nash equilibrium (r110)?
+    in:
+      spne_report: format_stackelberg_report
+      game_description: $in.game_description
+    out: explanation
+    function: explain_spne_prompt
+    params:
+    - spne_report
+    - game_description
+    arguments:
+    - '@spne_report'
+    - '@game_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      spne_report: format_stackelberg_report
+      explanation: explain_spne
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@spne_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(spne_report: str, explanation: str) -> str:
+          return f'=== Stackelberg Game (r111) | solver=ON ===\n\n{spne_report}\n\n── Explanation ─────────────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(spne_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - spne_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

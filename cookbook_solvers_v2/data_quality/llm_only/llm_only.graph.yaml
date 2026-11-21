@@ -1,0 +1,59 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: data_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- inspect_data:
+    generate: |-
+      You are a data quality analyst reviewing a sales transaction dataset.
+
+      DATASET DESCRIPTION:
+      {{in_data_description}}
+
+      The dataset has columns: transaction_id, amount, customer_id, region, date.
+      Expected rules:
+      - transaction_id: unique, not null
+      - amount: not null, must be > 0 and <= $10,000
+      - customer_id: not null
+      - region: one of [North, South, East, West]
+
+      Examine the description and report:
+      1. Which data quality rules appear to be satisfied?
+      2. Which rules might be violated, and why?
+      3. Estimate how many rows might have quality issues.
+      4. What action do you recommend for each issue found?
+
+      Be specific. Work from the description — do not assume the data is clean.
+    in:
+      data_description: $in.data_description
+    out: llm_analysis
+    function: inspect_data_prompt
+    params:
+    - data_description
+    arguments:
+    - '@data_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_analysis: inspect_data
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_analysis'
+    code: |
+      def format_report_solver_off(llm_analysis: str) -> str:
+          return f'=== Data Quality Validator (r103) | solver=OFF ===\n\n── LLM Sample-Based Analysis ───────────────────────────────\n{llm_analysis}\n\nNote: LLM inspects the description only — run with --param use_solver=true\nto validate all rows with the expectation engine.'
+      _spl_result = format_report_solver_off(llm_analysis)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_analysis
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

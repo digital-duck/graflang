@@ -1,0 +1,253 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: schema_json
+    type: TEXT
+  - name: data_csv
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- validate_schema:
+    node: SOLVE
+    in:
+      schema_json: $in.schema_json
+      data_csv: $in.data_csv
+    out: result_json
+    tool: validate_schema
+    backend: kernel
+    arguments:
+    - '@schema_json'
+    - '@data_csv'
+    code: |
+      import json
+
+      from io import StringIO
+
+      def _make_demo_dataframe():
+          """Synthetic payroll DataFrame with embedded schema violations."""
+          import pandas as pd
+          import numpy as np
+          rng = np.random.default_rng(7)
+          n = 200
+          depts = ['Engineering', 'Sales', 'HR', 'Finance', 'Operations']
+          df = pd.DataFrame({'employee_id': range(1000, 1000 + n), 'name': [f'Employee_{i}' for i in range(n)], 'department': rng.choice(depts, n), 'salary': rng.uniform(40000, 200000, n).round(2), 'hire_year': rng.integers(2000, 2027, n)})
+          zero_idx = rng.choice(n, size=6, replace=False)
+          df.loc[zero_idx, 'salary'] = 0.0
+          bad_dept_idx = rng.choice(n, size=4, replace=False)
+          df.loc[bad_dept_idx, 'department'] = 'Temp'
+          null_idx = rng.choice(n, size=3, replace=False)
+          df.loc[null_idx, 'name'] = None
+          return df
+
+      def validate_schema(schema_json: str, data_csv: str) -> str:
+          """Validate a DataFrame against a pandera schema.
+
+          Returns:
+            {"schema_name": str, "n_rows": int, "status": "PASS"|"FAIL"|"ERROR",
+             "n_violations": int, "violations": [{column, check, n_failed, samples}]}
+          """
+          try:
+              import pandas as pd
+              import pandera as pa
+          except ImportError as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e) + ' — run: pip install pandera'})
+          try:
+              schema_def = json.loads(schema_json)
+              if data_csv.strip() in ('', 'demo'):
+                  df = _make_demo_dataframe()
+              else:
+                  df = pd.read_csv(StringIO(data_csv))
+              check_map = {'gt': pa.Check.gt, 'ge': pa.Check.ge, 'lt': pa.Check.lt, 'le': pa.Check.le, 'isin': pa.Check.isin, 'ne': pa.Check.ne}
+              pa_cols: dict = {}
+              for col_def in schema_def['columns']:
+                  checks = [check_map[c['type']](c['value']) for c in col_def.get('checks', []) if c['type'] in check_map]
+                  dtype_map = {'int64': int, 'float64': float, 'object': str}
+                  dtype = dtype_map.get(col_def['dtype'], str)
+                  pa_cols[col_def['name']] = pa.Column(dtype, checks=checks, nullable=col_def.get('nullable', True), unique=col_def.get('unique', False))
+              schema = pa.DataFrameSchema(pa_cols)
+              violations = []
+              try:
+                  schema.validate(df, lazy=True)
+                  return json.dumps({'schema_name': schema_def.get('schema_name', 'unnamed'), 'n_rows': len(df), 'status': 'PASS', 'n_violations': 0, 'violations': []})
+              except pa.errors.SchemaErrors as e:
+                  errors_df = e.failure_cases
+                  for _, grp in errors_df.groupby(['schema_context', 'column'], dropna=False):
+                      row = grp.iloc[0]
+                      col = row.get('column', '?')
+                      import math
+                      if isinstance(col, float) and math.isnan(col):
+                          col = 'DataFrame'
+                      raw_samples = grp['failure_case'].head(5).tolist()
+                      samples = [None if isinstance(s, float) and math.isnan(s) else s for s in raw_samples]
+                      violations.append({'column': str(col), 'check': str(row.get('check', '?')), 'n_failed': len(grp), 'samples': samples})
+                  return json.dumps({'schema_name': schema_def.get('schema_name', 'unnamed'), 'n_rows': len(df), 'status': 'FAIL', 'n_violations': len(violations), 'violations': violations})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = validate_schema(schema_json, data_csv)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - schema_json
+    - data_csv
+    tool_returns: TEXT
+- format_schema_report:
+    node: SOLVE
+    in:
+      result_json: validate_schema
+    out: schema_report
+    tool: format_schema_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_schema_report(result_json: str) -> str:
+          """Markdown report of schema validation results."""
+          try:
+              data = json.loads(result_json)
+              status = data.get('status', 'ERROR')
+              if status == 'ERROR':
+                  return f"## pandera Schema Report — Error\n\n**Error:** {data.get('error', 'unknown error')}\n\nRun `pip install pandera` if pandera is not installed."
+              violations = data.get('violations', [])
+              status_sym = '✓ PASS' if status == 'PASS' else '✗ FAIL'
+              lines = [f"## pandera Schema Report — {data.get('schema_name', 'Schema')}", '', f"**Dataset:** {data.get('n_rows', '?')} rows  ", f'**Status:** {status_sym}  ', f"**Violations:** {data.get('n_violations', 0)} column checks failed", '']
+              if violations:
+                  lines += ['| Column | Check | Failures | Sample Values |', '|---|---|---|---|']
+                  for v in violations:
+                      raw = v.get('samples', [])[:3]
+                      samples = str(['(null)' if s is None else s for s in raw])
+                      lines.append(f"| {v['column']} | {v['check']} | {v['n_failed']} | {samples} |")
+              else:
+                  lines.append('All column checks passed.')
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_schema_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      result_json: validate_schema
+    out: n_violations
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_violations'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_violations')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: validate_schema
+    out: n_rows
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_rows'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_rows')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_violations:
+    generate: |-
+      You are a data quality analyst. pandera just validated an employee payroll DataFrame.
+
+      SCHEMA REPORT:
+      {{in_schema_report}}
+
+      Explain the violations in plain English (≤120 words):
+      1. What specific data errors were found?
+      2. What is the likely business cause of each error type?
+      3. Which violation is highest priority to fix and why?
+      4. What data pipeline fix would prevent this class of errors in future ingestion?
+    in:
+      schema_report: format_schema_report
+    out: explanation
+    function: explain_violations_prompt
+    params:
+    - schema_report
+    arguments:
+    - '@schema_report'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      schema_report: format_schema_report
+      explanation: explain_violations
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@schema_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(schema_report: str, explanation: str) -> str:
+          return f'=== pandera Schema Validator (r104) | solver=ON ===\n\n{schema_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(schema_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - schema_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

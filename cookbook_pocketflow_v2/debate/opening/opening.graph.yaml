@@ -1,0 +1,60 @@
+version: 1.0-graph
+workflow:
+  name: opening
+  inputs:
+  - name: claim
+    type: TEXT
+  outputs:
+  - name: argument_for
+    type: TEXT
+  - name: argument_against
+    type: TEXT
+steps:
+- fork:
+    fork:
+    - branch_1
+    - branch_2
+    out: []
+- argue_for:
+    generate: |-
+      You are Advocate A, a skilled debater. Argue strongly IN FAVOR of the following claim.
+
+      Claim: {{in_claim}}
+
+      Present 3-5 compelling arguments supporting this claim. Be persuasive, logical, and cite evidence where possible.
+      Label your response: ARGUMENT FOR THE CLAIM
+    in:
+      claim: $in.claim
+    out: argument_for
+    on: fork
+    function: argue_for
+    params:
+    - claim
+    arguments:
+    - '@claim'
+- argue_against:
+    generate: |-
+      You are Advocate B, a skilled debater. Argue strongly AGAINST the following claim.
+
+      Claim: {{in_claim}}
+
+      Present 3-5 compelling counter-arguments against this claim. Be persuasive, logical, and cite evidence where possible.
+      Label your response: ARGUMENT AGAINST THE CLAIM
+    in:
+      claim: $in.claim
+    out: argument_against
+    on: fork.branch_2
+    function: argue_against
+    params:
+    - claim
+    arguments:
+    - '@claim'
+- join:
+    join:
+    - argue_for
+    - argue_against
+    out: []
+- wf_exit:
+    output:
+      argument_for: argue_for
+      argument_against: argue_against

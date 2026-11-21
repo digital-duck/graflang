@@ -1,0 +1,133 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+steps:
+- get_default_problem:
+    node: SOLVE
+    out: problem_json
+    tool: get_default_problem
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      import math
+
+      def _ltv_objective(price: float, discount_pct: float, trial_days: int) -> float:
+          """Simulate customer lifetime value.
+
+          This is a non-convex, non-analytic function with multiple local optima.
+          Represents a simplified churn + conversion model — no gradient available.
+          """
+          trial_factor = 1.0 - math.exp(-trial_days / 10.0)
+          price_factor = math.exp(-0.015 * (price - 30))
+          conversion = 0.35 * trial_factor * price_factor
+          conversion = max(0.01, min(0.7, conversion))
+          monthly_revenue = price * (1 - discount_pct / 100) * (1 - 0.08 * (discount_pct > 20))
+          monthly_churn = 0.04 + 0.003 * max(0, price - 50) + 0.002 * max(0, discount_pct - 25)
+          monthly_churn = min(monthly_churn, 0.25)
+          ltv = conversion * (monthly_revenue / monthly_churn) * 0.85
+          return round(ltv, 2)
+
+      _DEFAULT_STRATEGY_PROBLEM = {'problem_name': 'SaaS Pricing Strategy Optimization', 'description': 'Find the optimal combination of monthly_price ($30–$120), annual_discount_pct (0%–40%), and trial_days (3–30) to maximize customer lifetime value (LTV). The LTV model is a black box: it depends on a churn model and conversion funnel with no closed-form gradient.', 'parameters': [{'name': 'monthly_price', 'type': 'float', 'low': 30, 'high': 120}, {'name': 'annual_discount_pct', 'type': 'float', 'low': 0, 'high': 40}, {'name': 'trial_days', 'type': 'int', 'low': 3, 'high': 30}], 'objective': 'maximize LTV (customer lifetime value in $)', 'n_trials': 50, 'naive_baseline': {'monthly_price': 50, 'annual_discount_pct': 20, 'trial_days': 14, 'ltv': None}}
+
+      def get_default_problem() -> str:
+          """Return default pricing strategy optimization problem JSON."""
+          p = dict(_DEFAULT_STRATEGY_PROBLEM)
+          nb = dict(p['naive_baseline'])
+          nb['ltv'] = _ltv_objective(nb['monthly_price'], nb['annual_discount_pct'], nb['trial_days'])
+          p['naive_baseline'] = nb
+          return json.dumps(p)
+      _spl_result = get_default_problem()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      problem_json: get_default_problem
+    out: problem_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(problem_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      problem_json: get_default_problem
+      problem_description: json_get

@@ -1,0 +1,70 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: schema_json
+    type: TEXT
+steps:
+- get_default_schema:
+    node: SOLVE
+    out: schema_json
+    tool: get_default_schema
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_PAYROLL_SCHEMA = {'schema_name': 'EmployeePayroll_v1', 'columns': [{'name': 'employee_id', 'dtype': 'int64', 'nullable': False, 'unique': True, 'checks': [{'type': 'gt', 'value': 999}]}, {'name': 'name', 'dtype': 'object', 'nullable': False, 'unique': False, 'checks': []}, {'name': 'department', 'dtype': 'object', 'nullable': False, 'unique': False, 'checks': [{'type': 'isin', 'value': ['Engineering', 'Sales', 'HR', 'Finance', 'Operations']}]}, {'name': 'salary', 'dtype': 'float64', 'nullable': False, 'unique': False, 'checks': [{'type': 'gt', 'value': 0}, {'type': 'lt', 'value': 500000}]}, {'name': 'hire_year', 'dtype': 'int64', 'nullable': False, 'unique': False, 'checks': [{'type': 'ge', 'value': 2000}, {'type': 'le', 'value': 2026}]}]}
+
+      def get_default_schema() -> str:
+          """Return the default payroll schema JSON."""
+          return json.dumps(_DEFAULT_PAYROLL_SCHEMA)
+      _spl_result = get_default_schema()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      schema_json: get_default_schema

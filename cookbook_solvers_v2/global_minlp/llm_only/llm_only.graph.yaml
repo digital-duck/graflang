@@ -1,0 +1,54 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- reactor_design:
+    generate: |-
+      You are a chemical process engineer advising on reactor design.
+
+      OPTIMIZATION PROBLEM:
+      {{in_problem_description}}
+
+      Without running any optimization algorithm:
+      1. Should the catalyst be used? Why or why not (consider yield boost vs cost)?
+      2. What temperature would you recommend (300–750 K)? Consider the Arrhenius tradeoff:
+         higher T increases reaction rate but also drives competing side reactions.
+      3. What concentration would you choose (0.1–2.0 mol/L)?
+      4. Estimate the net yield (reaction yield minus energy and catalyst cost) you expect.
+      5. What makes this problem hard for local optimization methods?
+
+      Be specific with parameter values and reasoning.
+    in:
+      problem_description: $in.problem_description
+    out: llm_guess
+    function: reactor_design_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_guess: reactor_design
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_guess'
+    code: |
+      def format_report_solver_off(llm_guess: str) -> str:
+          return f'=== Global MINLP — Reactor Optimization (r122) | solver=OFF ===\n\n── LLM Chemical Engineering Intuition ──────────────────────\n{llm_guess}\n\nNote: LLM reasoning cannot certify global optimality on non-convex surfaces.\nRun --param use_solver=true for Couenne/Bonmin global certification.'
+      _spl_result = format_report_solver_off(llm_guess)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_guess
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

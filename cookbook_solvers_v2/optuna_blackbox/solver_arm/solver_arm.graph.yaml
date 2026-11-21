@@ -1,0 +1,273 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- run_optuna_study:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+    out: result_json
+    tool: run_optuna_study
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      import math
+
+      def _ltv_objective(price: float, discount_pct: float, trial_days: int) -> float:
+          """Simulate customer lifetime value.
+
+          This is a non-convex, non-analytic function with multiple local optima.
+          Represents a simplified churn + conversion model — no gradient available.
+          """
+          trial_factor = 1.0 - math.exp(-trial_days / 10.0)
+          price_factor = math.exp(-0.015 * (price - 30))
+          conversion = 0.35 * trial_factor * price_factor
+          conversion = max(0.01, min(0.7, conversion))
+          monthly_revenue = price * (1 - discount_pct / 100) * (1 - 0.08 * (discount_pct > 20))
+          monthly_churn = 0.04 + 0.003 * max(0, price - 50) + 0.002 * max(0, discount_pct - 25)
+          monthly_churn = min(monthly_churn, 0.25)
+          ltv = conversion * (monthly_revenue / monthly_churn) * 0.85
+          return round(ltv, 2)
+
+      def run_optuna_study(problem_json: str) -> str:
+          """Run an Optuna TPE study to find optimal strategy parameters.
+
+          Returns:
+            {"problem_name": str, "best_params": {...}, "best_value": float,
+             "naive_value": float, "improvement_pct": float, "n_trials": int,
+             "top_trials": [{params, value}], "status": "OK"|"ERROR"}
+          """
+          try:
+              import optuna
+              optuna.logging.set_verbosity(optuna.logging.WARNING)
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'optuna not installed — run: pip install optuna'})
+          try:
+              problem = json.loads(problem_json)
+              n_trials = problem.get('n_trials', 50)
+              nb = problem['naive_baseline']
+              naive_ltv = nb.get('ltv') or _ltv_objective(nb['monthly_price'], nb['annual_discount_pct'], nb['trial_days'])
+              param_defs = {p['name']: p for p in problem['parameters']}
+
+              def objective(trial):
+                  price = trial.suggest_float('monthly_price', param_defs['monthly_price']['low'], param_defs['monthly_price']['high'])
+                  discount = trial.suggest_float('annual_discount_pct', param_defs['annual_discount_pct']['low'], param_defs['annual_discount_pct']['high'])
+                  trial_d = trial.suggest_int('trial_days', param_defs['trial_days']['low'], param_defs['trial_days']['high'])
+                  return _ltv_objective(price, discount, trial_d)
+              study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+              study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+              best = study.best_trial
+              improvement = round((best.value - naive_ltv) / naive_ltv * 100, 1)
+              top5 = sorted(study.trials, key=lambda t: t.value or 0, reverse=True)[:5]
+              top_trials = [{'params': t.params, 'ltv': round(t.value or 0, 2)} for t in top5]
+              return json.dumps({'problem_name': problem.get('problem_name', 'Problem'), 'best_params': best.params, 'best_value': round(best.value, 2), 'naive_params': {'monthly_price': nb['monthly_price'], 'annual_discount_pct': nb['annual_discount_pct'], 'trial_days': nb['trial_days']}, 'naive_value': round(naive_ltv, 2), 'improvement_pct': improvement, 'n_trials': n_trials, 'top_trials': top_trials, 'status': 'OK'})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = run_optuna_study(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- optimization_improved:
+    node: SOLVE
+    in:
+      result_json: run_optuna_study
+    out: tool_5
+    tool: optimization_improved
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def optimization_improved(result_json: str) -> bool:
+          """ASSERT gate: Optuna found a result better than the naive baseline."""
+          try:
+              data = json.loads(result_json)
+              return data.get('status') == 'OK' and data.get('improvement_pct', 0) > 0
+          except Exception:
+              return False
+      _spl_result = optimization_improved(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_optimization_improved:
+    assert: '@in_tool_5'
+    in:
+      result_json: run_optuna_study
+      tool_5: optimization_improved
+    out: []
+- format_optuna_report:
+    node: SOLVE
+    in:
+      result_json: run_optuna_study
+    out: optuna_report
+    on:
+    - assert_optimization_improved
+    - assert_optimization_improved.fail
+    tool: format_optuna_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_optuna_report(result_json: str) -> str:
+          """Markdown report of Optuna study results."""
+          try:
+              data = json.loads(result_json)
+              bp = data.get('best_params', {})
+              np_ = data.get('naive_params', {})
+              lines = [f"## Optuna Black-Box Optimization — {data.get('problem_name', 'Problem')}", '', f"**Trials:** {data.get('n_trials', '?')}  ", f"**Best LTV:** ${data.get('best_value', '?')}/customer  ", f"**Naive LTV:** ${data.get('naive_value', '?')}/customer  ", f"**Improvement:** +{data.get('improvement_pct', '?')}%", '', '| Parameter | Naive (LLM guess) | Optuna Best |', '|---|---|---|', f"| monthly_price | ${np_.get('monthly_price', '?')} | ${round(bp.get('monthly_price', 0), 1)} |", f"| annual_discount_pct | {np_.get('annual_discount_pct', '?')}% | {round(bp.get('annual_discount_pct', 0), 1)}% |", f"| trial_days | {np_.get('trial_days', '?')} days | {bp.get('trial_days', '?')} days |", '', '### Top 5 Trials', '', '| Rank | Price | Discount | Trial Days | LTV |', '|---|---|---|---|---|']
+              for i, t in enumerate(data.get('top_trials', []), 1):
+                  p = t['params']
+                  lines.append(f"| {i} | ${round(p.get('monthly_price', 0), 1)} | {round(p.get('annual_discount_pct', 0), 1)}% | {p.get('trial_days', '?')} days | ${t['ltv']} |")
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_optuna_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: run_optuna_study
+    out: improvement
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'improvement_pct'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'improvement_pct')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      result_json: run_optuna_study
+    out: best_ltv
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'best_value'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'best_value')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_optuna_result:
+    generate: |-
+      You are a growth analytics consultant. Optuna just completed a 50-trial TPE optimization.
+
+      PROBLEM:
+      {{in_problem_description}}
+
+      OPTUNA RESULT:
+      {{in_optuna_report}}
+
+      Explain (≤150 words):
+      1. What did Optuna find and how does it compare to the naive guess?
+      2. Why is price lower in the optimal solution than the naive guess? (hint: conversion)
+      3. Why is trial shorter in the optimal — doesn't longer trial hurt conversion?
+      4. What does "non-convex objective" mean here — why can't gradient descent find this?
+      5. In what business situations would you use Optuna vs an analytical pricing model?
+    in:
+      optuna_report: format_optuna_report
+      problem_description: $in.problem_description
+    out: explanation
+    function: explain_optuna_result_prompt
+    params:
+    - optuna_report
+    - problem_description
+    arguments:
+    - '@optuna_report'
+    - '@problem_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      optuna_report: format_optuna_report
+      explanation: explain_optuna_result
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@optuna_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(optuna_report: str, explanation: str) -> str:
+          return f'=== Optuna Black-Box Optimization (r112) | solver=ON ===\n\n{optuna_report}\n\n── Analytics Explanation ───────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(optuna_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - optuna_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

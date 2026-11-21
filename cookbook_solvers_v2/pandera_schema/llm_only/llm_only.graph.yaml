@@ -1,0 +1,59 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: schema_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- describe_schema:
+    generate: |-
+      You are a data engineer reviewing an employee payroll dataset.
+
+      DATASET DESCRIPTION:
+      {{in_schema_description}}
+
+      Expected schema for the payroll DataFrame:
+      - employee_id: integer, unique, >= 1000
+      - name: string, not null
+      - department: one of [Engineering, Sales, HR, Finance, Operations]
+      - salary: float, > 0, < $500,000
+      - hire_year: integer, between 2000 and 2026
+
+      Task:
+      1. Which columns are most likely to have quality issues, and why?
+      2. Give 3 example records that would PASS this schema.
+      3. Give 3 example records that would FAIL this schema (be specific about the violation).
+      4. What downstream analysis would break if each violation type were left uncorrected?
+
+      Be specific. Do not run any code — reason from the schema definition.
+    in:
+      schema_description: $in.schema_description
+    out: llm_analysis
+    function: describe_schema_prompt
+    params:
+    - schema_description
+    arguments:
+    - '@schema_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_analysis: describe_schema
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_analysis'
+    code: |
+      def format_report_solver_off(llm_analysis: str) -> str:
+          return f'=== pandera Schema Validator (r104) | solver=OFF ===\n\n── LLM Schema Analysis ─────────────────────────────────────\n{llm_analysis}\n\nNote: LLM describes expected violations. Run --param use_solver=true\nto validate all rows with pandera.'
+      _spl_result = format_report_solver_off(llm_analysis)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_analysis
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

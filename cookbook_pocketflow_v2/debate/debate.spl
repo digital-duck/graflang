@@ -1,0 +1,139 @@
+CREATE FUNCTION argue_for(claim TEXT)
+RETURNS TEXT AS $$
+You are Advocate A, a skilled debater. Argue strongly IN FAVOR of the following claim.
+
+Claim: {claim}
+
+Present 3-5 compelling arguments supporting this claim. Be persuasive, logical, and cite evidence where possible.
+Label your response: ARGUMENT FOR THE CLAIM
+$$;
+
+CREATE FUNCTION argue_against(claim TEXT)
+RETURNS TEXT AS $$
+You are Advocate B, a skilled debater. Argue strongly AGAINST the following claim.
+
+Claim: {claim}
+
+Present 3-5 compelling counter-arguments against this claim. Be persuasive, logical, and cite evidence where possible.
+Label your response: ARGUMENT AGAINST THE CLAIM
+$$;
+
+CREATE FUNCTION judge_review(claim TEXT, argument_for TEXT, argument_against TEXT, clarification_context TEXT)
+RETURNS TEXT AS $$
+You are an impartial Judge evaluating a debate. Carefully review both arguments.
+
+Claim under debate: {claim}
+
+ARGUMENT FOR:
+{argument_for}
+
+ARGUMENT AGAINST:
+{argument_against}
+
+Context from prior rounds (empty on first pass): {clarification_context}
+
+Analyze each side''s logical strength, use of evidence, and persuasiveness. Be thorough and impartial.
+$$;
+
+CREATE FUNCTION judge_score(claim TEXT, review TEXT, argument_for TEXT, argument_against TEXT)
+RETURNS TEXT AS $$
+You are a Judge scoring the arguments in a debate.
+
+Claim: {claim}
+
+Your review: {review}
+
+FOR argument: {argument_for}
+
+AGAINST argument: {argument_against}
+
+Score each argument on a scale of 1-10 for logical strength, evidence quality, and persuasiveness (max 30 each).
+Output exactly in this format:
+SCORE_FOR: [score]/30
+SCORE_AGAINST: [score]/30
+WINNER_DETERMINABLE: [YES or NO]
+REASON: [one-sentence explanation]
+$$;
+
+CREATE FUNCTION check_winner(score TEXT)
+RETURNS TEXT AS $$
+Read this debate scoring result and decide if a winner has been clearly determined.
+
+{score}
+
+If WINNER_DETERMINABLE is YES or one side''s score clearly surpasses the other, respond: yes
+If the result is inconclusive or too close to call, respond: no
+Reply with only "yes" or "no" — no other text.
+$$;
+
+CREATE FUNCTION declare_winner(claim TEXT, argument_for TEXT, argument_against TEXT, score TEXT)
+RETURNS TEXT AS $$
+You are the Judge. Declare the final verdict for this debate.
+
+Claim debated: {claim}
+
+ARGUMENT FOR:
+{argument_for}
+
+ARGUMENT AGAINST:
+{argument_against}
+
+Final scores: {score}
+
+Announce the winner (FOR or AGAINST), highlight the decisive arguments that swung the verdict, and deliver a clear final verdict statement.
+$$;
+
+CREATE FUNCTION request_clarification(claim TEXT, argument_for TEXT, argument_against TEXT, review TEXT, score TEXT)
+RETURNS TEXT AS $$
+You are a Judge who cannot yet determine a clear winner in this debate. Identify what is still unclear.
+
+Claim: {claim}
+
+FOR argument: {argument_for}
+
+AGAINST argument: {argument_against}
+
+Your review: {review}
+
+Scoring attempt: {score}
+
+Pinpoint the specific contested points, unsubstantiated claims, or missing evidence that prevent a verdict.
+Describe exactly what clarification or further argumentation would allow you to reach a decision.
+This will be passed as context into the next review round.
+$$;
+
+WORKFLOW debate
+  INPUT @claim TEXT := "Artificial intelligence will create more jobs than it eliminates"
+  INPUT @max_iterations INTEGER := 5
+  OUTPUT @result TEXT
+DO
+  CALL PARALLEL
+    argue_for(@claim) INTO @argument_for,
+    argue_against(@claim) INTO @argument_against
+  END;
+
+  @clarification_context := "";
+  @score := "";
+  @i := 0;
+  @result := "";
+
+  WHILE @i < @max_iterations DO
+    GENERATE judge_review(@claim, @argument_for, @argument_against, @clarification_context) INTO @review;
+    GENERATE judge_score(@claim, @review, @argument_for, @argument_against) INTO @score;
+    GENERATE check_winner(@score) INTO @winner_gate;
+    EVALUATE @winner_gate WHEN contains("yes") THEN
+      GENERATE declare_winner(@claim, @argument_for, @argument_against, @score) INTO @result;
+      @i := @max_iterations;
+    ELSE
+      GENERATE request_clarification(@claim, @argument_for, @argument_against, @review, @score) INTO @clarification_context;
+      @i := @i + 1;
+    END;
+  END;
+
+  CALL isblank(@result) INTO @result_is_blank;
+  EVALUATE @result_is_blank WHEN contains("true") THEN
+    GENERATE declare_winner(@claim, @argument_for, @argument_against, @score) INTO @result;
+  END;
+
+  RETURN @result WITH status = "complete";
+END;

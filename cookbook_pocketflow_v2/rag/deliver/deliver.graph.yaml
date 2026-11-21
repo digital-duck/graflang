@@ -1,0 +1,65 @@
+version: 1.0-graph
+workflow:
+  name: deliver
+  inputs:
+  - name: subject
+    type: TEXT
+  - name: generated_answer
+    type: TEXT
+  outputs: []
+steps:
+- gate:
+    evaluate: contains(@in_subject, '.')
+    in:
+      subject: $in.subject
+    out: []
+    branch: 1
+- write_file:
+    node: SOLVE
+    in:
+      output_path: $in.subject
+      generated_answer: $in.generated_answer
+    out: write_result
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@output_path'
+    - '@generated_answer'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip()).expanduser()
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(output_path, generated_answer)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- set_write_result:
+    node: CONTEXT
+    out: write_result
+    on: gate.fail
+    action: set
+    expression: "'skipped'"
+- wf_exit:
+    output: {}
+    on:
+    - set_write_result
+    - write_file

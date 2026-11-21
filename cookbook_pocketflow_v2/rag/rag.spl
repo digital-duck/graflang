@@ -1,0 +1,35 @@
+IMPORT 'tools.spl';
+
+CREATE FUNCTION generate_answer(query, retrieved_document)
+RETURNS TEXT AS $$
+You are a helpful assistant. Use the retrieved document as context to answer the user""s query.
+
+Query: {query}
+
+Retrieved Document Context:
+{retrieved_document}
+
+Provide a clear, accurate, and comprehensive answer based solely on the context above.
+If the context doesn""t contain relevant information, acknowledge this clearly rather than guessing.
+$$;
+
+WORKFLOW RAGPipeline
+  INPUT @documents LIST := ["cookbook-pocketflow/005_rag/data/doc1.txt", "cookbook-pocketflow/005_rag/data/doc2.txt", "cookbook-pocketflow/005_rag/data/doc3.txt"]
+  INPUT @query TEXT := "What is retrieval-augmented generation and when should I use it?"
+  INPUT @output_path TEXT := ""
+  OUTPUT @generated_answer TEXT
+DO
+  CALL chunk_documents(@documents) INTO @texts;
+  CALL embed_documents(@texts) INTO @embeddings;
+  CALL create_faiss_index(@embeddings) INTO @index;
+  CALL embed_query(@query) INTO @query_embedding;
+  CALL retrieve_document(@index, @query_embedding, @texts) INTO @retrieved_document;
+  GENERATE generate_answer(@query, @retrieved_document) INTO @generated_answer;
+  EVALUATE @output_path
+    WHEN contains(".") THEN
+      CALL write_file(@output_path, @generated_answer) INTO @write_result;
+    ELSE
+      @write_result := "skipped";
+  END;
+  RETURN @generated_answer WITH status = "complete";
+END;

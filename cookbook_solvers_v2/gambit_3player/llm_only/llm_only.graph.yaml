@@ -1,0 +1,52 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: game_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- reason_3player:
+    generate: |-
+      You are a business strategy consultant advising three competing SaaS companies.
+
+      SITUATION:
+      {{in_game_description}}
+
+      Without computing Nash equilibria, reason through this 3-way competitive situation:
+      1. What pricing tier should each firm choose, and why?
+      2. Is there a stable outcome where no firm regrets their choice?
+      3. What is the "cooperative" optimum — and why is it hard to maintain with 3 competitors?
+      4. How does having a third competitor change the dynamics vs a head-to-head duopoly?
+
+      Give concrete recommendations. Do not use game theory formulas — reason from business intuition.
+    in:
+      game_description: $in.game_description
+    out: llm_strategy
+    function: reason_3player_prompt
+    params:
+    - game_description
+    arguments:
+    - '@game_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_strategy: reason_3player
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_strategy'
+    code: |
+      def format_report_solver_off(llm_strategy: str) -> str:
+          return f'=== Gambit 3-Player Game Theory (r115) | solver=OFF ===\n\n── LLM Strategic Reasoning ─────────────────────────────────\n{llm_strategy}\n\nNote: LLM reasons from intuition. Run --param use_solver=true to find\nNash equilibria (Standard dominates regardless of rivals — 3-player PD).'
+      _spl_result = format_report_solver_off(llm_strategy)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_strategy
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

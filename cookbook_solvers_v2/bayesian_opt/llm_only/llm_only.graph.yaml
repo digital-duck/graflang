@@ -1,0 +1,58 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- guess_page_design:
+    generate: |-
+      You are a conversion rate optimization (CRO) expert helping a product team.
+
+      OPTIMIZATION PROBLEM:
+      {{in_problem_description}}
+
+      The team can tune three continuous design parameters (each on a 0–1 scale):
+      - headline_score: 0 = generic headline, 1 = personalized/dynamic headline
+      - layout_score: 0 = cluttered, 1 = clean minimalist layout
+      - cta_placement: 0 = CTA at bottom, 1 = CTA above the fold
+
+      They have 25 experiment slots. Their intuition says:
+      "Start with a clean layout, personalized headline, and CTA above the fold."
+
+      Without running experiments:
+      1. What specific parameter values would you test first?
+      2. How would you allocate 25 experiment slots across the parameter space?
+      3. What is your predicted optimal configuration?
+      4. What conversion rate do you expect at that configuration?
+    in:
+      problem_description: $in.problem_description
+    out: llm_guess
+    function: guess_page_design_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_guess: guess_page_design
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_guess'
+    code: |
+      def format_report_solver_off(llm_guess: str) -> str:
+          return f'=== Bayesian Optimization (r113) | solver=OFF ===\n\n── LLM CRO Heuristics ──────────────────────────────────────\n{llm_guess}\n\nNote: LLM guesses without modeling uncertainty. Run --param use_solver=true\nto use Bayesian GP+EI to find the optimum efficiently.'
+      _spl_result = format_report_solver_off(llm_guess)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_guess
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

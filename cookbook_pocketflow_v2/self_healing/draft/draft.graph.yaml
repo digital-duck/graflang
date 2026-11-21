@@ -1,0 +1,60 @@
+version: 1.0-graph
+workflow:
+  name: draft
+  inputs:
+  - name: description
+    type: TEXT
+  outputs:
+  - name: mermaid_code
+    type: TEXT
+  - name: i
+    type: TEXT
+  - name: is_valid
+    type: TEXT
+  - name: errors
+    type: TEXT
+steps:
+- set_i:
+    node: CONTEXT
+    out: i
+    action: set
+    expression: '0'
+- set_is_valid:
+    node: CONTEXT
+    out: is_valid
+    action: set
+    expression: "'false'"
+- set_errors:
+    node: CONTEXT
+    out: errors
+    action: set
+    expression: "''"
+- set_mermaid_code:
+    node: CONTEXT
+    out: mermaid_code
+    action: set
+    expression: "''"
+- generate_mermaid:
+    generate: |-
+      You are an expert in Mermaid diagram syntax.
+      Given the following plain-language description, generate valid Mermaid diagram code.
+
+      Description: {{in_description}}
+
+      Return ONLY the raw Mermaid code, starting with the diagram type declaration
+      (e.g., flowchart TD, sequenceDiagram, classDiagram, erDiagram).
+      Do not include markdown code fences or any explanation.
+    in:
+      description: $in.description
+    out: mermaid_code
+    function: generate_mermaid
+    params:
+    - description
+    arguments:
+    - '@description'
+- wf_exit:
+    output:
+      mermaid_code: generate_mermaid
+      i: set_i
+      is_valid: set_is_valid
+      errors: set_errors

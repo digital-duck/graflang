@@ -1,0 +1,176 @@
+version: 1.0-graph
+workflow:
+  name: tally
+  inputs:
+  - name: collected
+    type: TEXT
+  outputs:
+  - name: answer
+    type: TEXT
+  - name: json_get_3_answer
+    type: TEXT
+steps:
+- tally_votes:
+    node: SOLVE
+    in:
+      collected: $in.collected
+    out: tally
+    tool: tally_votes
+    backend: kernel
+    arguments:
+    - '@collected'
+    code: |
+      import json
+      from collections import Counter
+
+      def tally_votes(answers: str) -> str:
+          try:
+              items = [a.strip() for a in answers.split("\n") if a.strip()]
+              if not items:
+                  return json.dumps({"winner": "", "first_candidate": "", "consensus": "no"})
+              counts = Counter(items)
+              most_common = counts.most_common()
+              top_count = most_common[0][1]
+              top_candidates = [v for v, c in most_common if c == top_count]
+              consensus = "yes" if len(top_candidates) == 1 else "no"
+              return json.dumps({
+                  "winner": most_common[0][0],
+                  "first_candidate": top_candidates[0],
+                  "consensus": consensus
+              })
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = tally_votes(collected)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - answers
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      tally: tally_votes
+    out: consensus
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tally'
+    - "'consensus'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'consensus')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- gate:
+    evaluate: contains(@in_subject, 'yes')
+    in:
+      subject: json_get
+    out: []
+    branch: 1
+- json_get_2:
+    node: SOLVE
+    in:
+      tally: tally_votes
+    out: answer
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tally'
+    - "'winner'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'winner')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      tally: tally_votes
+    out: answer
+    on: gate.fail
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@tally'
+    - "'first_candidate'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(tally, 'first_candidate')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      answer: json_get_2
+      json_get_3_answer: json_get_3
+    on:
+    - json_get_2
+    - json_get_3

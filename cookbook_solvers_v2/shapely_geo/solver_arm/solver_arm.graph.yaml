@@ -1,0 +1,273 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: zones_json
+    type: TEXT
+  - name: zones_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- analyze_coverage:
+    node: SOLVE
+    in:
+      zones_json: $in.zones_json
+    out: result_json
+    tool: analyze_coverage
+    backend: kernel
+    arguments:
+    - '@zones_json'
+    code: |
+      import json
+
+      def analyze_coverage(zones_json: str) -> str:
+          """Compute coverage analysis using Shapely.
+
+          Returns:
+            {"city_name": str, "city_area": float, "total_covered_area": float,
+             "coverage_ratio": float, "overlaps": [...], "gaps": [...],
+             "assignments": [{customer_id, zone_name}], "status": "OK"}
+          """
+          try:
+              from shapely.geometry import Polygon, Point
+              from shapely.ops import unary_union
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'shapely not installed — run: pip install shapely'})
+          try:
+              data = json.loads(zones_json)
+              city = Polygon(data['city_boundary'])
+              zones = {z['name']: Polygon(z['polygon']) for z in data['zones']}
+              zone_list = list(zones.items())
+              overlaps = []
+              for i in range(len(zone_list)):
+                  for j in range(i + 1, len(zone_list)):
+                      n1, p1 = zone_list[i]
+                      n2, p2 = zone_list[j]
+                      inter = p1.intersection(p2)
+                      if not inter.is_empty and inter.area > 1e-09:
+                          overlaps.append({'zone_a': n1, 'zone_b': n2, 'overlap_area': round(inter.area, 4), 'overlap_pct_a': round(inter.area / p1.area * 100, 1), 'conflict': 'routing conflict — two drivers serve same area'})
+              covered = unary_union(list(zones.values())).intersection(city)
+              gap = city.difference(covered)
+              gaps = []
+              if not gap.is_empty and gap.area > 1e-09:
+                  gaps.append({'area': round(gap.area, 4), 'pct_city': round(gap.area / city.area * 100, 1), 'description': 'Area within city boundary with no delivery zone assigned'})
+              assignments = []
+              for cust in data.get('customers', []):
+                  pt = Point(cust['x'], cust['y'])
+                  assigned = []
+                  for name, poly in zones.items():
+                      if poly.contains(pt) or poly.touches(pt):
+                          assigned.append(name)
+                  assignments.append({'customer_id': cust['id'], 'customer_name': cust.get('name', cust['id']), 'x': cust['x'], 'y': cust['y'], 'zones': assigned, 'in_city': city.contains(pt), 'conflict': len(assigned) > 1, 'unassigned': len(assigned) == 0})
+              coverage_ratio = round(covered.area / city.area, 4) if city.area > 0 else 0.0
+              return json.dumps({'city_name': data.get('city_name', 'City'), 'city_area': round(city.area, 4), 'total_covered_area': round(covered.area, 4), 'coverage_ratio': coverage_ratio, 'n_overlaps': len(overlaps), 'n_gaps': len(gaps), 'overlaps': overlaps, 'gaps': gaps, 'assignments': assignments, 'status': 'OK'})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = analyze_coverage(zones_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - zones_json
+    tool_returns: TEXT
+- coverage_is_valid:
+    node: SOLVE
+    in:
+      result_json: analyze_coverage
+    out: tool_4
+    tool: coverage_is_valid
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def coverage_is_valid(result_json: str) -> bool:
+          """ASSERT gate: analysis ran successfully."""
+          try:
+              return json.loads(result_json).get('status') == 'OK'
+          except Exception:
+              return False
+      _spl_result = coverage_is_valid(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_coverage_is_valid:
+    assert: '@in_tool_4'
+    in:
+      result_json: analyze_coverage
+      tool_4: coverage_is_valid
+    out: []
+- format_coverage_report:
+    node: SOLVE
+    in:
+      result_json: analyze_coverage
+    out: coverage_report
+    on:
+    - assert_coverage_is_valid
+    - assert_coverage_is_valid.fail
+    tool: format_coverage_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def format_coverage_report(result_json: str) -> str:
+          """Markdown report of coverage analysis."""
+          try:
+              data = json.loads(result_json)
+              lines = [f"## Geospatial Coverage Report — {data.get('city_name', 'City')}", '', f"**City area:** {data.get('city_area', '?')} km²  ", f"**Covered area:** {data.get('total_covered_area', '?')} km²  ", f"**Coverage ratio:** {data.get('coverage_ratio', 0):.1%}  ", f"**Routing conflicts:** {data.get('n_overlaps', 0)}  ", f"**Coverage gaps:** {data.get('n_gaps', 0)}", '']
+              if data.get('overlaps'):
+                  lines += ['### Routing Conflicts (zone overlaps)', '', '| Zone A | Zone B | Overlap Area | % of Zone A |', '|---|---|---|---|']
+                  for ov in data['overlaps']:
+                      lines.append(f"| {ov['zone_a']} | {ov['zone_b']} | {ov['overlap_area']} km² | {ov['overlap_pct_a']}% |")
+                  lines.append('')
+              if data.get('gaps'):
+                  lines += ['### Coverage Gaps', '']
+                  for g in data['gaps']:
+                      lines.append(f"- **{g['area']} km² uncovered** ({g['pct_city']}% of city)")
+                  lines.append('')
+              if data.get('assignments'):
+                  lines += ['### Customer Zone Assignments', '', '| Customer | Location | Assigned Zone(s) | Conflict |', '|---|---|---|---|']
+                  for a in data['assignments']:
+                      zone_str = ', '.join(a['zones']) if a['zones'] else 'UNASSIGNED'
+                      conflict = '⚠ overlap' if a['conflict'] else '✗ unserved' if a['unassigned'] else '✓'
+                      lines.append(f"| {a['customer_name']} | ({a['x']}, {a['y']}) | {zone_str} | {conflict} |")
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_coverage_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      result_json: analyze_coverage
+    out: n_overlaps
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'n_overlaps'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'n_overlaps')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: analyze_coverage
+    out: coverage_ratio
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'coverage_ratio'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'coverage_ratio')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_coverage:
+    generate: |-
+      You are a logistics analyst. Shapely just computed exact delivery zone coverage for Maplewood.
+
+      ZONE DESCRIPTION:
+      {{in_zones_description}}
+
+      SHAPELY RESULTS:
+      {{in_coverage_report}}
+
+      Explain (≤150 words):
+      1. How significant is the Zone A / Zone B overlap? What operational problem does it cause?
+      2. Where is the coverage gap? Which customers are affected?
+      3. What is the simplest zone boundary adjustment to eliminate the overlap and gap?
+      4. What would an LLM estimate have gotten wrong about the gap size without exact geometry?
+    in:
+      coverage_report: format_coverage_report
+      zones_description: $in.zones_description
+    out: explanation
+    function: explain_coverage_prompt
+    params:
+    - coverage_report
+    - zones_description
+    arguments:
+    - '@coverage_report'
+    - '@zones_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      coverage_report: format_coverage_report
+      explanation: explain_coverage
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@coverage_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(coverage_report: str, explanation: str) -> str:
+          return f'=== Shapely Coverage Analyzer (r106) | solver=ON ===\n\n{coverage_report}\n\n── Logistics Explanation ───────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(coverage_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - coverage_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

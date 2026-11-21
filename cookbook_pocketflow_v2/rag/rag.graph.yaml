@@ -1,0 +1,69 @@
+version: 1.0-graph
+workflow:
+  name: RAGPipeline
+  inputs:
+  - name: documents
+    type: LIST
+    default: |-
+      ['cookbook_pocketflow/rag/data/doc1.txt', 'cookbook_pocketflow/rag/data/doc2.txt', 'cookbook_pocketflow/rag/data/doc3.txt']
+  - name: query
+    type: TEXT
+    default: What is retrieval-augmented generation and when should I use it?
+  - name: output_path
+    type: TEXT
+    default: ''
+  outputs:
+  - name: generated_answer
+    type: TEXT
+resources:
+  parts:
+    index: ./index/index.graph.yaml
+    retrieve: ./retrieve/retrieve.graph.yaml
+    deliver: ./deliver/deliver.graph.yaml
+steps:
+- index:
+    use: parts.index
+    in:
+      documents: $in.documents
+    out:
+    - index
+    - texts
+- retrieve:
+    use: parts.retrieve
+    in:
+      query: $in.query
+      index: index
+      texts: index.texts
+    out: retrieved_document
+- generate_answer:
+    generate: |-
+      You are a helpful assistant. Use the retrieved document as context to answer the user""s query.
+
+      Query: {{in_query}}
+
+      Retrieved Document Context:
+      {{in_retrieved_document}}
+
+      Provide a clear, accurate, and comprehensive answer based solely on the context above.
+      If the context doesn""t contain relevant information, acknowledge this clearly rather than guessing.
+    in:
+      query: $in.query
+      retrieved_document: retrieve
+    out: generated_answer
+    function: generate_answer
+    params:
+    - query
+    - retrieved_document
+    arguments:
+    - |-
+      @query
+    - |-
+      @retrieved_document
+- deliver:
+    use: parts.deliver
+    in:
+      subject: $in.output_path
+      generated_answer: generate_answer
+    out: []
+- wf_exit:
+    output: generate_answer

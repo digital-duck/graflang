@@ -1,0 +1,79 @@
+version: 1.0-graph
+workflow:
+  name: vote
+  inputs:
+  - name: question
+    type: TEXT
+  outputs:
+  - name: collected
+    type: TEXT
+steps:
+- fork:
+    fork:
+    - branch_1
+    - branch_2
+    - branch_3
+    out: []
+- attempt_reasoning:
+    generate: |-
+      Answer the following reasoning question carefully and concisely.
+      State only your final answer — no explanation or preamble.
+
+      Question: {{in_question}}
+    in:
+      question: $in.question
+    out: ans1
+    on: fork
+    function: attempt_reasoning
+    params:
+    - question
+    arguments:
+    - '@question'
+- attempt_reasoning_2:
+    generate: |-
+      Answer the following reasoning question carefully and concisely.
+      State only your final answer — no explanation or preamble.
+
+      Question: {{in_question}}
+    in:
+      question: $in.question
+    out: ans2
+    on: fork.branch_2
+    function: attempt_reasoning
+    params:
+    - question
+    arguments:
+    - '@question'
+- attempt_reasoning_3:
+    generate: |-
+      Answer the following reasoning question carefully and concisely.
+      State only your final answer — no explanation or preamble.
+
+      Question: {{in_question}}
+    in:
+      question: $in.question
+    out: ans3
+    on: fork.branch_3
+    function: attempt_reasoning
+    params:
+    - question
+    arguments:
+    - '@question'
+- join:
+    join:
+    - attempt_reasoning
+    - attempt_reasoning_2
+    - attempt_reasoning_3
+    out: []
+- set_collected:
+    node: CONTEXT
+    in:
+      ans1: attempt_reasoning
+      ans2: attempt_reasoning_2
+      ans3: attempt_reasoning_3
+    out: collected
+    action: set
+    expression: |-
+      @in_ans1 + '\n' + @in_ans2 + '\n' + @in_ans3
+- wf_exit:
+    output: set_collected

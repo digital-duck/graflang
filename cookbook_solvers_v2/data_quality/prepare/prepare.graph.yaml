@@ -1,0 +1,70 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: suite_json
+    type: TEXT
+steps:
+- get_default_suite:
+    node: SOLVE
+    out: suite_json
+    tool: get_default_suite
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_SUITE = {'suite_name': 'SalesTransactions_v1', 'expectations': [{'type': 'expect_column_to_exist', 'column': 'transaction_id'}, {'type': 'expect_column_to_exist', 'column': 'amount'}, {'type': 'expect_column_to_exist', 'column': 'customer_id'}, {'type': 'expect_column_to_exist', 'column': 'region'}, {'type': 'expect_column_values_to_be_unique', 'column': 'transaction_id'}, {'type': 'expect_column_values_to_not_be_null', 'column': 'transaction_id'}, {'type': 'expect_column_values_to_not_be_null', 'column': 'customer_id'}, {'type': 'expect_column_values_to_not_be_null', 'column': 'amount'}, {'type': 'expect_column_values_to_be_between', 'column': 'amount', 'min_value': 0.01, 'max_value': 10000}, {'type': 'expect_column_values_to_be_in_set', 'column': 'region', 'value_set': ['North', 'South', 'East', 'West']}]}
+
+      def get_default_suite() -> str:
+          """Return the default expectation suite JSON."""
+          return json.dumps(_DEFAULT_SUITE)
+      _spl_result = get_default_suite()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      suite_json: get_default_suite

@@ -1,0 +1,31 @@
+version: 1.0-graph
+workflow:
+  name: majority_vote
+  inputs:
+  - name: question
+    type: TEXT
+    default: What is 15% of 240?
+  outputs:
+  - name: answer
+    type: TEXT
+resources:
+  parts:
+    vote: ./vote/vote.graph.yaml
+    tally: ./tally/tally.graph.yaml
+steps:
+- vote:
+    use: parts.vote
+    in:
+      question: $in.question
+    out: collected
+- tally:
+    use: parts.tally
+    in:
+      collected: vote
+    out:
+    - answer
+    - json_get_3_answer
+- wf_exit:
+    output:
+    - tally
+    - tally.json_get_3_answer

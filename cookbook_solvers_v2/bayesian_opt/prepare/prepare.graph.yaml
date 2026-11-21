@@ -1,0 +1,131 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+steps:
+- get_default_problem:
+    node: SOLVE
+    out: problem_json
+    tool: get_default_problem
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      import math
+
+      def _conversion_rate(headline: float, layout: float, cta: float) -> float:
+          """Simulate a web page conversion rate (black box).
+
+          Parameters are on [0, 1] scales:
+            headline: 0=generic, 1=personalized
+            layout:   0=cluttered, 1=clean
+            cta:      0=bottom, 1=above-fold
+
+          The true optimum is near (0.75, 0.85, 0.60) — not at corners or center.
+          The function has a ridge and a local optimum near (0.3, 0.4, 0.8).
+          """
+          main = math.exp(-8 * ((headline - 0.75) ** 2 + (layout - 0.85) ** 2 + (cta - 0.6) ** 2))
+          local = 0.55 * math.exp(-10 * ((headline - 0.3) ** 2 + (layout - 0.4) ** 2 + (cta - 0.8) ** 2))
+          base = 0.05 + 0.12 * headline + 0.08 * layout + 0.06 * cta
+          return round(min(0.35, max(0.02, base + 0.2 * main + 0.12 * local)), 4)
+
+      _DEFAULT_OPT_PROBLEM = {'problem_name': 'Web Page Conversion Rate Optimizer', 'description': 'Maximize web page conversion rate by tuning three design parameters: headline_score (0=generic to 1=personalized), layout_score (0=cluttered to 1=clean), cta_placement (0=bottom to 1=above-fold). Budget: 25 experiment slots. Uniform/random baseline: tests parameters evenly, often wastes budget on losers. Bayesian GP: concentrates trials near the promising region found in early trials.', 'parameters': [{'name': 'headline_score', 'low': 0.0, 'high': 1.0}, {'name': 'layout_score', 'low': 0.0, 'high': 1.0}, {'name': 'cta_placement', 'low': 0.0, 'high': 1.0}], 'n_calls': 25, 'n_random_starts': 5, 'true_optimum': {'headline_score': 0.75, 'layout_score': 0.85, 'cta_placement': 0.6}, 'true_max_rate': None, 'random_baseline': {'n_calls': 25, 'seed': 99}}
+
+      def get_default_problem() -> str:
+          p = dict(_DEFAULT_OPT_PROBLEM)
+          opt = p['true_optimum']
+          p['true_max_rate'] = _conversion_rate(opt['headline_score'], opt['layout_score'], opt['cta_placement'])
+          return json.dumps(p)
+      _spl_result = get_default_problem()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      problem_json: get_default_problem
+    out: problem_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(problem_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      problem_json: get_default_problem
+      problem_description: json_get

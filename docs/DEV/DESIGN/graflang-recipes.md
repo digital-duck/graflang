@@ -116,3 +116,15 @@ passes the checker is used and the objections are an output, `plan_review`); onl
 ## Next candidates (not committed to; say which)
 
 `code_parts` (already uses parts, but the top level is flat), `stock_analysis`, `doc_it`, `recipe_chain`, `pocketflow/*`, `hello_world`, `release_approval` (waits for a person), `guardrail`, `assembler`.
+
+
+## Solver and PocketFlow recipes (`cookbook_solvers_v2/`, `cookbook_pocketflow_v2/`)
+
+Updated 2026-11-21. The lifted recipes of `cookbook_solvers/` and `cookbook_pocketflow/` are ported with `scripts/port_recipe.py` (compact, name every step after its tool or prompt, `graf group` into
+composites, prettify, validate). Status: 12 solver recipes (`pandera_schema`, `data_quality`, `shapely_geo`, `optuna_blackbox`, `bayesian_opt`, `global_minlp`, `insurance_policy_z3`, `prolog_inference`,
+`stackelberg_game`, `openspiel_cfr`, `gambit_3player`, `nash_game_theory`; each: prepare, solver_arm, llm_only) and 4 PocketFlow recipes (`majority_vote`, `debate`, `self_healing`, `rag`), all
+offline-equivalent to their originals on the mock adapter (`tests/test_cookbook_solvers_v2.py`, `tests/test_cookbook_pocketflow_v2.py`). Not run with a real model.
+
+What the port taught us: **`graf compact` could corrupt a long code string.** It wrote long quoted strings folded at the emitter's default width, and a fold could land inside an escape (`\n` read back as
+`\ n`), so the report of `pandera_schema` lost a blank line; the "round trip verified" check compared objects in memory, not the text it wrote. Fixed: no wrapping anywhere (`yamlfmt.WIDTH`) and
+`graf compact` reads its own output back before writing. A step is still best named after what it runs: the lifted ids (`tool_4`) told nothing.

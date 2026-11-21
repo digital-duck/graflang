@@ -1,0 +1,63 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: zones_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- estimate_coverage:
+    generate: |-
+      You are a logistics analyst reviewing delivery zone coverage for Maplewood city.
+
+      CITY AND ZONES:
+      {{in_zones_description}}
+
+      City boundary: 10×8 km rectangle (total area = 80 km²)
+
+      Zone A (North, Alice): rectangle [0,4] to [6,8] — covers the upper-left
+      Zone B (South-West, Bob): rectangle [0,0] to [7,5] — covers the lower-left
+      Zone C (East, Carol): rectangle [6,0] to [10,6] — covers the right side
+
+      Customers:
+      - C001 Main St Bakery at (3, 6)
+      - C002 Elm Ave Market at (3, 2)
+      - C003 Oak Park Cafe at (8, 3)
+      - C004 River View Deli at (9, 7)
+      - C005 NE Corner Shop at (8, 7)
+
+      Without computing exact polygon areas:
+      1. Estimate where Zone A and Zone B overlap (if at all) and the approximate overlap area.
+      2. Is there any part of the city not covered by any zone? Estimate the area.
+      3. Assign each customer to the most likely delivery zone.
+      4. Identify any customers that might be in a conflict area (2 zones) or unserved.
+    in:
+      zones_description: $in.zones_description
+    out: llm_estimate
+    function: estimate_coverage_prompt
+    params:
+    - zones_description
+    arguments:
+    - '@zones_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_estimate: estimate_coverage
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_estimate'
+    code: |
+      def format_report_solver_off(llm_estimate: str) -> str:
+          return f'=== Shapely Coverage Analyzer (r106) | solver=OFF ===\n\n── LLM Coverage Estimate ───────────────────────────────────\n{llm_estimate}\n\nNote: LLM estimates without exact geometry. Run with --param use_solver=true\nto compute exact overlap and gap areas with Shapely.'
+      _spl_result = format_report_solver_off(llm_estimate)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_estimate
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off
