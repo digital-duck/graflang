@@ -88,8 +88,8 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
    through its interface or `inherits`. GraphLang has no user base yet, so there is no migration path and no compatibility flag; the
    cookbook is rewritten (section 10).
 2. (Decided: subfolder, no inline body.) Left to settle: the folder layout (`<recipe>/<name>/<name>.graph.yaml` plus its own prompts).
-3. Do `inherits` keys need a type, and who owns the default?
-4. Where do `triggers` across the interface end up when a body has several entry points?
+3. (Reassessed, see row 13.) `inherits` would be a convenience for a key passed down several levels; it is not needed for isolation. If built: it needs a type and a default owned by the level that declares it.
+4. (Answered by the code.) Every node the part's INPUT node triggers starts when the use is triggered (`parts._expand_use`, `starts`); a part's way out is `complete` plus its declared error exits.
 5. Does a MUTATE inside a body see the level above? Proposed no: it edits its own level (compare gap #32 for LOOP bodies).
 
 6. **Loop-carried state (corrected after measuring).** An earlier version of this note counted 77 "implicit cross-level reads" in LOOP
@@ -129,7 +129,7 @@ tested and finished, not before.
 | 11 | Editor Group: description and exits fields | done | this commit |
 | 11a | Editor Group/Ungroup keep the graph file's comments | open | comments are dropped, as for a source edit |
 | 12 | A grouped part's inputs and outputs keep the types the graph declares (workflow inputs, typed `ports:`, `port_types`); `TEXT` only where nothing is declared | done | this commit |
-| 13 | Scoped context and `inherits` (section 4) | open | |
+| 13 | Scoped context (section 4), reassessed: a part sees only its declared inputs (it cannot read the level above, as `code_parts` notes), a loop body only its `in_*` ports, `state:` and the counter (validate refuses the rest). So isolation already holds. What is left is `inherits`, shorthand for passing one key down several levels | reassessed; `inherits` not built, waiting for a real recipe that needs it | |
 | 14a | The 54 recipes in `cookbook_pocketflow/` and `cookbook_solvers/` that warned on `outputs.from` now use `state:` (only that key line changed in each; all validate, no warnings) | done | this commit |
 | 14 | Cookbook rewrite as layered folders (section 10) | open | |
 | 15 | Recursion (section 7) | open, later | |
