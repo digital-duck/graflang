@@ -1,0 +1,52 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- reason_stochastic:
+    generate: |-
+      You are a supply chain consultant advising a retailer on how much seasonal inventory to order.
+
+      SITUATION:
+      {{in_problem_description}}
+
+      Without solving a mathematical program, reason through the optimal order quantity:
+      1. The expected demand is 0.3×100 + 0.5×200 + 0.2×300 = 190 units. Should you order exactly 190?
+      2. Shortages cost $15/unit, overstock costs $2/unit. How does this asymmetry affect the decision?
+      3. What is the downside risk of ordering too little vs too much?
+      4. Give a concrete order quantity recommendation with your reasoning.
+
+      Think step by step about uncertainty, costs, and risk.
+    in:
+      problem_description: $in.problem_description
+    out: llm_strategy
+    function: reason_stochastic_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_strategy: reason_stochastic
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_strategy'
+    code: |
+      def format_report_solver_off(llm_strategy: str) -> str:
+          return f"=== Two-Stage Stochastic Programming (r117) | solver=OFF ===\n\n── LLM Reasoning Under Uncertainty ─────────────────────────\n{llm_strategy}\n\nNote: LLM applies intuition but typically defaults to ordering the expected\ndemand (Q=190, cost=$1,409). Run --param use_solver=true to see Pyomo's\nstochastic optimum (Q=200, cost=$1,360 — VSS=$49 improvement)."
+      _spl_result = format_report_solver_off(llm_strategy)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_strategy
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

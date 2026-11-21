@@ -1,0 +1,142 @@
+version: 1.0-graph
+workflow:
+  name: sage_solver
+  inputs:
+  - name: problem
+    type: TEXT
+    default: what is the Galois group of x^5 - x - 1 over the rationals?
+  - name: log_dir
+    type: TEXT
+    default: cookbook/75_sage_math/logs-spl
+  outputs:
+  - name: explanation
+    type: TEXT
+resources:
+  parts:
+    setup: ./setup/setup.graph.yaml
+    parse: ./parse/parse.graph.yaml
+    dispatch: ./dispatch/dispatch.graph.yaml
+    explain: ./explain/explain.graph.yaml
+steps:
+- setup:
+    use: parts.setup
+    in:
+      log_dir: $in.log_dir
+    out:
+    - log_file
+    - sage_banner
+- parse:
+    use: parts.parse
+    in:
+      problem: $in.problem
+      log_file: setup
+      sage_banner: setup.sage_banner
+    out:
+    - operation_lc
+    - expression
+- solve_3:
+    node: SOLVE
+    out: _t0
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: str(__import__('time').perf_counter())
+    out_type: TEXT
+- dispatch:
+    use: parts.dispatch
+    in:
+      operation_lc: parse
+      expression: parse.expression
+    out:
+    - sage_result
+    - solve_5_sage_result
+    - solve_6_sage_result
+    - solve_7_sage_result
+    - set_sage_result_sage_result
+- solve_8:
+    node: SOLVE
+    in:
+      _t0: solve_3
+    out: elapsed
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: |-
+      '%.3fs'%(__import__('time').perf_counter()-float(_t0))
+    out_type: TEXT
+- assert_assert_2:
+    assert: len(str(@in_sage_result))>0
+    in:
+      sage_result:
+      - dispatch
+      - dispatch.solve_5_sage_result
+      - dispatch.solve_6_sage_result
+      - dispatch.solve_7_sage_result
+      - dispatch.set_sage_result_sage_result
+    out: []
+- write_file_2:
+    node: SOLVE
+    in:
+      log_file: setup
+      operation_lc: parse
+      sage_result:
+      - dispatch
+      - dispatch.solve_5_sage_result
+      - dispatch.solve_6_sage_result
+      - dispatch.solve_7_sage_result
+      - dispatch.set_sage_result_sage_result
+      elapsed: solve_8
+    out: write_file
+    'on':
+    - assert_assert_2
+    - assert_assert_2.fail
+    tool: write_file
+    backend: kernel
+    arguments:
+    - |-
+      @log_file
+    - f'## Step 2 — Sage computation\n**Operation:** {@operation_lc}\n**Result:** {@sage_result}\n**Elapsed:** {@elapsed}\n'
+    - |-
+      'a'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(log_file, f'## Step 2 — Sage computation\n**Operation:** {operation_lc}\n**Result:** {sage_result}\n**Elapsed:** {elapsed}\n', 'a')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- explain:
+    use: parts.explain
+    in:
+      problem: $in.problem
+      sage_result: dispatch
+      explain_solution_sage_result: dispatch.solve_5_sage_result
+      explain_solution_sage_result2: dispatch.solve_6_sage_result
+      explain_solution_sage_result3: dispatch.solve_7_sage_result
+      explain_solution_sage_result4: dispatch.set_sage_result_sage_result
+      log_file: setup
+    out: explanation
+- wf_exit:
+    output: explain

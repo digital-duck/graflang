@@ -1,0 +1,127 @@
+version: 1.0-graph
+workflow:
+  name: pii_compliance
+  inputs:
+  - name: document
+    type: TEXT
+    default: Customer John Doe, SSN 123-45-6789, asks to update his address.
+  - name: destination
+    type: TEXT
+    default: external_api
+  - name: engine
+    type: TEXT
+    default: stdlib
+  - name: rules_file
+    type: TEXT
+    default: ''
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    pii_compliance_extract: ./pii_compliance_extract/pii_compliance_extract.graph.yaml
+    pii_compliance_solver_arm: ./pii_compliance_solver_arm/pii_compliance_solver_arm.graph.yaml
+    pii_compliance_llm_only: ./pii_compliance_llm_only/pii_compliance_llm_only.graph.yaml
+steps:
+- pii_compliance_extract:
+    use: parts.pii_compliance_extract
+    in:
+      document: $in.document
+    out: pii_map
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - |-
+      @use_solver
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_engine:
+    node: SOLVE
+    in:
+      engine: $in.engine
+    out: engine
+    tool: normalize_engine
+    backend: kernel
+    arguments:
+    - |-
+      @engine
+    code: |
+      def normalize_engine(engine: str) -> str:
+          """The engine name, lower-cased and trimmed: stdlib | sympy | z3. An unknown name is reported by the check as an
+          error (there is no silent fallback; the LLM-only ablation is `use_solver=false`, not an engine)."""
+          return str(engine).strip().lower() or 'stdlib'
+      _spl_result = normalize_engine(engine)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - engine
+    tool_returns: TEXT
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: normalize_bool
+    out: []
+    branch: 1
+- pii_compliance_solver_arm:
+    use: parts.pii_compliance_solver_arm
+    in:
+      rules_file: $in.rules_file
+      pii_map: pii_compliance_extract
+      destination: $in.destination
+      engine: normalize_engine
+    out: report
+- solver_off:
+    evaluate: |-
+      @in_use_solver == 'false'
+    in:
+      use_solver: normalize_bool
+    out: []
+    'on': solver_on.fail
+    branch: 2
+- pii_compliance_llm_only:
+    use: parts.pii_compliance_llm_only
+    in:
+      pii_map: pii_compliance_extract
+      destination: $in.destination
+    out: report
+- wf_exit:
+    output:
+    - pii_compliance_solver_arm
+    - pii_compliance_llm_only
+    'on':
+    - solver_off.fail
+    - pii_compliance_solver_arm
+    - pii_compliance_llm_only

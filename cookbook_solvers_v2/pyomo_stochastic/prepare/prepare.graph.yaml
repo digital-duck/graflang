@@ -1,0 +1,110 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+steps:
+- get_problem_setup:
+    node: SOLVE
+    out: problem_json
+    tool: get_problem_setup
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_PROBLEM = {'problem_name': 'Seasonal Inventory Stocking', 'description': 'A retailer must order promotional merchandise BEFORE knowing seasonal demand. Demand depends on economic conditions: low, nominal, or high. The order decision is made once for the season (Stage 1). After demand is realized, shortages and excess inventory are handled (Stage 2). Costs: order=$5/unit, shortage=$15/unit (lost sales + expediting), holding=$2/unit (storage + obsolescence). Goal: minimize total expected cost across all demand scenarios.', 'scenarios': [{'name': 'pessimistic', 'demand': 100, 'probability': 0.3}, {'name': 'nominal', 'demand': 200, 'probability': 0.5}, {'name': 'optimistic', 'demand': 300, 'probability': 0.2}], 'costs': {'order': 5, 'shortage': 15, 'holding': 2}, 'capacity': 400, 'known_optimal_qty': 200, 'known_optimal_cost': 1360.0, 'ev_baseline_qty': 190, 'ev_baseline_cost': 1409.0, 'vss': 49.0}
+
+      def get_problem_setup() -> str:
+          return json.dumps(_DEFAULT_PROBLEM)
+      _spl_result = get_problem_setup()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      problem_json: get_problem_setup
+    out: problem_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(problem_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      problem_json: get_problem_setup
+      problem_description: json_get

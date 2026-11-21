@@ -1,0 +1,268 @@
+version: 1.0-graph
+workflow:
+  name: audit
+  inputs:
+  - name: policy_json
+    type: TEXT
+  - name: check_z3_strategy_policy_json
+    type: TEXT
+  - name: rules_text
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- check_z3_strategy:
+    node: SOLVE
+    in:
+      policy_json:
+      - $in.policy_json
+      - $in.check_z3_strategy_policy_json
+    out: z3_result
+    tool: check_z3_strategy
+    backend: kernel
+    arguments:
+    - '@policy_json'
+    code: |
+      import json
+
+      def _build_constraint(rule: dict, z3_vars: dict):
+          """Recursively translate a rule dict into a Z3 expression."""
+          from z3 import And, Or, Not, Implies
+          op = rule['op']
+          if op == 'gte':
+              return z3_vars[rule['var']] >= rule['value']
+          if op == 'lte':
+              return z3_vars[rule['var']] <= rule['value']
+          if op == 'eq':
+              return z3_vars[rule['var']] == rule['value']
+          if op == 'neq':
+              return z3_vars[rule['var']] != rule['value']
+          if op == 'and':
+              return And(*[_build_constraint(a, z3_vars) for a in rule['args']])
+          if op == 'or':
+              return Or(*[_build_constraint(a, z3_vars) for a in rule['args']])
+          if op == 'not':
+              return Not(_build_constraint(rule['arg'], z3_vars))
+          if op == 'implies':
+              return Implies(_build_constraint(rule['condition'], z3_vars), _build_constraint(rule['then'], z3_vars))
+          raise ValueError(f'Unknown op: {op}')
+
+      def _make_z3_vars(policy: dict) -> dict:
+          from z3 import Int, Bool
+          z3_vars: dict = {}
+          for v in policy['variables']:
+              if v['type'] == 'int':
+                  z3_vars[v['name']] = Int(v['name'])
+              elif v['type'] == 'bool':
+                  z3_vars[v['name']] = Bool(v['name'])
+          return z3_vars
+
+      def _add_range_constraints(solver, policy: dict, z3_vars: dict):
+          for v in policy['variables']:
+              if v['type'] == 'int' and 'range' in v:
+                  solver.add(z3_vars[v['name']] >= v['range'][0])
+                  solver.add(z3_vars[v['name']] <= v['range'][1])
+
+      def check_z3_strategy(policy_json: str) -> str:
+          """Run Z3 on all entry + risk rules.
+
+          Returns SAT → triggering market scenario, UNSAT → contradictory rules.
+          """
+          try:
+              from z3 import Solver, sat, unsat
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'z3-solver not installed — run: pip install z3-solver'})
+          policy = json.loads(policy_json)
+          z3_vars = _make_z3_vars(policy)
+          s = Solver()
+          _add_range_constraints(s, policy, z3_vars)
+          all_rules = policy.get('entry_rules', []) + policy.get('risk_rules', [])
+          for rule in all_rules:
+              s.add(_build_constraint(rule, z3_vars))
+          result = s.check()
+          if result == sat:
+              model = s.model()
+              scenario: dict = {}
+              for v in policy['variables']:
+                  val = model[z3_vars[v['name']]]
+                  if val is None:
+                      continue
+                  if v['type'] == 'bool':
+                      scenario[v['name']] = bool(val)
+                  else:
+                      try:
+                          scenario[v['name']] = int(str(val))
+                      except Exception:
+                          scenario[v['name']] = str(val)
+              return json.dumps({'status': 'SAT', 'verdict': 'Strategy is consistent — a triggering market scenario exists', 'triggering_scenario': scenario, 'n_entry_rules': len(policy.get('entry_rules', [])), 'n_risk_rules': len(policy.get('risk_rules', []))})
+          if result == unsat:
+              return json.dumps({'status': 'UNSAT', 'verdict': 'Strategy is CONTRADICTORY — no market state can ever trigger all rules simultaneously', 'triggering_scenario': {}, 'n_entry_rules': len(policy.get('entry_rules', [])), 'n_risk_rules': len(policy.get('risk_rules', []))})
+          return json.dumps({'status': 'UNKNOWN', 'verdict': 'Z3 could not determine satisfiability'})
+      _spl_result = check_z3_strategy(policy_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - policy_json
+    tool_returns: TEXT
+- is_strategy_consistent:
+    node: SOLVE
+    in:
+      z3_result: check_z3_strategy
+    out: tool_6
+    tool: is_strategy_consistent
+    backend: kernel
+    arguments:
+    - '@z3_result'
+    code: |
+      import json
+
+      def is_strategy_consistent(result_json: str) -> bool:
+          """ASSERT gate: strategy rules are not contradictory."""
+          try:
+              return json.loads(result_json).get('status') == 'SAT'
+          except Exception:
+              return False
+      _spl_result = is_strategy_consistent(z3_result)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_is_strategy_consistent:
+    assert: '@in_tool_6'
+    in:
+      z3_result: check_z3_strategy
+      tool_6: is_strategy_consistent
+    out: []
+- format_strategy_report:
+    node: SOLVE
+    in:
+      z3_result: check_z3_strategy
+      policy_json:
+      - $in.policy_json
+      - $in.check_z3_strategy_policy_json
+    out: solver_report
+    on:
+    - assert_is_strategy_consistent
+    - assert_is_strategy_consistent.fail
+    tool: format_strategy_report
+    backend: kernel
+    arguments:
+    - '@z3_result'
+    - '@policy_json'
+    code: |
+      import json
+
+      def format_strategy_report(result_json: str, policy_json: str) -> str:
+          """Markdown report of Z3 strategy audit."""
+          try:
+              res = json.loads(result_json)
+              policy = json.loads(policy_json)
+              lines = [f"## Z3 Trading Rule Audit — {policy.get('policy', 'Strategy')}", '', f"**Status:** {res['status']}  ", f"**Verdict:** {res['verdict']}", f"**Entry rules checked:** {res.get('n_entry_rules', '?')}  ", f"**Risk rules checked:** {res.get('n_risk_rules', '?')}", '']
+              if res['status'] == 'SAT' and res.get('triggering_scenario'):
+                  lines += ['### Triggering Market Scenario Found by Z3', '']
+                  lines += ['| Indicator | Value |', '|---|---|']
+                  for k, v in res['triggering_scenario'].items():
+                      lines.append(f'| {k} | {v} |')
+                  lines += ['', "> Z3 found the **minimum boundary** scenario — the exact threshold where all rules first become simultaneously satisfiable. A manual trace typically picks a 'typical' example and misses these edges."]
+              elif res['status'] == 'UNSAT':
+                  lines += ['### Contradiction Detected', '', 'Z3 proved that no combination of market indicators can satisfy all entry and risk rules simultaneously. This strategy can **never** trigger a trade.', '', 'Common causes:', '- An entry rule requires condition X while a risk rule forbids X', '- Two rules bound the same variable from opposite sides with no overlap', '- A boolean flag is required both True and False']
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_strategy_report(z3_result, policy_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - policy_json
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      z3_result: check_z3_strategy
+    out: sat_status
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@z3_result'
+    - "'status'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(z3_result, 'status')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_audit:
+    generate: |-
+      You are a quantitative trading analyst reviewing a Z3 formal verification of a trading strategy.
+
+      RULES:
+      {{in_rules_text}}
+
+      Z3 AUDIT RESULT:
+      {{in_strategy_report}}
+
+      Explain the result in plain English for a trader (≤200 words):
+      1. What did Z3 find? (consistent strategy, or contradictory rules?)
+      2. If SAT: what does the triggering scenario tell us? Is it a realistic market state?
+      3. If UNSAT: which rules are likely conflicting? What should the trader fix?
+      4. What is the key insight a manual rule-check would have missed?
+      5. What is the risk of running this strategy without a formal consistency check?
+    in:
+      strategy_report: format_strategy_report
+      rules_text: $in.rules_text
+    out: explanation
+    function: explain_audit_prompt
+    params:
+    - strategy_report
+    - rules_text
+    arguments:
+    - '@solver_report'
+    - '@rules_text'
+- format_report_audit:
+    node: SOLVE
+    in:
+      solver_report: format_strategy_report
+      explanation: explain_audit
+    out: report
+    tool: format_report_audit
+    backend: kernel
+    arguments:
+    - '@solver_report'
+    - '@explanation'
+    code: |
+      def format_report_audit(solver_report: str, explanation: str) -> str:
+          return f'=== Z3 Trading Rule Checker (r118) | mode=AUDIT ===\n\n{solver_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_audit(solver_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - solver_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_audit

@@ -1,0 +1,55 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_directly:
+    generate: |-
+      Solve this logic puzzle: "{{in_problem}}"
+
+      There is no constraint solver backing you up this time — work through the
+      clues yourself, from scratch, in plain English.
+
+      Write a clear walkthrough in under 10 sentences that:
+      1. Restates the puzzle
+      2. Works through the clues step by step, showing how each one narrows
+         down the possibilities
+      3. Gives the final answer plainly
+
+      End your response with a line in EXACTLY this format (no extra words):
+      Final answer: <value>
+    in:
+      problem: $in.problem
+    out: report
+    function: solve_directly
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- trim:
+    node: SOLVE
+    in:
+      report: solve_directly
+    out: report
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@report'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

@@ -1,0 +1,59 @@
+version: 1.0-graph
+workflow:
+  name: job_shop_scheduling
+  inputs:
+  - name: problem
+    type: TEXT
+    default: '3 jobs, 3 machines. Job1: M1(3)->M2(2)->M3(2). Job2: M2(2)->M1(3)->M3(1). Job3: M3(2)->M2(1)->M1(2). Minimize makespan. Known optimal: 8.'
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: adapter
+    type: TEXT
+    default: claude_cli
+  - name: model
+    type: TEXT
+    default: ''
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    prepare: ./prepare/prepare.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+steps:
+- prepare:
+    use: parts.prepare
+    in:
+      use_solver: $in.use_solver
+    out:
+    - use_solver
+    - llm_calls
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: prepare
+    out: []
+    branch: 1
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      problem: $in.problem
+      llm_calls: prepare.llm_calls
+    out: report
+- llm_only:
+    use: parts.llm_only
+    in:
+      problem: $in.problem
+      llm_calls: prepare.llm_calls
+    out: report
+    'on': solver_on.fail
+- wf_exit:
+    output:
+    - solver_arm
+    - llm_only
+    'on':
+    - solver_arm
+    - llm_only

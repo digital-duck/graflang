@@ -1,0 +1,103 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- nurse_schedule:
+    generate: |-
+      You are a hospital scheduling coordinator building next week's nurse roster.
+
+      SCHEDULING PROBLEM:
+      {{in_problem_description}}
+
+      Without a solver, build a 7-day schedule for 8 nurses (N1–N8) across 3 shifts:
+      - Morning (06:00–14:00): needs 2 nurses minimum (1 must be senior: N1/N2)
+      - Afternoon (14:00–22:00): needs 2 nurses minimum
+      - Night (22:00–06:00): needs 1 nurse minimum
+
+      Hard rules:
+      - No nurse works more than 5 days/week
+      - A nurse who works Night on day D cannot work Morning on day D+1 (rest rule)
+      - At least one senior (N1 or N2) on each morning shift
+
+      Soft preferences (try to satisfy):
+      - N3 prefers mornings; N7 prefers no nights; N8 prefers consecutive days off
+
+      Output a 7-day table: rows = nurses (N1–N8), columns = days (Mon–Sun),
+      cells = M/A/N/Off. Then check your schedule against all hard rules.
+    in:
+      problem_description: $in.problem_description
+    out: llm_schedule
+    function: nurse_schedule_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- check_llm_schedule_violations:
+    node: SOLVE
+    in:
+      llm_schedule: nurse_schedule
+    out: violation_json
+    tool: check_llm_schedule_violations
+    backend: kernel
+    arguments:
+    - '@llm_schedule'
+    code: |
+      import json
+
+      def check_llm_schedule_violations(llm_schedule: str) -> str:
+          """Parse LLM-generated text schedule and count constraint violations.
+
+          Best-effort: looks for N/M pattern strings in the LLM output.
+          Returns JSON with estimated violations.
+          """
+          night_morning = 0
+          lines = llm_schedule.split('\n')
+          for line in lines:
+              if 'N' in line and 'M' in line:
+                  tokens = line.upper().split()
+                  for i in range(len(tokens) - 1):
+                      if tokens[i] in ('N', 'NIGHT') and tokens[i + 1] in ('M', 'MORNING'):
+                          night_morning += 1
+          return json.dumps({'estimated_night_morning_violations': night_morning, 'note': 'Heuristic scan — exact count requires structured LLM output'})
+      _spl_result = check_llm_schedule_violations(llm_schedule)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_schedule
+    tool_returns: TEXT
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_schedule: nurse_schedule
+      violation_json: check_llm_schedule_violations
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_schedule'
+    - '@violation_json'
+    code: |
+      import json
+
+      def format_report_solver_off(llm_schedule: str, violation_json: str) -> str:
+          try:
+              v = json.loads(violation_json)
+              viol_note = f"Estimated night→morning violations: {v.get('estimated_night_morning_violations', '?')}"
+          except Exception:
+              viol_note = ''
+          return f'=== MiniZinc CP — Nurse Scheduling (r126) | solver=OFF ===\n\n── LLM Schedule ─────────────────────────────────────────────\n{llm_schedule}\n\n── Constraint Check ─────────────────────────────────────────\n{viol_note}\n\nNote: LLM "soft reasoning" often misses hard constraint interactions.\nRun --param use_solver=true for MiniZinc CP with guaranteed constraint satisfaction.'
+      _spl_result = format_report_solver_off(llm_schedule, violation_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_schedule
+    - violation_json
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

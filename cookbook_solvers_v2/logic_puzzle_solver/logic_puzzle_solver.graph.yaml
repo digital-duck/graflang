@@ -1,0 +1,125 @@
+version: 1.0-graph
+workflow:
+  name: logic_puzzle_solver
+  inputs:
+  - name: problem
+    type: TEXT
+    default: 'There are 3 houses in a row, numbered 1 to 3 from left to right. Each house has a unique color (Red, Green, Blue), is occupied by a person of a unique nationality (Brit, Swede, Dane), and that person drinks a unique beverage (Tea, Coffee, Milk). Clues: (1) The Brit lives in the Red house. (2) The Swede drinks Tea. (3) The Dane lives in house 1. (4) The owner of the Green house drinks Coffee. (5) The Blue house is house 2. Who drinks Coffee?'
+  - name: enable_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INTEGER
+    default: 3
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook/82_logic_puzzle_solver/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    mode: ./mode/mode.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+steps:
+- time_monotonic:
+    node: SOLVE
+    out: t_start
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- time_now:
+    node: SOLVE
+    out: ts_safe
+    tool: time_now
+    backend: kernel
+    arguments: []
+    code: |
+      import datetime
+
+      def time_now() -> str:
+          """TIME_NOW() — current local time as a filesystem-safe string:
+          YYYY-MM-DD_HH-MM-SS."""
+          return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+      _spl_result = time_now()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- mode:
+    use: parts.mode
+    in:
+      enable_solver: $in.enable_solver
+    out:
+    - use_solver
+    - set_use_solver_2_use_solver
+- gate:
+    evaluate: |-
+      @in_use_solver == 'no'
+    in:
+      use_solver:
+      - mode
+      - mode.set_use_solver_2_use_solver
+    out: []
+    branch: 1
+- llm_only:
+    use: parts.llm_only
+    in:
+      problem: $in.problem
+    out: report
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      max_tries: $in.max_tries
+      problem: $in.problem
+      out_dir: $in.out_dir
+      ts_safe: time_now
+    out: report
+    'on': gate.fail
+- time_elapsed:
+    node: SOLVE
+    in:
+      t_start: time_monotonic
+    out: elapsed
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - |-
+      @t_start
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_start)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+    - llm_only
+    - solver_arm
+    'on':
+    - time_elapsed
+    - llm_only

@@ -1,0 +1,196 @@
+version: 1.0-graph
+workflow:
+  name: variants
+  inputs:
+  - name: sample_problem
+    type: TEXT
+  - name: domain
+    type: TEXT
+  - name: n_variants
+    type: TEXT
+  - name: n_size
+    type: TEXT
+  outputs:
+  - name: variants_json
+    type: TEXT
+  - name: variants_raw
+    type: TEXT
+  - name: tool_4
+    type: TEXT
+steps:
+- generate_variants:
+    generate: |-
+      You are a problem-set designer for operations research benchmarks.
+
+      TASK: Generate {{in_n_variants}} STRUCTURAL VARIANTS of the reference problem below.
+
+      PROBLEM SIZE: n_size={{in_n_size}}
+      - For LP/ILP: each variant must have exactly {{in_n_size}} decision variables
+        (e.g. n_size=5 → 5 products; n_size=10 → 10 products; n_size=20 → 20 products)
+      - For supply-sourcing: each variant must have exactly {{in_n_size}} suppliers
+      - This mirrors the r78 ablation scale levels: n05 (small), n10 (medium), n20 (large)
+      - Larger n_size stresses LLM constraint-mapping and is where solver=OFF breaks down
+
+      Each variant must:
+      - Keep the same solver class ({{in_domain}}) and same decision-variable types
+      - Have exactly {{in_n_size}} decision variables — no more, no fewer
+      - Change the numbers (coefficients, resource limits, capacities) for variety
+      - Cover a range of difficulty: some easy (large slack), some tight (near-binding constraints)
+
+      REFERENCE PROBLEM:
+      {{in_sample_problem}}
+
+      OUTPUT FORMAT — return a JSON array, one object per variant.
+      For LP/ILP domains each object must have ALL of these keys:
+
+      [
+        {{
+          "id": "v001",
+          "domain": "{{in_domain}}",
+          "problem_text": "Plain English description a business user would read.",
+          "variables": [
+            {{"name": "x1", "type": "continuous", "lb": 0}},
+            {{"name": "x2", "type": "continuous", "lb": 0}}
+          ],
+          "objective": {{
+            "sense": "maximize",
+            "coefficients": {{"x1": 10, "x2": 6}}
+          }},
+          "constraints": [
+            {{"name": "labor",    "lhs": {{"x1": 2, "x2": 1}}, "op": "<=", "rhs": 20}},
+            {{"name": "material", "lhs": {{"x1": 3, "x2": 2}}, "op": "<=", "rhs": 30}}
+          ]
+        }},
+        ...
+      ]
+
+      For supply-sourcing domains each object must have ALL of these keys:
+      [
+        {{
+          "id": "v001",
+          "domain": "supply-sourcing",
+          "problem_text": "Plain English description.",
+          "suppliers": [
+            {{"name": "S1", "cost": 10, "fill_rate": 0.95, "capacity": 400}},
+            {{"name": "S2", "cost": 7,  "fill_rate": 0.80, "capacity": 500}}
+          ],
+          "total_demand": 1000
+        }},
+        ...
+      ]
+
+      RULES:
+      - Return ONLY the JSON array — no prose, no markdown headers
+      - Ensure every constraint coefficient and objective coefficient is a number, not a string
+      - For ILP: set "type": "integer" on integer variables
+      - Make problem_text self-contained: a reader should be able to solve it from the text alone
+      - Vary coefficients and resource limits across variants so optimal values differ meaningfully
+      - For ILP: set "type": "integer" on integer variables; for LP leave as "continuous"
+    in:
+      sample_problem: $in.sample_problem
+      domain: $in.domain
+      n_variants: $in.n_variants
+      n_size: $in.n_size
+    out: variants_raw
+    function: generate_variants_prompt
+    params:
+    - sample_problem
+    - domain
+    - n_variants
+    - n_size
+    arguments:
+    - '@sample_problem'
+    - '@domain'
+    - '@n_variants'
+    - '@n_size'
+- parse_variants:
+    node: SOLVE
+    in:
+      variants_raw: generate_variants
+      domain: $in.domain
+    out: variants_json
+    tool: parse_variants
+    backend: kernel
+    arguments:
+    - '@variants_raw'
+    - '@domain'
+    code: |
+      import json
+
+      import re
+
+      def _extract_json(text: str):
+          """Pull the first JSON array or object from fenced or raw text."""
+          for pat in ['```(?:json)?\\s*([\\[{].*?)\\s*```', '((?:\\[|\\{)(?:.|\\n)*(?:\\]|\\}))']:
+              m = re.search(pat, text, re.DOTALL)
+              if m:
+                  try:
+                      return json.loads(m.group(1))
+                  except json.JSONDecodeError:
+                      continue
+          raise ValueError('No parseable JSON found in LLM output')
+
+      _REQUIRED = {'lp': {'id', 'problem_text', 'variables', 'objective', 'constraints'}, 'ilp': {'id', 'problem_text', 'variables', 'objective', 'constraints'}, 'supply-sourcing': {'id', 'problem_text', 'suppliers', 'total_demand'}}
+
+      def parse_variants(variants_raw: str, domain: str) -> str:
+          """Parse LLM-generated variant JSON and validate required fields.
+
+          Returns:
+            {"status": "OK"|"EMPTY"|"PARSE_ERROR", "n_valid": int, "n_errors": int,
+             "errors": [str], "variants": [dict]}
+          """
+          try:
+              data = _extract_json(variants_raw)
+              if isinstance(data, dict):
+                  data = data.get('variants', [data])
+              dom_key = domain.lower().replace(' ', '-')
+              required = _REQUIRED.get(dom_key, _REQUIRED['lp'])
+              valid, errors = ([], [])
+              for i, v in enumerate(data):
+                  vid = v.get('id', f'v{i + 1:03d}')
+                  v['id'] = vid
+                  missing = required - set(v.keys())
+                  if missing:
+                      errors.append(f'{vid}: missing {sorted(missing)}')
+                  else:
+                      v['domain'] = dom_key
+                      valid.append(v)
+              return json.dumps({'status': 'OK' if valid else 'EMPTY', 'n_valid': len(valid), 'n_errors': len(errors), 'errors': errors, 'variants': valid})
+          except Exception as e:
+              return json.dumps({'status': 'PARSE_ERROR', 'error': str(e), 'n_valid': 0, 'n_errors': 1, 'errors': [str(e)], 'variants': []})
+      _spl_result = parse_variants(variants_raw, domain)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - variants_raw
+    - domain
+    tool_returns: TEXT
+- has_valid_variants:
+    node: SOLVE
+    in:
+      variants_json: parse_variants
+    out: tool_4
+    tool: has_valid_variants
+    backend: kernel
+    arguments:
+    - '@variants_json'
+    code: |
+      import json
+
+      def has_valid_variants(variants_json: str) -> bool:
+          """ASSERT gate: at least 1 variant parsed successfully."""
+          try:
+              return json.loads(variants_json).get('n_valid', 0) >= 1
+          except Exception:
+              return False
+      _spl_result = has_valid_variants(variants_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - variants_json
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      variants_json: parse_variants
+      variants_raw: generate_variants
+      tool_4: has_valid_variants

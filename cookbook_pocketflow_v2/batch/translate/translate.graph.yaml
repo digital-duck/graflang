@@ -1,0 +1,89 @@
+version: 1.0-graph
+workflow:
+  name: translate
+  inputs:
+  - name: content
+    type: TEXT
+  - name: lang1
+    type: TEXT
+  - name: output_dir
+    type: TEXT
+  - name: max_iterations
+    type: INTEGER
+  - name: lang2
+    type: TEXT
+  - name: lang3
+    type: TEXT
+  outputs:
+  - name: result1
+    type: TEXT
+  - name: result2
+    type: TEXT
+  - name: result3
+    type: TEXT
+resources:
+  procedures:
+    translate_and_save: ./procedures/batch_translator.spl
+steps:
+- fork:
+    fork:
+    - branch_1
+    - branch_2
+    - branch_3
+    out: []
+- call_1:
+    node: GENERATE
+    in:
+      content: $in.content
+      lang1: $in.lang1
+      output_dir: $in.output_dir
+      max_iterations: $in.max_iterations
+    out: result1
+    on: fork
+    procedure_ref: procedures.translate_and_save
+    arguments:
+    - '@content'
+    - '@lang1'
+    - '@output_dir'
+    - '@max_iterations'
+- call_2:
+    node: GENERATE
+    in:
+      content: $in.content
+      lang2: $in.lang2
+      output_dir: $in.output_dir
+      max_iterations: $in.max_iterations
+    out: result2
+    on: fork.branch_2
+    procedure_ref: procedures.translate_and_save
+    arguments:
+    - '@content'
+    - '@lang2'
+    - '@output_dir'
+    - '@max_iterations'
+- call_3:
+    node: GENERATE
+    in:
+      content: $in.content
+      lang3: $in.lang3
+      output_dir: $in.output_dir
+      max_iterations: $in.max_iterations
+    out: result3
+    on: fork.branch_3
+    procedure_ref: procedures.translate_and_save
+    arguments:
+    - '@content'
+    - '@lang3'
+    - '@output_dir'
+    - '@max_iterations'
+- join:
+    join:
+    - call_1
+    - call_2
+    - call_3
+    out: []
+- wf_exit:
+    output:
+      result1: call_1
+      result2: call_2
+      result3: call_3

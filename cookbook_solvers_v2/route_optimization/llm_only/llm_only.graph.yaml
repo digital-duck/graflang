@@ -1,0 +1,56 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_directly:
+    generate: |-
+      A dispatcher asked this routing question: "{{in_problem}}"
+
+      There is no routing solver backing you up this time — plan the route
+      yourself, from scratch, in plain English.
+
+      Write a clear walkthrough in under 8 sentences that:
+      1. Restates the problem
+      2. Proposes a route, showing your reasoning (which stop to visit next
+         and why)
+      3. Gives the total distance of your proposed route plainly
+
+      End your response with a line in EXACTLY this format (no extra words,
+      number only):
+      Final answer: <total distance>
+    in:
+      problem: $in.problem
+    out: report
+    function: solve_directly
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- trim:
+    node: SOLVE
+    in:
+      report: solve_directly
+    out: report
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@report'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

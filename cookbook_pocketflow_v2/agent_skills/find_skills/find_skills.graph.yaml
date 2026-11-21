@@ -1,0 +1,114 @@
+version: 1.0-graph
+workflow:
+  name: find_skills
+  inputs:
+  - name: skills_dir
+    type: TEXT
+  - name: task
+    type: TEXT
+  outputs:
+  - name: match_result
+    type: TEXT
+  - name: skill_files_content
+    type: TEXT
+steps:
+- scan_skills_dir:
+    node: SOLVE
+    in:
+      skills_dir: $in.skills_dir
+    out: skill_files_list
+    tool: scan_skills_dir
+    backend: kernel
+    arguments:
+    - '@skills_dir'
+    code: |
+      import os, glob
+      def scan_skills_dir(skills_dir: str) -> str:
+          try:
+              pattern = os.path.join(skills_dir, "*.md")
+              files = sorted(glob.glob(pattern))
+              return "\n".join(files) if files else ""
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = scan_skills_dir(skills_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - skills_dir
+    tool_returns: TEXT
+- read_skill_files:
+    node: SOLVE
+    in:
+      skill_files_list: scan_skills_dir
+    out: skill_files_content
+    tool: read_skill_files
+    backend: kernel
+    arguments:
+    - '@skill_files_list'
+    code: |
+      import os
+      def read_skill_files(file_list: str) -> str:
+          try:
+              files = [f.strip() for f in file_list.split("\n") if f.strip()]
+              if not files:
+                  return ""
+              parts = []
+              for f in files:
+                  with open(f, "r", encoding="utf-8") as fh:
+                      content = fh.read()
+                  parts.append("=== " + os.path.basename(f) + " ===\n" + content)
+              return "\n\n".join(parts)
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = read_skill_files(skill_files_list)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_list
+    tool_returns: TEXT
+- extract_keywords:
+    generate: |-
+      You are given the contents of multiple skill markdown files.
+      Each file is delimited by a header line in the format: === filename.md ===
+
+      For each skill file, identify the key topics, capabilities, and relevant keywords it covers.
+      Return the result as a keyword map — one line per skill file in this exact format:
+      <filename.md>: keyword1, keyword2, keyword3, ...
+
+      Skill file contents:
+      {{in_skill_files_content}}
+    in:
+      skill_files_content: read_skill_files
+    out: keywords_map
+    function: extract_keywords
+    params:
+    - skill_files_content
+    arguments:
+    - '@skill_files_content'
+- match_task_to_skills:
+    generate: |-
+      Determine whether any of the available skill files is a suitable match for the given task.
+
+      Task:
+      {{in_task}}
+
+      Skill keywords map (filename: keywords):
+      {{in_keywords_map}}
+
+      If at least one skill file is relevant to the task, respond with exactly: MATCH
+      If no skill file is relevant to the task, respond with exactly: NO_MATCH
+    in:
+      task: $in.task
+      keywords_map: extract_keywords
+    out: match_result
+    function: match_task_to_skills
+    params:
+    - task
+    - keywords_map
+    arguments:
+    - '@task'
+    - '@keywords_map'
+- wf_exit:
+    output:
+      match_result: match_task_to_skills
+      skill_files_content: read_skill_files

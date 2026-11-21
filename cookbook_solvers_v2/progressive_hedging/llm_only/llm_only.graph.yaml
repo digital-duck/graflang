@@ -1,0 +1,161 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_ev_deterministic:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+    out: ev_json
+    tool: solve_ev_deterministic
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      _INVESTMENT = {'capital_cost_per_MW': 8000, 'max_capacity_MW': 100.0, 'charge_efficiency': 0.92, 'discharge_efficiency': 0.92, 'max_cycles_per_day': 2.0}
+
+      _N_HOURS = 24
+
+      def _rev_rate(prices: list, eff_c: float, eff_d: float) -> float:
+          """Net revenue rate ($/MW/day) from optimal multi-cycle dispatch.
+
+          Pairs cheapest hours with most expensive; each pair earns
+          eff_c * eff_d * sell_price - buy_price per MW per cycle.
+          Cycles accumulate until spread turns negative.
+          """
+          sorted_asc = sorted(prices)
+          sorted_desc = sorted(prices, reverse=True)
+          T = len(prices)
+          rate = 0.0
+          for i in range(T // 2):
+              spread = eff_c * eff_d * sorted_desc[i] - sorted_asc[i]
+              if spread > 0:
+                  rate += spread
+              else:
+                  break
+          return rate
+
+      def _compute_scenario_cost(sc: dict, inv: dict, capacity: float) -> float:
+          """Compute optimal operating cost for a scenario given fixed capacity.
+
+          Uses same multi-cycle revenue model as _solve_scenario_subproblem so
+          EV and PH results are directly comparable.
+          """
+          prices = sc['price_per_MWh']
+          eff_c = inv['charge_efficiency']
+          eff_d = inv['discharge_efficiency']
+          rate = _rev_rate(prices, eff_c, eff_d)
+          return -(rate * capacity)
+
+      def _solve_ev_policy(scenarios: list, inv: dict) -> tuple:
+          """Deterministic EV: solve with mean-scenario revenue rate."""
+          n = len(scenarios)
+          T = _N_HOURS
+          mean_prices = [sum((sc['price_per_MWh'][t] for sc in scenarios)) / n for t in range(T)]
+          eff_c = inv['charge_efficiency']
+          eff_d = inv['discharge_efficiency']
+          ev_rate = _rev_rate(mean_prices, eff_c, eff_d)
+          cap_cost_daily = inv['capital_cost_per_MW'] / 250.0
+          ev_cap = inv['max_capacity_MW'] if ev_rate > cap_cost_daily else 0.0
+          ev_annual_op = sum((sc['probability'] * _compute_scenario_cost(sc, inv, ev_cap) for sc in scenarios)) * 250
+          ev_capital = inv['capital_cost_per_MW'] * ev_cap
+          return (ev_cap, ev_annual_op + ev_capital)
+
+      def solve_ev_deterministic(problem_json: str) -> str:
+          """Deterministic EV policy (mean scenario solve) for solver=OFF branch."""
+          try:
+              p = json.loads(problem_json)
+              scenarios = p['scenarios']
+              cap, ev_op = _solve_ev_policy(scenarios, _INVESTMENT)
+              return json.dumps({'status': 'OK', 'capacity_MW': round(cap, 1), 'ev_annual_op_cost': round(ev_op, 0), 'capital_cost': round(_INVESTMENT['capital_cost_per_MW'] * cap, 0)})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = solve_ev_deterministic(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- format_ev_report:
+    node: SOLVE
+    in:
+      ev_json: solve_ev_deterministic
+    out: ev_report
+    tool: format_ev_report
+    backend: kernel
+    arguments:
+    - '@ev_json'
+    code: |
+      import json
+
+      def format_ev_report(ev_json: str) -> str:
+          try:
+              d = json.loads(ev_json)
+              return f"**EV (mean-scenario) policy:**  \nCapacity: {d.get('capacity_MW', '?')} MW | Capital: ${d.get('capital_cost', '?'):,} | Annual op cost: ${d.get('ev_annual_op_cost', '?'):,}"
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_ev_report(ev_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - ev_json
+    tool_returns: TEXT
+- ev_policy:
+    generate: |-
+      You are an energy economist advising on battery storage investment.
+
+      INVESTMENT PROBLEM:
+      {{in_problem_description}}
+
+      Using a deterministic "expected value" (EV) approach — assume all scenarios equal
+      the mean demand/price trajectory and make one decision for all of them:
+      1. How much battery capacity (MW) would you build, and why?
+         Consider: capital cost vs. peak-shaving savings vs. arbitrage revenue.
+      2. What is the risk of under-investing? Over-investing?
+      3. In low-demand scenarios, does excess capacity hurt you?
+         In high-demand scenarios, does insufficient capacity cost you?
+      4. What is the "value of stochastic solution" (VSS) conceptually?
+         Why is solving with 30 scenarios better than solving with mean values?
+
+      Be specific: estimate capacity in MW and expected annual savings.
+    in:
+      problem_description: $in.problem_description
+    out: llm_ev
+    function: ev_policy_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_ev: ev_policy
+      ev_report: format_ev_report
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_ev'
+    - '@ev_report'
+    code: |
+      def format_report_solver_off(llm_ev: str, ev_report: str) -> str:
+          return f'=== Progressive Hedging — Battery Storage (r125) | solver=OFF ===\n\n── Deterministic EV Policy (computed) ──────────────────────\n{ev_report}\n\n── LLM Investment Reasoning ─────────────────────────────────\n{llm_ev}\n\nNote: Both deterministic EV and LLM ignore scenario uncertainty.\nRun --param use_solver=true for Progressive Hedging across all scenarios.'
+      _spl_result = format_report_solver_off(llm_ev, ev_report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_ev
+    - ev_report
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

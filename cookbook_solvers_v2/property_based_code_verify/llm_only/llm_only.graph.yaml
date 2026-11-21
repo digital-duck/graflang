@@ -1,0 +1,50 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: spec
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_directly:
+    generate: |-
+      Write a Python implementation for this spec, then review it yourself by
+      eye — there is no test runner backing you up this time.
+
+      Spec: {{in_spec}}
+
+      Write the implementation, then in a few sentences self-assess whether you
+      believe it is correct and why. State clearly whether you believe it
+      passes or fails.
+    in:
+      spec: $in.spec
+    out: report
+    function: solve_directly
+    params:
+    - spec
+    arguments:
+    - '@spec'
+- trim:
+    node: SOLVE
+    in:
+      report: solve_directly
+    out: report
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@report'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

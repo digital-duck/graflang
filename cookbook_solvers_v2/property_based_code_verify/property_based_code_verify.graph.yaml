@@ -1,0 +1,125 @@
+version: 1.0-graph
+workflow:
+  name: property_based_code_verify
+  inputs:
+  - name: spec
+    type: TEXT
+    default: 'Write a function merge_sorted(a: list[int], b: list[int]) -> list[int] that takes two ALREADY-SORTED lists of integers and returns a single sorted list containing all elements of both (duplicates included).'
+  - name: enable_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INTEGER
+    default: 3
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook/85_property_based_code_verify/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    mode: ./mode/mode.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+steps:
+- time_monotonic:
+    node: SOLVE
+    out: t_start
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- time_now:
+    node: SOLVE
+    out: ts_safe
+    tool: time_now
+    backend: kernel
+    arguments: []
+    code: |
+      import datetime
+
+      def time_now() -> str:
+          """TIME_NOW() — current local time as a filesystem-safe string:
+          YYYY-MM-DD_HH-MM-SS."""
+          return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+      _spl_result = time_now()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- mode:
+    use: parts.mode
+    in:
+      enable_solver: $in.enable_solver
+    out:
+    - use_solver
+    - set_use_solver_2_use_solver
+- gate:
+    evaluate: |-
+      @in_use_solver == 'no'
+    in:
+      use_solver:
+      - mode
+      - mode.set_use_solver_2_use_solver
+    out: []
+    branch: 1
+- llm_only:
+    use: parts.llm_only
+    in:
+      spec: $in.spec
+    out: report
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      spec: $in.spec
+      max_tries: $in.max_tries
+      out_dir: $in.out_dir
+      ts_safe: time_now
+    out: report
+    'on': gate.fail
+- time_elapsed:
+    node: SOLVE
+    in:
+      t_start: time_monotonic
+    out: elapsed
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - |-
+      @t_start
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_start)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+    - llm_only
+    - solver_arm
+    'on':
+    - time_elapsed
+    - llm_only

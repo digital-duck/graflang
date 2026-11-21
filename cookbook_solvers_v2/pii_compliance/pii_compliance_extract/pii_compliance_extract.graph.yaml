@@ -1,0 +1,75 @@
+version: 1.0-graph
+workflow:
+  name: pii_compliance_extract
+  inputs:
+  - name: document
+    type: TEXT
+  outputs:
+  - name: pii_map
+    type: TEXT
+steps:
+- extract_pii:
+    generate: |-
+      You are a data-protection analyst. List the kinds of personal data in the document below.
+
+      Rules for your answer:
+      - Output JSON only, no explanation, no markdown fences.
+      - Do NOT copy any sensitive value into your answer. Report the TYPE only.
+      - Use these types: SSN, CCN, EMAIL, PHONE, ADDRESS, NAME, DOB, OTHER.
+      - "masked" is true only if the value in the document is already replaced by a mask such as [REDACTED] or ***.
+
+      Schema: {"entities": [{"type": "<TYPE>", "masked": <true|false>}]}
+
+      DOCUMENT:
+      {{in_document}}
+    in:
+      document: $in.document
+    out: pii_raw
+    function: extract_pii_prompt
+    params:
+    - document
+    arguments:
+    - '@document'
+- parse_pii_map:
+    node: SOLVE
+    in:
+      pii_raw: extract_pii
+    out: pii_map
+    tool: parse_pii_map
+    backend: kernel
+    arguments:
+    - '@pii_raw'
+    code: |
+      import json
+
+      import re
+
+      def parse_pii_map_text(raw: str) -> dict:
+          """The PII map from LLM output (code fences allowed). Unreadable output gives {"entities": [], "parse_error": ...}
+          so the caller can fail closed instead of treating a broken reply as 'no PII'."""
+          text = str(raw).strip()
+          fenced = re.search('```(?:json)?\\s*([\\s\\S]*?)```', text)
+          if fenced:
+              text = fenced.group(1).strip()
+          try:
+              data = json.loads(text)
+              if isinstance(data, dict) and data.get('parse_error'):
+                  return {'entities': [], 'parse_error': str(data['parse_error'])}
+              entities = data['entities']
+              if not isinstance(entities, list) or not all((isinstance(e, dict) and 'type' in e for e in entities)):
+                  raise ValueError('entities must be a list of objects with a type')
+              return {'entities': [{'type': str(e['type']).upper(), 'masked': bool(e.get('masked', False))} for e in entities]}
+          except (ValueError, KeyError, TypeError) as e:
+              return {'entities': [], 'parse_error': f'{type(e).__name__}: {e}'}
+
+      def parse_pii_map(raw: str) -> str:
+          """Clean the LLM's PII map reply into JSON; unreadable replies are marked so the check fails closed."""
+          return json.dumps(parse_pii_map_text(raw))
+      _spl_result = parse_pii_map(pii_raw)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - raw
+    tool_returns: TEXT
+- wf_exit:
+    output: parse_pii_map

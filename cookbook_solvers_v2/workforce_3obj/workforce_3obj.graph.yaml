@@ -1,0 +1,61 @@
+version: 1.0-graph
+workflow:
+  name: workforce_3obj
+  inputs:
+  - name: problem
+    type: TEXT
+    default: 'A service center runs 3 shift types. Day shift: $100/employee, 0.90 service quality, 0.10 fatigue risk, min 10 max 20 staff. Evening shift: $130/employee, 1.00 quality, 0.25 risk, min 10 max 20. Night shift: $160/employee, 0.70 quality, 0.40 risk, min 10 max 20. Total minimum: 30 staff. Find staffing plans that minimize cost, maximize quality, and minimize fatigue risk simultaneously.'
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: n_gen
+    type: TEXT
+    default: '50'
+  - name: pop_size
+    type: TEXT
+    default: '100'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    prepare: ./prepare/prepare.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+steps:
+- prepare:
+    use: parts.prepare
+    in:
+      use_solver: $in.use_solver
+    out:
+    - use_solver
+    - llm_calls
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: prepare
+    out: []
+    branch: 1
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      problem: $in.problem
+      llm_calls: prepare.llm_calls
+      n_gen: $in.n_gen
+      pop_size: $in.pop_size
+    out: report
+- llm_only:
+    use: parts.llm_only
+    in:
+      problem: $in.problem
+      llm_calls: prepare.llm_calls
+    out: report
+    'on': solver_on.fail
+- wf_exit:
+    output:
+    - solver_arm
+    - llm_only
+    'on':
+    - solver_arm
+    - llm_only

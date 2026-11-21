@@ -1,0 +1,197 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: problem_json
+    type: TEXT
+  - name: mmc_json
+    type: TEXT
+  - name: mmc_report
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+steps:
+- get_ed_problem:
+    node: SOLVE
+    out: problem_json
+    tool: get_ed_problem
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _ED_PROBLEM = {'problem_name': 'Hospital Emergency Department Simulation', 'description': 'Simulate an emergency department with bursty arrivals and lognormal treatment. Mean arrival rate: 3.2 patients/hour (non-Poisson — shift handovers at 8am/4pm cause burst factors up to 2.5×). Resources: 3 triage nurses (2 min average, exponential), 8 treatment bays (lognormal mean=40 min, σ=25 min), 2 specialist consultants (50% of patients, exponential mean=30 min). M/M/c formula assumes Poisson arrivals and exponential service — significantly underestimates tail wait times for this ED.', 'mean_arrival_rate_per_hr': 3.2, 'triage_nurses': 3, 'triage_mean_min': 2.0, 'treatment_bays': 8, 'treatment_mean_min': 40.0, 'treatment_sigma_min': 25.0, 'specialist_docs': 2, 'specialist_prob': 0.5, 'specialist_mean_min': 30.0, 'sim_hours': 168, 'burst_hours': [8, 16, 0], 'burst_factor': 2.5}
+
+      def get_ed_problem() -> str:
+          return json.dumps(_ED_PROBLEM)
+      _spl_result = get_ed_problem()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      problem_json: get_ed_problem
+    out: problem_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(problem_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- compute_mmc_baseline:
+    node: SOLVE
+    in:
+      problem_json: get_ed_problem
+    out: mmc_json
+    tool: compute_mmc_baseline
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      import math
+
+      def compute_mmc_baseline(problem_json: str) -> str:
+          """Erlang-C M/M/c formula for mean and approximate 95th-percentile wait.
+
+          Uses treatment bay as the bottleneck resource (highest utilization).
+          Returns JSON with mean_wait_min, p95_wait_min, utilization.
+          """
+          try:
+              p = json.loads(problem_json)
+              lam = p['mean_arrival_rate_per_hr'] / 60.0
+              mu_bay = 1.0 / p['treatment_mean_min']
+              c = p['treatment_bays']
+              rho_unit = lam / (c * mu_bay)
+              if rho_unit >= 1.0:
+                  return json.dumps({'status': 'overloaded', 'p95_wait_min': 9999, 'mean_wait_min': 9999})
+              rho_total = lam / mu_bay
+              c0 = _erlang_c(c, rho_total)
+              wq_bay = c0 / (c * mu_bay - lam)
+              mean_triage_sojourn = p['triage_mean_min']
+              mean_bay_sojourn = wq_bay + p['treatment_mean_min']
+              mean_spec_sojourn = p['specialist_mean_min']
+              mean_total = mean_triage_sojourn + mean_bay_sojourn + p['specialist_prob'] * mean_spec_sojourn
+              p95_total = mean_total + mean_bay_sojourn
+              util_pct = round(100.0 * rho_unit, 1)
+              return json.dumps({'status': 'OK', 'formula': 'M/M/c Erlang-C — total sojourn (queue + service, all stages)', 'c_servers': c, 'mean_wait_min': round(mean_total, 1), 'p95_wait_min': round(p95_total, 1), 'utilization_pct': util_pct, 'erlang_c': round(c0, 4), 'wq_bay_min': round(wq_bay, 2)})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+
+      def _erlang_c(c: int, rho: float) -> float:
+          """Erlang-C blocking probability (P[wait > 0])."""
+          import math
+          sum_terms = sum((rho ** n / math.factorial(n) for n in range(c)))
+          last_term = rho ** c / math.factorial(c) * (c / (c - rho))
+          p0 = 1.0 / (sum_terms + last_term)
+          erlang_c = rho ** c / math.factorial(c) * (c / (c - rho)) * p0
+          return erlang_c
+      _spl_result = compute_mmc_baseline(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- format_mmc_report:
+    node: SOLVE
+    in:
+      mmc_json: compute_mmc_baseline
+    out: mmc_report
+    tool: format_mmc_report
+    backend: kernel
+    arguments:
+    - '@mmc_json'
+    code: |
+      import json
+
+      def format_mmc_report(mmc_json: str) -> str:
+          try:
+              d = json.loads(mmc_json)
+              if d.get('status') != 'OK':
+                  return f"M/M/c: {d.get('status', 'error')}"
+              return f"**M/M/c Analytic Baseline ({d['formula']}):**  \nMean wait: {d['mean_wait_min']} min | P95 wait: {d['p95_wait_min']} min | Bay utilization: {d['utilization_pct']}%"
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_mmc_report(mmc_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - mmc_json
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      problem_json: get_ed_problem
+      mmc_json: compute_mmc_baseline
+      mmc_report: format_mmc_report
+      problem_description: json_get

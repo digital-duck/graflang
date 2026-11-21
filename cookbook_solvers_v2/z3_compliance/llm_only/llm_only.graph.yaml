@@ -1,0 +1,59 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: policy_text
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- interpret_policy:
+    generate: |-
+      You are a compliance analyst reviewing a loan eligibility policy.
+
+      POLICY TEXT:
+      {{in_policy_text}}
+
+      The policy has the following eligibility rules:
+      R1: Applicant must be 18 or older
+      R2: Annual income >= $30,000 OR has collateral
+      R3: If self-employed, then annual income >= $50,000
+      R4: Credit score >= 650 OR (credit score >= 600 AND income >= $80,000)
+      R5: Employed for >= 12 months OR has collateral
+
+      Task: Manually trace through the rules and determine:
+      1. Is this policy satisfiable — does a qualifying customer profile exist?
+      2. If yes, give ONE example of a customer who would qualify (specify all variable values).
+      3. Are there any hidden interactions between rules that could trap a customer?
+      4. What is the most restrictive edge case?
+
+      Be specific with numbers. Do not use Z3 or any solver — reason manually.
+    in:
+      policy_text: $in.policy_text
+    out: llm_analysis
+    function: interpret_policy_prompt
+    params:
+    - policy_text
+    arguments:
+    - '@policy_text'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_analysis: interpret_policy
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_analysis'
+    code: |
+      def format_report_solver_off(llm_analysis: str) -> str:
+          return f'=== Z3 Compliance Checker (r102) | solver=OFF ===\n\n── LLM Manual Rule Analysis ────────────────────────────────\n{llm_analysis}\n\nNote: solver=OFF relies on LLM sequential rule tracing. Run with --param use_solver=true\nto verify with Z3 (finds hidden rule interactions the LLM misses).'
+      _spl_result = format_report_solver_off(llm_analysis)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_analysis
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

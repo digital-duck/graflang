@@ -1,0 +1,128 @@
+version: 1.0-graph
+workflow:
+  name: portfolio_comparison_report
+  inputs:
+  - name: tickers
+    type: TEXT
+  - name: market_data_json
+    type: TEXT
+  - name: result_markowitz
+    type: TEXT
+  - name: result_min_variance
+    type: TEXT
+  - name: result_max_sharpe
+    type: TEXT
+  - name: result_risk_parity
+    type: TEXT
+  - name: result_hrp
+    type: TEXT
+  - name: result_cvar
+    type: TEXT
+  - name: period
+    type: TEXT
+  - name: capital
+    type: TEXT
+  - name: target_return
+    type: TEXT
+  - name: max_weight
+    type: TEXT
+  - name: summary_csv
+    type: TEXT
+  - name: composition_csv
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- compare_algorithms:
+    generate: |-
+      You are a quantitative portfolio analyst. Compare these six optimization results for the same stock universe and recommend the best one for a personal investor.
+
+      Tickers: {{in_tickers}}
+      Market data: {{in_market_data_json}}
+
+      Results:
+        Markowitz:    {{in_result_markowitz}}
+        Min Variance: {{in_result_min_variance}}
+        Max Sharpe:   {{in_result_max_sharpe}}
+        Risk Parity:  {{in_result_risk_parity}}
+        HRP:          {{in_result_hrp}}
+        CVaR:         {{in_result_cvar}}
+
+      Your analysis should:
+      1. Show a comparison table: algorithm | return | volatility | sharpe | # positions
+      2. Identify which algorithm gives the best risk-adjusted return (Sharpe)
+      3. Identify which gives the most diversified allocation
+      4. Recommend ONE algorithm for this specific portfolio and explain why in 2-3 sentences
+      5. Note any algorithms that failed or produced degenerate results
+      6. Add disclaimer: past performance does not guarantee future results
+    in:
+      tickers: $in.tickers
+      market_data_json: $in.market_data_json
+      result_markowitz: $in.result_markowitz
+      result_min_variance: $in.result_min_variance
+      result_max_sharpe: $in.result_max_sharpe
+      result_risk_parity: $in.result_risk_parity
+      result_hrp: $in.result_hrp
+      result_cvar: $in.result_cvar
+    out: synthesis
+    function: compare_algorithms
+    params:
+    - tickers
+    - market_data_json
+    - result_markowitz
+    - result_min_variance
+    - result_max_sharpe
+    - result_risk_parity
+    - result_hrp
+    - result_cvar
+    arguments:
+    - '@tickers'
+    - '@market_data_json'
+    - '@r_markowitz'
+    - '@r_min_var'
+    - '@r_max_sharpe'
+    - '@r_risk_parity'
+    - '@r_hrp'
+    - '@r_cvar'
+- format_comparison_report:
+    node: SOLVE
+    in:
+      tickers: $in.tickers
+      period: $in.period
+      capital: $in.capital
+      target_return: $in.target_return
+      max_weight: $in.max_weight
+      summary_csv: $in.summary_csv
+      composition_csv: $in.composition_csv
+      synthesis: compare_algorithms
+    out: report
+    tool: format_comparison_report
+    backend: kernel
+    arguments:
+    - '@tickers'
+    - '@period'
+    - '@capital'
+    - '@target_return'
+    - '@max_weight'
+    - '@summary_csv'
+    - '@composition_csv'
+    - '@synthesis'
+    code: |
+      def format_comparison_report(tickers: str, period: str, capital: str, target_return: str, max_weight: str, summary_csv: str, composition_csv: str, synthesis: str) -> str:
+          return f'=== Cross-Algorithm Portfolio Comparison ===\n\nTickers: {tickers}  |  Period: {period}  |  Capital: ${capital}\nTarget return: {target_return}  |  Max position: {max_weight}\n\nAlgorithm Summary (CSV):\n{summary_csv}\n\nPortfolio Composition (CSV):\n{composition_csv}\n\nLLM Synthesis & Recommendation:\n{synthesis}'
+      _spl_result = format_comparison_report(tickers, period, capital, target_return, max_weight, summary_csv, composition_csv, synthesis)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tickers
+    - period
+    - capital
+    - target_return
+    - max_weight
+    - summary_csv
+    - composition_csv
+    - synthesis
+    tool_returns: TEXT
+- wf_exit:
+    output: format_comparison_report

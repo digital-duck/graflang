@@ -1,0 +1,55 @@
+version: 1.0-graph
+workflow:
+  name: synthetic_problem_gen
+  inputs:
+  - name: sample_problem
+    type: TEXT
+    default: 'A factory produces two products. Product A yields $10 profit per unit, requires 2 labor-hours and 3 kg material. Product B yields $6 profit per unit, requires 1 labor-hour and 2 kg material. Available resources: 20 labor-hours and 30 kg material per day. All production quantities must be non-negative. Maximize total daily profit. Known optimal: 10 units of A, 0 units of B, profit = $100.'
+  - name: domain
+    type: TEXT
+    default: LP
+  - name: n_variants
+    type: TEXT
+    default: '5'
+  - name: n_size
+    type: TEXT
+    default: '5'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    init: ./init/init.graph.yaml
+    variants: ./variants/variants.graph.yaml
+    suite: ./suite/suite.graph.yaml
+steps:
+- init:
+    use: parts.init
+    out:
+    - attempts
+    - parse_error
+- variants:
+    use: parts.variants
+    in:
+      sample_problem: $in.sample_problem
+      domain: $in.domain
+      n_variants: $in.n_variants
+      n_size: $in.n_size
+    out:
+    - variants_json
+    - variants_raw
+    - tool_4
+- suite:
+    use: parts.suite
+    in:
+      domain: $in.domain
+      n_variants: $in.n_variants
+      n_size: $in.n_size
+      attempts: init
+      parse_error: init.parse_error
+      variants_json: variants
+      variants_raw: variants.variants_raw
+      tool_4: variants.tool_4
+    out: report
+- wf_exit:
+    output: suite

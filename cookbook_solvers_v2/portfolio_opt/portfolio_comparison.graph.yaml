@@ -1,0 +1,161 @@
+version: 1.0-graph
+workflow:
+  name: portfolio_comparison
+  inputs:
+  - name: tickers
+    type: TEXT
+    default: AAPL,MSFT,GOOGL,AMZN,NVDA
+  - name: capital
+    type: TEXT
+    default: '10000'
+  - name: period
+    type: TEXT
+    default: 1y
+  - name: target_return
+    type: TEXT
+    default: '0.08'
+  - name: max_weight
+    type: TEXT
+    default: '0.25'
+  - name: adapter
+    type: TEXT
+    default: claude_cli
+  - name: model
+    type: TEXT
+    default: ''
+  - name: log_dir
+    type: TEXT
+    default: ./logs
+  - name: out_dir
+    type: TEXT
+    default: cookbook-solver/099_portfolio_opt/outputs
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    portfolio_comparison_optimizers: ./portfolio_comparison_optimizers/portfolio_comparison_optimizers.graph.yaml
+    portfolio_comparison_tables: ./portfolio_comparison_tables/portfolio_comparison_tables.graph.yaml
+    portfolio_comparison_report: ./portfolio_comparison_report/portfolio_comparison_report.graph.yaml
+steps:
+- fetch_stock_data:
+    node: SOLVE
+    in:
+      tickers: $in.tickers
+      period: $in.period
+    out: market_data_json
+    tool: fetch_stock_data
+    backend: kernel
+    arguments:
+    - |-
+      @tickers
+    - |-
+      @period
+    code: |
+      import json
+
+      from datetime import datetime, timedelta
+
+      def fetch_stock_data(tickers_str: str, period: str='1y', trading_days_per_year: int=252, min_data_fraction: float=0.8) -> str:
+          """
+          Fetch historical adjusted-close prices for a comma-separated list of tickers.
+
+          Args:
+              tickers_str:           Comma-separated ticker symbols (e.g. "AAPL,MSFT,GOOG").
+              period:                Look-back window — "1mo","3mo","6mo","1y","2y","3y" (default "1y").
+              trading_days_per_year: Used to annualize daily mean returns and covariance
+                                     (default 252 = NYSE/NASDAQ trading days; use 261 for a
+                                     broader market or 250 for a conservative estimate).
+                                     Must be in [200, 300].
+              min_data_fraction:     Fraction of trading days a ticker must have data for to be
+                                     included; tickers below this threshold are dropped
+                                     (default 0.8 = 80%; use 1.0 to require complete data).
+                                     Must be in (0.0, 1.0].
+
+          Returns JSON: {"tickers": [...], "annual_returns": {...}, "cov_matrix": [[...]], "period": "..."}
+          """
+          if not 200 <= trading_days_per_year <= 300:
+              return json.dumps({'error': f'trading_days_per_year {trading_days_per_year} out of range [200, 300]'})
+          if not 0.0 < min_data_fraction <= 1.0:
+              return json.dumps({'error': f'min_data_fraction {min_data_fraction} out of range (0.0, 1.0]'})
+          try:
+              import yfinance as yf
+              tickers = [t.strip().upper() for t in tickers_str.split(',') if t.strip()]
+              if not tickers:
+                  return json.dumps({'error': 'no tickers provided'})
+              end = datetime.today()
+              period_map = {'1mo': 30, '3mo': 90, '6mo': 180, '1y': 365, '2y': 730, '3y': 1095}
+              days = period_map.get(period, 365)
+              start = end - timedelta(days=days)
+              raw = yf.download(tickers, start=start.strftime('%Y-%m-%d'), end=end.strftime('%Y-%m-%d'), auto_adjust=True, progress=False)
+              if raw is None or raw.empty:
+                  return json.dumps({'error': 'no price data returned'})
+              prices = raw['Close']
+              if not hasattr(prices, 'columns'):
+                  prices = prices.to_frame(name=tickers[0])
+              min_count = int(min_data_fraction * len(prices))
+              prices = prices.loc[:, prices.count() >= min_count]
+              valid_tickers = list(prices.columns)
+              daily_ret = prices.pct_change().dropna()
+              annual_returns = (daily_ret.mean() * trading_days_per_year).to_dict()
+              cov_matrix = (daily_ret.cov() * trading_days_per_year).values.tolist()
+              return json.dumps({'tickers': valid_tickers, 'annual_returns': {k: round(v, 6) for k, v in annual_returns.items()}, 'cov_matrix': [[round(v, 8) for v in row] for row in cov_matrix], 'period': period, 'trading_days': len(daily_ret)})
+          except Exception as e:
+              return json.dumps({'error': str(e)})
+      _spl_result = fetch_stock_data(tickers, period)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tickers_str
+    - period
+    - trading_days_per_year
+    - min_data_fraction
+    tool_returns: TEXT
+- portfolio_comparison_optimizers:
+    use: parts.portfolio_comparison_optimizers
+    in:
+      market_data_json: fetch_stock_data
+      target_return: $in.target_return
+      max_weight: $in.max_weight
+    out:
+    - r_markowitz
+    - r_min_var
+    - r_max_sharpe
+    - r_risk_parity
+    - r_hrp
+    - r_cvar
+- portfolio_comparison_tables:
+    use: parts.portfolio_comparison_tables
+    in:
+      tickers: $in.tickers
+      r_markowitz: portfolio_comparison_optimizers
+      r_min_var: portfolio_comparison_optimizers.r_min_var
+      r_max_sharpe: portfolio_comparison_optimizers.r_max_sharpe
+      r_risk_parity: portfolio_comparison_optimizers.r_risk_parity
+      r_hrp: portfolio_comparison_optimizers.r_hrp
+      r_cvar: portfolio_comparison_optimizers.r_cvar
+      capital: $in.capital
+      out_dir: $in.out_dir
+    out:
+    - summary_csv
+    - composition_csv
+- portfolio_comparison_report:
+    use: parts.portfolio_comparison_report
+    in:
+      tickers: $in.tickers
+      market_data_json: fetch_stock_data
+      result_markowitz: portfolio_comparison_optimizers
+      result_min_variance: portfolio_comparison_optimizers.r_min_var
+      result_max_sharpe: portfolio_comparison_optimizers.r_max_sharpe
+      result_risk_parity: portfolio_comparison_optimizers.r_risk_parity
+      result_hrp: portfolio_comparison_optimizers.r_hrp
+      result_cvar: portfolio_comparison_optimizers.r_cvar
+      period: $in.period
+      capital: $in.capital
+      target_return: $in.target_return
+      max_weight: $in.max_weight
+      summary_csv: portfolio_comparison_tables
+      composition_csv: portfolio_comparison_tables.composition_csv
+    out: report
+- wf_exit:
+    output: portfolio_comparison_report

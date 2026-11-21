@@ -1,0 +1,347 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_json
+    type: TEXT
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_naive_heuristic:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+    out: heuristic_json
+    tool: solve_naive_heuristic
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      def solve_naive_heuristic(problem_json: str) -> str:
+          """Solver=OFF baseline: use expected demand to make the build decision.
+
+          This is the heuristic a non-expert might apply — it often gives the
+          wrong answer because it ignores the asymmetry between scenarios.
+          """
+          try:
+              data = json.loads(problem_json)
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+          scenarios = data['scenarios']
+          cap_own = float(data['capacity_own'])
+          cap_lease = float(data.get('capacity_lease', cap_own * 0.5))
+          cost_build = float(data['cost_build'])
+          cost_produce = float(data['cost_produce'])
+          cost_emerg = float(data['cost_emergency'])
+          exp_demand = sum((s['probability'] * s['demand'] for s in scenarios))
+          build = 1 if exp_demand > cap_lease else 0
+          cap = cap_own if build else cap_lease
+          plans = []
+          for s in scenarios:
+              prod = min(cap, s['demand'])
+              emerg = max(0.0, s['demand'] - prod)
+              sc_cost = cost_produce * prod + cost_emerg * emerg
+              plans.append({'scenario': s['name'], 'probability': s['probability'], 'demand': s['demand'], 'production': round(prod, 2), 'emergency': round(emerg, 2), 'scenario_cost': round(sc_cost, 2)})
+          fixed = cost_build * build
+          exp_op = sum((p['probability'] * p['scenario_cost'] for p in plans))
+          return json.dumps({'status': 'HEURISTIC', 'build_factory': build, 'capacity_used': cap, 'fixed_cost': fixed, 'expected_op_cost': round(exp_op, 2), 'expected_cost': round(fixed + exp_op, 2), 'expected_demand': round(exp_demand, 1), 'scenario_plans': plans, 'objective': round(fixed + exp_op, 2)})
+      _spl_result = solve_naive_heuristic(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- format_scenario_report_2:
+    node: SOLVE
+    in:
+      heuristic_json: solve_naive_heuristic
+    out: heuristic_table
+    tool: format_scenario_report
+    backend: kernel
+    arguments:
+    - '@heuristic_json'
+    code: |
+      import json
+
+      def format_scenario_report(solution_json: str) -> str:
+          """Format scenario plans as a markdown table."""
+          try:
+              data = json.loads(solution_json)
+              plans = data.get('scenario_plans', [])
+              build = data.get('build_factory', '?')
+              cap = data.get('capacity_used', '?')
+              fixed = data.get('fixed_cost', 0)
+              exp_op = data.get('expected_op_cost', '?')
+              exp = data.get('expected_cost', '?')
+              decision = f'**Build own factory** (capacity {cap} units, fixed cost ${fixed:,.0f})' if build else f'**Lease facility** (capacity {cap} units, no fixed cost)'
+              lines = [f'Decision: {decision}', '', '| Scenario | Prob | Demand | Own/Lease prod | Emergency | Scenario cost |', '|---|---|---|---|---|---|']
+              for p in plans:
+                  lines.append(f"| {p['scenario']} | {p['probability']:.0%} | {p['demand']:.0f} | {p['production']:.0f} | {p['emergency']:.0f} | ${p['scenario_cost']:,.0f} |")
+              lines += ['', f'**Fixed cost:** ${fixed:,.0f}  ', f'**Expected operational cost:** ${exp_op:,.0f}  ', f'**Total expected cost:** ${exp:,.0f}']
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'Error formatting report: {e}'
+      _spl_result = format_scenario_report(heuristic_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - solution_json
+    tool_returns: TEXT
+- verify_robust_off:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+      heuristic_json: solve_naive_heuristic
+    out: verify_result
+    tool: verify_robust_off
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@heuristic_json'
+    code: |
+      import json
+
+      def verify_robust_off(problem_json: str, solution_json: str) -> str:
+          """Verify that the heuristic solution satisfies all scenario constraints."""
+          try:
+              data = json.loads(problem_json)
+              sol = json.loads(solution_json)
+          except Exception as e:
+              return json.dumps({'verdict': 'ERROR', 'error': str(e)})
+          cap_own = float(data['capacity_own'])
+          cap_lease = float(data.get('capacity_lease', cap_own * 0.5))
+          build = sol.get('build_factory', 0)
+          capacity = cap_own if build else cap_lease
+          plans = sol.get('scenario_plans', [])
+          violations = []
+          for p in plans:
+              prod = float(p.get('production', 0))
+              emerg = float(p.get('emergency', 0))
+              demand = float(p.get('demand', 0))
+              if prod > capacity + 1e-06:
+                  violations.append(f"{p['scenario']}: production {prod:.1f} > capacity {capacity:.1f}")
+              if prod + emerg < demand - 1e-06:
+                  violations.append(f"{p['scenario']}: supply {prod + emerg:.1f} < demand {demand:.1f}")
+          if violations:
+              return json.dumps({'verdict': 'FAIL', 'notes': '; '.join(violations)})
+          return json.dumps({'verdict': 'PASS', 'notes': f'All {len(plans)} scenario constraints satisfied'})
+      _spl_result = verify_robust_off(problem_json, heuristic_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - solution_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      verify_result: verify_robust_off
+    out: verify_status
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      heuristic_json: solve_naive_heuristic
+    out: obj_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@heuristic_json'
+    - "'expected_cost'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(heuristic_json, 'expected_cost')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- solve_robust_milp_2:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+    out: solution_json
+    tool: solve_robust_milp
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      def solve_robust_milp(problem_json: str) -> str:
+          """Two-stage stochastic MILP via python-mip.
+
+          Stage 1: y ∈ {0,1} — build own factory (y=1) or lease (y=0)
+          Stage 2: for each scenario s — x_s (own/leased production), z_s (emergency)
+
+          Objective: minimize cost_build·y + Σ_s prob_s·(cost_prod·x_s + cost_emerg·z_s)
+
+          Requires: pip install python-mip
+          """
+          import mip
+          from mip import Model, xsum, minimize, BINARY, CONTINUOUS, OptimizationStatus
+          try:
+              data = json.loads(problem_json)
+          except Exception as e:
+              return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+          scenarios = data['scenarios']
+          cap_own = float(data['capacity_own'])
+          cap_lease = float(data.get('capacity_lease', cap_own * 0.5))
+          cost_build = float(data['cost_build'])
+          cost_produce = float(data['cost_produce'])
+          cost_emerg = float(data['cost_emergency'])
+          m = Model('robust_supply')
+          m.verbose = 0
+          y = m.add_var(name='build', var_type=BINARY)
+          x = [m.add_var(name=f'produce_s{i}', lb=0, ub=cap_own, var_type=CONTINUOUS) for i in range(len(scenarios))]
+          z = [m.add_var(name=f'emergency_s{i}', lb=0, var_type=CONTINUOUS) for i in range(len(scenarios))]
+          m.objective = minimize(cost_build * y + xsum((s['probability'] * (cost_produce * x[i] + cost_emerg * z[i]) for i, s in enumerate(scenarios))))
+          for i, s in enumerate(scenarios):
+              m += (x[i] <= cap_own * y + cap_lease * (1 - y), f'cap_s{i}')
+              m += (x[i] + z[i] >= s['demand'], f'demand_s{i}')
+          m.optimize()
+          if m.status == OptimizationStatus.OPTIMAL:
+              build_flag = int(round(float(y.x or 0)))
+              plans = []
+              for i, s in enumerate(scenarios):
+                  prod = float(x[i].x or 0)
+                  emerg = float(z[i].x or 0)
+                  sc_cost = cost_produce * prod + cost_emerg * emerg
+                  plans.append({'scenario': s['name'], 'probability': s['probability'], 'demand': s['demand'], 'production': round(prod, 2), 'emergency': round(emerg, 2), 'scenario_cost': round(sc_cost, 2)})
+              return json.dumps({'status': 'OPTIMAL', 'build_factory': build_flag, 'capacity_used': cap_own if build_flag else cap_lease, 'fixed_cost': cost_build * build_flag, 'expected_op_cost': round(sum((p['probability'] * p['scenario_cost'] for p in plans)), 2), 'expected_cost': round(float(m.objective_value), 2), 'scenario_plans': plans, 'objective': round(float(m.objective_value), 2)})
+          else:
+              return json.dumps({'status': m.status.name, 'objective': None})
+      _spl_result = solve_robust_milp(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- interpret_heuristic:
+    generate: |-
+      Compare a naive expected-demand heuristic solution against the MILP optimum.
+
+      Problem: {{in_problem}}
+
+      Heuristic solution (naive, expected demand): {{in_heuristic_json}}
+      MILP optimal solution: {{in_milp_json}}
+
+      Explain:
+      1. What decision did the heuristic make, and why (based on expected demand)?
+      2. What decision did the MILP make?
+      3. If they differ: how much does the heuristic cost more than the MILP optimum? Why?
+      4. What does this illustrate about scenario-based optimization vs. expected-value reasoning?
+
+      Be precise and show the cost gap in dollars.
+    in:
+      problem: $in.problem
+      heuristic_json: solve_naive_heuristic
+      milp_json: solve_robust_milp_2
+    out: comparison
+    function: interpret_heuristic
+    params:
+    - problem
+    - heuristic_json
+    - milp_json
+    arguments:
+    - '@problem'
+    - '@heuristic_json'
+    - '@solution_json'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      heuristic_table: format_scenario_report_2
+      comparison: interpret_heuristic
+      verify_status: json_get_2
+      llm_calls: set_llm_calls_3
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@heuristic_table'
+    - '@comparison'
+    - '@verify_status'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_off(problem: str, heuristic_table: str, comparison: str, verify_status: str, llm_calls: str) -> str:
+          return f'=== Robust Supply Chain MILP (solver=OFF / naive heuristic) ===\n\nProblem:\n{problem}\n\nNaive Heuristic Solution:\n{heuristic_table}\n\nHeuristic vs MILP Comparison:\n{comparison}\n\nVerification: {verify_status}\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_off(problem, heuristic_table, comparison, verify_status, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - heuristic_table
+    - comparison
+    - verify_status
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

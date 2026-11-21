@@ -1,0 +1,195 @@
+version: 1.0-graph
+workflow:
+  name: snapshot
+  inputs:
+  - name: policy_json
+    type: TEXT
+  - name: check_market_snapshot_policy_json
+    type: TEXT
+  - name: snapshot_json
+    type: TEXT
+  - name: policy_text
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- check_market_snapshot:
+    node: SOLVE
+    in:
+      policy_json:
+      - $in.policy_json
+      - $in.check_market_snapshot_policy_json
+      snapshot_json: $in.snapshot_json
+    out: snapshot_result
+    tool: check_market_snapshot
+    backend: kernel
+    arguments:
+    - '@policy_json'
+    - '@snapshot_json'
+    code: |
+      import json
+
+      def _build_constraint(rule: dict, z3_vars: dict):
+          """Recursively translate a rule dict into a Z3 expression."""
+          from z3 import And, Or, Not, Implies
+          op = rule['op']
+          if op == 'gte':
+              return z3_vars[rule['var']] >= rule['value']
+          if op == 'lte':
+              return z3_vars[rule['var']] <= rule['value']
+          if op == 'eq':
+              return z3_vars[rule['var']] == rule['value']
+          if op == 'neq':
+              return z3_vars[rule['var']] != rule['value']
+          if op == 'and':
+              return And(*[_build_constraint(a, z3_vars) for a in rule['args']])
+          if op == 'or':
+              return Or(*[_build_constraint(a, z3_vars) for a in rule['args']])
+          if op == 'not':
+              return Not(_build_constraint(rule['arg'], z3_vars))
+          if op == 'implies':
+              return Implies(_build_constraint(rule['condition'], z3_vars), _build_constraint(rule['then'], z3_vars))
+          raise ValueError(f'Unknown op: {op}')
+
+      def _make_z3_vars(policy: dict) -> dict:
+          from z3 import Int, Bool
+          z3_vars: dict = {}
+          for v in policy['variables']:
+              if v['type'] == 'int':
+                  z3_vars[v['name']] = Int(v['name'])
+              elif v['type'] == 'bool':
+                  z3_vars[v['name']] = Bool(v['name'])
+          return z3_vars
+
+      def check_market_snapshot(policy_json: str, snapshot_json: str) -> str:
+          """Given today's market indicator values, check which rules fire.
+
+          snapshot_json: {"rsi": 31, "price_vs_ma200": 5, "volume_ratio": 180, ...}
+          Returns: {"signal": "BUY"|"NO_SIGNAL", "failed_rules": [...], "passed_rules": [...]}
+          """
+          try:
+              from z3 import Solver, sat
+              from z3 import Not
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'z3-solver not installed'})
+          policy = json.loads(policy_json)
+          snapshot = json.loads(snapshot_json)
+          z3_vars = _make_z3_vars(policy)
+          all_rules = policy.get('entry_rules', []) + policy.get('risk_rules', [])
+          passed, failed = ([], [])
+          for rule in all_rules:
+              s = Solver()
+              for v in policy['variables']:
+                  name = v['name']
+                  if name in snapshot:
+                      s.add(z3_vars[name] == snapshot[name])
+              s.add(Not(_build_constraint(rule, z3_vars)))
+              if s.check() == sat:
+                  s2 = Solver()
+                  for v in policy['variables']:
+                      name = v['name']
+                      if name in snapshot:
+                          s2.add(z3_vars[name] == snapshot[name])
+                  s2.add(_build_constraint(rule, z3_vars))
+                  if s2.check() != sat:
+                      failed.append({'rule_id': rule['id'], 'desc': rule['desc']})
+                  else:
+                      passed.append(rule['id'])
+              else:
+                  passed.append(rule['id'])
+          signal = 'BUY' if not failed else 'NO_SIGNAL'
+          return json.dumps({'signal': signal, 'passed_rules': passed, 'failed_rules': failed, 'verdict': f'Signal: {signal}.' + (f" Blocking rules: {[r['rule_id'] for r in failed]}" if failed else ' All rules satisfied.')})
+      _spl_result = check_market_snapshot(policy_json, snapshot_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - policy_json
+    - snapshot_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      snapshot_result: check_market_snapshot
+    out: signal
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@snapshot_result'
+    - "'signal'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(snapshot_result, 'signal')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_snapshot:
+    generate: |-
+      You are a quantitative trading analyst. Z3 just evaluated today's market against a trading strategy.
+
+      STRATEGY:
+      {{in_policy_text}}
+
+      SNAPSHOT CHECK RESULT:
+      {{in_snapshot_result}}
+
+      Explain in plain English for the trader (≤150 words):
+      1. Signal: BUY or NO_SIGNAL?
+      2. Which rules passed? Which blocked the signal?
+      3. What would need to change in the market for a signal to fire?
+    in:
+      snapshot_result: check_market_snapshot
+      policy_text: $in.policy_text
+    out: explanation
+    function: explain_snapshot_prompt
+    params:
+    - snapshot_result
+    - policy_text
+    arguments:
+    - '@snapshot_result'
+    - '@rules_text'
+- format_report_snapshot:
+    node: SOLVE
+    in:
+      snapshot_result: check_market_snapshot
+      explanation: explain_snapshot
+    out: report
+    tool: format_report_snapshot
+    backend: kernel
+    arguments:
+    - '@snapshot_result'
+    - '@explanation'
+    code: |
+      def format_report_snapshot(snapshot_result: str, explanation: str) -> str:
+          return f'=== Z3 Trading Rule Checker (r118) | mode=SNAPSHOT ===\n\n── Market Snapshot Evaluation ──────────────────────────────\n{snapshot_result}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_snapshot(snapshot_result, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - snapshot_result
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_snapshot

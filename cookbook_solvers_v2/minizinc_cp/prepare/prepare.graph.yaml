@@ -1,0 +1,110 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+steps:
+- get_scheduling_problem:
+    node: SOLVE
+    out: problem_json
+    tool: get_scheduling_problem
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _PROBLEM = {'problem_name': '7-Day Nurse Scheduling', 'description': 'Schedule 8 nurses (N1–N8; N1 and N2 are senior) across 7 days and 3 shifts. Hard constraints: (1) Morning shift needs ≥2 nurses, at least one senior (N1 or N2). (2) Afternoon shift needs ≥2 nurses. (3) Night shift needs ≥1 nurse. (4) No nurse works more than 5 days per week. (5) A nurse who works Night on day D cannot work Morning on day D+1 (rest rule). Soft preferences: N3 prefers mornings, N7 avoids nights, N8 prefers consecutive days off. Objective: maximize preference satisfaction score subject to all hard constraints.', 'n_nurses': 8, 'n_days': 7, 'n_shifts': 3, 'senior_nurses': [0, 1], 'min_morning': 2, 'min_afternoon': 2, 'min_night': 1, 'max_work_days': 5, 'preferences': [(2, 0, 3), (6, 2, -3), (7, 3, 2)]}
+
+      def get_scheduling_problem() -> str:
+          return json.dumps(_PROBLEM)
+      _spl_result = get_scheduling_problem()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      problem_json: get_scheduling_problem
+    out: problem_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(problem_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      problem_json: get_scheduling_problem
+      problem_description: json_get

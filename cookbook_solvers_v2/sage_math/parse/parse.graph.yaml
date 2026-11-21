@@ -1,0 +1,218 @@
+version: 1.0-graph
+workflow:
+  name: parse
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: log_file
+    type: TEXT
+  - name: sage_banner
+    type: TEXT
+  outputs:
+  - name: operation_lc
+    type: TEXT
+  - name: expression
+    type: TEXT
+steps:
+- parse_math_problem:
+    generate: |-
+      Convert this math problem into Sage notation.
+      Reply with exactly one line in this format (no other text):
+        <expression>|<operation>
+
+      Rules:
+      - operation must be exactly one of: galois, conic, rank, factor
+      - Use ^ for powers and * for multiplication (Sage notation)
+      - galois: expression is a polynomial in x over the rationals
+      - factor: expression is a polynomial in x over the rationals
+      - conic:  expression is a homogeneous quadratic in x, y, z moved
+        to the "= 0" form (e.g. "x^2 + y^2 = 3*z^2" becomes "x^2 + y^2 - 3*z^2")
+      - rank:   expression is the 5-element Weierstrass coefficient list
+        [a1, a2, a3, a4, a6] of the elliptic curve
+        y^2 + a1*x*y + a3*y = x^3 + a2*x^2 + a4*x + a6
+
+      Examples:
+        "Galois group of x to the fifth minus x minus 1"        →  x^5 - x - 1|galois
+        "factor x^4 - 1 over the rationals"                     →  x^4 - 1|factor
+        "does x^2 + y^2 = 3*z^2 have a rational solution?"      →  x^2 + y^2 - 3*z^2|conic
+        "rank of the curve y^2 + y = x^3 - x^2 - 10*x - 20"     →  [0, -1, 1, -10, -20]|rank
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: parsed
+    function: parse_math_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- trim:
+    node: SOLVE
+    in:
+      parsed: parse_math_problem
+    out: parsed
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@parsed'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(parsed)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- split_part:
+    node: SOLVE
+    in:
+      parsed: trim
+    out: expression
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@parsed'
+    - "'|'"
+    - "'1'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(parsed, '|', '1')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- split_part_2:
+    node: SOLVE
+    in:
+      parsed: trim
+    out: operation
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@parsed'
+    - "'|'"
+    - "'2'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(parsed, '|', '2')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- write_file:
+    node: SOLVE
+    in:
+      log_file: $in.log_file
+      sage_banner: $in.sage_banner
+      problem: $in.problem
+      parsed: trim
+      expression: split_part
+      operation: split_part_2
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@log_file'
+    - f'# Sage Solver — chain trace\n\n**Engine:** {@sage_banner}\n\n## Step 1 — LLM parse\n**Problem:** {@problem}\n**Parsed:** {@parsed}\n**Expression:** {@expression}\n**Operation:** {@operation}\n'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(log_file, f'# Sage Solver — chain trace\n\n**Engine:** {sage_banner}\n\n## Step 1 — LLM parse\n**Problem:** {problem}\n**Parsed:** {parsed}\n**Expression:** {expression}\n**Operation:** {operation}\n')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- lower:
+    node: SOLVE
+    in:
+      operation: split_part_2
+    out: operation_lc
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@operation'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(operation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      operation_lc: lower
+      expression: split_part

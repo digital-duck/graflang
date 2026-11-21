@@ -1,0 +1,100 @@
+version: 1.0-graph
+workflow:
+  name: setup
+  inputs:
+  - name: log_dir
+    type: TEXT
+  outputs:
+  - name: log_file
+    type: TEXT
+  - name: sage_banner
+    type: TEXT
+steps:
+- tool_1:
+    node: SOLVE
+    out: tool_1
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: isinstance(1, Integer)
+    out_type: BOOL
+- assert_tool_1:
+    assert: '@in_tool_1'
+    in:
+      tool_1: tool_1
+    out: []
+- solve_1:
+    node: SOLVE
+    out: sage_banner
+    on:
+    - assert_tool_1
+    - assert_tool_1.fail
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: str(version())
+    out_type: TEXT
+- now_iso:
+    node: SOLVE
+    out: run_ts
+    tool: now_iso
+    backend: kernel
+    arguments: []
+    code: |
+      import datetime
+
+      def now_iso() -> str:
+          """NOW() — current UTC datetime as ISO-8601 string: 'YYYY-MM-DDTHH:MM:SS'."""
+          return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+      _spl_result = now_iso()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- replace:
+    node: SOLVE
+    in:
+      run_ts: now_iso
+    out: run_ts
+    tool: replace
+    backend: kernel
+    arguments:
+    - '@run_ts'
+    - "':'"
+    - "''"
+    code: |
+      def replace(value: str, old: str, new: str) -> str:
+          """REPLACE(value, old, new) — replace all occurrences of old with new."""
+          return str(value).replace(str(old), str(new))
+      _spl_result = replace(run_ts, ':', '')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - old
+    - new
+    tool_returns: TEXT
+    tool_builtin: true
+- set_log_file:
+    node: CONTEXT
+    in:
+      log_dir: $in.log_dir
+      run_ts: replace
+    out: log_file
+    action: set
+    expression: f'{@in_log_dir}/chain_trace-{@in_run_ts}.md'
+- solve_2:
+    node: SOLVE
+    out: _xyz
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: str(var('x y z'))
+    out_type: TEXT
+- wf_exit:
+    output:
+      log_file: set_log_file
+      sage_banner: solve_1

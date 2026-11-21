@@ -1,0 +1,96 @@
+version: 1.0-graph
+workflow:
+  name: mode
+  inputs:
+  - name: enable_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: set_use_solver_2_use_solver
+    type: TEXT
+  - name: schema
+    type: TEXT
+steps:
+- lower:
+    node: SOLVE
+    in:
+      enable_solver: $in.enable_solver
+    out: solver_mode
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@enable_solver'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(enable_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- schema_description:
+    node: SOLVE
+    out: schema
+    tool: schema_description
+    backend: kernel
+    arguments: []
+    code: |
+      def schema_description() -> str:
+          """Human-readable schema + sample rows, shown to the LLM (and to the
+          unaided baseline arm) so it can write/reason about SQL without ever
+          seeing the live database connection."""
+          return (
+              "Table: customers(id INTEGER, name TEXT, segment TEXT)\n"
+              "Rows:\n"
+              "  1, Acme Corp,     Enterprise\n"
+              "  2, Globex Inc,    Enterprise\n"
+              "  3, Initech,       SMB\n"
+              "  4, Umbrella LLC,  SMB\n"
+              "  5, Wayne Retail,  Consumer\n"
+              "\n"
+              "Table: orders(id INTEGER, customer_id INTEGER, amount REAL, order_date TEXT)\n"
+              "Rows:\n"
+              "  1, 1, 5000.00, 2026-01-10\n"
+              "  2, 1, 7000.00, 2026-02-14\n"
+              "  3, 2, 6000.00, 2026-02-20\n"
+              "  4, 3,  800.00, 2026-01-15\n"
+              "  5, 4, 1200.00, 2026-03-01\n"
+              "  6, 5,  150.00, 2026-01-05\n"
+              "  7, 5,  250.00, 2026-03-12\n"
+          )
+      _spl_result = schema_description()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- solver_on:
+    evaluate: >-
+      (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode
+      == 'yes')
+    in:
+      solver_mode: lower
+    out: []
+    branch: 1
+- set_use_solver:
+    node: CONTEXT
+    out: use_solver
+    action: set
+    expression: "'yes'"
+- set_use_solver_2:
+    node: CONTEXT
+    out: use_solver
+    on: solver_on.fail
+    action: set
+    expression: "'no'"
+- wf_exit:
+    output:
+      use_solver: set_use_solver
+      set_use_solver_2_use_solver: set_use_solver_2
+      schema: schema_description
+    on:
+    - set_use_solver
+    - set_use_solver_2

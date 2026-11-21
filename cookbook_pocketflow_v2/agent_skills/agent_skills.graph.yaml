@@ -1,0 +1,129 @@
+version: 1.0-graph
+workflow:
+  name: skill_dispatcher
+  inputs:
+  - name: task
+    type: TEXT
+    default: Write an executive brief summarizing the key advantages of retrieval-augmented generation for enterprise AI
+  - name: skills_dir
+    type: TEXT
+    default: skills
+  - name: default_skill
+    type: TEXT
+    default: default.md
+  outputs:
+  - name: response
+    type: TEXT
+resources:
+  parts:
+    find_skills: ./find_skills/find_skills.graph.yaml
+    apply: ./apply/apply.graph.yaml
+steps:
+- find_skills:
+    use: parts.find_skills
+    in:
+      skills_dir: $in.skills_dir
+      task: $in.task
+    out:
+    - match_result
+    - skill_files_content
+- gate:
+    evaluate: contains(@in_subject, 'NO_MATCH')
+    in:
+      subject: find_skills
+    out: []
+    branch: 1
+- path_join:
+    node: SOLVE
+    in:
+      skills_dir: $in.skills_dir
+      default_skill: $in.default_skill
+    out: skill_path
+    tool: path_join
+    backend: kernel
+    arguments:
+    - |-
+      @skills_dir
+    - |-
+      @default_skill
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(skills_dir, default_skill)
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- select_best_skill:
+    generate: |-
+      Select the single best-matching skill file for the given task.
+
+      Task:
+      {{in_task}}
+
+      Available skill files:
+      {{in_skill_files_content}}
+
+      Respond with ONLY the filename of the best-matching skill (e.g., "coding.md").
+      Do not include any explanation, path prefix, or extra text.
+    in:
+      task: $in.task
+      skill_files_content: find_skills.skill_files_content
+    out: selected_skill
+    'on': gate.fail
+    function: select_best_skill
+    params:
+    - task
+    - skill_files_content
+    arguments:
+    - |-
+      @task
+    - |-
+      @skill_files_content
+- path_join_2:
+    node: SOLVE
+    in:
+      skills_dir: $in.skills_dir
+      selected_skill: select_best_skill
+    out: skill_path
+    tool: path_join
+    backend: kernel
+    arguments:
+    - |-
+      @skills_dir
+    - |-
+      @selected_skill
+    code: |
+      import pathlib
+
+      def path_join(*parts: str) -> str:
+          """PATH_JOIN(part1, part2, ...) — join path segments with OS separator.
+
+          Returns the joined path as a string.
+          """
+          return str(pathlib.Path(*[str(p).strip() for p in parts]))
+      _spl_result = path_join(skills_dir, selected_skill)
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- apply:
+    use: parts.apply
+    in:
+      skill_path: path_join
+      read_file_skill_path: path_join_2
+      task: $in.task
+    out: response
+    'on':
+    - path_join
+    - path_join_2
+- wf_exit:
+    output: apply

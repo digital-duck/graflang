@@ -1,0 +1,296 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- extract_sourcing_problem_2:
+    generate: |-
+      Extract this supply sourcing problem into JSON.
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "suppliers": [
+          {{"name": "S1", "cost": 10.0, "fill_rate": 0.95, "capacity": 400.0}},
+          {{"name": "S2", "cost": 7.0,  "fill_rate": 0.80, "capacity": 500.0}},
+          {{"name": "S3", "cost": 5.0,  "fill_rate": 0.60, "capacity": 400.0}}
+        ],
+        "demand": 1000.0
+      }}
+
+      Rules:
+      - cost is dollars per unit (numeric, not a string)
+      - fill_rate is a decimal in [0, 1] (e.g. 95% → 0.95)
+      - capacity is maximum units this supplier can provide
+      - demand is the total units required
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: problem_json
+    function: extract_sourcing_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_4:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- propose_allocation:
+    generate: |-
+      You are a supply chain analyst. Propose a single allocation across these suppliers.
+
+      Problem: {{in_problem}}
+      Supplier data (JSON): {{in_problem_json}}
+
+      Steps:
+      1. List each supplier's cost, fill rate, and capacity.
+      2. Choose an allocation strategy (e.g. fill cheapest first, or balance cost and fill rate).
+      3. Assign units to each supplier so that the total equals the demand.
+      4. Respect each supplier's capacity limit.
+      5. Compute the total cost and the blended fill rate.
+
+      Return your answer as a JSON object:
+      {{
+        "cost": <total cost as a number>,
+        "fill_rate": <blended fill rate as a decimal, e.g. 0.735>,
+        "allocation": {{"S1": <units>, "S2": <units>, "S3": <units>}},
+        "reasoning": "<one sentence explaining the strategy>"
+      }}
+
+      Return ONLY the JSON — no markdown, no prose.
+    in:
+      problem: $in.problem
+      problem_json: extract_sourcing_problem_2
+    out: allocation_text
+    function: propose_allocation
+    params:
+    - problem
+    - problem_json
+    arguments:
+    - '@problem'
+    - '@problem_json'
+- set_llm_calls_5:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_4
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- extract_solution_json:
+    generate: |-
+      Extract the sourcing allocation from this text into JSON.
+      Return ONLY a JSON object — no markdown:
+      {{
+        "cost": <total cost as a number>,
+        "fill_rate": <blended fill rate as a decimal>,
+        "allocation": {{"S1": <units>, "S2": <units>, "S3": <units>}},
+        "reasoning": "<strategy summary>"
+      }}
+
+      Problem: {{in_problem}}
+      Allocation text:
+      {{in_allocation_text}}
+    in:
+      problem: $in.problem
+      allocation_text: propose_allocation
+    out: solution_json
+    function: extract_solution_json
+    params:
+    - problem
+    - allocation_text
+    arguments:
+    - '@problem'
+    - '@allocation_text'
+- set_llm_calls_6:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_5
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- verify_sourcing_off:
+    node: SOLVE
+    in:
+      problem_json: extract_sourcing_problem_2
+      solution_json: extract_solution_json
+    out: verify_result
+    tool: verify_sourcing_off
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@solution_json'
+    code: |
+      import json
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def verify_sourcing_off(problem_json: str, solution_json: str) -> str:
+          """Verify LLM-proposed allocation arithmetic.
+
+          Checks:
+          - demand balance: sum(allocation) == demand (±1)
+          - capacity: each allocation <= supplier capacity
+          - cost: recompute from allocation and compare to claimed
+          - fill_rate: recompute and compare to claimed
+
+          Returns {"verdict": "PASS"/"FAIL", "notes": str}
+          """
+          try:
+              problem = json.loads(_strip_fences(problem_json))
+              sol = json.loads(_strip_fences(solution_json))
+          except Exception as e:
+              return json.dumps({'verdict': 'FAIL', 'notes': f'parse error: {e}'})
+          suppliers = {s['name']: s for s in problem.get('suppliers', [])}
+          demand = float(problem.get('demand', 1000))
+          allocation = sol.get('allocation', {})
+          notes = []
+          ok = True
+          total_alloc = sum((float(v) for v in allocation.values()))
+          if abs(total_alloc - demand) > 1.0:
+              notes.append(f'demand balance: allocated {total_alloc:.1f} vs demanded {demand:.1f}')
+              ok = False
+          for name, amount in allocation.items():
+              amount = float(amount)
+              if name in suppliers:
+                  cap = float(suppliers[name]['capacity'])
+                  if amount > cap + 0.5:
+                      notes.append(f'{name}: allocated {amount:.1f} exceeds capacity {cap:.1f}')
+                      ok = False
+          recomputed_cost = sum((float(suppliers[n]['cost']) * float(v) for n, v in allocation.items() if n in suppliers))
+          claimed_cost = sol.get('cost')
+          if claimed_cost is not None:
+              if abs(float(claimed_cost) - recomputed_cost) > 10.0:
+                  notes.append(f'cost mismatch: claimed={float(claimed_cost):.2f}, recomputed={recomputed_cost:.2f}')
+                  ok = False
+          recomputed_fill = sum((float(suppliers[n]['fill_rate']) * float(v) for n, v in allocation.items() if n in suppliers)) / demand
+          claimed_fill = sol.get('fill_rate')
+          if claimed_fill is not None:
+              if abs(float(claimed_fill) - recomputed_fill) > 0.02:
+                  notes.append(f'fill_rate mismatch: claimed={float(claimed_fill):.4f}, recomputed={recomputed_fill:.4f}')
+                  ok = False
+          return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'recomputed_cost': round(recomputed_cost, 2), 'recomputed_fill_rate': round(recomputed_fill, 4), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+      _spl_result = verify_sourcing_off(problem_json, solution_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - solution_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      verify_result: verify_sourcing_off
+    out: verify_status
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      solution_json: extract_solution_json
+    out: fill_rate_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    - "'fill_rate'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(solution_json, 'fill_rate')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      allocation_text: propose_allocation
+      solution_json: extract_solution_json
+      verify_result: verify_sourcing_off
+      llm_calls: set_llm_calls_6
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@allocation_text'
+    - '@solution_json'
+    - '@verify_result'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_off(problem: str, allocation_text: str, solution_json: str, verify_result: str, llm_calls: str) -> str:
+          return f'=== Supply Sourcing (solver=OFF / LLM heuristic) ===\n\nProblem:\n{problem}\n\nLLM Allocation:\n{allocation_text}\n\nExtracted Solution (JSON):\n{solution_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_off(problem, allocation_text, solution_json, verify_result, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - allocation_text
+    - solution_json
+    - verify_result
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

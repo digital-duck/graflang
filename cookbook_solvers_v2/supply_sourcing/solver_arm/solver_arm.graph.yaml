@@ -1,0 +1,325 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: n_points
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- extract_sourcing_problem:
+    generate: |-
+      Extract this supply sourcing problem into JSON.
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "suppliers": [
+          {{"name": "S1", "cost": 10.0, "fill_rate": 0.95, "capacity": 400.0}},
+          {{"name": "S2", "cost": 7.0,  "fill_rate": 0.80, "capacity": 500.0}},
+          {{"name": "S3", "cost": 5.0,  "fill_rate": 0.60, "capacity": 400.0}}
+        ],
+        "demand": 1000.0
+      }}
+
+      Rules:
+      - cost is dollars per unit (numeric, not a string)
+      - fill_rate is a decimal in [0, 1] (e.g. 95% → 0.95)
+      - capacity is maximum units this supplier can provide
+      - demand is the total units required
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: problem_json
+    function: extract_sourcing_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- sweep_pareto_front:
+    node: SOLVE
+    in:
+      problem_json: extract_sourcing_problem
+      n_points: $in.n_points
+    out: front_json
+    tool: sweep_pareto_front
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@n_points'
+    code: |
+      import json
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def sweep_pareto_front(problem_json: str, n_points: int=8) -> str:
+          """ε-constraint sweep: for each fill_rate threshold, minimize cost via PuLP.
+
+          Returns:
+              {"status": "OK", "n_points": int, "pareto_front":
+                  [{"cost": float, "fill_rate": float, "allocation": {name: amount}}]}
+
+          Dominated points are stripped before returning.
+          Requires: pip install pulp
+          """
+          n_points = int(n_points)
+          import pulp
+          try:
+              data = json.loads(_strip_fences(problem_json))
+          except Exception as e:
+              return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+          suppliers = data.get('suppliers', [])
+          demand = float(data.get('demand', 1000))
+          if not suppliers:
+              return json.dumps({'status': 'INVALID_INPUT', 'error': 'no suppliers'})
+          names = [s['name'] for s in suppliers]
+          costs = {s['name']: float(s['cost']) for s in suppliers}
+          fill_rates = {s['name']: float(s['fill_rate']) for s in suppliers}
+          capacities = {s['name']: float(s['capacity']) for s in suppliers}
+          sorted_by_cost = sorted(names, key=lambda n: costs[n])
+          remaining = demand
+          min_fill_units = 0.0
+          for n in sorted_by_cost:
+              alloc = min(remaining, capacities[n])
+              min_fill_units += alloc * fill_rates[n]
+              remaining -= alloc
+              if remaining <= 0:
+                  break
+          min_fill_rate = min_fill_units / demand
+          sorted_by_fill = sorted(names, key=lambda n: fill_rates[n], reverse=True)
+          remaining = demand
+          max_fill_units = 0.0
+          for n in sorted_by_fill:
+              alloc = min(remaining, capacities[n])
+              max_fill_units += alloc * fill_rates[n]
+              remaining -= alloc
+              if remaining <= 0:
+                  break
+          max_fill_rate = max_fill_units / demand
+          n_pts = max(2, int(n_points))
+          step = (max_fill_rate - min_fill_rate) / max(n_pts - 1, 1)
+          thresholds = [min_fill_rate + i * step for i in range(n_pts)]
+          raw_points = []
+          for threshold in thresholds:
+              prob = pulp.LpProblem('supply_cost_min', pulp.LpMinimize)
+              x = {n: pulp.LpVariable(f'x_{n}', lowBound=0, upBound=capacities[n]) for n in names}
+              prob += pulp.lpSum((costs[n] * x[n] for n in names))
+              prob += pulp.lpSum((x[n] for n in names)) == demand
+              prob += pulp.lpSum((fill_rates[n] * x[n] for n in names)) >= threshold * demand
+              status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
+              if pulp.LpStatus[status] not in ('Optimal',):
+                  continue
+              allocation = {n: round(float(pulp.value(x[n]) or 0.0), 2) for n in names}
+              total_cost = sum((costs[n] * allocation[n] for n in names))
+              blended_fill = sum((fill_rates[n] * allocation[n] for n in names)) / demand
+              raw_points.append({'cost': round(total_cost, 2), 'fill_rate': round(blended_fill, 6), 'allocation': allocation})
+          if not raw_points:
+              return json.dumps({'status': 'INFEASIBLE', 'n_points': 0, 'pareto_front': []})
+
+          def is_dominated(p, candidates):
+              for q in candidates:
+                  if q is p:
+                      continue
+                  if q['cost'] <= p['cost'] and q['fill_rate'] >= p['fill_rate']:
+                      if q['cost'] < p['cost'] or q['fill_rate'] > p['fill_rate']:
+                          return True
+              return False
+          pareto = [p for p in raw_points if not is_dominated(p, raw_points)]
+          pareto.sort(key=lambda p: p['cost'])
+          return json.dumps({'status': 'OK', 'n_points': len(pareto), 'pareto_front': pareto})
+      _spl_result = sweep_pareto_front(problem_json, n_points)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - n_points
+    tool_returns: TEXT
+- is_pareto_feasible:
+    node: SOLVE
+    in:
+      front_json: sweep_pareto_front
+    out: tool_3
+    tool: is_pareto_feasible
+    backend: kernel
+    arguments:
+    - '@front_json'
+    code: |
+      import json
+
+      def is_pareto_feasible(front_json: str) -> bool:
+          """ASSERT gate: True if front has status==OK and n_points >= 2."""
+          try:
+              data = json.loads(front_json)
+              return data.get('status') == 'OK' and int(data.get('n_points', 0)) >= 2
+          except Exception:
+              return False
+      _spl_result = is_pareto_feasible(front_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - front_json
+    tool_returns: TEXT
+- assert_is_pareto_feasible:
+    assert: '@in_tool_3'
+    in:
+      front_json: sweep_pareto_front
+      tool_3: is_pareto_feasible
+    out: []
+- format_pareto_table:
+    node: SOLVE
+    in:
+      front_json: sweep_pareto_front
+    out: front_table
+    on:
+    - assert_is_pareto_feasible
+    - assert_is_pareto_feasible.fail
+    tool: format_pareto_table
+    backend: kernel
+    arguments:
+    - '@front_json'
+    code: |
+      import json
+
+      def format_pareto_table(front_json: str) -> str:
+          """Format Pareto front as a markdown table: Cost ($) | Fill rate (%) | Allocation."""
+          try:
+              data = json.loads(front_json)
+              points = data.get('pareto_front', [])
+              if not points:
+                  return 'No Pareto-optimal points found.'
+              sample_alloc = points[0].get('allocation', {})
+              supplier_names = sorted(sample_alloc.keys())
+              alloc_header = '  |  '.join(supplier_names)
+              lines = [f'| Cost ($) | Fill rate (%) | {alloc_header} |', '|---|---|' + '|'.join(['---'] * len(supplier_names)) + '|']
+              for pt in points:
+                  cost = f"{pt['cost']:,.2f}"
+                  fill = f"{pt['fill_rate'] * 100:.1f}"
+                  alloc_vals = '  |  '.join((str(int(pt['allocation'].get(n, 0))) for n in supplier_names))
+                  lines.append(f'| {cost} | {fill} | {alloc_vals} |')
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'Could not format Pareto table: {e}'
+      _spl_result = format_pareto_table(front_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - front_json
+    tool_returns: TEXT
+- interpret_pareto_front:
+    generate: |-
+      Interpret this supply sourcing Pareto front for a supply chain manager.
+
+      Problem: {{in_problem}}
+
+      Pareto front (cost vs. fill rate):
+      {{in_front_table}}
+
+      Your interpretation should:
+      1. Explain the cost/fill-rate tradeoff in plain language.
+      2. Recommend 2-3 concrete operating points with reasoning:
+         - a low-cost anchor (acceptable fill rate)
+         - a balanced midpoint
+         - a high-fill anchor (for critical supply scenarios)
+      3. Identify which suppliers dominate each recommended point.
+      4. One-sentence practical takeaway for procurement.
+
+      Be concise and actionable.
+    in:
+      problem: $in.problem
+      front_table: format_pareto_table
+    out: interpretation
+    function: interpret_pareto_front
+    params:
+    - problem
+    - front_table
+    arguments:
+    - '@problem'
+    - '@front_table'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- json_get:
+    node: SOLVE
+    in:
+      front_json: sweep_pareto_front
+    out: fill_rate_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@front_json'
+    - "'n_points'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(front_json, 'n_points')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      fill_rate_str: json_get
+      front_table: format_pareto_table
+      interpretation: interpret_pareto_front
+      llm_calls: set_llm_calls_3
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@fill_rate_str'
+    - '@front_table'
+    - '@interpretation'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_on(problem: str, n_points: str, front_table: str, interpretation: str, llm_calls: str) -> str:
+          return f'=== Supply Sourcing (solver=ON / PuLP ε-constraint) ===\n\nProblem:\n{problem}\n\nPareto Front ({n_points} points):\n{front_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_on(problem, fill_rate_str, front_table, interpretation, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - n_points
+    - front_table
+    - interpretation
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

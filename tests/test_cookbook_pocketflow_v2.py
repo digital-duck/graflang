@@ -36,13 +36,25 @@ def test_the_layered_recipe_has_composites_and_a_short_top_level(name):
 
 
 def scrub(value):
-    """A temporary file name differs from run to run."""
-    return re.sub(r"/tmp/tmp\w+", "/tmp/TMP", str(value))
+    """What differs from run to run or by where a step lives: a temporary file name, the node id in an error message, and the part a mock procedure moved into
+    (`procedures.translate__translate_and_save` after `graf group`)."""
+    if isinstance(value, dict):
+        return {k: scrub(v) for k, v in value.items()}
+    text = re.sub(r"/tmp/tmp\w+", "/tmp/TMP", str(value))
+    text = re.sub(r"node '[^']*'", "node 'N'", text)
+    text = re.sub(r"procedures\.\w+?__", "procedures.", text)
+    # a mock procedure lists its inputs in port order, and grouping changes the order of the ports: compare them as a set
+    return re.sub(r"(\[Mock procedure [\w.]+\] )(.*?)(?=\n\[Mock procedure|\Z)",
+                  lambda m: m.group(1) + ", ".join(sorted(re.split(r", (?=in_\w+=)", m.group(2)))), text, flags=re.S)
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_the_layered_recipe_gives_the_original_s_outputs(name):
+    """With its default inputs on the mock adapter. A recipe that cannot finish there (it needs a server, or a real answer to name a file) must fail the same way in both."""
     def run(base):
         rt = GraphLangRuntime(load_graph(graph(base, name)), llm=make_llm("mock", None), verbose=False)
-        return scrub(rt.execute({}))
+        try:
+            return scrub(rt.execute({}))
+        except Exception as e:                      # noqa: BLE001
+            return f"{type(e).__name__}: {scrub(e)}"
     assert run(V2) == run(ORIGINALS)

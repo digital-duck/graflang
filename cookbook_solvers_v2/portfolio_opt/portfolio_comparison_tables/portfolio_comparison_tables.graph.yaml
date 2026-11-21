@@ -1,0 +1,236 @@
+version: 1.0-graph
+workflow:
+  name: portfolio_comparison_tables
+  inputs:
+  - name: tickers
+    type: TEXT
+  - name: r_markowitz
+    type: TEXT
+  - name: r_min_var
+    type: TEXT
+  - name: r_max_sharpe
+    type: TEXT
+  - name: r_risk_parity
+    type: TEXT
+  - name: r_hrp
+    type: TEXT
+  - name: r_cvar
+    type: TEXT
+  - name: capital
+    type: TEXT
+  - name: out_dir
+    type: TEXT
+  outputs:
+  - name: summary_csv
+    type: TEXT
+  - name: composition_csv
+    type: TEXT
+steps:
+- comparison_to_csv:
+    node: SOLVE
+    in:
+      tickers: $in.tickers
+      r_markowitz: $in.r_markowitz
+      r_min_var: $in.r_min_var
+      r_max_sharpe: $in.r_max_sharpe
+      r_risk_parity: $in.r_risk_parity
+      r_hrp: $in.r_hrp
+      r_cvar: $in.r_cvar
+    out: summary_csv
+    tool: comparison_to_csv
+    backend: kernel
+    arguments:
+    - '@tickers'
+    - '@r_markowitz'
+    - '@r_min_var'
+    - '@r_max_sharpe'
+    - '@r_risk_parity'
+    - '@r_hrp'
+    - '@r_cvar'
+    code: |
+      import json
+
+      def _parse_algo_results(raws: list, algo_labels: list) -> list:
+          parsed = []
+          for name, raw in zip(algo_labels, raws):
+              try:
+                  d = json.loads(raw)
+              except Exception:
+                  d = {'status': 'PARSE_ERROR', 'weights': {}, 'expected_return': None, 'annual_volatility': None, 'sharpe_ratio': None}
+              d['_name'] = name
+              parsed.append(d)
+          return parsed
+
+      def comparison_to_csv(tickers: str, r_markowitz: str, r_min_var: str, r_max_sharpe: str, r_risk_parity: str, r_hrp: str, r_cvar: str) -> str:
+          """Algorithm summary: rows=algorithms, cols=metrics + per-ticker weight."""
+          import csv, io
+          ticker_list = [t.strip() for t in tickers.split(',')]
+          algo_labels = ['markowitz', 'min_variance', 'max_sharpe', 'risk_parity', 'hrp', 'cvar']
+          parsed = _parse_algo_results([r_markowitz, r_min_var, r_max_sharpe, r_risk_parity, r_hrp, r_cvar], algo_labels)
+          buf = io.StringIO()
+          writer = csv.writer(buf)
+          writer.writerow(['algorithm', 'status', 'expected_return', 'annual_volatility', 'sharpe_ratio'] + ticker_list)
+          for d in parsed:
+              weights = d.get('weights', {})
+              writer.writerow([d['_name'], d.get('status', 'UNKNOWN'), f"{d.get('expected_return') or 0:.4f}", f"{d.get('annual_volatility') or 0:.4f}", f"{d.get('sharpe_ratio') or 0:.4f}"] + [f'{weights.get(t, 0.0):.4f}' for t in ticker_list])
+          return buf.getvalue().strip()
+      _spl_result = comparison_to_csv(tickers, r_markowitz, r_min_var, r_max_sharpe, r_risk_parity, r_hrp, r_cvar)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tickers
+    - r_markowitz
+    - r_min_var
+    - r_max_sharpe
+    - r_risk_parity
+    - r_hrp
+    - r_cvar
+    tool_returns: TEXT
+- composition_to_csv:
+    node: SOLVE
+    in:
+      tickers: $in.tickers
+      capital: $in.capital
+      r_markowitz: $in.r_markowitz
+      r_min_var: $in.r_min_var
+      r_max_sharpe: $in.r_max_sharpe
+      r_risk_parity: $in.r_risk_parity
+      r_hrp: $in.r_hrp
+      r_cvar: $in.r_cvar
+    out: composition_csv
+    tool: composition_to_csv
+    backend: kernel
+    arguments:
+    - '@tickers'
+    - '@capital'
+    - '@r_markowitz'
+    - '@r_min_var'
+    - '@r_max_sharpe'
+    - '@r_risk_parity'
+    - '@r_hrp'
+    - '@r_cvar'
+    code: |
+      import json
+
+      def _parse_algo_results(raws: list, algo_labels: list) -> list:
+          parsed = []
+          for name, raw in zip(algo_labels, raws):
+              try:
+                  d = json.loads(raw)
+              except Exception:
+                  d = {'status': 'PARSE_ERROR', 'weights': {}, 'expected_return': None, 'annual_volatility': None, 'sharpe_ratio': None}
+              d['_name'] = name
+              parsed.append(d)
+          return parsed
+
+      def composition_to_csv(tickers: str, capital: str, r_markowitz: str, r_min_var: str, r_max_sharpe: str, r_risk_parity: str, r_hrp: str, r_cvar: str) -> str:
+          """Portfolio composition: rows=tickers, cols=weight% and $ per algorithm."""
+          import csv, io
+          ticker_list = [t.strip() for t in tickers.split(',')]
+          cap = float(capital)
+          algo_labels = ['markowitz', 'min_variance', 'max_sharpe', 'risk_parity', 'hrp', 'cvar']
+          parsed = _parse_algo_results([r_markowitz, r_min_var, r_max_sharpe, r_risk_parity, r_hrp, r_cvar], algo_labels)
+          buf = io.StringIO()
+          writer = csv.writer(buf)
+          writer.writerow(['ticker'] + [f'{a}_wt%' for a in algo_labels] + [f'{a}_$' for a in algo_labels])
+          for ticker in ticker_list:
+              row = [ticker]
+              row += [f"{d.get('weights', {}).get(ticker, 0.0) * 100:.2f}" for d in parsed]
+              row += [f"{d.get('weights', {}).get(ticker, 0.0) * cap:.0f}" for d in parsed]
+              writer.writerow(row)
+          return buf.getvalue().strip()
+      _spl_result = composition_to_csv(tickers, capital, r_markowitz, r_min_var, r_max_sharpe, r_risk_parity, r_hrp, r_cvar)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tickers
+    - capital
+    - r_markowitz
+    - r_min_var
+    - r_max_sharpe
+    - r_risk_parity
+    - r_hrp
+    - r_cvar
+    tool_returns: TEXT
+- fork_2:
+    fork:
+    - branch_1
+    - branch_2
+    out: []
+- save_csv:
+    node: SOLVE
+    in:
+      summary_csv: comparison_to_csv
+      out_dir: $in.out_dir
+    out: path_summary
+    on: fork_2
+    tool: save_csv
+    backend: kernel
+    arguments:
+    - '@summary_csv'
+    - '@out_dir'
+    - "'comparison_summary.csv'"
+    code: |
+      def save_csv(csv_text: str, out_dir: str, filename: str) -> str:
+          """Write csv_text to out_dir/filename, creating the directory if needed.
+
+          Returns the absolute path of the saved file.
+          """
+          import os
+          from pathlib import Path
+          out = Path(out_dir) if os.path.isabs(out_dir) else Path(os.getcwd()) / out_dir
+          out.mkdir(parents=True, exist_ok=True)
+          dest = out / filename
+          dest.write_text(csv_text, encoding='utf-8')
+          return str(dest)
+      _spl_result = save_csv(summary_csv, out_dir, 'comparison_summary.csv')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - csv_text
+    - out_dir
+    - filename
+    tool_returns: TEXT
+- save_csv_2:
+    node: SOLVE
+    in:
+      composition_csv: composition_to_csv
+      out_dir: $in.out_dir
+    out: path_composition
+    on: fork_2.branch_2
+    tool: save_csv
+    backend: kernel
+    arguments:
+    - '@composition_csv'
+    - '@out_dir'
+    - "'comparison_composition.csv'"
+    code: |
+      def save_csv(csv_text: str, out_dir: str, filename: str) -> str:
+          """Write csv_text to out_dir/filename, creating the directory if needed.
+
+          Returns the absolute path of the saved file.
+          """
+          import os
+          from pathlib import Path
+          out = Path(out_dir) if os.path.isabs(out_dir) else Path(os.getcwd()) / out_dir
+          out.mkdir(parents=True, exist_ok=True)
+          dest = out / filename
+          dest.write_text(csv_text, encoding='utf-8')
+          return str(dest)
+      _spl_result = save_csv(composition_csv, out_dir, 'comparison_composition.csv')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - csv_text
+    - out_dir
+    - filename
+    tool_returns: TEXT
+- join_2:
+    join:
+    - save_csv
+    - save_csv_2
+    out: []
+- wf_exit:
+    output:
+      summary_csv: comparison_to_csv
+      composition_csv: composition_to_csv

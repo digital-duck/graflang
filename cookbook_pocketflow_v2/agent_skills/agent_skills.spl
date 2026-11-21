@@ -1,0 +1,99 @@
+CREATE TOOL_API scan_skills_dir(skills_dir TEXT) RETURNS TEXT AS PYTHON $$
+import os, glob
+def scan_skills_dir(skills_dir: str) -> str:
+    try:
+        pattern = os.path.join(skills_dir, "*.md")
+        files = sorted(glob.glob(pattern))
+        return "\n".join(files) if files else ""
+    except Exception as e:
+        return "error: " + str(e)
+$$;
+
+CREATE TOOL_API read_skill_files(file_list TEXT) RETURNS TEXT AS PYTHON $$
+import os
+def read_skill_files(file_list: str) -> str:
+    try:
+        files = [f.strip() for f in file_list.split("\n") if f.strip()]
+        if not files:
+            return ""
+        parts = []
+        for f in files:
+            with open(f, "r", encoding="utf-8") as fh:
+                content = fh.read()
+            parts.append("=== " + os.path.basename(f) + " ===\n" + content)
+        return "\n\n".join(parts)
+    except Exception as e:
+        return "error: " + str(e)
+$$;
+
+CREATE FUNCTION extract_keywords(skill_files_content TEXT)
+RETURNS TEXT AS $$
+You are given the contents of multiple skill markdown files.
+Each file is delimited by a header line in the format: === filename.md ===
+
+For each skill file, identify the key topics, capabilities, and relevant keywords it covers.
+Return the result as a keyword map — one line per skill file in this exact format:
+<filename.md>: keyword1, keyword2, keyword3, ...
+
+Skill file contents:
+{skill_files_content}
+$$;
+
+CREATE FUNCTION match_task_to_skills(task TEXT, keywords_map TEXT)
+RETURNS TEXT AS $$
+Determine whether any of the available skill files is a suitable match for the given task.
+
+Task:
+{task}
+
+Skill keywords map (filename: keywords):
+{keywords_map}
+
+If at least one skill file is relevant to the task, respond with exactly: MATCH
+If no skill file is relevant to the task, respond with exactly: NO_MATCH
+$$;
+
+CREATE FUNCTION select_best_skill(task TEXT, skill_files_content TEXT)
+RETURNS TEXT AS $$
+Select the single best-matching skill file for the given task.
+
+Task:
+{task}
+
+Available skill files:
+{skill_files_content}
+
+Respond with ONLY the filename of the best-matching skill (e.g., "coding.md").
+Do not include any explanation, path prefix, or extra text.
+$$;
+
+CREATE FUNCTION apply_skill_template(prompt TEXT)
+RETURNS TEXT AS $$
+{prompt}
+$$;
+
+WORKFLOW skill_dispatcher
+  INPUT @task TEXT := "Write an executive brief summarizing the key advantages of retrieval-augmented generation for enterprise AI"
+  INPUT @skills_dir TEXT := "cookbook-pocketflow/041_agent_skills/skills"
+  INPUT @default_skill TEXT := "default.md"
+  OUTPUT @response TEXT
+DO
+  CALL scan_skills_dir(@skills_dir) INTO @skill_files_list;
+  CALL read_skill_files(@skill_files_list) INTO @skill_files_content;
+  GENERATE extract_keywords(@skill_files_content) INTO @keywords_map;
+  GENERATE match_task_to_skills(@task, @keywords_map) INTO @match_result;
+
+  EVALUATE @match_result
+    WHEN contains("NO_MATCH") THEN
+      CALL path_join(@skills_dir, @default_skill) INTO @skill_path;
+    ELSE
+      GENERATE select_best_skill(@task, @skill_files_content) INTO @selected_skill;
+      CALL path_join(@skills_dir, @selected_skill) INTO @skill_path;
+  END;
+
+  CALL read_file(@skill_path) INTO @skill_template;
+  CALL replace(@skill_template, "{task}", @task) INTO @prompt;
+  GENERATE apply_skill_template(@prompt) INTO @response;
+
+  RETURN @response WITH status = "complete";
+END;

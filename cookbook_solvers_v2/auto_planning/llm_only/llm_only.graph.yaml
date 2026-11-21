@@ -1,0 +1,62 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: domain
+    type: TEXT
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_directly:
+    generate: |-
+      You are an automated planner. There is no plan validator backing you
+      up this time — work out a plan yourself, from scratch, and reason in
+      prose about whether each step's precondition holds.
+
+      {{in_domain}}
+
+      Problem: {{in_problem}}
+
+      Write a clear step-by-step plan in under 10 sentences, explicitly
+      checking each action's precondition against the state at that point.
+      State the final number of steps in the plan plainly.
+
+      End your response with a line in EXACTLY this format (no extra words,
+      number only):
+      Final answer: <value>
+    in:
+      domain: $in.domain
+      problem: $in.problem
+    out: report
+    function: solve_directly
+    params:
+    - domain
+    - problem
+    arguments:
+    - '@domain'
+    - '@problem_text'
+- trim:
+    node: SOLVE
+    in:
+      report: solve_directly
+    out: report
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@report'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

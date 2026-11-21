@@ -1,0 +1,86 @@
+version: 1.0-graph
+workflow:
+  name: trading_rule_z3
+  inputs:
+  - name: rules_text
+    type: TEXT
+    default: ''
+  - name: snapshot_json
+    type: TEXT
+    default: ''
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    policy: ./policy/policy.graph.yaml
+    audit: ./audit/audit.graph.yaml
+    snapshot: ./snapshot/snapshot.graph.yaml
+steps:
+- policy:
+    use: parts.policy
+    in:
+      rules_text: $in.rules_text
+    out:
+    - policy_json
+    - parse_policy_json_policy_json
+- is_empty_policy_2:
+    node: SOLVE
+    in:
+      snapshot_json: $in.snapshot_json
+    out: is_audit_mode
+    tool: is_empty_policy
+    backend: kernel
+    arguments:
+    - |-
+      @snapshot_json
+    code: |
+      def is_empty_policy(policy_text: str) -> str:
+          """Return 'true' if no custom policy was provided."""
+          return 'true' if not policy_text.strip() else 'false'
+      _spl_result = is_empty_policy(snapshot_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - policy_text
+    tool_returns: TEXT
+- solver_on_2:
+    evaluate: |-
+      @in_subject == 'true'
+    in:
+      subject: is_empty_policy_2
+    out: []
+    semantic: true
+    branch: 1
+- audit:
+    use: parts.audit
+    in:
+      policy_json: policy
+      check_z3_strategy_policy_json: policy.parse_policy_json_policy_json
+      rules_text: $in.rules_text
+    out: report
+- solver_off_2:
+    evaluate: |-
+      @in_subject == 'false'
+    in:
+      subject: is_empty_policy_2
+    out: []
+    'on': solver_on_2.fail
+    semantic: true
+    branch: 2
+- snapshot:
+    use: parts.snapshot
+    in:
+      policy_json: policy
+      check_market_snapshot_policy_json: policy.parse_policy_json_policy_json
+      snapshot_json: $in.snapshot_json
+      policy_text: $in.rules_text
+    out: report
+- wf_exit:
+    output:
+    - audit
+    - snapshot
+    'on':
+    - solver_off_2.fail
+    - audit
+    - snapshot

@@ -1,0 +1,132 @@
+version: 1.0-graph
+workflow:
+  name: sql_verifier
+  inputs:
+  - name: question
+    type: TEXT
+    default: What is the average salary in the Engineering department?
+  - name: ground_truth_sql
+    type: TEXT
+    default: SELECT AVG(salary) AS avg_salary FROM employees WHERE department = 'Engineering';
+  - name: enable_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INTEGER
+    default: 3
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook/84_sql_verifier/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    mode: ./mode/mode.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+steps:
+- time_monotonic:
+    node: SOLVE
+    out: t_start
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- time_now:
+    node: SOLVE
+    out: ts_safe
+    tool: time_now
+    backend: kernel
+    arguments: []
+    code: |
+      import datetime
+
+      def time_now() -> str:
+          """TIME_NOW() — current local time as a filesystem-safe string:
+          YYYY-MM-DD_HH-MM-SS."""
+          return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+      _spl_result = time_now()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- mode:
+    use: parts.mode
+    in:
+      enable_solver: $in.enable_solver
+    out:
+    - use_solver
+    - set_use_solver_2_use_solver
+    - schema
+- gate:
+    evaluate: |-
+      @in_use_solver == 'no'
+    in:
+      use_solver:
+      - mode
+      - mode.set_use_solver_2_use_solver
+    out: []
+    branch: 1
+- llm_only:
+    use: parts.llm_only
+    in:
+      question: $in.question
+      schema: mode.schema
+    out: report
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      ground_truth_sql: $in.ground_truth_sql
+      max_tries: $in.max_tries
+      question: $in.question
+      out_dir: $in.out_dir
+      ts_safe: time_now
+      schema: mode.schema
+    out: report
+    'on': gate.fail
+- time_elapsed:
+    node: SOLVE
+    in:
+      t_start: time_monotonic
+    out: elapsed
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - |-
+      @t_start
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_start)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+    - llm_only
+    - solver_arm
+    'on':
+    - time_elapsed
+    - llm_only

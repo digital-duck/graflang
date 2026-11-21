@@ -1,6 +1,7 @@
 """cookbook_solvers_v2: the lifted solver recipes in the layered form (scripts/port_solver.py). Each one must validate with no errors or warnings and,
 run next to its original in cookbook_solvers/ on the mock adapter, give the same outputs with the solver switch on and off (the tools really run, in
 a Jupyter kernel; the model answers with the mock's placeholder text, which names the prompt it was asked, so equal outputs mean equal prompts)."""
+import re
 from pathlib import Path
 
 import pytest
@@ -13,11 +14,13 @@ from graphlang.grafr.topology import check
 
 ROOT = Path(__file__).resolve().parents[1]
 V2, ORIGINALS = ROOT / "cookbook_solvers_v2", ROOT / "cookbook_solvers"
-NAMES = sorted(d.name for d in V2.iterdir() if d.is_dir() and (d / f"{d.name}.graph.yaml").exists())
+GRAPHS = sorted(f"{g.parent.name}/{g.name.removesuffix('.graph.yaml')}" for g in V2.glob("*/*.graph.yaml"))      # every graph of every recipe: a recipe may hold several, named as they like
+NAMES = GRAPHS
 
 
 def path(base, name):
-    return base / name / f"{name}.graph.yaml"
+    folder, graph = name.split("/")
+    return base / folder / f"{graph}.graph.yaml"
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -32,16 +35,36 @@ def test_the_layered_recipe_reads_as_a_few_composites(name):
     assert top.number_of_nodes() <= 10, f"{top.number_of_nodes()} boxes at the top level"
 
 
-def switch(graph):
-    (name,) = [i["name"] for i in graph["workflow"]["inputs"] if "solver" in i["name"]]
-    return name
+def scrub(value):
+    """What differs from run to run, or by where the recipe lives: a solver's solve time, a temporary file name, a timestamp, the recipe's folder, and the part a
+    procedure moved into (a mock procedure names itself, `procedures.drafts__gen_tests` after `graf group`)."""
+    text = str(value)
+    text = re.sub(r"(?i)((?:solve|elapsed|wall|cpu|run)?[ _]?time[^\n\d]{0,14})\d+(?:\.\d+)?", r"\1N", text)
+    text = re.sub(r"\b\d+(?:\.\d+)?\s?(?:ms|sec|seconds|s)\b", "N s", text)        # any duration: "1.7s", "0.32 s", "in 2 seconds"
+    text = re.sub(r"/tmp/tmp\w+", "/tmp/TMP", text)
+    text = re.sub(r"node '[^']*'", "node 'N'", text)                # the node id in an error message
+    text = re.sub(r"(\d\.\d{3})\d+", r"\1", text)                      # a numerical solver or a live market feed differs in the last digits
+    text = re.sub(r"\d{4}-\d\d-\d\d[_ T]\d\d[-:]\d\d[-:]\d\d", "TIMESTAMP", text)
+    text = re.sub(r"cookbook_solvers(?:_v2)?/", "RECIPES/", text)
+    return re.sub(r"procedures\.\w+?__", "procedures.", text)
+
+
+def settings(graph, on):
+    """The inputs of a run: the solver switch set, or none when the recipe has no switch (it runs on its defaults)."""
+    names = [i["name"] for i in graph["workflow"]["inputs"] if "solver" in i["name"]]
+    return {names[0]: on} if len(names) == 1 else {}
 
 
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize("on", ["true", "false"])
-def test_the_layered_recipe_gives_the_original_s_outputs(name, on):
+def test_the_layered_recipe_gives_the_original_s_outputs(name, on, monkeypatch):
+    """Each run starts in its recipe's folder (a recipe reads `rules.json` and the like relative to it). A run that cannot finish on the mock must fail the same way in both."""
     def run(base):
+        monkeypatch.chdir(base / name.split("/")[0])
         g = load_graph(path(base, name))
         rt = GraphLangRuntime(g, llm=make_llm("mock", None), verbose=False)
-        return rt.execute({switch(g): on})
+        try:
+            return scrub(rt.execute(settings(g, on)))
+        except Exception as e:                      # noqa: BLE001
+            return f"{type(e).__name__}: {scrub(e)}"
     assert run(V2) == run(ORIGINALS)

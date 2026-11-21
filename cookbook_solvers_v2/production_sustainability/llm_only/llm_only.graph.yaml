@@ -1,0 +1,295 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- extract_production_problem_2:
+    generate: |-
+      Extract the production problem data from the text below into JSON.
+
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "products": [
+          {{"name": "A", "profit": 10.0, "carbon": 3.0, "labor": 2.0, "material": 3.0}},
+          {{"name": "B", "profit": 6.0,  "carbon": 1.0, "labor": 1.0, "material": 2.0}}
+        ],
+        "resources": {{"labor": 20.0, "material": 30.0}}
+      }}
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: problem_json
+    function: extract_production_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_4:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- propose_solution:
+    generate: |-
+      You are a production planner. Choose a production plan (x units of Product A, y units of Product B)
+      that balances profit and carbon footprint.
+
+      Problem: {{in_problem}}
+
+      Parsed problem data (JSON): {{in_problem_json}}
+
+      Constraints:
+        2x + y ≤ 20   (labor hours)
+        3x + 2y ≤ 30  (kg material)
+        x ≥ 0, y ≥ 0
+
+      Objectives:
+        Maximize profit = 10x + 6y
+        Minimize carbon = 3x + y
+
+      Choose (x, y) and explain your reasoning. Then output your answer as JSON:
+      {{
+        "x": <float>,
+        "y": <float>,
+        "profit": <float>,
+        "carbon": <float>,
+        "reasoning": "<one sentence>"
+      }}
+
+      Show calculations. Verify your constraints before answering.
+    in:
+      problem: $in.problem
+      problem_json: extract_production_problem_2
+    out: solution_text
+    function: propose_solution
+    params:
+    - problem
+    - problem_json
+    arguments:
+    - '@problem'
+    - '@problem_json'
+- set_llm_calls_5:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_4
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- extract_solution_json:
+    generate: |-
+      Extract the production plan from the analysis below into JSON.
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "x": <float>,
+        "y": <float>,
+        "profit": <float>,
+        "carbon": <float>,
+        "reasoning": "<str>"
+      }}
+
+      Problem: {{in_problem}}
+      Analysis: {{in_solution_text}}
+    in:
+      problem: $in.problem
+      solution_text: propose_solution
+    out: solution_json
+    function: extract_solution_json
+    params:
+    - problem
+    - solution_text
+    arguments:
+    - '@problem'
+    - '@solution_text'
+- set_llm_calls_6:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_5
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- verify_production_off:
+    node: SOLVE
+    in:
+      problem_json: extract_production_problem_2
+      solution_json: extract_solution_json
+    out: verify_result
+    tool: verify_production_off
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@solution_json'
+    code: |
+      import json
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def verify_production_off(problem_json: str, solution_json: str) -> str:
+          """
+          Verify LLM-proposed (x, y) against the B3 constraints and claimed objectives.
+          Checks: feasibility, profit arithmetic, carbon arithmetic.
+          Returns {"verdict": "PASS"/"FAIL", "notes": str}
+          """
+          TOLS = {'arith': 0.5}
+          try:
+              prob = json.loads(_strip_fences(problem_json))
+              sol = json.loads(_strip_fences(solution_json))
+              products = prob['products']
+              resources = prob['resources']
+              pA = products[0]
+              pB = products[1]
+              x = float(sol.get('x', 0))
+              y = float(sol.get('y', 0))
+              claimed_profit = float(sol.get('profit', 0))
+              claimed_carbon = float(sol.get('carbon', 0))
+              notes: list[str] = []
+              ok = True
+              labor_used = pA['labor'] * x + pB['labor'] * y
+              material_used = pA['material'] * x + pB['material'] * y
+              if labor_used > resources['labor'] + 1e-06:
+                  notes.append(f"labor violated: {labor_used:.2f} > {resources['labor']}")
+                  ok = False
+              if material_used > resources['material'] + 1e-06:
+                  notes.append(f"material violated: {material_used:.2f} > {resources['material']}")
+                  ok = False
+              if x < -1e-06 or y < -1e-06:
+                  notes.append(f'non-negativity violated: x={x}, y={y}')
+                  ok = False
+              actual_profit = pA['profit'] * x + pB['profit'] * y
+              actual_carbon = pA['carbon'] * x + pB['carbon'] * y
+              if abs(actual_profit - claimed_profit) > TOLS['arith']:
+                  notes.append(f'profit mismatch: computed={actual_profit:.2f}, claimed={claimed_profit:.2f}')
+                  ok = False
+              if abs(actual_carbon - claimed_carbon) > TOLS['arith']:
+                  notes.append(f'carbon mismatch: computed={actual_carbon:.2f}, claimed={claimed_carbon:.2f}')
+                  ok = False
+              return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'x': x, 'y': y, 'actual_profit': round(actual_profit, 2), 'actual_carbon': round(actual_carbon, 2), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+          except Exception as e:
+              return json.dumps({'verdict': 'FAIL', 'notes': f'parse error: {e}'})
+      _spl_result = verify_production_off(problem_json, solution_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - solution_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      verify_result: verify_production_off
+    out: verify_status
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      solution_json: extract_solution_json
+    out: profit_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    - "'profit'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(solution_json, 'profit')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      problem_json: extract_production_problem_2
+      solution_text: propose_solution
+      solution_json: extract_solution_json
+      verify_result: verify_production_off
+      llm_calls: set_llm_calls_6
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@problem_json'
+    - '@solution_text'
+    - '@solution_json'
+    - '@verify_result'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_off(problem: str, problem_json: str, solution_text: str, solution_json: str, verify_result: str, llm_calls: str) -> str:
+          return f'=== Production Sustainability (solver=OFF / LLM heuristic) ===\n\nProblem:\n{problem}\n\nExtracted Problem Data (JSON):\n{problem_json}\n\nLLM Proposed Solution:\n{solution_text}\n\nExtracted Solution (JSON):\n{solution_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_off(problem, problem_json, solution_text, solution_json, verify_result, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - problem_json
+    - solution_text
+    - solution_json
+    - verify_result
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

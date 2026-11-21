@@ -1,0 +1,91 @@
+version: 1.0-graph
+workflow:
+  name: portfolio_optimization
+  inputs:
+  - name: tickers
+    type: TEXT
+    default: AAPL,MSFT,GOOGL,AMZN,NVDA
+  - name: capital
+    type: TEXT
+    default: '10000'
+  - name: period
+    type: TEXT
+    default: 1y
+  - name: target_return
+    type: TEXT
+    default: '0.08'
+  - name: max_weight
+    type: TEXT
+    default: '0.25'
+  - name: adapter
+    type: TEXT
+    default: claude_cli
+  - name: model
+    type: TEXT
+    default: ''
+  - name: log_dir
+    type: TEXT
+    default: ./logs
+  - name: algorithm
+    type: TEXT
+    default: markowitz
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    portfolio_optimization_prepare: ./portfolio_optimization_prepare/portfolio_optimization_prepare.graph.yaml
+    portfolio_optimization_solver_arm: ./portfolio_optimization_solver_arm/portfolio_optimization_solver_arm.graph.yaml
+    portfolio_optimization_llm_only: ./portfolio_optimization_llm_only/portfolio_optimization_llm_only.graph.yaml
+steps:
+- portfolio_optimization_prepare:
+    use: parts.portfolio_optimization_prepare
+    in:
+      tickers: $in.tickers
+      period: $in.period
+      use_solver: $in.use_solver
+    out:
+    - use_solver
+    - market_data_json
+    - llm_calls
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: portfolio_optimization_prepare
+    out: []
+    branch: 1
+- portfolio_optimization_solver_arm:
+    use: parts.portfolio_optimization_solver_arm
+    in:
+      algorithm: $in.algorithm
+      tickers: $in.tickers
+      market_data_json: portfolio_optimization_prepare.market_data_json
+      target_return: $in.target_return
+      llm_calls: portfolio_optimization_prepare.llm_calls
+      max_weight: $in.max_weight
+      capital: $in.capital
+      period: $in.period
+    out: report
+- portfolio_optimization_llm_only:
+    use: parts.portfolio_optimization_llm_only
+    in:
+      tickers: $in.tickers
+      market_data_json: portfolio_optimization_prepare.market_data_json
+      capital: $in.capital
+      target_return: $in.target_return
+      max_weight: $in.max_weight
+      llm_calls: portfolio_optimization_prepare.llm_calls
+      period: $in.period
+    out: report
+    'on': solver_on.fail
+- wf_exit:
+    output:
+    - portfolio_optimization_solver_arm
+    - portfolio_optimization_llm_only
+    'on':
+    - portfolio_optimization_solver_arm
+    - portfolio_optimization_llm_only

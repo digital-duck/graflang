@@ -1,0 +1,93 @@
+version: 1.0-graph
+workflow:
+  name: mode
+  inputs:
+  - name: enable_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: set_use_solver_2_use_solver
+    type: TEXT
+  - name: domain
+    type: TEXT
+steps:
+- lower:
+    node: SOLVE
+    in:
+      enable_solver: $in.enable_solver
+    out: solver_mode
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@enable_solver'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(enable_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- domain_description:
+    node: SOLVE
+    out: domain
+    tool: domain_description
+    backend: kernel
+    arguments: []
+    code: |
+      def domain_description() -> str:
+          """Fixed STRIPS logistics-lite domain, shown to the LLM (and to the
+          unaided baseline arm) exactly as the ground truth the validator
+          will replay the plan against."""
+          return (
+              "STRIPS DOMAIN: logistics-lite\n"
+              "Objects: truck t1; packages p1, p2; locations A, B, C "
+              "(any location reachable directly from any other — no roads to worry about)\n"
+              "Predicates: truck_at(T, L), pkg_at(P, L), pkg_in(P, T)\n"
+              "Actions (grounded, one per plan step):\n"
+              "  {\"action\": \"drive\", \"truck\": T, \"from\": L1, \"to\": L2}\n"
+              "    precondition: truck_at(T, L1)\n"
+              "    effect: truck no longer at L1, truck now at L2\n"
+              "  {\"action\": \"load\", \"truck\": T, \"pkg\": P, \"loc\": L}\n"
+              "    precondition: truck_at(T, L) AND pkg_at(P, L)\n"
+              "    effect: P no longer at L, P now in T\n"
+              "  {\"action\": \"unload\", \"truck\": T, \"pkg\": P, \"loc\": L}\n"
+              "    precondition: truck_at(T, L) AND pkg_in(P, T)\n"
+              "    effect: P no longer in T, P now at L\n"
+          )
+      _spl_result = domain_description()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- solver_on:
+    evaluate: >-
+      (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode
+      == 'yes')
+    in:
+      solver_mode: lower
+    out: []
+    branch: 1
+- set_use_solver:
+    node: CONTEXT
+    out: use_solver
+    action: set
+    expression: "'yes'"
+- set_use_solver_2:
+    node: CONTEXT
+    out: use_solver
+    on: solver_on.fail
+    action: set
+    expression: "'no'"
+- wf_exit:
+    output:
+      use_solver: set_use_solver
+      set_use_solver_2_use_solver: set_use_solver_2
+      domain: domain_description
+    on:
+    - set_use_solver
+    - set_use_solver_2

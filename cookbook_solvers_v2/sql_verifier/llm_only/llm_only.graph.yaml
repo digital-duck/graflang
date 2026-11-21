@@ -1,0 +1,56 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: question
+    type: TEXT
+  - name: schema
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_directly:
+    generate: |-
+      Answer this question about the following data, WITHOUT writing or running
+      any SQL — reason about the rows yourself, from scratch, in plain English.
+
+      {{in_schema}}
+
+      Question: {{in_question}}
+
+      Write a clear walkthrough in under 8 sentences that shows your reasoning
+      over the rows above and gives the final answer plainly.
+    in:
+      question: $in.question
+      schema: $in.schema
+    out: report
+    function: solve_directly
+    params:
+    - question
+    - schema
+    arguments:
+    - '@question'
+    - '@schema'
+- trim:
+    node: SOLVE
+    in:
+      report: solve_directly
+    out: report
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@report'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

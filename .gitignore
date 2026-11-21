@@ -235,3 +235,6 @@ docs/DEV/IDEATION/
 
 # a recipe's own result files (digests, alerts, state), written when it runs
 output/
+
+# trace logs a lifted recipe writes beside itself when it runs
+logs-spl/

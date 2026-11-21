@@ -1,0 +1,151 @@
+version: 1.0-graph
+workflow:
+  name: mcp_math_agent
+  inputs:
+  - name: question
+    type: TEXT
+    default: What is the square root of 144?
+  - name: mcp_mode
+    type: TEXT
+    default: 'false'
+  - name: mcp_server_url
+    type: TEXT
+    default: ''
+  outputs:
+  - name: answer
+    type: TEXT
+resources:
+  parts:
+    plan: ./plan/plan.graph.yaml
+steps:
+- plan:
+    use: parts.plan
+    in:
+      mcp_server_url: $in.mcp_server_url
+      question: $in.question
+    out:
+    - tool_name
+    - tool_params
+- solver_on:
+    evaluate: contains(@in_subject, 'true')
+    in:
+      subject: $in.mcp_mode
+    out: []
+    branch: 1
+- invoke_mcp_tool:
+    node: SOLVE
+    in:
+      tool_name: plan
+      tool_params: plan.tool_params
+      mcp_server_url: $in.mcp_server_url
+    out: tool_result
+    tool: invoke_mcp_tool
+    backend: kernel
+    arguments:
+    - |-
+      @tool_name
+    - |-
+      @tool_params
+    - |-
+      @mcp_server_url
+    code: |
+      import json, urllib.request
+
+      def invoke_mcp_tool(tool_name: str, params_json: str, mcp_server_url: str) -> str:
+          try:
+              params = json.loads(params_json) if params_json.strip() else {}
+              payload = json.dumps({"name": tool_name, "arguments": params}).encode()
+              url = mcp_server_url.rstrip("/") + "/tools/call"
+              req = urllib.request.Request(
+                  url, data=payload,
+                  headers={"Content-Type": "application/json"},
+                  method="POST"
+              )
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  data = json.loads(resp.read().decode())
+                  content = data.get("content", [])
+                  if isinstance(content, list) and content:
+                      return str(content[0].get("text", ""))
+                  return json.dumps(data)
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = invoke_mcp_tool(tool_name, tool_params, mcp_server_url)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tool_name
+    - params_json
+    - mcp_server_url
+    tool_returns: TEXT
+- invoke_local_tool:
+    node: SOLVE
+    in:
+      tool_name: plan
+      tool_params: plan.tool_params
+    out: tool_result
+    'on': solver_on.fail
+    tool: invoke_local_tool
+    backend: kernel
+    arguments:
+    - |-
+      @tool_name
+    - |-
+      @tool_params
+    code: |
+      import json, math
+
+      def invoke_local_tool(tool_name: str, params_json: str) -> str:
+          try:
+              params = json.loads(params_json) if params_json.strip() else {}
+              name = tool_name.lower().strip()
+              if name == "calculator":
+                  expr = params.get("expression", "")
+                  safe_ns = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
+                  return str(eval(expr, {"__builtins__": {}}, safe_ns))
+              elif name == "sqrt":
+                  return str(math.sqrt(float(params.get("value", 0))))
+              elif name == "power":
+                  return str(math.pow(float(params.get("base", 0)), float(params.get("exponent", 1))))
+              elif name == "factorial":
+                  return str(math.factorial(int(params.get("n", 0))))
+              else:
+                  return "error: unknown local tool " + tool_name
+          except Exception as e:
+              return "error: " + str(e)
+      _spl_result = invoke_local_tool(tool_name, tool_params)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tool_name
+    - params_json
+    tool_returns: TEXT
+- format_final_answer:
+    generate: |-
+      You are a helpful math assistant. A user asked the following question:
+        {{in_question}}
+
+        The computation tool returned this result: {{in_tool_result}}
+
+        Write a clear, concise answer to the user''s question using the computation result.
+        If the result starts with "error:", explain that the computation could not be completed
+        and suggest how the user might rephrase or simplify the question.
+    in:
+      question: $in.question
+      tool_result:
+      - invoke_mcp_tool
+      - invoke_local_tool
+    out: answer
+    'on':
+    - invoke_mcp_tool
+    - invoke_local_tool
+    function: format_final_answer
+    params:
+    - question
+    - tool_result
+    arguments:
+    - |-
+      @question
+    - |-
+      @tool_result
+- wf_exit:
+    output: format_final_answer

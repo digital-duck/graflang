@@ -1,0 +1,55 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_directly:
+    generate: |-
+      A student asked this crystallography question: "{{in_problem}}"
+
+      There is no symmetry/density checker backing you up this time — work
+      it out yourself, from scratch.
+
+      Write a clear walkthrough in under 8 sentences that:
+      1. Restates the crystal system and lattice parameters
+      2. Shows your volume and density calculation step by step
+      3. Gives the final theoretical density plainly, with its unit
+
+      End your response with a line in EXACTLY this format (no extra words,
+      number only, no unit):
+      Final answer: <value>
+    in:
+      problem: $in.problem
+    out: report
+    function: solve_directly
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- trim:
+    node: SOLVE
+    in:
+      report: solve_directly
+    out: report
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@report'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

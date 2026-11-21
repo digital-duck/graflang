@@ -1,0 +1,110 @@
+version: 1.0-graph
+workflow:
+  name: dispatch
+  inputs:
+  - name: operation_lc
+    type: TEXT
+  - name: expression
+    type: TEXT
+  outputs:
+  - name: sage_result
+    type: TEXT
+  - name: solve_5_sage_result
+    type: TEXT
+  - name: solve_6_sage_result
+    type: TEXT
+  - name: solve_7_sage_result
+    type: TEXT
+  - name: set_sage_result_sage_result
+    type: TEXT
+steps:
+- gate:
+    evaluate: "@in_operation_lc == 'galois'"
+    in:
+      operation_lc: $in.operation_lc
+    out: []
+    branch: 1
+- solve_4:
+    node: SOLVE
+    in:
+      expression: $in.expression
+    out: sage_result
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: str(QQ['x'](expression).galois_group())
+    out_type: TEXT
+- gate_2:
+    evaluate: "@in_operation_lc == 'factor'"
+    in:
+      operation_lc: $in.operation_lc
+    out: []
+    on: gate.fail
+    branch: 2
+- solve_5:
+    node: SOLVE
+    in:
+      expression: $in.expression
+    out: sage_result
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: str(factor(QQ['x'](expression)))
+    out_type: TEXT
+- gate_3:
+    evaluate: "@in_operation_lc == 'conic'"
+    in:
+      operation_lc: $in.operation_lc
+    out: []
+    on: gate_2.fail
+    branch: 3
+- solve_6:
+    node: SOLVE
+    in:
+      expression: $in.expression
+    out: sage_result
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: str(Conic(QQ['x,y,z'](expression)).has_rational_point(point=True))
+    out_type: TEXT
+- gate_4:
+    evaluate: "@in_operation_lc == 'rank'"
+    in:
+      operation_lc: $in.operation_lc
+    out: []
+    on: gate_3.fail
+    branch: 4
+- solve_7:
+    node: SOLVE
+    in:
+      expression: $in.expression
+    out: sage_result
+    type: TEXT
+    backend: kernel
+    kernel_name: sagemath
+    code: ''
+    result: str(EllipticCurve(expression).rank())
+    out_type: TEXT
+- set_sage_result:
+    node: CONTEXT
+    out: sage_result
+    on: gate_4.fail
+    action: set
+    expression: "'unsupported_operation'"
+- wf_exit:
+    output:
+      sage_result: solve_4
+      solve_5_sage_result: solve_5
+      solve_6_sage_result: solve_6
+      solve_7_sage_result: solve_7
+      set_sage_result_sage_result: set_sage_result
+    on:
+    - set_sage_result
+    - solve_4
+    - solve_5
+    - solve_6
+    - solve_7

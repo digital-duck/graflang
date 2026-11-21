@@ -112,15 +112,8 @@ def rename_all(data, names):
             edge[end] = rename_refs(edge[end], names)
 
 
-def prepare(name, src, dst):
-    """Copy the recipe, compact it and name its steps; returns (graph path, the data, the step names in order)."""
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst, ignore=SKIP)
-    graphs = sorted(dst.glob("*.graph.yaml"))
-    if len(graphs) != 1:
-        raise RuntimeError(f"{len(graphs)} graphs: not handled")
-    path = graphs[0]
+def prepare_graph(path):
+    """Compact one graph file in place and name its steps; returns (the data, the steps, the new names)."""
     graf("compact", path, "-o", path)
     data = yaml.load(path.read_text())
     steps = [(list(s)[0], list(s.values())[0]) for s in data["steps"]]
@@ -128,35 +121,94 @@ def prepare(name, src, dst):
     rename_all(data, names)
     with path.open("w") as f:
         yaml.dump(data, f)
-    return path, data, steps, names
+    return data, steps, names
+
+
+def copy_recipe(src, dst):
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst, ignore=SKIP)
+    graphs = sorted(dst.glob("*.graph.yaml"))
+    if not graphs:
+        raise RuntimeError("no graph")
+    return graphs
+
+
+def _on(step):
+    on = step.get("on")
+    return [on] if isinstance(on, str) else list(on or [])
+
+
+def infer_groups(data):
+    """Groups for the lifted solver shapes, from the renamed steps (and the long-form nodes beside them)."""
+    steps = [(list(s)[0], list(s.values())[0]) for s in data["steps"]]
+    order = [n for n, _ in steps]
+    longform = [n["id"] for n in data.get("nodes", []) or [] if n["id"] != "wf_exit"]
+    ix = order.index("wf_exit") if "wf_exit" in order else len(order)
+    gates = [n for n, st in steps if kind(st) == "evaluate"]
+    if any(n.startswith("set_use_solver") for n in order):        # the timed shape: normalise the switch, the direct arm, then the solver arm (a retry loop)
+        mode_end = next(i for i, n in enumerate(order) if n.startswith("set_use_solver_2")) + 1
+        mode_start = next(i for i, (n, st) in enumerate(steps) if "enable_solver" in str(st.get("in")) or "use_solver" in str(st.get("in")) and kind(st) != "evaluate")
+        gate = next(n for n, st in steps[mode_end:] if kind(st) == "evaluate")
+        gi = order.index(gate)
+        solver_start = next((i for i, (n, st) in enumerate(steps) if f"{gate}.fail" in _on(st)), None)
+        if solver_start is None:
+            raise RuntimeError("timed shape without a solver arm")
+        timing = [n for n in order[solver_start:ix] if n.startswith("time_")]
+        arm_solver = [n for n in order[solver_start:ix] if n not in timing] + longform
+        return [("mode", order[mode_start:mode_end]), ("llm_only", order[gi + 1:solver_start]), ("solver_arm", arm_solver)]
+    if not gates:
+        raise RuntimeError("no gate: not a solver shape")
+    g = gates[0]
+    gi = order.index(g)
+    start2 = next((i for i, (n, st) in enumerate(steps) if f"{g}.fail" in _on(st)), None)
+    if start2 is None:
+        raise RuntimeError(f"nothing hangs on {g}.fail")
+    if kind(steps[start2][1]) == "evaluate":                     # the switch is tested twice (on, then off): the second gate stays at the top
+        arm1, arm2 = order[gi + 1:start2], order[start2 + 1:ix]
+    else:
+        arm1, arm2 = order[gi + 1:start2], order[start2:ix]
+    if longform:                                                  # the solver arm is a retry loop, kept in long form; the timing steps stay at the top
+        arm1 = [n for n in longform if not n.startswith("time_")]
+        arm2 = [n for n in arm2 if not n.startswith("time_")]
+    return [(part, nodes) for part, nodes in (("prepare", order[:gi]), ("solver_arm", arm1), ("llm_only", arm2)) if nodes]
 
 
 def port(family, name, groups=None):
+    """`groups`: a list of (part, [steps]) for a one-graph recipe, or {graph stem: that list} for several graphs; None infers the solver shape."""
     src_root, dst_root = FAMILIES[family]
     src, dst = src_root / name, dst_root / name
-    path, data, steps, names = prepare(name, src, dst)
-    order = [names[n] for n, _ in steps]
-    if groups is None:                                           # the two-arm solver shape
-        gates = [n for n, s in steps if kind(s) == "evaluate"]
-        if len(gates) != 2:
-            raise RuntimeError(f"{len(gates)} gates: not the two-arm shape")
-        g1, g2 = names[gates[0]], names[gates[1]]
-        i1, i2, ix = order.index(g1), order.index(g2), order.index("wf_exit")
-        groups = [("prepare", order[:i1]), ("solver_arm", order[i1 + 1:i2]), ("llm_only", order[i2 + 1:ix])]
-    for part, nodes in groups:
-        if len(nodes) >= 1 and (len(nodes) >= 2 or part):
-            graf("group", path, "--nodes", ",".join(nodes), "--name", part)
-    for f in [path, *dst.glob("*/*.graph.yaml")]:
-        if f != path:
-            graf("compact", f, "-o", f)
+    graphs = copy_recipe(src, dst)
+    many = len(graphs) > 1
+    for path in graphs:
+        stem = path.name.replace(".graph.yaml", "")
+        data, steps, names = prepare_graph(path)
+        chosen = groups.get(stem, []) if isinstance(groups, dict) else groups      # a graph left out of an explicit spec stays flat
+        if chosen is None:
+            try:
+                chosen = infer_groups(data)
+            except (RuntimeError, StopIteration) as e:
+                if not many:
+                    raise
+                print(f"  {stem}: left flat ({e})")
+                chosen = []
+        for part, nodes in chosen:
+            graf("group", path, "--nodes", ",".join(nodes), "--name", f"{stem}_{part}" if many else part)
+    for f in [*graphs, *dst.glob("*/*.graph.yaml")]:
+        if f not in graphs:
+            try:
+                graf("compact", f, "-o", f)
+            except RuntimeError:                 # a part with nothing to write as steps (a loop and its body) stays in long form
+                pass
         graf("prettier", f, "-o", f)
-    graf("validate", path)
+    for path in graphs:
+        graf("validate", path)
     original = (src / "readme.md").read_text() if (src / "readme.md").exists() else f"# {name}\n"
     original = original.replace(f"{src_root.name}/{name}", f"{dst_root.name}/{name}")
-    parts = [p.name for p in sorted(dst.iterdir()) if p.is_dir() and (p / f"{p.name}.graph.yaml").exists()]
+    parts = [p.name for p in sorted(dst.iterdir()) if p.is_dir() and list(p.glob("*.graph.yaml"))]
     head = (f"> **Layered port** of `{src_root.name}/{name}`: the same tools, prompts and gates, grouped into composites "
             f"({', '.join(f'`{p}/`' for p in parts)}), each step named after the tool or prompt it runs. "
-            f"Checked against the original by `tests/test_{dst_root.name}.py`. Open it with `graf vis {dst_root.name}/{name}/{path.name} --depth 0`.\n\n")
+            f"Checked against the original by `tests/test_{dst_root.name}.py`. Open it with `graf vis {dst_root.name}/{name}/{graphs[0].name} --depth 0`.\n\n")
     first, _, rest = original.partition("\n")
     (dst / "readme.md").write_text(first + "\n\n" + head + rest.lstrip("\n"))
     return parts
@@ -165,12 +217,14 @@ def port(family, name, groups=None):
 def listing(family, name):
     src_root, dst_root = FAMILIES[family]
     scratch = ROOT / "tmp" / "port_list" / name
-    path, data, steps, names = prepare(name, src_root / name, scratch)
-    for old, step in steps:
-        extra = {k: step[k] for k in ("in", "on", "evaluate", "fork", "join", "loop") if k in step}
-        print(f"{names[old]:28} {kind(step):9} {str(extra)[:150]}")
-    for n in data.get("nodes", []) or []:
-        print(f"  [long form] {n['id']:22} {n['type']}")
+    for path in copy_recipe(src_root / name, scratch):
+        data, steps, names = prepare_graph(path)
+        print(f"##### {path.name}")
+        for old, step in steps:
+            extra = {k: step[k] for k in ("in", "on", "evaluate", "fork", "join", "loop") if k in step}
+            print(f"{names[old]:28} {kind(step):9} {str(extra)[:150]}")
+        for n in data.get("nodes", []) or []:
+            print(f"  [long form] {n['id']:22} {n['type']}")
     shutil.rmtree(scratch.parent, ignore_errors=True)
 
 
@@ -183,7 +237,16 @@ if __name__ == "__main__":
         sys.exit()
     explicit = [a for a in rest if "=" in a]
     for n in [a for a in rest if "=" not in a]:
-        groups = [(a.split("=", 1)[0], a.split("=", 1)[1].split(",")) for a in explicit] or None
+        groups = None
+        if explicit:
+            if any(":" in a.split("=", 1)[0] for a in explicit):          # stem:part=a,b  for a recipe with several graphs
+                groups = {}
+                for a in explicit:
+                    key, nodes = a.split("=", 1)
+                    stem, part = key.split(":", 1)
+                    groups.setdefault(stem, []).append((part, nodes.split(",")))
+            else:
+                groups = [(a.split("=", 1)[0], a.split("=", 1)[1].split(",")) for a in explicit]
         try:
             print(f"{n}: ported ({', '.join(port(family, n, groups))})")
         except Exception as e:            # report, go on with the next

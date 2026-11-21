@@ -1,0 +1,342 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem_json
+    type: TEXT
+  - name: n_patients
+    type: TEXT
+  - name: mmc_json
+    type: TEXT
+  - name: mmc_report
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- run_ed_simulation:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+      n_patients: $in.n_patients
+    out: sim_json
+    tool: run_ed_simulation
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@n_patients'
+    code: |
+      import json
+
+      import math
+
+      import random
+
+      import statistics
+
+      def run_ed_simulation(problem_json: str, n_patients: str) -> str:
+          """Run SimPy DES simulation of the ED.
+
+          Uses bursty non-Poisson arrivals and lognormal treatment times.
+          Returns JSON with mean_wait_min, p95_wait_min, utilization stats,
+          and a histogram of wait times.
+          """
+          try:
+              import simpy
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'simpy not installed — run: pip install simpy'})
+          p = json.loads(problem_json)
+          n_pat = int(n_patients)
+          rng = random.Random(42)
+          wait_times_min = []
+          triage_waits = []
+          specialist_waits = []
+          resource_busy: dict[str, float] = {'triage': 0.0, 'bay': 0.0, 'specialist': 0.0}
+          env = simpy.Environment()
+          triage_res = simpy.Resource(env, capacity=p['triage_nurses'])
+          bay_res = simpy.Resource(env, capacity=p['treatment_bays'])
+          spec_res = simpy.Resource(env, capacity=p['specialist_docs'])
+          burst_hours_set = set(p.get('burst_hours', [8, 16, 0]))
+          burst_factor = p.get('burst_factor', 2.5)
+          mean_arr = p['mean_arrival_rate_per_hr'] / 60.0
+          triage_mean = p['triage_mean_min']
+          treat_mean = p['treatment_mean_min']
+          treat_sigma = p['treatment_sigma_min']
+          spec_prob = p['specialist_prob']
+          spec_mean = p['specialist_mean_min']
+          patients_done = []
+
+          def patient_process(env, patient_id):
+              arrive = env.now
+              with triage_res.request() as req:
+                  t_wait_start = env.now
+                  yield req
+                  triage_waits.append(env.now - t_wait_start)
+                  triage_dur = rng.expovariate(1.0 / triage_mean)
+                  resource_busy['triage'] += triage_dur
+                  yield env.timeout(triage_dur)
+              with bay_res.request() as req:
+                  yield req
+                  mu_ln = math.log(treat_mean ** 2 / math.sqrt(treat_sigma ** 2 + treat_mean ** 2))
+                  sigma_ln = math.sqrt(math.log(1 + (treat_sigma / treat_mean) ** 2))
+                  treat_dur = rng.lognormvariate(mu_ln, sigma_ln)
+                  resource_busy['bay'] += treat_dur
+                  yield env.timeout(treat_dur)
+              if rng.random() < spec_prob:
+                  with spec_res.request() as req:
+                      spec_wait_start = env.now
+                      yield req
+                      specialist_waits.append(env.now - spec_wait_start)
+                      spec_dur = rng.expovariate(1.0 / spec_mean)
+                      resource_busy['specialist'] += spec_dur
+                      yield env.timeout(spec_dur)
+              total_wait = env.now - arrive
+              wait_times_min.append(total_wait)
+              patients_done.append(patient_id)
+
+          def arrival_generator(env):
+              pid = 0
+              while pid < n_pat:
+                  current_hour = int(env.now / 60.0) % 24
+                  effective_rate = mean_arr * (burst_factor if current_hour in burst_hours_set else 1.0)
+                  iat = rng.expovariate(effective_rate)
+                  yield env.timeout(iat)
+                  env.process(patient_process(env, pid))
+                  pid += 1
+          env.process(arrival_generator(env))
+          env.run(until=n_pat * (60.0 / (mean_arr * 60.0)) * 2.0 + 500)
+          env.run(until=env.now + 300)
+          if not wait_times_min:
+              return json.dumps({'status': 'ERROR', 'error': 'No patients completed simulation'})
+          wait_times_min.sort()
+          n_completed = len(wait_times_min)
+          mean_wait = round(statistics.mean(wait_times_min), 1)
+          p95_idx = int(0.95 * n_completed)
+          p95_wait = round(wait_times_min[p95_idx], 1)
+          p50_wait = round(statistics.median(wait_times_min), 1)
+          sim_duration = env.now
+          util = {'triage_pct': round(100.0 * resource_busy['triage'] / (sim_duration * p['triage_nurses']), 1), 'bay_pct': round(100.0 * resource_busy['bay'] / (sim_duration * p['treatment_bays']), 1), 'specialist_pct': round(100.0 * resource_busy['specialist'] / (sim_duration * p['specialist_docs']), 1)}
+          buckets = [0, 10, 20, 30, 45, 60, 90, 120, 9999]
+          hist = {}
+          for i in range(len(buckets) - 1):
+              lo, hi = (buckets[i], buckets[i + 1])
+              label = f"{lo}-{(hi if hi < 9999 else '120+')}min"
+              hist[label] = sum((1 for w in wait_times_min if lo <= w < hi))
+          return json.dumps({'status': 'OK', 'n_patients_completed': n_completed, 'mean_wait_min': mean_wait, 'p50_wait_min': p50_wait, 'p95_wait_min': p95_wait, 'utilization': util, 'wait_histogram': hist, 'triage_mean_wait_min': round(statistics.mean(triage_waits), 1) if triage_waits else 0, 'specialist_mean_wait_min': round(statistics.mean(specialist_waits), 1) if specialist_waits else 0})
+      _spl_result = run_ed_simulation(problem_json, n_patients)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - n_patients
+    tool_returns: TEXT
+- simulation_valid:
+    node: SOLVE
+    in:
+      sim_json: run_ed_simulation
+      mmc_json: $in.mmc_json
+    out: tool_7
+    tool: simulation_valid
+    backend: kernel
+    arguments:
+    - '@sim_json, @mmc_json'
+    code: |
+      import json
+
+      def simulation_valid(sim_json: str, mmc_json: str) -> bool:
+          """ASSERT: simulation ran successfully with enough patients.
+
+          Requires ≥ 200 patients completed and plausible mean wait.
+          (The comparison with M/M/c is narrative, not a pass/fail gate — both
+          measure total sojourn, but lognormal service produces a heavier tail
+          than M/M/c's exponential assumption.)
+          """
+          try:
+              sim = json.loads(sim_json)
+              if sim.get('status') != 'OK':
+                  return False
+              n_done = sim.get('n_patients_completed', 0)
+              mean_wait = sim.get('mean_wait_min', 0)
+              return n_done >= 200 and mean_wait > 5.0
+          except Exception:
+              return False
+      _spl_result = simulation_valid(sim_json, mmc_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - sim_json
+    - mmc_json
+    tool_returns: TEXT
+- assert_simulation_valid:
+    assert: '@in_tool_7'
+    in:
+      sim_json: run_ed_simulation
+      mmc_json: $in.mmc_json
+      tool_7: simulation_valid
+    out: []
+- format_sim_report:
+    node: SOLVE
+    in:
+      sim_json: run_ed_simulation
+    out: sim_report
+    on:
+    - assert_simulation_valid
+    - assert_simulation_valid.fail
+    tool: format_sim_report
+    backend: kernel
+    arguments:
+    - '@sim_json'
+    code: |
+      import json
+
+      _ED_PROBLEM = {'problem_name': 'Hospital Emergency Department Simulation', 'description': 'Simulate an emergency department with bursty arrivals and lognormal treatment. Mean arrival rate: 3.2 patients/hour (non-Poisson — shift handovers at 8am/4pm cause burst factors up to 2.5×). Resources: 3 triage nurses (2 min average, exponential), 8 treatment bays (lognormal mean=40 min, σ=25 min), 2 specialist consultants (50% of patients, exponential mean=30 min). M/M/c formula assumes Poisson arrivals and exponential service — significantly underestimates tail wait times for this ED.', 'mean_arrival_rate_per_hr': 3.2, 'triage_nurses': 3, 'triage_mean_min': 2.0, 'treatment_bays': 8, 'treatment_mean_min': 40.0, 'treatment_sigma_min': 25.0, 'specialist_docs': 2, 'specialist_prob': 0.5, 'specialist_mean_min': 30.0, 'sim_hours': 168, 'burst_hours': [8, 16, 0], 'burst_factor': 2.5}
+
+      def format_sim_report(sim_json: str) -> str:
+          try:
+              d = json.loads(sim_json)
+              util = d.get('utilization', {})
+              hist = d.get('wait_histogram', {})
+              lines = [f'## SimPy DES Report — Emergency Department', '', f"**Patients simulated:** {d.get('n_patients_completed', '?'):,}  ", f"**Mean total wait:** {d.get('mean_wait_min', '?')} min  ", f"**Median wait:** {d.get('p50_wait_min', '?')} min  ", f"**95th-percentile wait:** {d.get('p95_wait_min', '?')} min  ", '', '### Resource Utilization', '', '| Resource | Utilization |', '|---|---|', f"| Triage nurses (×{_ED_PROBLEM['triage_nurses']}) | {util.get('triage_pct', '?')}% |", f"| Treatment bays (×{_ED_PROBLEM['treatment_bays']}) | {util.get('bay_pct', '?')}% |", f"| Specialists (×{_ED_PROBLEM['specialist_docs']}) | {util.get('specialist_pct', '?')}% |", '', '### Wait Time Distribution', '', '| Bucket | Patients |', '|---|---|']
+              for bucket, count in hist.items():
+                  lines.append(f'| {bucket} | {count:,} |')
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_sim_report(sim_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - sim_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      sim_json: run_ed_simulation
+    out: p95_wait
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@sim_json'
+    - "'p95_wait_min'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(sim_json, 'p95_wait_min')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      mmc_json: $in.mmc_json
+    out: mmc_p95
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@mmc_json'
+    - "'p95_wait_min'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(mmc_json, 'p95_wait_min')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_simulation:
+    generate: |-
+      You are a healthcare operations researcher explaining simulation results.
+
+      SIMULATION RESULT (SimPy DES):
+      {{in_sim_report}}
+
+      ANALYTIC BASELINE (M/M/c queuing):
+      {{in_mmc_report}}
+
+      Explain (≤200 words):
+      1. Why does the simulation show a higher 95th-percentile wait than M/M/c predicts?
+         What does "bursty arrivals" mean mathematically (coefficient of variation > 1)?
+      2. What is the "inspection paradox" in queuing — why does arriving during a busy period
+         feel different from the average utilization?
+      3. What operational changes would reduce the 95th-percentile wait the most?
+         (Hint: look at which resource has the highest utilization in the simulation)
+      4. Why can't you optimize the staffing level from simulation alone — what do you need
+         to add to turn a simulation into an optimization?
+    in:
+      sim_report: format_sim_report
+      mmc_report: $in.mmc_report
+    out: explanation
+    function: explain_simulation_prompt
+    params:
+    - sim_report
+    - mmc_report
+    arguments:
+    - '@sim_report'
+    - '@mmc_report'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      sim_report: format_sim_report
+      mmc_report: $in.mmc_report
+      explanation: explain_simulation
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@sim_report'
+    - '@mmc_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(sim_report: str, mmc_report: str, explanation: str) -> str:
+          return f'=== Discrete-Event Simulation — Hospital ED (r124) | solver=ON ===\n\n{sim_report}\n\n── M/M/c Analytic Baseline ─────────────────────────────────\n{mmc_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(sim_report, mmc_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - sim_report
+    - mmc_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

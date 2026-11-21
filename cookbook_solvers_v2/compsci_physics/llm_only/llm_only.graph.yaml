@@ -1,0 +1,56 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_directly:
+    generate: |-
+      A student asked this physics collision question: "{{in_problem}}"
+
+      There is no conservation-law checker backing you up this time — work it
+      out yourself, from scratch.
+
+      Write a clear walkthrough in under 8 sentences that:
+      1. Restates the problem
+      2. Shows your calculation step by step, naming which conservation
+         law(s) you are applying
+      3. Gives the final velocity of object 1 plainly, with its unit
+
+      End your response with a line in EXACTLY this format (no extra words,
+      number only, no unit):
+      Final answer: <value>
+    in:
+      problem: $in.problem
+    out: report
+    function: solve_directly
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- trim:
+    node: SOLVE
+    in:
+      report: solve_directly
+    out: report
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@report'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

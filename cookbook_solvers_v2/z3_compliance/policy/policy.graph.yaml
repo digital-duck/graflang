@@ -1,0 +1,171 @@
+version: 1.0-graph
+workflow:
+  name: policy
+  inputs:
+  - name: policy_text
+    type: TEXT
+  outputs:
+  - name: policy_json
+    type: TEXT
+  - name: parse_policy_json_policy_json
+    type: TEXT
+steps:
+- is_empty_policy:
+    node: SOLVE
+    in:
+      policy_text: $in.policy_text
+    out: use_default
+    tool: is_empty_policy
+    backend: kernel
+    arguments:
+    - '@policy_text'
+    code: |
+      def is_empty_policy(policy_text: str) -> str:
+          """Return 'true' if no custom policy was provided (empty string), 'false' otherwise."""
+          return 'true' if not policy_text.strip() else 'false'
+      _spl_result = is_empty_policy(policy_text)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - policy_text
+    tool_returns: TEXT
+- solver_on:
+    evaluate: "@in_subject == 'true'"
+    in:
+      subject: is_empty_policy
+    out: []
+    semantic: true
+    branch: 1
+- get_default_policy:
+    node: SOLVE
+    out: policy_json
+    tool: get_default_policy
+    backend: kernel
+    arguments: []
+    code: |
+      import json
+
+      _DEFAULT_LOAN_POLICY = {'policy': 'QuickLoan Eligibility Policy v2.1', 'variables': [{'name': 'age', 'type': 'int', 'range': [0, 120]}, {'name': 'income', 'type': 'int', 'range': [0, 1000000]}, {'name': 'credit_score', 'type': 'int', 'range': [300, 850]}, {'name': 'months_employed', 'type': 'int', 'range': [0, 600]}, {'name': 'has_collateral', 'type': 'bool'}, {'name': 'self_employed', 'type': 'bool'}], 'rules': [{'id': 'R1', 'desc': 'Must be 18+', 'op': 'gte', 'var': 'age', 'value': 18}, {'id': 'R2', 'desc': 'Income >= $30K or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'income', 'value': 30000}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}, {'id': 'R3', 'desc': 'Self-employed requires income >= $50K', 'op': 'implies', 'condition': {'op': 'eq', 'var': 'self_employed', 'value': True}, 'then': {'op': 'gte', 'var': 'income', 'value': 50000}}, {'id': 'R4', 'desc': 'Credit >= 650 or (credit >= 600 and income >= $80K)', 'op': 'or', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 650}, {'op': 'and', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 600}, {'op': 'gte', 'var': 'income', 'value': 80000}]}]}, {'id': 'R5', 'desc': 'Employed 12+ months or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'months_employed', 'value': 12}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}], 'query': 'find_qualifying_profile'}
+
+      def get_default_policy() -> str:
+          """Return the hardcoded QuickLoan policy JSON (demo / fallback)."""
+          return json.dumps(_DEFAULT_LOAN_POLICY)
+      _spl_result = get_default_policy()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- solver_off:
+    evaluate: "@in_subject == 'false'"
+    in:
+      subject: is_empty_policy
+    out: []
+    on: solver_on.fail
+    semantic: true
+    branch: 2
+- extract_policy:
+    generate: |-
+      You are a compliance engineer. Convert the natural-language policy below into a structured JSON object matching this schema exactly. Output JSON only — no explanation, no markdown fences.
+
+      SCHEMA:
+      {
+        "policy": "<policy name string>",
+        "variables": [
+          {"name": "<var_name>", "type": "int", "range": [<min>, <max>]},
+          {"name": "<var_name>", "type": "bool"}
+        ],
+        "rules": [
+          {"id": "R1", "desc": "<human description>", <op structure>}
+        ],
+        "query": "find_qualifying_profile"
+      }
+
+      SUPPORTED OPS:
+      - Comparison:  {"op": "gte"|"lte"|"eq"|"neq", "var": "<name>", "value": <number|bool>}
+      - Logical:     {"op": "and"|"or", "args": [<rule>, ...]}
+      - Negation:    {"op": "not", "arg": <rule>}
+      - Implication: {"op": "implies", "condition": <rule>, "then": <rule>}
+
+      EXAMPLE:
+      Policy text: "users must be 18+, have a verified email or phone, and premium members may skip the phone check."
+      Output:
+      {
+        "policy": "User Eligibility Policy",
+        "variables": [
+          {"name": "age", "type": "int", "range": [0, 120]},
+          {"name": "email_verified", "type": "bool"},
+          {"name": "phone_verified", "type": "bool"},
+          {"name": "premium_member", "type": "bool"}
+        ],
+        "rules": [
+          {"id": "R1", "desc": "Age >= 18", "op": "gte", "var": "age", "value": 18},
+          {"id": "R2", "desc": "Email verified or phone verified", "op": "or", "args": [
+            {"op": "eq", "var": "email_verified", "value": true},
+            {"op": "eq", "var": "phone_verified", "value": true}
+          ]},
+          {"id": "R3", "desc": "Non-premium members must verify phone", "op": "implies",
+            "condition": {"op": "eq", "var": "premium_member", "value": false},
+            "then":      {"op": "eq", "var": "phone_verified", "value": true}}
+        ],
+        "query": "find_qualifying_profile"
+      }
+
+      NOW CONVERT:
+      Policy text: {{in_policy_text}}
+    in:
+      policy_text: $in.policy_text
+    out: policy_json_raw
+    function: extract_policy_prompt
+    params:
+    - policy_text
+    arguments:
+    - '@policy_text'
+- parse_policy_json:
+    node: SOLVE
+    in:
+      policy_json_raw: extract_policy
+    out: policy_json
+    tool: parse_policy_json
+    backend: kernel
+    arguments:
+    - '@policy_json_raw'
+    code: |
+      import json
+
+      _DEFAULT_LOAN_POLICY = {'policy': 'QuickLoan Eligibility Policy v2.1', 'variables': [{'name': 'age', 'type': 'int', 'range': [0, 120]}, {'name': 'income', 'type': 'int', 'range': [0, 1000000]}, {'name': 'credit_score', 'type': 'int', 'range': [300, 850]}, {'name': 'months_employed', 'type': 'int', 'range': [0, 600]}, {'name': 'has_collateral', 'type': 'bool'}, {'name': 'self_employed', 'type': 'bool'}], 'rules': [{'id': 'R1', 'desc': 'Must be 18+', 'op': 'gte', 'var': 'age', 'value': 18}, {'id': 'R2', 'desc': 'Income >= $30K or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'income', 'value': 30000}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}, {'id': 'R3', 'desc': 'Self-employed requires income >= $50K', 'op': 'implies', 'condition': {'op': 'eq', 'var': 'self_employed', 'value': True}, 'then': {'op': 'gte', 'var': 'income', 'value': 50000}}, {'id': 'R4', 'desc': 'Credit >= 650 or (credit >= 600 and income >= $80K)', 'op': 'or', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 650}, {'op': 'and', 'args': [{'op': 'gte', 'var': 'credit_score', 'value': 600}, {'op': 'gte', 'var': 'income', 'value': 80000}]}]}, {'id': 'R5', 'desc': 'Employed 12+ months or has collateral', 'op': 'or', 'args': [{'op': 'gte', 'var': 'months_employed', 'value': 12}, {'op': 'eq', 'var': 'has_collateral', 'value': True}]}], 'query': 'find_qualifying_profile'}
+
+      def parse_policy_json(json_str: str) -> str:
+          """Validate and clean LLM-extracted policy JSON; fall back to default on failure.
+
+          Strips markdown code fences, parses JSON, checks minimal schema, then
+          returns the cleaned JSON string. Falls back to _DEFAULT_LOAN_POLICY if
+          the LLM output cannot be parsed or is missing required fields.
+          """
+          import re
+          text = json_str.strip()
+          m = re.search('```(?:json)?\\s*([\\s\\S]*?)```', text)
+          if m:
+              text = m.group(1).strip()
+          try:
+              policy = json.loads(text)
+              if 'variables' not in policy or 'rules' not in policy:
+                  raise ValueError('missing required fields')
+              if 'query' not in policy:
+                  policy['query'] = 'find_qualifying_profile'
+              return json.dumps(policy)
+          except Exception:
+              return json.dumps(_DEFAULT_LOAN_POLICY)
+      _spl_result = parse_policy_json(policy_json_raw)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      policy_json: get_default_policy
+      parse_policy_json_policy_json: parse_policy_json
+    on:
+    - get_default_policy
+    - parse_policy_json
+    - solver_off.fail

@@ -1,0 +1,91 @@
+version: 1.0-graph
+workflow:
+  name: explain
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: sage_result
+    type: TEXT
+  - name: explain_solution_sage_result
+    type: TEXT
+  - name: explain_solution_sage_result2
+    type: TEXT
+  - name: explain_solution_sage_result3
+    type: TEXT
+  - name: explain_solution_sage_result4
+    type: TEXT
+  - name: log_file
+    type: TEXT
+  outputs:
+  - name: explanation
+    type: TEXT
+steps:
+- explain_solution:
+    generate: |-
+      A student asked: "{{in_problem}}"
+
+      The SageMath computer algebra system computed: {{in_sage_result}}
+
+      Write a clear, friendly explanation in less than 5 sentences that:
+      1. Restates what the problem is asking in plain English
+      2. States the exact answer from the computation above
+      3. Briefly explains the key concept (Galois group, rational point,
+         rank, or factorization) at an advanced-undergraduate level
+      Do not re-derive the answer — trust the Sage result above as exact.
+    in:
+      problem: $in.problem
+      sage_result:
+      - $in.sage_result
+      - $in.explain_solution_sage_result
+      - $in.explain_solution_sage_result2
+      - $in.explain_solution_sage_result3
+      - $in.explain_solution_sage_result4
+    out: explanation
+    function: explain_solution
+    params:
+    - problem
+    - sage_result
+    arguments:
+    - '@problem'
+    - '@sage_result'
+- write_file_3:
+    node: SOLVE
+    in:
+      log_file: $in.log_file
+      explanation: explain_solution
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - '@log_file'
+    - "f'## Step 3 — LLM explanation\\n{@explanation}\\n\\n---\\n*status: complete*\\n'"
+    - "'a'"
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(log_file, f'## Step 3 — LLM explanation\n{explanation}\n\n---\n*status: complete*\n', 'a')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: explain_solution

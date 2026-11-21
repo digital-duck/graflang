@@ -1,0 +1,127 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: problem_json
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+steps:
+- set_solution_json:
+    node: CONTEXT
+    out: solution_json
+    action: set
+    expression: "'{}'"
+- set_heuristic_json:
+    node: CONTEXT
+    out: heuristic_json
+    action: set
+    expression: "'{}'"
+- set_verify_status:
+    node: CONTEXT
+    out: verify_status
+    action: set
+    expression: "'N/A'"
+- set_obj_str:
+    node: CONTEXT
+    out: obj_str
+    action: set
+    expression: "''"
+- set_llm_calls:
+    node: CONTEXT
+    out: llm_calls
+    action: set
+    expression: '0'
+- extract_robust_problem:
+    node: SOLVE
+    in:
+      problem: $in.problem
+    out: problem_json
+    tool: extract_robust_problem
+    backend: kernel
+    arguments:
+    - '@problem'
+    code: |
+      import json
+
+      _DEFAULT_B5 = {'scenarios': [{'name': 'Low', 'probability': 0.3, 'demand': 100}, {'name': 'Normal', 'probability': 0.5, 'demand': 200}, {'name': 'High', 'probability': 0.2, 'demand': 300}], 'capacity_own': 300, 'capacity_lease': 150, 'cost_build': 4000, 'cost_produce': 8, 'cost_emergency': 60}
+
+      def extract_robust_problem(problem_text: str) -> str:
+          """Parse stochastic capacity problem into JSON.
+          Falls back to default B5 if parsing fails."""
+          import re
+          text = problem_text.strip()
+          try:
+              parsed = json.loads(text)
+              if 'scenarios' in parsed:
+                  return json.dumps(parsed)
+          except Exception:
+              pass
+          try:
+              scenarios = []
+              for m in re.finditer('(low|normal|medium|high|surge)\\D{0,30}?(\\d+)\\s*units?\\D{0,20}?(\\d+(?:\\.\\d+)?)\\s*%', text, re.IGNORECASE):
+                  name, demand, prob = (m.group(1).capitalize(), float(m.group(2)), float(m.group(3)) / 100)
+                  scenarios.append({'name': name, 'probability': prob, 'demand': demand})
+              cap_own_m = re.search('(?:own|build|factory)\\D{0,20}?(\\d+)\\s*units?', text, re.I)
+              cap_lease_m = re.search('(?:lease|rent)\\D{0,20}?(\\d+)\\s*units?', text, re.I)
+              cost_build_m = re.search('(?:build|one.time|fixed)\\D{0,20}?\\$?([\\d,]+)', text, re.I)
+              cost_produce_m = re.search('produc\\w+\\D{0,10}?\\$?(\\d+)\\s*/\\s*unit', text, re.I)
+              cost_emerg_m = re.search('(?:emergency|urgent|spot)\\D{0,15}?\\$?(\\d+)\\s*/\\s*unit', text, re.I)
+              if scenarios and cap_own_m and cost_build_m:
+                  return json.dumps({'scenarios': scenarios, 'capacity_own': float(cap_own_m.group(1)), 'capacity_lease': float(cap_lease_m.group(1)) if cap_lease_m else float(cap_own_m.group(1)) * 0.5, 'cost_build': float(cost_build_m.group(1).replace(',', '')), 'cost_produce': float(cost_produce_m.group(1)) if cost_produce_m else 8.0, 'cost_emergency': float(cost_emerg_m.group(1)) if cost_emerg_m else 60.0})
+          except Exception:
+              pass
+          return json.dumps(_DEFAULT_B5)
+      _spl_result = extract_robust_problem(problem)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_text
+    tool_returns: TEXT
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      problem_json: extract_robust_problem
+      llm_calls: set_llm_calls

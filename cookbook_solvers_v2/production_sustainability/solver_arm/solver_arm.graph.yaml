@@ -1,0 +1,305 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: n_points
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- extract_production_problem:
+    generate: |-
+      Extract the production problem data from the text below into JSON.
+
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "products": [
+          {{"name": "A", "profit": 10.0, "carbon": 3.0, "labor": 2.0, "material": 3.0}},
+          {{"name": "B", "profit": 6.0,  "carbon": 1.0, "labor": 1.0, "material": 2.0}}
+        ],
+        "resources": {{"labor": 20.0, "material": 30.0}}
+      }}
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: problem_json
+    function: extract_production_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- sweep_pareto_scalarization:
+    node: SOLVE
+    in:
+      problem_json: extract_production_problem
+      n_points: $in.n_points
+    out: front_json
+    tool: sweep_pareto_scalarization
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@n_points'
+    code: |
+      import json
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def sweep_pareto_scalarization(problem_json: str, n_points: int=10) -> str:
+          """
+          Weighted-sum scalarization: maximize λ·profit_norm - (1-λ)·carbon_norm
+          Sweep λ from 0.0 to 1.0 in n_points steps.
+
+          Anchor values (B3):
+            max_profit = 100  (x=10, y=0)
+            max_carbon  = 30  (x=10, y=0)
+            min_carbon  = 15  (x=0,  y=15)
+
+          Normalization: profit_norm = profit/100, carbon_norm = carbon/30
+
+          Returns:
+            {"status": "OK", "n_points": int,
+             "pareto_front": [{"profit": float, "carbon": float, "x": float, "y": float}]}
+          """
+          n_points = int(n_points)
+          import pulp
+          MAX_PROFIT = 100.0
+          MAX_CARBON = 30.0
+          try:
+              data = json.loads(_strip_fences(problem_json))
+              products = data['products']
+              resources = data['resources']
+              labor_cap = resources['labor']
+              material_cap = resources['material']
+              pA = products[0]
+              pB = products[1]
+              raw_points: list[dict] = []
+              n = max(int(n_points), 2)
+              lambdas = [i / (n - 1) for i in range(n)]
+              for lam in lambdas:
+                  prob = pulp.LpProblem('pareto_step', pulp.LpMaximize)
+                  x = pulp.LpVariable('x', lowBound=0)
+                  y = pulp.LpVariable('y', lowBound=0)
+                  profit = pA['profit'] * x + pB['profit'] * y
+                  carbon = pA['carbon'] * x + pB['carbon'] * y
+                  profit_norm = profit / MAX_PROFIT
+                  carbon_norm = carbon / MAX_CARBON
+                  prob += lam * profit_norm - (1 - lam) * carbon_norm
+                  prob += pA['labor'] * x + pB['labor'] * y <= labor_cap
+                  prob += pA['material'] * x + pB['material'] * y <= material_cap
+                  solver = pulp.PULP_CBC_CMD(msg=False)
+                  prob.solve(solver)
+                  if pulp.LpStatus[prob.status] == 'Optimal':
+                      xv_raw = pulp.value(x)
+                      xv = max(0.0, xv_raw if isinstance(xv_raw, float) else 0.0)
+                      yv_raw = pulp.value(y)
+                      yv = max(0.0, yv_raw if isinstance(yv_raw, float) else 0.0)
+                      p = round(pA['profit'] * xv + pB['profit'] * yv, 4)
+                      c = round(pA['carbon'] * xv + pB['carbon'] * yv, 4)
+                      raw_points.append({'profit': p, 'carbon': c, 'x': round(xv, 4), 'y': round(yv, 4)})
+
+              def dominates(q: dict, p: dict) -> bool:
+                  return q['profit'] >= p['profit'] and q['carbon'] <= p['carbon'] and (q['profit'] > p['profit'] or q['carbon'] < p['carbon'])
+              pareto: list[dict] = []
+              for p in raw_points:
+                  if not any((dominates(q, p) for q in raw_points if q is not p)):
+                      key = (round(p['profit'], 2), round(p['carbon'], 2))
+                      if not any(((round(q['profit'], 2), round(q['carbon'], 2)) == key for q in pareto)):
+                          pareto.append(p)
+              pareto.sort(key=lambda p: -p['profit'])
+              return json.dumps({'status': 'OK', 'n_points': len(pareto), 'pareto_front': pareto})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e), 'n_points': 0, 'pareto_front': []})
+      _spl_result = sweep_pareto_scalarization(problem_json, n_points)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - n_points
+    tool_returns: TEXT
+- is_pareto_feasible:
+    node: SOLVE
+    in:
+      front_json: sweep_pareto_scalarization
+    out: tool_3
+    tool: is_pareto_feasible
+    backend: kernel
+    arguments:
+    - '@front_json'
+    code: |
+      import json
+
+      def is_pareto_feasible(front_json: str) -> bool:
+          """ASSERT gate: True when status==OK and at least 2 Pareto points exist."""
+          try:
+              data = json.loads(front_json)
+              return data.get('status') == 'OK' and data.get('n_points', 0) >= 2
+          except Exception:
+              return False
+      _spl_result = is_pareto_feasible(front_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - front_json
+    tool_returns: TEXT
+- assert_is_pareto_feasible:
+    assert: '@in_tool_3'
+    in:
+      front_json: sweep_pareto_scalarization
+      tool_3: is_pareto_feasible
+    out: []
+- format_pareto_table:
+    node: SOLVE
+    in:
+      front_json: sweep_pareto_scalarization
+    out: front_table
+    on:
+    - assert_is_pareto_feasible
+    - assert_is_pareto_feasible.fail
+    tool: format_pareto_table
+    backend: kernel
+    arguments:
+    - '@front_json'
+    code: |
+      import json
+
+      def format_pareto_table(front_json: str) -> str:
+          """Format Pareto front as a markdown table."""
+          try:
+              data = json.loads(front_json)
+              front = data.get('pareto_front', [])
+              if not front:
+                  return '(no Pareto points)'
+              header = '| Profit ($) | Carbon (kg) | Product A (units) | Product B (units) |'
+              sep = '|---|---|---|---|'
+              rows = [header, sep]
+              for pt in front:
+                  rows.append(f"| {pt['profit']:.1f} | {pt['carbon']:.1f} | {pt['x']:.2f} | {pt['y']:.2f} |")
+              return '\n'.join(rows)
+          except Exception as e:
+              return f'(table error: {e})'
+      _spl_result = format_pareto_table(front_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - front_json
+    tool_returns: TEXT
+- interpret_pareto_front:
+    generate: |-
+      You are a sustainability consultant. Interpret the Pareto front below for a factory manager.
+
+      Problem: {{in_problem}}
+
+      Pareto front (profit vs. carbon tradeoff):
+      {{in_front_table}}
+
+      Your interpretation should:
+      1. Explain the profit-carbon tradeoff in plain language — why maximizing profit increases emissions.
+      2. Recommend 2-3 concrete operating points from the table (e.g. balanced, profit-leaning, green-leaning).
+      3. Note the sustainability angle: how much profit is sacrificed to achieve a meaningful carbon reduction?
+      4. Suggest which point a sustainability-conscious manager should choose, and why.
+
+      Be practical and concrete. The audience is a factory manager, not a mathematician.
+    in:
+      problem: $in.problem
+      front_table: format_pareto_table
+    out: interpretation
+    function: interpret_pareto_front
+    params:
+    - problem
+    - front_table
+    arguments:
+    - '@problem'
+    - '@front_table'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- json_get:
+    node: SOLVE
+    in:
+      front_json: sweep_pareto_scalarization
+    out: profit_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@front_json'
+    - "'n_points'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(front_json, 'n_points')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      problem_json: extract_production_problem
+      profit_str: json_get
+      front_table: format_pareto_table
+      interpretation: interpret_pareto_front
+      llm_calls: set_llm_calls_3
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@problem_json'
+    - '@profit_str'
+    - '@front_table'
+    - '@interpretation'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_on(problem: str, problem_json: str, n_points: str, front_table: str, interpretation: str, llm_calls: str) -> str:
+          return f'=== Production Sustainability (solver=ON / PuLP Pareto Sweep) ===\n\nProblem:\n{problem}\n\nExtracted Problem Data (JSON):\n{problem_json}\n\nPareto Front ({n_points} non-dominated points):\n{front_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_on(problem, problem_json, profit_str, front_table, interpretation, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - problem_json
+    - n_points
+    - front_table
+    - interpretation
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

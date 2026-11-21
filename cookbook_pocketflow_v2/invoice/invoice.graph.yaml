@@ -1,0 +1,132 @@
+version: 1.0-graph
+workflow:
+  name: invoice_processor
+  inputs:
+  - name: pdf_path
+    type: TEXT
+    default: invoice.pdf
+  outputs:
+  - name: result
+    type: TEXT
+resources:
+  parts:
+    extract: ./extract/extract.graph.yaml
+steps:
+- extract:
+    use: parts.extract
+    in:
+      pdf_path: $in.pdf_path
+    out: invoice_json
+- validate_invoice_math:
+    node: SOLVE
+    in:
+      invoice_json: extract
+    out: math_check
+    tool: validate_invoice_math
+    backend: kernel
+    arguments:
+    - |-
+      @invoice_json
+    code: |
+      import json
+
+      def validate_invoice_math(invoice_json: str) -> str:
+          try:
+              data = json.loads(invoice_json)
+              line_items = data.get("line_items", [])
+              subtotal = sum(float(item.get("amount", 0)) for item in line_items)
+              tax = float(data.get("tax", 0))
+              computed = round(subtotal + tax, 2)
+              declared = round(float(data.get("total", 0)), 2)
+              if abs(computed - declared) < 0.01:
+                  return "pass"
+              return f"fail: line_items_sum={subtotal} tax={tax} computed_total={computed} declared_total={declared}"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = validate_invoice_math(invoice_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - invoice_json
+    tool_returns: TEXT
+- gate:
+    evaluate: contains(@in_subject, 'pass')
+    in:
+      subject: validate_invoice_math
+    out: []
+    branch: 1
+- build_invoice_output:
+    node: SOLVE
+    in:
+      invoice_json: extract
+    tool: build_invoice_output
+    backend: kernel
+    arguments:
+    - |-
+      @invoice_json
+    - |-
+      'valid'
+    - |-
+      ''
+    code: |
+      import json
+
+      def build_invoice_output(invoice_json: str, status: str, notes: str) -> str:
+          try:
+              data = json.loads(invoice_json)
+              data["validation_status"] = status
+              if notes:
+                  data["validation_notes"] = notes
+              return json.dumps(data, indent=2)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = build_invoice_output(invoice_json, 'valid', '')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - invoice_json
+    - status
+    - notes
+    tool_returns: TEXT
+- build_invoice_output_2:
+    node: SOLVE
+    in:
+      invoice_json: extract
+      math_check: validate_invoice_math
+    'on': gate.fail
+    tool: build_invoice_output
+    backend: kernel
+    arguments:
+    - |-
+      @invoice_json
+    - |-
+      'invalid'
+    - |-
+      @math_check
+    code: |
+      import json
+
+      def build_invoice_output(invoice_json: str, status: str, notes: str) -> str:
+          try:
+              data = json.loads(invoice_json)
+              data["validation_status"] = status
+              if notes:
+                  data["validation_notes"] = notes
+              return json.dumps(data, indent=2)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = build_invoice_output(invoice_json, 'invalid', math_check)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - invoice_json
+    - status
+    - notes
+    tool_returns: TEXT
+- wf_exit:
+    output:
+    - build_invoice_output
+    - build_invoice_output_2
+    'on':
+    - build_invoice_output
+    - build_invoice_output_2

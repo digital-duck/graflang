@@ -1,0 +1,295 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: default_problem_json
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: periods
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- describe_ts_problem:
+    generate: |-
+      Describe this time-series forecasting problem as a JSON object.
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "description": "<one-sentence summary>",
+        "frequency": "monthly",
+        "seasonal_period": 12,
+        "history": [<list of numeric values in chronological order>]
+      }}
+
+      Rules:
+      - history must be a flat list of numbers (no labels, no dates)
+      - seasonal_period: 12 for monthly, 4 for quarterly, 7 for daily-weekly
+      - if the problem provides raw data, use it exactly
+      - if it gives no data (e.g. asks for the default dataset), return this default problem unchanged:
+        {{in_default_problem_json}}
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+      default_problem_json: $in.default_problem_json
+    out: problem_json
+    function: describe_ts_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- fit_structural_ts:
+    node: SOLVE
+    in:
+      problem_json: describe_ts_problem
+      periods: $in.periods
+    out: forecast_json
+    tool: fit_structural_ts
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@periods'
+    code: |
+      import json
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def fit_structural_ts(problem_json: str, periods: str='6') -> str:
+          """Fit statsmodels UnobservedComponents and forecast future periods.
+
+          Uses local-linear-trend + seasonal components (Kalman filter / MLE).
+          Holds out the last seasonal_period // 2 observations for RMSE validation.
+
+          Returns:
+              {"status": "OK", "forecast": [...], "lower": [...], "upper": [...],
+               "n_periods": int, "rmse_holdout": float, "naive_rmse": float,
+               "beats_naive": bool}
+          """
+          try:
+              import statsmodels.api as sm
+              import numpy as np
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'statsmodels not installed — run: pip install statsmodels'})
+          try:
+              data = json.loads(_strip_fences(problem_json))
+          except Exception as e:
+              return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+          history = [float(v) for v in data.get('history', [])]
+          seasonal_period = int(data.get('seasonal_period', 12))
+          n_forecast = max(1, int(periods))
+          if len(history) < 2 * seasonal_period:
+              return json.dumps({'status': 'INSUFFICIENT_DATA', 'error': f'need at least {2 * seasonal_period} observations for seasonal fit'})
+          n_holdout = seasonal_period // 2
+          train = history[:-n_holdout]
+          holdout = history[-n_holdout:]
+          try:
+              model = sm.tsa.UnobservedComponents(train, level='local linear trend', seasonal=seasonal_period)
+              result = model.fit(disp=False)
+          except Exception as e:
+              return json.dumps({'status': 'FIT_ERROR', 'error': str(e)})
+          fc = result.get_forecast(steps=n_holdout + n_forecast)
+          mean_all = np.asarray(fc.predicted_mean)
+          ci_arr = np.asarray(fc.conf_int())
+          lower_all = ci_arr[:, 0]
+          upper_all = ci_arr[:, 1]
+          holdout_pred = mean_all[:n_holdout]
+          forecast = mean_all[n_holdout:]
+          lower = lower_all[n_holdout:]
+          upper = upper_all[n_holdout:]
+          rmse = float(np.sqrt(np.mean((np.array(holdout) - holdout_pred) ** 2)))
+          naive_pred = np.full(n_holdout, train[-1])
+          naive_rmse = float(np.sqrt(np.mean((np.array(holdout) - naive_pred) ** 2)))
+          return json.dumps({'status': 'OK', 'forecast': [round(float(v), 1) for v in forecast], 'lower': [round(float(v), 1) for v in lower], 'upper': [round(float(v), 1) for v in upper], 'n_periods': n_forecast, 'rmse_holdout': round(rmse, 2), 'naive_rmse': round(naive_rmse, 2), 'beats_naive': bool(rmse < naive_rmse)})
+      _spl_result = fit_structural_ts(problem_json, periods)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - periods
+    tool_returns: TEXT
+- is_forecast_valid:
+    node: SOLVE
+    in:
+      forecast_json: fit_structural_ts
+    out: tool_4
+    tool: is_forecast_valid
+    backend: kernel
+    arguments:
+    - '@forecast_json'
+    code: |
+      import json
+
+      def is_forecast_valid(forecast_json: str) -> bool:
+          """ASSERT gate: status==OK and RMSE beats naïve baseline."""
+          try:
+              d = json.loads(forecast_json)
+              return d.get('status') == 'OK' and d.get('beats_naive', False)
+          except Exception:
+              return False
+      _spl_result = is_forecast_valid(forecast_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - forecast_json
+    tool_returns: TEXT
+- assert_is_forecast_valid:
+    assert: '@in_tool_4'
+    in:
+      forecast_json: fit_structural_ts
+      tool_4: is_forecast_valid
+    out: []
+- format_forecast_table:
+    node: SOLVE
+    in:
+      forecast_json: fit_structural_ts
+    out: forecast_table
+    on:
+    - assert_is_forecast_valid
+    - assert_is_forecast_valid.fail
+    tool: format_forecast_table
+    backend: kernel
+    arguments:
+    - '@forecast_json'
+    code: |
+      import json
+
+      def format_forecast_table(forecast_json: str) -> str:
+          """Format forecast as markdown table with confidence interval."""
+          try:
+              d = json.loads(forecast_json)
+              forecast = d.get('forecast', [])
+              lower = d.get('lower', [])
+              upper = d.get('upper', [])
+              if not forecast:
+                  return 'No forecast points.'
+              lines = ['| Period | Forecast | Lower 95% | Upper 95% |', '|---|---|---|---|']
+              for i, (f, lo, hi) in enumerate(zip(forecast, lower, upper), 1):
+                  lines.append(f'| +{i} | {f:.1f} | {lo:.1f} | {hi:.1f} |')
+              rmse = d.get('rmse_holdout')
+              naive = d.get('naive_rmse')
+              if rmse is not None and naive is not None:
+                  lines.append(f"\nHold-out RMSE: **{rmse:.2f}** vs naïve baseline {naive:.2f} ({('✓ beats naïve' if d.get('beats_naive') else '✗ does not beat naïve')})")
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'Could not format forecast table: {e}'
+      _spl_result = format_forecast_table(forecast_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - forecast_json
+    tool_returns: TEXT
+- interpret_forecast:
+    generate: |-
+      Interpret this demand forecast for a supply chain or inventory planner.
+
+      Problem: {{in_problem}}
+
+      Forecast table (statsmodels UnobservedComponents — local linear trend + seasonal):
+      {{in_forecast_table}}
+
+      Your interpretation should:
+      1. Summarize the overall trend direction.
+      2. Identify any seasonal pattern visible in the forecast.
+      3. Give a plain-English recommendation for inventory planning based on the forecast.
+      4. Note any uncertainty (wide vs. narrow confidence intervals).
+
+      Be concise and practical — one paragraph.
+    in:
+      problem: $in.problem
+      forecast_table: format_forecast_table
+    out: interpretation
+    function: interpret_forecast
+    params:
+    - problem
+    - forecast_table
+    arguments:
+    - '@problem'
+    - '@forecast_table'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- json_get:
+    node: SOLVE
+    in:
+      forecast_json: fit_structural_ts
+    out: n_periods_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@forecast_json'
+    - "'n_periods'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(forecast_json, 'n_periods')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      n_periods_str: json_get
+      forecast_table: format_forecast_table
+      interpretation: interpret_forecast
+      llm_calls: set_llm_calls_3
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@n_periods_str'
+    - '@forecast_table'
+    - '@interpretation'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_on(problem: str, n_periods: str, forecast_table: str, interpretation: str, llm_calls: str) -> str:
+          return f'=== Demand Forecasting (solver=ON / statsmodels UnobservedComponents) ===\n\nProblem:\n{problem}\n\nForecast ({n_periods} periods ahead):\n{forecast_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_on(problem, n_periods_str, forecast_table, interpretation, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - n_periods
+    - forecast_table
+    - interpretation
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

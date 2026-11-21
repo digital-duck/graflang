@@ -1,0 +1,260 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: policy_json
+    type: TEXT
+  - name: check_z3_eligibility_policy_json
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- check_z3_eligibility:
+    node: SOLVE
+    in:
+      policy_json:
+      - $in.policy_json
+      - $in.check_z3_eligibility_policy_json
+    out: z3_result
+    tool: check_z3_eligibility
+    backend: kernel
+    arguments:
+    - '@policy_json'
+    code: |
+      import json
+
+      def _build_constraint(rule: dict, z3_vars: dict):
+          """Recursively translate a rule dict into a Z3 expression."""
+          from z3 import And, Or, Not, Implies
+          op = rule['op']
+          if op == 'gte':
+              return z3_vars[rule['var']] >= rule['value']
+          if op == 'lte':
+              return z3_vars[rule['var']] <= rule['value']
+          if op == 'eq':
+              return z3_vars[rule['var']] == rule['value']
+          if op == 'neq':
+              return z3_vars[rule['var']] != rule['value']
+          if op == 'and':
+              return And(*[_build_constraint(a, z3_vars) for a in rule['args']])
+          if op == 'or':
+              return Or(*[_build_constraint(a, z3_vars) for a in rule['args']])
+          if op == 'not':
+              return Not(_build_constraint(rule['arg'], z3_vars))
+          if op == 'implies':
+              return Implies(_build_constraint(rule['condition'], z3_vars), _build_constraint(rule['then'], z3_vars))
+          raise ValueError(f'Unknown op: {op}')
+
+      def check_z3_eligibility(policy_json: str) -> str:
+          """Run Z3 on the policy and return SAT/UNSAT + a qualifying profile (if SAT).
+
+          Returns:
+            {"status": "SAT"|"UNSAT"|"UNKNOWN", "qualifying_profile": {...},
+             "n_rules": int, "verdict": str}
+          """
+          try:
+              from z3 import Int, Bool, Solver, sat, unsat
+          except ImportError:
+              return json.dumps({'status': 'ERROR', 'error': 'z3-solver not installed — run: pip install z3-solver'})
+          policy = json.loads(policy_json)
+          z3_vars: dict = {}
+          for v in policy['variables']:
+              if v['type'] == 'int':
+                  z3_vars[v['name']] = Int(v['name'])
+              elif v['type'] == 'bool':
+                  z3_vars[v['name']] = Bool(v['name'])
+          s = Solver()
+          for v in policy['variables']:
+              if v['type'] == 'int' and 'range' in v:
+                  z3_vars[v['name']] = z3_vars[v['name']]
+                  s.add(z3_vars[v['name']] >= v['range'][0])
+                  s.add(z3_vars[v['name']] <= v['range'][1])
+          for rule in policy['rules']:
+              s.add(_build_constraint(rule, z3_vars))
+          result = s.check()
+          if result == sat:
+              m = s.model()
+              profile: dict = {}
+              for v in policy['variables']:
+                  val = m[z3_vars[v['name']]]
+                  if val is None:
+                      continue
+                  if v['type'] == 'bool':
+                      profile[v['name']] = bool(val)
+                  else:
+                      try:
+                          profile[v['name']] = int(str(val))
+                      except Exception:
+                          profile[v['name']] = str(val)
+              return json.dumps({'status': 'SAT', 'verdict': 'Policy is satisfiable — a qualifying customer profile exists', 'qualifying_profile': profile, 'n_rules': len(policy['rules'])})
+          if result == unsat:
+              return json.dumps({'status': 'UNSAT', 'verdict': 'Policy is UNSATISFIABLE — no customer can ever qualify (contradictory rules)', 'qualifying_profile': {}, 'n_rules': len(policy['rules'])})
+          return json.dumps({'status': 'UNKNOWN', 'verdict': 'Z3 could not determine satisfiability', 'n_rules': len(policy['rules'])})
+      _spl_result = check_z3_eligibility(policy_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - policy_json
+    tool_returns: TEXT
+- is_satisfiable:
+    node: SOLVE
+    in:
+      z3_result: check_z3_eligibility
+    out: tool_6
+    tool: is_satisfiable
+    backend: kernel
+    arguments:
+    - '@z3_result'
+    code: |
+      import json
+
+      def is_satisfiable(result_json: str) -> bool:
+          """ASSERT gate: policy is SAT (eligibility rules are consistent)."""
+          try:
+              return json.loads(result_json).get('status') == 'SAT'
+          except Exception:
+              return False
+      _spl_result = is_satisfiable(z3_result)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_is_satisfiable:
+    assert: '@in_tool_6'
+    in:
+      z3_result: check_z3_eligibility
+      tool_6: is_satisfiable
+    out: []
+- format_z3_report:
+    node: SOLVE
+    in:
+      z3_result: check_z3_eligibility
+      policy_json:
+      - $in.policy_json
+      - $in.check_z3_eligibility_policy_json
+    out: solver_report
+    on:
+    - assert_is_satisfiable
+    - assert_is_satisfiable.fail
+    tool: format_z3_report
+    backend: kernel
+    arguments:
+    - '@z3_result'
+    - '@policy_json'
+    code: |
+      import json
+
+      def format_z3_report(result_json: str, policy_json: str) -> str:
+          """Markdown report of Z3 eligibility check."""
+          try:
+              res = json.loads(result_json)
+              policy = json.loads(policy_json)
+              lines = [f"## Z3 Eligibility Check — {policy.get('policy', 'Policy')}", '', f"**Status:** {res['status']}  ", f"**Verdict:** {res['verdict']}", f"**Rules checked:** {res.get('n_rules', '?')}", '']
+              if res['status'] == 'SAT' and res.get('qualifying_profile'):
+                  lines += ['### Qualifying Profile Found by Z3', '']
+                  lines += ['| Variable | Value |', '|---|---|']
+                  for k, v in res['qualifying_profile'].items():
+                      lines.append(f'| {k} | {v} |')
+              elif res['status'] == 'UNSAT':
+                  lines += ['### Contradiction Detected', '', 'Z3 proved that no assignment of input variables can satisfy all rules simultaneously.', 'This indicates a logical contradiction in the policy — review the rules for conflicting requirements.']
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_z3_report(z3_result, policy_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - policy_json
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      z3_result: check_z3_eligibility
+    out: sat_status
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@z3_result'
+    - "'status'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(z3_result, 'status')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_z3_result:
+    generate: |-
+      You are a compliance analyst. Z3 (an SMT theorem prover) just verified this loan eligibility policy.
+
+      POLICY (as Z3 checked it, JSON):
+      {{in_policy_json}}
+
+      Z3 RESULT:
+      {{in_z3_report}}
+
+      Explain the result in plain English for a business audience (≤150 words):
+      1. What did Z3 find?
+      2. What does this mean for the business? (e.g. are the rules consistent? contradictory?)
+      3. If Z3 found a qualifying profile, what is notable about it?
+      4. What would be the risk of relying on manual rule-tracing (solver=OFF) instead?
+    in:
+      z3_report: format_z3_report
+      policy_json:
+      - $in.policy_json
+      - $in.check_z3_eligibility_policy_json
+    out: explanation
+    function: explain_z3_result_prompt
+    params:
+    - z3_report
+    - policy_json
+    arguments:
+    - '@solver_report'
+    - '@policy_json'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      solver_report: format_z3_report
+      explanation: explain_z3_result
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@solver_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(solver_report: str, explanation: str) -> str:
+          return f'=== Z3 Compliance Checker (r102) | solver=ON ===\n\n{solver_report}\n\n── Business Explanation ────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(solver_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - solver_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

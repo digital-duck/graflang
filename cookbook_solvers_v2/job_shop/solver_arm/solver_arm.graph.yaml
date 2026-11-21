@@ -1,0 +1,318 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- extract_job_structure:
+    generate: |-
+      Extract this job-shop scheduling problem into JSON.
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "jobs": [
+          {{"name": "Job1", "operations": [
+            {{"machine": "M1", "duration": 3}},
+            {{"machine": "M2", "duration": 2}}
+          ]}},
+          ...
+        ],
+        "machines": ["M1", "M2", ...],
+        "deadline": null
+      }}
+
+      Rules:
+      - Each operation must specify exactly one machine and an integer duration.
+      - Operations within a job are in the required processing order.
+      - deadline is null unless the problem states one.
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: problem_json
+    function: extract_job_structure
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- solve_job_shop:
+    node: SOLVE
+    in:
+      problem_json: extract_job_structure
+    out: solution_json
+    tool: solve_job_shop
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      from typing import Any
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def solve_job_shop(problem_json: str) -> str:
+          """
+          Solve a job-shop scheduling problem using OR-Tools CP-SAT.
+          Input: JSON string with keys: jobs, machines, deadline (optional)
+          Returns: JSON with keys: status, makespan, schedule, solver_log
+          """
+          from ortools.sat.python import cp_model
+          try:
+              data = json.loads(_strip_fences(problem_json))
+          except Exception as e:
+              return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+          jobs_data: list[dict[str, Any]] = data.get('jobs', [])
+          deadline: int | None = data.get('deadline')
+          if not jobs_data:
+              return json.dumps({'status': 'INVALID_INPUT', 'error': 'no jobs'})
+          model = cp_model.CpModel()
+          horizon = sum((op['duration'] for job in jobs_data for op in job.get('operations', [])))
+          all_tasks: dict[tuple[int, int], dict] = {}
+          machine_to_intervals: dict[str, list] = {}
+          for job_id, job in enumerate(jobs_data):
+              for task_id, op in enumerate(job.get('operations', [])):
+                  machine = op['machine']
+                  duration = int(op['duration'])
+                  suffix = f'_j{job_id}_t{task_id}'
+                  start_var = model.NewIntVar(0, horizon, f'start{suffix}')
+                  end_var = model.NewIntVar(0, horizon, f'end{suffix}')
+                  interval_var = model.NewIntervalVar(start_var, duration, end_var, f'interval{suffix}')
+                  all_tasks[job_id, task_id] = {'start': start_var, 'end': end_var, 'interval': interval_var, 'machine': machine, 'duration': duration}
+                  if machine not in machine_to_intervals:
+                      machine_to_intervals[machine] = []
+                  machine_to_intervals[machine].append(interval_var)
+          for machine, intervals in machine_to_intervals.items():
+              model.AddNoOverlap(intervals)
+          for job_id, job in enumerate(jobs_data):
+              ops = job.get('operations', [])
+              for task_id in range(len(ops) - 1):
+                  model.Add(all_tasks[job_id, task_id + 1]['start'] >= all_tasks[job_id, task_id]['end'])
+          makespan_var = model.NewIntVar(0, horizon, 'makespan')
+          model.AddMaxEquality(makespan_var, [all_tasks[job_id, len(job['operations']) - 1]['end'] for job_id, job in enumerate(jobs_data) if job.get('operations')])
+          if deadline is not None:
+              model.Add(makespan_var <= deadline)
+          model.Minimize(makespan_var)
+          solver = cp_model.CpSolver()
+          solver.parameters.max_time_in_seconds = 30.0
+          status_code = solver.Solve(model)
+          status_name = solver.StatusName(status_code)
+          if status_code not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+              return json.dumps({'status': status_name, 'makespan': None, 'schedule': [], 'solver_log': f'CP-SAT returned {status_name}'})
+          makespan = solver.ObjectiveValue()
+          schedule = []
+          for job_id, job in enumerate(jobs_data):
+              for task_id, op in enumerate(job.get('operations', [])):
+                  t = all_tasks[job_id, task_id]
+                  schedule.append({'job': job.get('name', f'Job{job_id + 1}'), 'operation': task_id + 1, 'machine': op['machine'], 'start': solver.Value(t['start']), 'end': solver.Value(t['end']), 'duration': t['duration']})
+          schedule.sort(key=lambda x: (x['machine'], x['start']))
+          return json.dumps({'status': status_name, 'makespan': int(makespan), 'schedule': schedule, 'solver_log': f'CP-SAT {status_name}; makespan={int(makespan)}'})
+      _spl_result = solve_job_shop(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- is_scheduled:
+    node: SOLVE
+    in:
+      solution_json: solve_job_shop
+    out: tool_3
+    tool: is_scheduled
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    code: |
+      import json
+
+      def is_scheduled(solution_json: str) -> bool:
+          """Return True when CP-SAT status is OPTIMAL or FEASIBLE."""
+          import json
+          try:
+              data = json.loads(solution_json)
+              return data.get('status', '') in ('OPTIMAL', 'FEASIBLE')
+          except Exception:
+              return 'OPTIMAL' in solution_json or 'FEASIBLE' in solution_json
+      _spl_result = is_scheduled(solution_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - solution_json
+    tool_returns: TEXT
+- assert_is_scheduled:
+    assert: '@in_tool_3'
+    in:
+      solution_json: solve_job_shop
+      tool_3: is_scheduled
+    out: []
+- format_gantt:
+    node: SOLVE
+    in:
+      solution_json: solve_job_shop
+    out: gantt
+    on:
+    - assert_is_scheduled
+    - assert_is_scheduled.fail
+    tool: format_gantt
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    code: |
+      import json
+
+      def format_gantt(solution_json: str) -> str:
+          """
+          Render a simple ASCII Gantt chart from the CP-SAT solution.
+          """
+          try:
+              sol = json.loads(solution_json)
+          except Exception:
+              return 'Could not parse solution for Gantt chart.'
+          schedule: list[dict] = sol.get('schedule', [])
+          if not schedule:
+              return 'No schedule to render.'
+          makespan = sol.get('makespan', max((e['end'] for e in schedule)))
+          width = min(makespan, 60)
+          scale = width / makespan if makespan > 0 else 1.0
+          machines = sorted({e['machine'] for e in schedule})
+          lines = [f'Makespan = {makespan} time units', '']
+          header = 'Machine  |' + ''.join((str(t % 10) for t in range(width + 1)))
+          lines.append(header)
+          lines.append('-' * len(header))
+          for machine in machines:
+              row = ['.'] * (width + 1)
+              ops = [e for e in schedule if e['machine'] == machine]
+              for op in ops:
+                  s = int(op['start'] * scale)
+                  e = int(op['end'] * scale)
+                  label = op['job'][0] if op['job'] else '?'
+                  for i in range(s, min(e, width + 1)):
+                      row[i] = label
+              lines.append(f"{machine:<9}|{''.join(row)}")
+          return '\n'.join(lines)
+      _spl_result = format_gantt(solution_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - solution_json
+    tool_returns: TEXT
+- interpret_schedule:
+    generate: |-
+      Interpret this job-shop scheduling result for a non-expert.
+
+      Problem: {{in_problem}}
+      Schedule (JSON): {{in_solution_json}}
+      Gantt chart:
+      {{in_gantt}}
+
+      Your interpretation should:
+      1. State the optimal makespan and what it means
+      2. Identify the bottleneck machine (most loaded)
+      3. Describe the schedule in plain language (which job runs when on which machine)
+      4. Note any waiting time and why it occurs
+      5. One-sentence practical takeaway
+
+      Be concise and practical.
+    in:
+      problem: $in.problem
+      solution_json: solve_job_shop
+      gantt: format_gantt
+    out: interpretation
+    function: interpret_schedule
+    params:
+    - problem
+    - solution_json
+    - gantt
+    arguments:
+    - '@problem'
+    - '@solution_json'
+    - '@gantt'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- json_get:
+    node: SOLVE
+    in:
+      solution_json: solve_job_shop
+    out: makespan_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    - "'makespan'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(solution_json, 'makespan')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      solution_json: solve_job_shop
+      gantt: format_gantt
+      interpretation: interpret_schedule
+      llm_calls: set_llm_calls_3
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@solution_json'
+    - '@gantt'
+    - '@interpretation'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_on(problem: str, solution_json: str, gantt: str, interpretation: str, llm_calls: str) -> str:
+          return f'=== Job-Shop Scheduling (solver=ON / OR-Tools CP-SAT) ===\n\nProblem:\n{problem}\n\nCP-SAT Solution (JSON):\n{solution_json}\n\nGantt Chart:\n{gantt}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_on(problem, solution_json, gantt, interpretation, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - solution_json
+    - gantt
+    - interpretation
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

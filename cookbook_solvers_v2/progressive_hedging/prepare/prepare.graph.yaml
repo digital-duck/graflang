@@ -1,0 +1,140 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: n_scenarios
+    type: TEXT
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+steps:
+- get_storage_problem:
+    node: SOLVE
+    in:
+      n_scenarios: $in.n_scenarios
+    out: problem_json
+    tool: get_storage_problem
+    backend: kernel
+    arguments:
+    - '@n_scenarios'
+    code: |
+      import json
+
+      import math
+
+      import random
+
+      _INVESTMENT = {'capital_cost_per_MW': 8000, 'max_capacity_MW': 100.0, 'charge_efficiency': 0.92, 'discharge_efficiency': 0.92, 'max_cycles_per_day': 2.0}
+
+      _N_HOURS = 24
+
+      def get_storage_problem(n_scenarios: str) -> str:
+          """Generate storage investment problem with n_scenarios demand/price scenarios."""
+          n = int(n_scenarios)
+          rng = random.Random(7)
+          scenarios = []
+          for s in range(n):
+              peak_factor = rng.uniform(0.7, 1.4)
+              demand = [_base_demand(h) * peak_factor + rng.gauss(0, 5) for h in range(_N_HOURS)]
+              prices = [max(15.0, 20.0 + 80.0 * (d / 350.0) + rng.gauss(0, 12)) for d in demand]
+              scenarios.append({'id': s, 'probability': 1.0 / n, 'demand_MW': [round(max(50.0, d), 1) for d in demand], 'price_per_MWh': [round(max(15.0, pr), 2) for pr in prices]})
+          inv = _INVESTMENT.copy()
+          inv['description'] = f"Invest in battery storage capacity (0–100 MW) to maximize net present value across {n} demand/price scenarios. Stage 1: choose capacity_MW before observing the scenario. Stage 2: optimal hourly charge/discharge dispatch per scenario (recourse). Capital cost: ${_INVESTMENT['capital_cost_per_MW']:,}/MW. Revenue: arbitrage (buy cheap, sell expensive) + peak-shaving. Progressive Hedging decomposes to {n} independent subproblems, coupled via non-anticipativity penalty rho."
+          inv['scenarios'] = scenarios
+          inv['n_scenarios'] = n
+          inv['n_hours'] = _N_HOURS
+          return json.dumps(inv)
+
+      def _base_demand(h: int) -> float:
+          """Synthetic 24-hour base demand (MW)."""
+          return 150 + 80 * math.sin(math.pi * (h - 6) / 12.0) ** 2 + 30 * (h > 17 and h < 22)
+      _spl_result = get_storage_problem(n_scenarios)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - n_scenarios
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      problem_json: get_storage_problem
+    out: problem_description
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - "'description'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(problem_json, 'description')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      problem_json: get_storage_problem
+      problem_description: json_get

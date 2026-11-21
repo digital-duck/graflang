@@ -1,0 +1,88 @@
+version: 1.0-graph
+workflow:
+  name: extract
+  inputs:
+  - name: pdf_path
+    type: TEXT
+  outputs:
+  - name: invoice_json
+    type: TEXT
+steps:
+- load_pdf_invoice:
+    node: SOLVE
+    in:
+      pdf_path: $in.pdf_path
+    out: pdf_content
+    tool: load_pdf_invoice
+    backend: kernel
+    arguments:
+    - '@pdf_path'
+    code: |
+      import pypdf
+
+      def load_pdf_invoice(pdf_path: str) -> str:
+          try:
+              reader = pypdf.PdfReader(pdf_path)
+              pages = [page.extract_text() or "" for page in reader.pages]
+              text = "\n".join(pages).strip()
+              return text if text else "error: no text extracted from PDF"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = load_pdf_invoice(pdf_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - pdf_path
+    tool_returns: TEXT
+- extract_invoice_fields:
+    generate: |-
+      You are an invoice extraction specialist. Analyze the invoice text below and return a single valid JSON object with exactly these fields:
+      - vendor: string (seller name and address)
+      - customer: string (buyer/billed-to name and address)
+      - invoice_number: string
+      - invoice_date: string (ISO 8601 format)
+      - line_items: array of objects, each with: description (string), quantity (number), unit_price (number), amount (number)
+      - tax: number
+      - total: number
+
+      Invoice content:
+      {{in_pdf_content}}
+
+      Return ONLY the JSON object — no markdown fences, no explanation, no trailing text.
+    in:
+      pdf_content: load_pdf_invoice
+    out: raw_json
+    function: extract_invoice_fields
+    params:
+    - pdf_content
+    arguments:
+    - '@pdf_content'
+- parse_invoice_json:
+    node: SOLVE
+    in:
+      raw_json: extract_invoice_fields
+    out: invoice_json
+    tool: parse_invoice_json
+    backend: kernel
+    arguments:
+    - '@raw_json'
+    code: |
+      import json
+
+      def parse_invoice_json(raw_json: str) -> str:
+          try:
+              text = raw_json.strip()
+              if text.startswith("```"):
+                  lines = text.split("\n")
+                  text = "\n".join(lines[1:-1]).strip()
+              return json.dumps(json.loads(text))
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = parse_invoice_json(raw_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - raw_json
+    tool_returns: TEXT
+- wf_exit:
+    output: parse_invoice_json

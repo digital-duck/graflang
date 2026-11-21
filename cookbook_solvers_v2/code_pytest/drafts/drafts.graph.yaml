@@ -1,0 +1,48 @@
+version: 1.0-graph
+workflow:
+  name: drafts
+  inputs:
+  - name: spec
+    type: TEXT
+  outputs:
+  - name: code
+    type: TEXT
+  - name: tests
+    type: TEXT
+resources:
+  procedures:
+    gen_code: ./procedures/code_pytest.spl
+    gen_tests: ./procedures/code_pytest.spl
+steps:
+- fork:
+    fork:
+    - branch_1
+    - branch_2
+    out: []
+- call_1:
+    node: GENERATE
+    in:
+      spec: $in.spec
+    out: code
+    on: fork
+    procedure_ref: procedures.gen_code
+    arguments:
+    - '@spec'
+- call_2:
+    node: GENERATE
+    in:
+      spec: $in.spec
+    out: tests
+    on: fork.branch_2
+    procedure_ref: procedures.gen_tests
+    arguments:
+    - '@spec'
+- join:
+    join:
+    - call_1
+    - call_2
+    out: []
+- wf_exit:
+    output:
+      code: call_1
+      tests: call_2

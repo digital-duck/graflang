@@ -1,0 +1,56 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- merit_order_dispatch:
+    generate: |-
+      You are a grid operator doing manual unit commitment for a 24-hour period.
+
+      GRID PROBLEM:
+      {{in_problem_description}}
+
+      Using merit-order heuristics (cheapest generators first):
+      1. Which generators would you commit for each 6-hour block (midnight, morning, afternoon, evening)?
+         List the on/off decisions for all 5 generators across 4 time blocks.
+      2. Estimate total generation cost for the day.
+      3. Which constraints make this problem difficult?
+         - Startup costs (paid every time a generator is switched on)
+         - Minimum up/down times (generators can't be toggled every hour)
+         - Ramp rate limits (generators can't instantly change output)
+      4. Why can't you guarantee your heuristic solution is optimal?
+
+      Be specific: name generators (G1–G5), give power outputs (MW), and estimate hourly cost.
+    in:
+      problem_description: $in.problem_description
+    out: llm_dispatch
+    function: merit_order_dispatch_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_dispatch: merit_order_dispatch
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_dispatch'
+    code: |
+      def format_report_solver_off(llm_dispatch: str) -> str:
+          return f'=== Hard MILP Unit Commitment (r123) | solver=OFF ===\n\n── LLM Merit-Order Heuristic ──────────────────────────────\n{llm_dispatch}\n\nNote: LLM heuristic cannot certify optimality or guarantee ramp/min-uptime constraints.\nRun --param use_solver=true for SCIP certified solution.'
+      _spl_result = format_report_solver_off(llm_dispatch)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_dispatch
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

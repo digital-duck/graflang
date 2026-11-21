@@ -1,0 +1,58 @@
+version: 1.0-graph
+workflow:
+  name: pii_compliance_llm_only
+  inputs:
+  - name: pii_map
+    type: TEXT
+  - name: destination
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- judge_compliance:
+    generate: |-
+      You are a compliance officer. A document contains the personal data described by this PII map:
+      {{in_pii_map}}
+
+      It is about to be sent to: {{in_destination}}  (external_api and third_party_vendor are external; anything else is internal).
+
+      Policy: (1) PII sent externally must be masked. (2) A social security number never leaves externally, even masked.
+      (3) Card numbers must always be masked.
+
+      Answer with one line: COMPLIANT or NOT COMPLIANT, then the rule numbers that are violated.
+    in:
+      pii_map: $in.pii_map
+      destination: $in.destination
+    out: llm_verdict
+    function: judge_compliance_prompt
+    params:
+    - pii_map
+    - destination
+    arguments:
+    - '@pii_map'
+    - '@destination'
+- format_llm_report:
+    node: SOLVE
+    in:
+      llm_verdict: judge_compliance
+      destination: $in.destination
+    out: report
+    tool: format_llm_report
+    backend: kernel
+    arguments:
+    - '@llm_verdict'
+    - '@destination'
+    code: |
+      def format_llm_report(llm_verdict: str, destination: str) -> str:
+          """Report for the solver=OFF ablation: the LLM's own verdict, labelled as unverified."""
+          return f'## Compliance check (LLM judgement, unverified)\n\n**Destination:** {destination}  \n**LLM verdict:** {str(llm_verdict).strip()}\n\nRun with --param use_solver=true to check the rules deterministically.'
+      _spl_result = format_llm_report(llm_verdict, destination)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_verdict
+    - destination
+    tool_returns: TEXT
+- wf_exit:
+    output: format_llm_report

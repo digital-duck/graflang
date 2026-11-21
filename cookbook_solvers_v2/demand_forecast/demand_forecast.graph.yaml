@@ -1,0 +1,60 @@
+version: 1.0-graph
+workflow:
+  name: demand_forecast
+  inputs:
+  - name: problem
+    type: TEXT
+    default: Use the default 36-month widget sales dataset.
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: periods
+    type: TEXT
+    default: '6'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    prepare: ./prepare/prepare.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+steps:
+- prepare:
+    use: parts.prepare
+    in:
+      use_solver: $in.use_solver
+    out:
+    - use_solver
+    - default_problem_json
+    - llm_calls
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: prepare
+    out: []
+    branch: 1
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      problem: $in.problem
+      default_problem_json: prepare.default_problem_json
+      llm_calls: prepare.llm_calls
+      periods: $in.periods
+    out: report
+- llm_only:
+    use: parts.llm_only
+    in:
+      problem: $in.problem
+      llm_calls: prepare.llm_calls
+      default_problem_json: prepare.default_problem_json
+    out: report
+    'on': solver_on.fail
+- wf_exit:
+    output:
+    - solver_arm
+    - llm_only
+    'on':
+    - solver_arm
+    - llm_only

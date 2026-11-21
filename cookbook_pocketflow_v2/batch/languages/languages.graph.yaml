@@ -1,0 +1,240 @@
+version: 1.0-graph
+workflow:
+  name: languages
+  inputs:
+  - name: input_file
+    type: TEXT
+  - name: languages
+    type: TEXT
+  outputs:
+  - name: content
+    type: TEXT
+  - name: lang1
+    type: TEXT
+  - name: lang2
+    type: TEXT
+  - name: lang3
+    type: TEXT
+steps:
+- read_file:
+    node: SOLVE
+    in:
+      input_file: $in.input_file
+    out: content
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@input_file'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip()).expanduser()
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(input_file)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+- parse_target_languages:
+    node: SOLVE
+    in:
+      content: read_file
+    out: parsed_langs
+    tool: parse_target_languages
+    backend: kernel
+    arguments:
+    - '@content'
+    code: |
+      import re
+      def parse_target_languages(markdown_content: str) -> str:
+          try:
+              match = re.match(r'^---\s*\n(.*?)\n---\s*\n', markdown_content, re.DOTALL)
+              if match:
+                  fm = match.group(1)
+                  m = re.search(r'target_languages\s*:\s*\[([^\]]+)\]', fm)
+                  if m:
+                      return ','.join(l.strip().strip('"\'') for l in m.group(1).split(','))
+                  m = re.search(r'target_languages\s*:\s*\n((?:[ \t]+-[ \t]+\S+\n?)+)', fm)
+                  if m:
+                      return ','.join(re.findall(r'-\s+(\S+)', m.group(1)))
+              return "error: no target_languages in front matter"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = parse_target_languages(content)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - markdown_content
+    tool_returns: TEXT
+- gate:
+    evaluate: contains(@in_subject, 'error:')
+    in:
+      subject: parse_target_languages
+    out: []
+    branch: 1
+- set_lang_list:
+    node: CONTEXT
+    in:
+      languages: $in.languages
+    out: lang_list
+    action: set
+    expression: '@in_languages'
+- set_lang_list_2:
+    node: CONTEXT
+    in:
+      parsed_langs: parse_target_languages
+    out: lang_list
+    on: gate.fail
+    action: set
+    expression: '@in_parsed_langs'
+- split_part:
+    node: SOLVE
+    in:
+      lang_list:
+      - set_lang_list
+      - set_lang_list_2
+    out: lang1
+    on:
+    - set_lang_list
+    - set_lang_list_2
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@lang_list'
+    - "','"
+    - "'1'"
+    - "'true'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(lang_list, ',', '1', 'true')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- split_part_2:
+    node: SOLVE
+    in:
+      lang_list:
+      - set_lang_list
+      - set_lang_list_2
+    out: lang2
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@lang_list'
+    - "','"
+    - "'2'"
+    - "'true'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(lang_list, ',', '2', 'true')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- split_part_3:
+    node: SOLVE
+    in:
+      lang_list:
+      - set_lang_list
+      - set_lang_list_2
+    out: lang3
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@lang_list'
+    - "','"
+    - "'3'"
+    - "'true'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(lang_list, ',', '3', 'true')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      content: read_file
+      lang1: split_part
+      lang2: split_part_2
+      lang3: split_part_3

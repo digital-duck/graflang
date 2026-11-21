@@ -1,0 +1,49 @@
+version: 1.0-graph
+workflow:
+  name: init
+  inputs: []
+  outputs:
+  - name: attempts
+    type: TEXT
+  - name: parse_error
+    type: TEXT
+steps:
+- set_attempts:
+    node: CONTEXT
+    out: attempts
+    action: set
+    expression: '0'
+- set_parse_error:
+    node: CONTEXT
+    out: parse_error
+    action: set
+    expression: "''"
+- set_n_valid:
+    node: CONTEXT
+    out: n_valid
+    action: set
+    expression: "'0'"
+- set_n_ok:
+    node: CONTEXT
+    out: n_ok
+    action: set
+    expression: "'0'"
+- set_n_total:
+    node: CONTEXT
+    out: n_total
+    action: set
+    expression: "'0'"
+- set_suite_path:
+    node: CONTEXT
+    out: suite_path
+    action: set
+    expression: "'(not saved)'"
+- set_suite_table:
+    node: CONTEXT
+    out: suite_table
+    action: set
+    expression: "'(no variants generated)'"
+- wf_exit:
+    output:
+      attempts: set_attempts
+      parse_error: set_parse_error

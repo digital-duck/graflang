@@ -1,0 +1,71 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: use_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+steps:
+- set_fill_rate_str:
+    node: CONTEXT
+    out: fill_rate_str
+    action: set
+    expression: "''"
+- set_verify_status:
+    node: CONTEXT
+    out: verify_status
+    action: set
+    expression: "'N/A'"
+- set_problem_json:
+    node: CONTEXT
+    out: problem_json
+    action: set
+    expression: "'{}'"
+- set_llm_calls:
+    node: CONTEXT
+    out: llm_calls
+    action: set
+    expression: '0'
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      use_solver: normalize_bool
+      llm_calls: set_llm_calls

@@ -1,0 +1,171 @@
+version: 1.0-graph
+workflow:
+  name: formulate
+  inputs:
+  - name: problem_type
+    type: TEXT
+  - name: demand_scale
+    type: TEXT
+  - name: elasticity
+    type: TEXT
+  - name: unit_cost
+    type: TEXT
+  - name: fixed_cost
+    type: TEXT
+  - name: x_min
+    type: TEXT
+  - name: x_max
+    type: TEXT
+  - name: min_demand
+    type: TEXT
+  - name: congestion_factor
+    type: TEXT
+  - name: revenue_scale
+    type: TEXT
+  - name: saturation_factor
+    type: TEXT
+  outputs:
+  - name: problem_json
+    type: TEXT
+  - name: formulate_logistics_problem_problem_json
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+steps:
+- set_llm_calls:
+    node: CONTEXT
+    out: llm_calls
+    action: set
+    expression: '0'
+- gate:
+    evaluate: "@in_problem_type == 'pricing'"
+    in:
+      problem_type: $in.problem_type
+    out: []
+    branch: 1
+- formulate_pricing_problem:
+    generate: |-
+      Formulate the following nonlinear pricing problem as a JSON specification.
+
+      A company sells a product with a power demand curve:
+        D(price) = {{in_demand_scale}} * price^(-{{in_elasticity}})
+
+      Economics:
+        Unit cost:   ${{in_unit_cost}}
+        Fixed cost:  ${{in_fixed_cost}} per period
+        Price range: [${{in_x_min}}, ${{in_x_max}}]
+        Min demand:  {{in_min_demand}} units (0 = unconstrained)
+
+      Objective: maximize profit = (price - unit_cost) * D(price) - fixed_cost
+
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "type": "pricing",
+        "sense": "maximize",
+        "params": {{
+          "demand_scale": {{in_demand_scale}},
+          "elasticity": {{in_elasticity}},
+          "unit_cost": {{in_unit_cost}},
+          "fixed_cost": {{in_fixed_cost}},
+          "min_demand": {{in_min_demand}}
+        }},
+        "bounds": {{"x_min": {{in_x_min}}, "x_max": {{in_x_max}}}}
+      }}
+    in:
+      demand_scale: $in.demand_scale
+      elasticity: $in.elasticity
+      unit_cost: $in.unit_cost
+      fixed_cost: $in.fixed_cost
+      x_min: $in.x_min
+      x_max: $in.x_max
+      min_demand: $in.min_demand
+    out: problem_json
+    function: formulate_pricing_problem
+    params:
+    - demand_scale
+    - elasticity
+    - unit_cost
+    - fixed_cost
+    - x_min
+    - x_max
+    - min_demand
+    arguments:
+    - '@demand_scale'
+    - '@elasticity'
+    - '@unit_cost'
+    - '@fixed_cost'
+    - '@x_min'
+    - '@x_max'
+    - '@min_demand'
+- formulate_logistics_problem:
+    generate: |-
+      Formulate the following nonlinear logistics problem as a JSON specification.
+
+      A firm ships x units per period with quadratic cost and revenue:
+        Revenue(x) = {{in_revenue_scale}} * x - {{in_saturation_factor}} * x^2
+        Cost(x)    = {{in_fixed_cost}} + {{in_unit_cost}} * x + {{in_congestion_factor}} * x^2
+
+      Volume range: [{{in_x_min}}, {{in_x_max}}] units
+      Min demand:   {{in_min_demand}} units (0 = unconstrained)
+
+      Objective: maximize profit = Revenue(x) - Cost(x)
+
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "type": "logistics",
+        "sense": "maximize",
+        "params": {{
+          "fixed_cost": {{in_fixed_cost}},
+          "unit_cost": {{in_unit_cost}},
+          "congestion_factor": {{in_congestion_factor}},
+          "revenue_scale": {{in_revenue_scale}},
+          "saturation_factor": {{in_saturation_factor}},
+          "min_demand": {{in_min_demand}}
+        }},
+        "bounds": {{"x_min": {{in_x_min}}, "x_max": {{in_x_max}}}}
+      }}
+    in:
+      fixed_cost: $in.fixed_cost
+      unit_cost: $in.unit_cost
+      congestion_factor: $in.congestion_factor
+      revenue_scale: $in.revenue_scale
+      saturation_factor: $in.saturation_factor
+      x_min: $in.x_min
+      x_max: $in.x_max
+      min_demand: $in.min_demand
+    out: problem_json
+    on: gate.fail
+    function: formulate_logistics_problem
+    params:
+    - fixed_cost
+    - unit_cost
+    - congestion_factor
+    - revenue_scale
+    - saturation_factor
+    - x_min
+    - x_max
+    - min_demand
+    arguments:
+    - '@fixed_cost'
+    - '@unit_cost'
+    - '@congestion'
+    - '@revenue_scale'
+    - '@saturation'
+    - '@x_min'
+    - '@x_max'
+    - '@min_demand'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls
+    out: llm_calls
+    on:
+    - formulate_pricing_problem
+    - formulate_logistics_problem
+    action: set
+    expression: '@in_llm_calls + 1'
+- wf_exit:
+    output:
+      problem_json: formulate_pricing_problem
+      formulate_logistics_problem_problem_json: formulate_logistics_problem
+      llm_calls: set_llm_calls_2

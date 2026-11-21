@@ -1,0 +1,88 @@
+version: 1.0-graph
+workflow:
+  name: mode
+  inputs:
+  - name: enable_solver
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: set_use_solver_2_use_solver
+    type: TEXT
+  - name: schema
+    type: TEXT
+steps:
+- lower:
+    node: SOLVE
+    in:
+      enable_solver: $in.enable_solver
+    out: solver_mode
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@enable_solver'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(enable_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- schema_description:
+    node: SOLVE
+    out: schema
+    tool: schema_description
+    backend: kernel
+    arguments: []
+    code: |
+      def schema_description() -> str:
+          """Human-readable schema + sample rows, shown to the LLM (and to the
+          unaided baseline arm) so it can write/reason about SQL without ever
+          seeing the live database connection."""
+          return (
+              "Table: employees(id INTEGER, name TEXT, department TEXT, "
+              "salary REAL, hire_year INTEGER)\n"
+              "Rows:\n"
+              "  1, Alice, Engineering, 95000, 2019\n"
+              "  2, Bob,   Engineering, 87000, 2021\n"
+              "  3, Carol, Sales,       72000, 2018\n"
+              "  4, Dave,  Sales,       68000, 2022\n"
+              "  5, Eve,   Marketing,   77000, 2020\n"
+              "  6, Frank, Engineering, 110000, 2016"
+          )
+      _spl_result = schema_description()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+- solver_on:
+    evaluate: >-
+      (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode
+      == 'yes')
+    in:
+      solver_mode: lower
+    out: []
+    branch: 1
+- set_use_solver:
+    node: CONTEXT
+    out: use_solver
+    action: set
+    expression: "'yes'"
+- set_use_solver_2:
+    node: CONTEXT
+    out: use_solver
+    on: solver_on.fail
+    action: set
+    expression: "'no'"
+- wf_exit:
+    output:
+      use_solver: set_use_solver
+      set_use_solver_2_use_solver: set_use_solver_2
+      schema: schema_description
+    on:
+    - set_use_solver
+    - set_use_solver_2

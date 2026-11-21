@@ -1,0 +1,59 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem_description
+    type: TEXT
+  - name: mmc_report
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- mmc_queuing:
+    generate: |-
+      You are a hospital operations analyst using classic queuing theory.
+
+      ED PROBLEM:
+      {{in_problem_description}}
+
+      Using the M/M/c formula (Poisson arrivals, exponential service, c servers):
+      1. Compute or estimate the mean wait time in queue (Wq) using the Erlang-C formula.
+         Show the formula: ρ = λ/(c·μ), then compute P0 (idle probability) and Wq.
+      2. Estimate the 95th-percentile wait time (assume exponential tail: W_95 ≈ Wq × ln(20)).
+      3. Compute triage nurse utilization (ρ_triage) and treatment bay utilization (ρ_bay).
+      4. Under what conditions does M/M/c give accurate predictions?
+         Why might an ED violate the "Poisson arrivals" assumption?
+
+      Show your calculations. Use: λ=3.2 patients/hour (mean), μ_triage=30/hr, μ_treat=1.5/hr.
+    in:
+      problem_description: $in.problem_description
+    out: llm_mmc
+    function: mmc_queuing_prompt
+    params:
+    - problem_description
+    arguments:
+    - '@problem_description'
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      llm_mmc: mmc_queuing
+      mmc_report: $in.mmc_report
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@llm_mmc'
+    - '@mmc_report'
+    code: |
+      def format_report_solver_off(llm_mmc: str, mmc_report: str) -> str:
+          return f'=== Discrete-Event Simulation — Hospital ED (r124) | solver=OFF ===\n\n── M/M/c Analytic Baseline (computed) ─────────────────────\n{mmc_report}\n\n── LLM Queuing Theory Analysis ─────────────────────────────\n{llm_mmc}\n\nNote: Both M/M/c and LLM assume Poisson arrivals. Run --param use_solver=true\nfor SimPy simulation capturing bursty arrivals and lognormal service.'
+      _spl_result = format_report_solver_off(llm_mmc, mmc_report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - llm_mmc
+    - mmc_report
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

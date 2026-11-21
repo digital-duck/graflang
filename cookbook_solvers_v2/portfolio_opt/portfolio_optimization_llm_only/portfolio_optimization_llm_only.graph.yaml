@@ -1,0 +1,325 @@
+version: 1.0-graph
+workflow:
+  name: portfolio_optimization_llm_only
+  inputs:
+  - name: tickers
+    type: TEXT
+  - name: market_data_json
+    type: TEXT
+  - name: capital
+    type: TEXT
+  - name: target_return
+    type: TEXT
+  - name: max_weight
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: period
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- suggest_allocation:
+    generate: |-
+      You are a personal finance advisor. Suggest a stock portfolio allocation.
+
+      Stocks to consider: {{in_tickers}}
+      Historical data (annual returns and covariance): {{in_market_data_json}}
+      Capital to invest: ${{in_capital}}
+      Target annual return: at least {{in_target_return}} (e.g. 0.12 = 12%)
+      Max per stock: {{in_max_weight}} (e.g. 0.40 = 40%)
+
+      Steps:
+      1. Review each stock's historical annual return and volatility.
+      2. Rank stocks by risk-adjusted return (return / volatility).
+      3. Propose percentage weights that sum to 100%, each <= {{in_max_weight}}.
+      4. Estimate the blended expected return and risk level (low/medium/high).
+      5. Show dollar amounts for ${{in_capital}} capital.
+
+      Be concrete. Show your reasoning.
+    in:
+      tickers: $in.tickers
+      market_data_json: $in.market_data_json
+      capital: $in.capital
+      target_return: $in.target_return
+      max_weight: $in.max_weight
+    out: llm_allocation
+    function: suggest_allocation
+    params:
+    - tickers
+    - market_data_json
+    - capital
+    - target_return
+    - max_weight
+    arguments:
+    - '@tickers'
+    - '@market_data_json'
+    - '@capital'
+    - '@target_return'
+    - '@max_weight'
+- set_llm_calls_5:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- extract_weights_json:
+    generate: |-
+      Extract the portfolio weights from this analysis into JSON.
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "status": "OPTIMAL",
+        "weights": {{"TICKER1": 0.30, "TICKER2": 0.25, ...}},
+        "expected_return": 0.12,
+        "annual_volatility": 0.18,
+        "sharpe_ratio": 0.39
+      }}
+
+      All weights must be decimals (not percentages). They must sum to approximately 1.0.
+
+      Analysis: {{in_allocation_text}}
+    in:
+      allocation_text: suggest_allocation
+    out: optimization_json
+    function: extract_weights_json
+    params:
+    - allocation_text
+    arguments:
+    - '@llm_allocation'
+- set_llm_calls_6:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_5
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- allocate_capital_2:
+    node: SOLVE
+    in:
+      optimization_json: extract_weights_json
+      capital: $in.capital
+    out: allocation_json
+    tool: allocate_capital
+    backend: kernel
+    arguments:
+    - '@optimization_json'
+    - '@capital'
+    code: |
+      import json
+
+      def allocate_capital(optimization_json: str, capital: float) -> str:
+          """
+          Convert optimal weights to dollar allocations for a given capital amount.
+          Returns JSON: {tickers: [{ticker, weight_pct, dollars, shares_approx}], total}
+          """
+          capital = float(capital)
+          try:
+              data = json.loads(optimization_json)
+              weights = data.get('weights', {})
+              if not weights:
+                  return json.dumps({'error': 'no weights in optimization result'})
+              allocations = []
+              for ticker, weight in sorted(weights.items(), key=lambda x: -x[1]):
+                  dollars = round(weight * capital, 2)
+                  allocations.append({'ticker': ticker, 'weight_pct': round(weight * 100, 2), 'dollars': dollars})
+              return json.dumps({'capital': capital, 'allocations': allocations, 'expected_annual_return': data.get('expected_return'), 'annual_volatility': data.get('annual_volatility'), 'sharpe_ratio': data.get('sharpe_ratio')})
+          except Exception as e:
+              return json.dumps({'error': str(e)})
+      _spl_result = allocate_capital(optimization_json, capital)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - optimization_json
+    - capital
+    tool_returns: TEXT
+- verify_portfolio:
+    node: SOLVE
+    in:
+      optimization_json: extract_weights_json
+    out: verify_result
+    tool: verify_portfolio
+    backend: kernel
+    arguments:
+    - '@optimization_json'
+    code: |
+      import json
+
+      def verify_portfolio(optimization_json: str, max_weight_limit: float=0.4, weight_sum_tol: float=0.02) -> str:
+          """
+          Back-substitution verifier for solver=OFF path.
+          Checks: weights sum ≈ 1, all weights in [0,1], return/volatility consistency.
+
+          Args:
+              optimization_json: JSON output from optimize_portfolio or an LLM-generated portfolio.
+              max_weight_limit:  Per-asset weight cap for the sanity check (default 0.40 = 40%).
+                                 Set to match the optimizer's max_weight when running ablation sweeps.
+                                 Must be in (0.0, 1.0].
+              weight_sum_tol:    Absolute tolerance for the weights-sum-to-1 check
+                                 (default 0.02; tighten to 0.001 for high-precision verification).
+                                 Must be in [0.0, 0.05].
+          """
+          if not 0.0 < max_weight_limit <= 1.0:
+              return json.dumps({'verdict': 'INPUT_ERROR', 'notes': f'max_weight_limit {max_weight_limit} out of range (0.0, 1.0]'})
+          if not 0.0 <= weight_sum_tol <= 0.05:
+              return json.dumps({'verdict': 'INPUT_ERROR', 'notes': f'weight_sum_tol {weight_sum_tol} out of range [0.0, 0.05]'})
+          try:
+              data = json.loads(optimization_json)
+              weights = data.get('weights', {})
+              notes: list[str] = []
+              ok = True
+              if not weights:
+                  return json.dumps({'verdict': 'UNPARSEABLE', 'notes': 'no weights found'})
+              weight_values = list(weights.values())
+              total = sum(weight_values)
+              if abs(total - 1.0) > weight_sum_tol:
+                  notes.append(f'weights sum to {total:.4f}, expected 1.0 ± {weight_sum_tol}')
+                  ok = False
+              negative = [t for t, w in weights.items() if w < -0.01]
+              if negative:
+                  notes.append(f'negative weights: {negative}')
+                  ok = False
+              over_limit = [t for t, w in weights.items() if w > max_weight_limit]
+              if over_limit:
+                  notes.append(f'weights exceed {max_weight_limit:.0%} limit: {over_limit}')
+                  ok = False
+              exp_ret = data.get('expected_return')
+              volatility = data.get('annual_volatility')
+              if exp_ret is not None and exp_ret < 0:
+                  notes.append(f'negative expected return: {exp_ret}')
+                  ok = False
+              if volatility is not None and volatility < 0:
+                  notes.append(f'negative volatility: {volatility}')
+                  ok = False
+              return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'weight_sum': round(total, 4), 'n_positions': len(weights), 'notes': '; '.join(notes) if notes else 'all checks passed'})
+          except Exception as e:
+              return json.dumps({'verdict': 'UNPARSEABLE', 'notes': str(e)})
+      _spl_result = verify_portfolio(optimization_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - optimization_json
+    - max_weight_limit
+    - weight_sum_tol
+    tool_returns: TEXT
+- json_get_3:
+    node: SOLVE
+    in:
+      verify_result: verify_portfolio
+    out: verify_status
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_4:
+    node: SOLVE
+    in:
+      optimization_json: extract_weights_json
+    out: sharpe_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@optimization_json'
+    - "'sharpe_ratio'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(optimization_json, 'sharpe_ratio')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      tickers: $in.tickers
+      period: $in.period
+      capital: $in.capital
+      market_data_json: $in.market_data_json
+      llm_allocation: suggest_allocation
+      optimization_json: extract_weights_json
+      allocation_json: allocate_capital_2
+      verify_result: verify_portfolio
+      llm_calls: set_llm_calls_6
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@tickers'
+    - '@period'
+    - '@capital'
+    - '@market_data_json'
+    - '@llm_allocation'
+    - '@optimization_json'
+    - '@allocation_json'
+    - '@verify_result'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_off(tickers: str, period: str, capital: str, market_data_json: str, llm_allocation: str, optimization_json: str, allocation_json: str, verify_result: str, llm_calls: str) -> str:
+          return f'=== Portfolio Optimization (solver=OFF / LLM heuristic) ===\n\nTickers: {tickers}  |  Period: {period}  |  Capital: ${capital}\n\nMarket Data:\n{market_data_json}\n\nLLM Allocation:\n{llm_allocation}\n\nExtracted Weights (JSON):\n{optimization_json}\n\nCapital Allocation:\n{allocation_json}\n\nVerification:\n{verify_result}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_off(tickers, period, capital, market_data_json, llm_allocation, optimization_json, allocation_json, verify_result, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - tickers
+    - period
+    - capital
+    - market_data_json
+    - llm_allocation
+    - optimization_json
+    - allocation_json
+    - verify_result
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off

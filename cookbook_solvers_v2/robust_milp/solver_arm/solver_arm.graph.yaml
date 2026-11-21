@@ -1,0 +1,251 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem_json
+    type: TEXT
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_robust_milp:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+    out: solution_json
+    tool: solve_robust_milp
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      def solve_robust_milp(problem_json: str) -> str:
+          """Two-stage stochastic MILP via python-mip.
+
+          Stage 1: y ∈ {0,1} — build own factory (y=1) or lease (y=0)
+          Stage 2: for each scenario s — x_s (own/leased production), z_s (emergency)
+
+          Objective: minimize cost_build·y + Σ_s prob_s·(cost_prod·x_s + cost_emerg·z_s)
+
+          Requires: pip install python-mip
+          """
+          import mip
+          from mip import Model, xsum, minimize, BINARY, CONTINUOUS, OptimizationStatus
+          try:
+              data = json.loads(problem_json)
+          except Exception as e:
+              return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+          scenarios = data['scenarios']
+          cap_own = float(data['capacity_own'])
+          cap_lease = float(data.get('capacity_lease', cap_own * 0.5))
+          cost_build = float(data['cost_build'])
+          cost_produce = float(data['cost_produce'])
+          cost_emerg = float(data['cost_emergency'])
+          m = Model('robust_supply')
+          m.verbose = 0
+          y = m.add_var(name='build', var_type=BINARY)
+          x = [m.add_var(name=f'produce_s{i}', lb=0, ub=cap_own, var_type=CONTINUOUS) for i in range(len(scenarios))]
+          z = [m.add_var(name=f'emergency_s{i}', lb=0, var_type=CONTINUOUS) for i in range(len(scenarios))]
+          m.objective = minimize(cost_build * y + xsum((s['probability'] * (cost_produce * x[i] + cost_emerg * z[i]) for i, s in enumerate(scenarios))))
+          for i, s in enumerate(scenarios):
+              m += (x[i] <= cap_own * y + cap_lease * (1 - y), f'cap_s{i}')
+              m += (x[i] + z[i] >= s['demand'], f'demand_s{i}')
+          m.optimize()
+          if m.status == OptimizationStatus.OPTIMAL:
+              build_flag = int(round(float(y.x or 0)))
+              plans = []
+              for i, s in enumerate(scenarios):
+                  prod = float(x[i].x or 0)
+                  emerg = float(z[i].x or 0)
+                  sc_cost = cost_produce * prod + cost_emerg * emerg
+                  plans.append({'scenario': s['name'], 'probability': s['probability'], 'demand': s['demand'], 'production': round(prod, 2), 'emergency': round(emerg, 2), 'scenario_cost': round(sc_cost, 2)})
+              return json.dumps({'status': 'OPTIMAL', 'build_factory': build_flag, 'capacity_used': cap_own if build_flag else cap_lease, 'fixed_cost': cost_build * build_flag, 'expected_op_cost': round(sum((p['probability'] * p['scenario_cost'] for p in plans)), 2), 'expected_cost': round(float(m.objective_value), 2), 'scenario_plans': plans, 'objective': round(float(m.objective_value), 2)})
+          else:
+              return json.dumps({'status': m.status.name, 'objective': None})
+      _spl_result = solve_robust_milp(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- is_optimal:
+    node: SOLVE
+    in:
+      solution_json: solve_robust_milp
+    out: tool_4
+    tool: is_optimal
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    code: |
+      import json
+
+      def is_optimal(solution_json: str) -> bool:
+          """ASSERT gate: True when python-mip reports OPTIMAL."""
+          try:
+              return json.loads(solution_json).get('status') == 'OPTIMAL'
+          except Exception:
+              return False
+      _spl_result = is_optimal(solution_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - solution_json
+    tool_returns: TEXT
+- assert_is_optimal:
+    assert: '@in_tool_4'
+    in:
+      solution_json: solve_robust_milp
+      tool_4: is_optimal
+    out: []
+- format_scenario_report:
+    node: SOLVE
+    in:
+      solution_json: solve_robust_milp
+    out: report_table
+    on:
+    - assert_is_optimal
+    - assert_is_optimal.fail
+    tool: format_scenario_report
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    code: |
+      import json
+
+      def format_scenario_report(solution_json: str) -> str:
+          """Format scenario plans as a markdown table."""
+          try:
+              data = json.loads(solution_json)
+              plans = data.get('scenario_plans', [])
+              build = data.get('build_factory', '?')
+              cap = data.get('capacity_used', '?')
+              fixed = data.get('fixed_cost', 0)
+              exp_op = data.get('expected_op_cost', '?')
+              exp = data.get('expected_cost', '?')
+              decision = f'**Build own factory** (capacity {cap} units, fixed cost ${fixed:,.0f})' if build else f'**Lease facility** (capacity {cap} units, no fixed cost)'
+              lines = [f'Decision: {decision}', '', '| Scenario | Prob | Demand | Own/Lease prod | Emergency | Scenario cost |', '|---|---|---|---|---|---|']
+              for p in plans:
+                  lines.append(f"| {p['scenario']} | {p['probability']:.0%} | {p['demand']:.0f} | {p['production']:.0f} | {p['emergency']:.0f} | ${p['scenario_cost']:,.0f} |")
+              lines += ['', f'**Fixed cost:** ${fixed:,.0f}  ', f'**Expected operational cost:** ${exp_op:,.0f}  ', f'**Total expected cost:** ${exp:,.0f}']
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'Error formatting report: {e}'
+      _spl_result = format_scenario_report(solution_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - solution_json
+    tool_returns: TEXT
+- json_get:
+    node: SOLVE
+    in:
+      solution_json: solve_robust_milp
+    out: obj_str
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@solution_json'
+    - "'expected_cost'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(solution_json, 'expected_cost')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- interpret_milp_result:
+    generate: |-
+      Interpret this robust MILP capacity planning result for a business manager.
+
+      Problem: {{in_problem}}
+
+      Optimal solution (JSON): {{in_solution_json}}
+
+      Scenario breakdown:
+      {{in_report_table}}
+
+      Your interpretation must cover:
+      1. What is the optimal decision — build own factory or lease? Why?
+      2. Which scenario drives the decision most (i.e. which scenario is most expensive to under-prepare for)?
+      3. How much does the MILP save compared to the other option? Show the arithmetic.
+      4. What is the role of emergency sourcing in each scenario?
+      5. One-sentence strategic recommendation.
+
+      Be concrete and quantitative. Show cost comparisons explicitly.
+    in:
+      problem: $in.problem
+      solution_json: solve_robust_milp
+      report_table: format_scenario_report
+    out: interpretation
+    function: interpret_milp_result
+    params:
+    - problem
+    - solution_json
+    - report_table
+    arguments:
+    - '@problem'
+    - '@solution_json'
+    - '@report_table'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      report_table: format_scenario_report
+      interpretation: interpret_milp_result
+      llm_calls: set_llm_calls_2
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@report_table'
+    - '@interpretation'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_on(problem: str, report_table: str, interpretation: str, llm_calls: str) -> str:
+          return f'=== Robust Supply Chain MILP (solver=ON / python-mip) ===\n\nProblem:\n{problem}\n\nMILP Solution:\n{report_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_on(problem, report_table, interpretation, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - report_table
+    - interpretation
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

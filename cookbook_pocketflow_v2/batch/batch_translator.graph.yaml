@@ -1,0 +1,87 @@
+version: 1.0-graph
+workflow:
+  name: markdown_translator
+  inputs:
+  - name: input_file
+    type: TEXT
+    default: document.md
+  - name: output_dir
+    type: TEXT
+    default: translations
+  - name: languages
+    type: TEXT
+    default: ''
+  - name: max_iterations
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    languages: ./languages/languages.graph.yaml
+    translate: ./translate/translate.graph.yaml
+steps:
+- languages:
+    use: parts.languages
+    in:
+      input_file: $in.input_file
+      languages: $in.languages
+    out:
+    - content
+    - lang1
+    - lang2
+    - lang3
+- make_dir:
+    node: SOLVE
+    in:
+      output_dir: $in.output_dir
+    out: dir_status
+    tool: make_dir
+    backend: kernel
+    arguments:
+    - |-
+      @output_dir
+    code: |
+      import pathlib
+
+      def make_dir(dir_path: str) -> str:
+          """MAKE_DIR(dir_path) — create directory (and parents) if not present.
+
+          Returns the absolute path of the directory.
+          """
+          p = pathlib.Path(str(dir_path).strip()).expanduser()
+          p.mkdir(parents=True, exist_ok=True)
+          return str(p.resolve())
+      _spl_result = make_dir(output_dir)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - dir_path
+    tool_returns: TEXT
+    tool_builtin: true
+- translate:
+    use: parts.translate
+    in:
+      content: languages
+      lang1: languages.lang1
+      output_dir: $in.output_dir
+      max_iterations: $in.max_iterations
+      lang2: languages.lang2
+      lang3: languages.lang3
+    out:
+    - result1
+    - result2
+    - result3
+- set_report:
+    node: CONTEXT
+    in:
+      result1: translate
+      result2: translate.result2
+      result3: translate.result3
+    out: report
+    action: set
+    expression: |-
+      'Translation complete:' + '\n' + @in_result1 + '\n' + @in_result2 + '\n' + @in_result3
+- wf_exit:
+    output: set_report

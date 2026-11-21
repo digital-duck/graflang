@@ -1,0 +1,96 @@
+version: 1.0-graph
+workflow:
+  name: z3_compliance
+  inputs:
+  - name: policy_text
+    type: TEXT
+    default: ''
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    policy: ./policy/policy.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+steps:
+- policy:
+    use: parts.policy
+    in:
+      policy_text: $in.policy_text
+    out:
+    - policy_json
+    - parse_policy_json_policy_json
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - |-
+      @use_solver
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- solver_on_2:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: normalize_bool
+    out: []
+    branch: 1
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      policy_json: policy
+      check_z3_eligibility_policy_json: policy.parse_policy_json_policy_json
+    out: report
+- solver_off_2:
+    evaluate: |-
+      @in_use_solver == 'false'
+    in:
+      use_solver: normalize_bool
+    out: []
+    'on': solver_on_2.fail
+    branch: 2
+- llm_only:
+    use: parts.llm_only
+    in:
+      policy_text: $in.policy_text
+    out: report
+- wf_exit:
+    output:
+    - solver_arm
+    - llm_only
+    'on':
+    - solver_off_2.fail
+    - solver_arm
+    - llm_only

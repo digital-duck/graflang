@@ -1,0 +1,92 @@
+CREATE TOOL_API load_pdf_invoice(pdf_path TEXT) RETURNS TEXT AS PYTHON $$
+import pypdf
+
+def load_pdf_invoice(pdf_path: str) -> str:
+    try:
+        reader = pypdf.PdfReader(pdf_path)
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(pages).strip()
+        return text if text else "error: no text extracted from PDF"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API parse_invoice_json(raw_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def parse_invoice_json(raw_json: str) -> str:
+    try:
+        text = raw_json.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1]).strip()
+        return json.dumps(json.loads(text))
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API validate_invoice_math(invoice_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def validate_invoice_math(invoice_json: str) -> str:
+    try:
+        data = json.loads(invoice_json)
+        line_items = data.get("line_items", [])
+        subtotal = sum(float(item.get("amount", 0)) for item in line_items)
+        tax = float(data.get("tax", 0))
+        computed = round(subtotal + tax, 2)
+        declared = round(float(data.get("total", 0)), 2)
+        if abs(computed - declared) < 0.01:
+            return "pass"
+        return f"fail: line_items_sum={subtotal} tax={tax} computed_total={computed} declared_total={declared}"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API build_invoice_output(invoice_json TEXT, status TEXT, notes TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def build_invoice_output(invoice_json: str, status: str, notes: str) -> str:
+    try:
+        data = json.loads(invoice_json)
+        data["validation_status"] = status
+        if notes:
+            data["validation_notes"] = notes
+        return json.dumps(data, indent=2)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION extract_invoice_fields(pdf_content TEXT)
+RETURNS TEXT AS $$
+You are an invoice extraction specialist. Analyze the invoice text below and return a single valid JSON object with exactly these fields:
+- vendor: string (seller name and address)
+- customer: string (buyer/billed-to name and address)
+- invoice_number: string
+- invoice_date: string (ISO 8601 format)
+- line_items: array of objects, each with: description (string), quantity (number), unit_price (number), amount (number)
+- tax: number
+- total: number
+
+Invoice content:
+{pdf_content}
+
+Return ONLY the JSON object — no markdown fences, no explanation, no trailing text.
+$$;
+
+WORKFLOW invoice_processor
+  INPUT @pdf_path TEXT := "invoice.pdf"
+  OUTPUT @result TEXT
+DO
+  CALL load_pdf_invoice(@pdf_path) INTO @pdf_content;
+  GENERATE extract_invoice_fields(@pdf_content) INTO @raw_json;
+  CALL parse_invoice_json(@raw_json) INTO @invoice_json;
+  CALL validate_invoice_math(@invoice_json) INTO @math_check;
+  EVALUATE @math_check
+    WHEN contains("pass") THEN
+      CALL build_invoice_output(@invoice_json, "valid", "") INTO @result;
+    ELSE
+      CALL build_invoice_output(@invoice_json, "invalid", @math_check) INTO @result;
+  END;
+  RETURN @result WITH status = "complete";
+END;

@@ -1,0 +1,57 @@
+version: 1.0-graph
+workflow:
+  name: production_sustainability
+  inputs:
+  - name: problem
+    type: TEXT
+    default: 'A factory produces standard product A and green product B. A: $10 profit, 3 kg CO₂, uses 2 hr labor and 3 kg material. B: $6 profit, 1 kg CO₂, uses 1 hr labor and 2 kg material. Available: 20 labor-hours, 30 kg material. Find production plans that maximize profit and minimize carbon footprint.'
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: n_points
+    type: TEXT
+    default: '10'
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    prepare: ./prepare/prepare.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+steps:
+- prepare:
+    use: parts.prepare
+    in:
+      use_solver: $in.use_solver
+    out:
+    - use_solver
+    - llm_calls
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: prepare
+    out: []
+    branch: 1
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      problem: $in.problem
+      llm_calls: prepare.llm_calls
+      n_points: $in.n_points
+    out: report
+- llm_only:
+    use: parts.llm_only
+    in:
+      problem: $in.problem
+      llm_calls: prepare.llm_calls
+    out: report
+    'on': solver_on.fail
+- wf_exit:
+    output:
+    - solver_arm
+    - llm_only
+    'on':
+    - solver_arm
+    - llm_only

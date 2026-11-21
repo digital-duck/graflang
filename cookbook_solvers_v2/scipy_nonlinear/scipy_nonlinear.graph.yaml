@@ -1,0 +1,211 @@
+version: 1.0-graph
+workflow:
+  name: nonlinear_opt
+  inputs:
+  - name: problem_type
+    type: TEXT
+    default: pricing
+  - name: demand_scale
+    type: TEXT
+    default: '10000'
+  - name: elasticity
+    type: TEXT
+    default: '1.5'
+  - name: revenue_scale
+    type: TEXT
+    default: '20'
+  - name: saturation
+    type: TEXT
+    default: '0.02'
+  - name: congestion
+    type: TEXT
+    default: '0.05'
+  - name: unit_cost
+    type: TEXT
+    default: '8'
+  - name: fixed_cost
+    type: TEXT
+    default: '200'
+  - name: x_min
+    type: TEXT
+    default: '6'
+  - name: x_max
+    type: TEXT
+    default: '150'
+  - name: min_demand
+    type: TEXT
+    default: '0'
+  - name: method
+    type: TEXT
+    default: SLSQP
+  - name: max_iterations
+    type: TEXT
+    default: '1000'
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook-solver/114_scipy_nonlinear/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    formulate: ./formulate/formulate.graph.yaml
+    solver_arm: ./solver_arm/solver_arm.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+steps:
+- formulate:
+    use: parts.formulate
+    in:
+      problem_type: $in.problem_type
+      demand_scale: $in.demand_scale
+      elasticity: $in.elasticity
+      unit_cost: $in.unit_cost
+      fixed_cost: $in.fixed_cost
+      x_min: $in.x_min
+      x_max: $in.x_max
+      min_demand: $in.min_demand
+      congestion_factor: $in.congestion
+      revenue_scale: $in.revenue_scale
+      saturation_factor: $in.saturation
+    out:
+    - problem_json
+    - formulate_logistics_problem_problem_json
+    - llm_calls
+- normalize_bool:
+    node: SOLVE
+    in:
+      use_solver: $in.use_solver
+    out: use_solver
+    tool: normalize_bool
+    backend: kernel
+    arguments:
+    - |-
+      @use_solver
+    code: |
+      def _coerce_bool(value: str) -> str:
+          s = str(value).strip()
+          if not s:
+              return 'false'
+          try:
+              return 'true' if float(s) != 0 else 'false'
+          except ValueError:
+              pass
+          if s.lower() in ('false', 'no', 'off'):
+              return 'false'
+          return 'true'
+
+      def normalize_bool(value: str) -> str:
+          """NORMALIZE_BOOL(value) — same logic as to_bool; purpose-named for --param flags.
+          Accepts any truthy/falsy representation: 'ON', 'YES', '1', '2', 'true' → 'true';
+          '0', 'OFF', 'NO', 'false', '' → 'false'.
+          """
+          return _coerce_bool(value)
+      _spl_result = normalize_bool(use_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: normalize_bool
+    out: []
+    branch: 1
+- solver_arm:
+    use: parts.solver_arm
+    in:
+      problem_json: formulate
+      solve_nonlinear_problem_json: formulate.formulate_logistics_problem_problem_json
+      method: $in.method
+      max_iterations: $in.max_iterations
+      problem_type: $in.problem_type
+      llm_calls: formulate.llm_calls
+    out: body
+- solver_off:
+    evaluate: |-
+      @in_use_solver == 'false'
+    in:
+      use_solver: normalize_bool
+    out: []
+    'on': solver_on.fail
+    branch: 2
+- llm_only:
+    use: parts.llm_only
+    in:
+      problem_type: $in.problem_type
+      problem_json: formulate
+      estimate_optimum_problem_json: formulate.formulate_logistics_problem_problem_json
+      llm_calls: formulate.llm_calls
+    out: body
+- format_report_wrapper:
+    node: SOLVE
+    in:
+      problem_type: $in.problem_type
+      body:
+      - solver_arm
+      - llm_only
+    out: report
+    'on':
+    - solver_off.fail
+    - solver_arm
+    - llm_only
+    tool: format_report_wrapper
+    backend: kernel
+    arguments:
+    - |-
+      @problem_type
+    - |-
+      @body
+    code: |
+      def format_report_wrapper(problem_type: str, body: str) -> str:
+          return f'=== Nonlinear Optimization (scipy.optimize / {problem_type}) ===\n\n{body}'
+      _spl_result = format_report_wrapper(problem_type, body)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_type
+    - body
+    tool_returns: TEXT
+- save_report:
+    node: SOLVE
+    in:
+      report: format_report_wrapper
+      out_dir: $in.out_dir
+      problem_type: $in.problem_type
+      use_solver: normalize_bool
+      method: $in.method
+    out: saved_path
+    tool: save_report
+    backend: kernel
+    arguments:
+    - |-
+      @report
+    - |-
+      @out_dir
+    - f'{@problem_type}_{@use_solver}_{@method}.txt'
+    code: |
+      def save_report(report: str, out_dir: str, filename: str) -> str:
+          """Write report text to out_dir/filename, creating the directory if needed."""
+          import os
+          from pathlib import Path
+          out = Path(out_dir) if os.path.isabs(out_dir) else Path(os.getcwd()) / out_dir
+          out.mkdir(parents=True, exist_ok=True)
+          dest = out / filename
+          dest.write_text(report, encoding='utf-8')
+          return str(dest)
+      _spl_result = save_report(report, out_dir, f'{problem_type}_{use_solver}_{method}.txt')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - report
+    - out_dir
+    - filename
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_wrapper

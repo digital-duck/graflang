@@ -1,0 +1,79 @@
+version: 1.0-graph
+workflow:
+  name: apply
+  inputs:
+  - name: skill_path
+    type: TEXT
+  - name: read_file_skill_path
+    type: TEXT
+  - name: task
+    type: TEXT
+  outputs:
+  - name: response
+    type: TEXT
+steps:
+- read_file:
+    node: SOLVE
+    in:
+      skill_path:
+      - $in.skill_path
+      - $in.read_file_skill_path
+    out: skill_template
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@skill_path'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip()).expanduser()
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(skill_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+- replace:
+    node: SOLVE
+    in:
+      skill_template: read_file
+      task: $in.task
+    out: prompt
+    tool: replace
+    backend: kernel
+    arguments:
+    - '@skill_template'
+    - "'{task}'"
+    - '@task'
+    code: |
+      def replace(value: str, old: str, new: str) -> str:
+          """REPLACE(value, old, new) — replace all occurrences of old with new."""
+          return str(value).replace(str(old), str(new))
+      _spl_result = replace(skill_template, '{task}', task)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - old
+    - new
+    tool_returns: TEXT
+    tool_builtin: true
+- apply_skill_template:
+    generate: '{{in_prompt}}'
+    in:
+      prompt: replace
+    out: response
+    function: apply_skill_template
+    params:
+    - prompt
+    arguments:
+    - '@prompt'
+- wf_exit:
+    output: apply_skill_template

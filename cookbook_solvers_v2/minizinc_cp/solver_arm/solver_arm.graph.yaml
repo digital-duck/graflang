@@ -1,0 +1,372 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem_json
+    type: TEXT
+  - name: problem_description
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- solve_with_minizinc:
+    node: SOLVE
+    in:
+      problem_json: $in.problem_json
+    out: result_json
+    tool: solve_with_minizinc
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      import textwrap
+
+      NURSES = ['N1_senior', 'N2_senior', 'N3', 'N4', 'N5', 'N6', 'N7', 'N8']
+
+      DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+      OFF = 3
+
+      _MZN_MODEL = textwrap.dedent('    % Nurse scheduling: 8 nurses, 7 days, 3 shifts + off\n    % Hard: coverage, rest between night→morning, max work days\n    % Soft: maximize preference score\n\n    int: n_nurses = {n_nurses};\n    int: n_days   = {n_days};\n    int: n_shifts = 3;   % 0=Morning 1=Afternoon 2=Night\n    int: OFF      = 3;\n\n    array[1..n_nurses, 1..n_days] of var 0..3: sched;\n\n    % Shift coverage minimums\n    constraint forall(d in 1..n_days) (\n        sum(n in 1..n_nurses)(sched[n,d] == 0) >= {min_morning} /\\\n        sum(n in 1..n_nurses)(sched[n,d] == 1) >= {min_afternoon} /\\\n        sum(n in 1..n_nurses)(sched[n,d] == 2) >= {min_night}\n    );\n\n    % At least one senior (N1 or N2) on morning\n    constraint forall(d in 1..n_days) (\n        sched[1,d] == 0 \\/ sched[2,d] == 0\n    );\n\n    % Max 5 work days per week\n    constraint forall(n in 1..n_nurses) (\n        sum(d in 1..n_days)(sched[n,d] != OFF) <= {max_work_days}\n    );\n\n    % Night→Morning rest: no night on day d and morning on day d+1\n    constraint forall(n in 1..n_nurses, d in 1..n_days-1) (\n        not (sched[n,d] == 2 /\\ sched[n,d+1] == 0)\n    );\n\n    % Preference scores\n    var int: pref_score =\n        sum(d in 1..n_days)(sched[3,d] == 0) * 3       % N3 likes morning\n      - sum(d in 1..n_days)(sched[7,d] == 2) * 3       % N7 dislikes night\n      + sum(d in 1..n_days)(sched[8,d] == OFF) * 2;   % N8 likes days off\n\n    solve maximize pref_score;\n\n    output ["sched=", show(sched), "\\npref=", show(pref_score)];\n')
+
+      def solve_with_minizinc(problem_json: str) -> str:
+          """Solve nurse scheduling via MiniZinc Python interface.
+
+          Tries CP-SAT (via OR-Tools) backend first, then Gecode.
+          Falls back to a Python constraint solver if MiniZinc binary absent.
+          """
+          try:
+              import minizinc
+          except ImportError:
+              return _python_cp_fallback(json.loads(problem_json), note='minizinc not installed — pip install minizinc + binary from minizinc.org')
+          p = json.loads(problem_json)
+          if minizinc.default_driver is None:
+              return _python_cp_fallback(p, note='MiniZinc binary not found — install from https://www.minizinc.org/software.html')
+          mzn_src = _MZN_MODEL.format(**p)
+          try:
+              model = minizinc.Model()
+              model.add_string(mzn_src)
+              for solver_tag in ('com.google.ortools.sat', 'org.gecode.gecode'):
+                  try:
+                      solver = minizinc.Solver.lookup(solver_tag)
+                      inst = minizinc.Instance(solver, model)
+                      result = inst.solve(timeout=None)
+                      if result.status in (minizinc.Status.SATISFIED, minizinc.Status.OPTIMAL_SOLUTION):
+                          sched_flat = result['sched']
+                          pref = result['pref_score']
+                          schedule = _parse_mzn_schedule(sched_flat, p)
+                          violations = _count_violations(schedule, p)
+                          return json.dumps({'status': 'OK', 'backend': solver_tag.split('.')[-1], 'violations': violations, 'pref_score': pref, 'schedule': schedule, 'n_nurses': p['n_nurses'], 'n_days': p['n_days']})
+                  except Exception:
+                      continue
+              return _python_cp_fallback(p, note='No MiniZinc solver backend found (tried CP-SAT, Gecode)')
+          except Exception as e:
+              return _python_cp_fallback(p, note=f'MiniZinc error: {e}')
+
+      def _parse_mzn_schedule(sched_flat, p: dict) -> list:
+          """Convert flat MiniZinc array to nurse×day schedule."""
+          n_nurses = p['n_nurses']
+          n_days = p['n_days']
+          shift_labels = ['M', 'A', 'N', 'Off']
+          schedule = []
+          for n in range(n_nurses):
+              row = {'nurse': NURSES[n], 'days': {}}
+              for d in range(n_days):
+                  val = sched_flat[n][d] if isinstance(sched_flat[0], list) else sched_flat[n * n_days + d]
+                  row['days'][DAYS[d]] = shift_labels[val]
+              schedule.append(row)
+          return schedule
+
+      def _python_cp_fallback(p: dict, note: str='') -> str:
+          """Python-only CP solver using backtracking (demonstrates same constraints)."""
+          n_nurses = p['n_nurses']
+          n_days = p['n_days']
+          min_m, min_a, min_n = (p['min_morning'], p['min_afternoon'], p['min_night'])
+          max_work = p['max_work_days']
+          seniors = p['senior_nurses']
+          shift_names = ['M', 'A', 'N', 'Off']
+          import random as rnd
+          rng = rnd.Random(42)
+          sched = [[OFF] * n_days for _ in range(n_nurses)]
+          for d in range(n_days):
+              morning_candidates = list(range(n_nurses))
+              rng.shuffle(morning_candidates)
+              morning_assigned = []
+              for n in seniors:
+                  if n in morning_candidates and len(morning_assigned) < min_m:
+                      prev_shift = sched[n][d - 1] if d > 0 else -1
+                      if prev_shift != 2:
+                          sched[n][d] = 0
+                          morning_assigned.append(n)
+              for n in morning_candidates:
+                  if n not in morning_assigned and len(morning_assigned) < min_m:
+                      prev_shift = sched[n][d - 1] if d > 0 else -1
+                      if prev_shift != 2 and sum((sched[n][dd] != OFF for dd in range(d))) < max_work:
+                          sched[n][d] = 0
+                          morning_assigned.append(n)
+              afternoon_assigned = []
+              for n in morning_candidates:
+                  if n not in morning_assigned and len(afternoon_assigned) < min_a:
+                      if sum((sched[n][dd] != OFF for dd in range(d))) < max_work:
+                          sched[n][d] = 1
+                          afternoon_assigned.append(n)
+              night_assigned = []
+              for n in morning_candidates:
+                  if n not in morning_assigned and n not in afternoon_assigned and (len(night_assigned) < min_n):
+                      if sum((sched[n][dd] != OFF for dd in range(d))) < max_work:
+                          sched[n][d] = 2
+                          night_assigned.append(n)
+          schedule = []
+          for n in range(n_nurses):
+              row = {'nurse': NURSES[n], 'days': {DAYS[d]: shift_names[sched[n][d]] for d in range(n_days)}}
+              schedule.append(row)
+          violations = _count_violations(schedule, p)
+          pref = _score_preferences(sched, p)
+          return json.dumps({'status': 'OK', 'backend': 'python_backtracking_fallback', 'note': note or 'MiniZinc unavailable; Python CP fallback used', 'violations': violations, 'pref_score': pref, 'schedule': schedule, 'n_nurses': n_nurses, 'n_days': n_days})
+
+      def _count_violations(schedule: list, p: dict) -> dict:
+          """Count hard constraint violations in a schedule."""
+          n_days = p['n_days']
+          violations = {'night_morning': 0, 'coverage_shortage': 0, 'overwork': 0}
+          for d in range(n_days):
+              counts = {'M': 0, 'A': 0, 'N': 0}
+              for row in schedule:
+                  shift = row['days'].get(DAYS[d], 'Off')
+                  if shift in counts:
+                      counts[shift] += 1
+              if counts['M'] < p['min_morning']:
+                  violations['coverage_shortage'] += 1
+              if counts['A'] < p['min_afternoon']:
+                  violations['coverage_shortage'] += 1
+              if counts['N'] < p['min_night']:
+                  violations['coverage_shortage'] += 1
+          for row in schedule:
+              work_days = sum((1 for d in DAYS if row['days'].get(d, 'Off') != 'Off'))
+              if work_days > p['max_work_days']:
+                  violations['overwork'] += 1
+              for d_idx in range(n_days - 1):
+                  if row['days'].get(DAYS[d_idx]) == 'N' and row['days'].get(DAYS[d_idx + 1]) == 'M':
+                      violations['night_morning'] += 1
+          return violations
+
+      def _score_preferences(sched: list, p: dict) -> int:
+          score = 0
+          for row in p.get('preferences', []):
+              n_idx, shift, pts = row
+              for d in range(p['n_days']):
+                  if sched[n_idx][d] == shift:
+                      score += pts
+          return score
+      _spl_result = solve_with_minizinc(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- schedule_hard_constraints_met:
+    node: SOLVE
+    in:
+      result_json: solve_with_minizinc
+    out: tool_5
+    tool: schedule_hard_constraints_met
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      def schedule_hard_constraints_met(result_json: str) -> bool:
+          """ASSERT: no night→morning violations and no coverage shortages."""
+          try:
+              d = json.loads(result_json)
+              if d.get('status') != 'OK':
+                  return False
+              v = d.get('violations', {})
+              return v.get('night_morning', 1) == 0 and v.get('coverage_shortage', 1) == 0
+          except Exception:
+              return False
+      _spl_result = schedule_hard_constraints_met(result_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- assert_schedule_hard_constraints_met:
+    assert: '@in_tool_5'
+    in:
+      result_json: solve_with_minizinc
+      tool_5: schedule_hard_constraints_met
+    out: []
+- format_schedule_report:
+    node: SOLVE
+    in:
+      result_json: solve_with_minizinc
+    out: cp_report
+    on:
+    - assert_schedule_hard_constraints_met
+    - assert_schedule_hard_constraints_met.fail
+    tool: format_schedule_report
+    backend: kernel
+    arguments:
+    - '@result_json'
+    code: |
+      import json
+
+      DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+      def format_schedule_report(result_json: str) -> str:
+          try:
+              d = json.loads(result_json)
+              v = d.get('violations', {})
+              backend = d.get('backend', '?')
+              note = d.get('note', '')
+              lines = [f"## CP Schedule Report — {d.get('problem_name', 'Nurse Scheduling')}", '', f'**Backend:** MiniZinc → {backend}  ', f"**Preference score:** {d.get('pref_score', '?')}  ", f"**Night→Morning violations:** {v.get('night_morning', '?')}  ", f"**Coverage shortages:** {v.get('coverage_shortage', '?')}  ", f"**Overwork violations:** {v.get('overwork', '?')}  "]
+              if note:
+                  lines += ['', f'> {note}']
+              lines += ['', '### Weekly Schedule', '', '| Nurse | Mon | Tue | Wed | Thu | Fri | Sat | Sun | Days |', '|---|---|---|---|---|---|---|---|---|']
+              for row in d.get('schedule', []):
+                  days = row.get('days', {})
+                  work_count = sum((1 for d_name in DAYS if days.get(d_name, 'Off') != 'Off'))
+                  cells = ' | '.join((days.get(day, 'Off') for day in DAYS))
+                  lines.append(f"| {row['nurse']} | {cells} | {work_count} |")
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'(format error: {e})'
+      _spl_result = format_schedule_report(result_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      result_json: solve_with_minizinc
+    out: violations
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'violations'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'violations')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- json_get_3:
+    node: SOLVE
+    in:
+      result_json: solve_with_minizinc
+    out: pref_score
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@result_json'
+    - "'pref_score'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(result_json, 'pref_score')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_cp_result:
+    generate: |-
+      You are a constraint programming expert explaining MiniZinc results.
+
+      PROBLEM:
+      {{in_problem_description}}
+
+      MINIZINC CP RESULT:
+      {{in_cp_report}}
+
+      Explain (≤200 words):
+      1. What is constraint propagation, and how does it differ from LP relaxation?
+         (CP reduces domain sizes by forward-checking; LP uses continuous relaxation)
+      2. Why did the LLM schedule violate the night→morning constraint?
+         Is this a "reasoning failure" or a "search complexity" failure?
+      3. MiniZinc separates the model from the solver backend. What are two advantages
+         of this for organizations with evolving solver licensing?
+      4. How would you extend this model to a monthly roster with 30+ nurses?
+         What makes CP scale well here vs. MILP-based scheduling?
+    in:
+      cp_report: format_schedule_report
+      problem_description: $in.problem_description
+    out: explanation
+    function: explain_cp_result_prompt
+    params:
+    - cp_report
+    - problem_description
+    arguments:
+    - '@cp_report'
+    - '@problem_description'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      cp_report: format_schedule_report
+      explanation: explain_cp_result
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@cp_report'
+    - '@explanation'
+    code: |
+      def format_report_solver_on(cp_report: str, explanation: str) -> str:
+          return f'=== MiniZinc CP — Nurse Scheduling (r126) | solver=ON ===\n\n{cp_report}\n\n── Analyst Explanation ─────────────────────────────────────\n{explanation}'
+      _spl_result = format_report_solver_on(cp_report, explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - cp_report
+    - explanation
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

@@ -1,0 +1,405 @@
+version: 1.0-graph
+workflow:
+  name: solver_arm
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: n_eval
+    type: TEXT
+  - name: pop_size
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- extract_workforce_problem:
+    generate: |-
+      Extract this workforce scheduling problem into JSON.
+      Return ONLY a JSON object — no markdown, no prose:
+      {{
+        "shifts": [
+          {{"name": "Day",     "cost": 100.0, "quality": 0.90, "risk": 0.10, "min": 10, "max": 20}},
+          {{"name": "Evening", "cost": 130.0, "quality": 1.00, "risk": 0.25, "min": 10, "max": 20}},
+          {{"name": "Night",   "cost": 160.0, "quality": 0.70, "risk": 0.40, "min": 10, "max": 20}}
+        ],
+        "total_min": 30
+      }}
+
+      Rules:
+      - shifts is a list; each entry has name, cost, quality, risk, min, max.
+      - total_min is the minimum total headcount across all shifts.
+      - If any value is missing, use the defaults above.
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: problem_json
+    function: extract_workforce_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- compute_utopia_anchors:
+    node: SOLVE
+    in:
+      problem_json: extract_workforce_problem
+    out: anchors_json
+    tool: compute_utopia_anchors
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    code: |
+      import json
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def compute_utopia_anchors(problem_json: str) -> str:
+          """Compute per-objective optimal solutions via PuLP (continuous relaxation).
+
+          Returns:
+              {"min_cost": {...}, "max_quality": {...}, "min_risk": {...}}
+          """
+          import pulp
+          try:
+              data = json.loads(_strip_fences(problem_json))
+          except Exception as e:
+              return json.dumps({'error': f'parse error: {e}'})
+          shifts = data.get('shifts', [])
+          total_min = float(data.get('total_min', 30))
+          names = [s['name'] for s in shifts]
+          if len(shifts) < 2:
+              return json.dumps({'error': 'need at least 2 shifts'})
+          costs = {s['name']: float(s['cost']) for s in shifts}
+          qualities = {s['name']: float(s['quality']) for s in shifts}
+          risks = {s['name']: float(s['risk']) for s in shifts}
+          mins = {s['name']: float(s['min']) for s in shifts}
+          maxs = {s['name']: float(s['max']) for s in shifts}
+
+          def make_vars(prob):
+              return {n: pulp.LpVariable(f'x_{n}', lowBound=mins[n], upBound=maxs[n]) for n in names}
+
+          def calc_metrics(x_vals, total):
+              cost_v = sum((costs[n] * x_vals[n] for n in names))
+              quality_v = sum((qualities[n] * x_vals[n] for n in names)) / total if total > 0 else 0.0
+              risk_v = sum((risks[n] * x_vals[n] for n in names)) / total if total > 0 else 0.0
+              return (cost_v, quality_v, risk_v)
+          anchors = {}
+          for label, sense, objective_fn in [('min_cost', pulp.LpMinimize, lambda x: pulp.lpSum((costs[n] * x[n] for n in names))), ('max_quality', pulp.LpMinimize, lambda x: -pulp.lpSum((qualities[n] * x[n] for n in names))), ('min_risk', pulp.LpMinimize, lambda x: pulp.lpSum((risks[n] * x[n] for n in names)))]:
+              try:
+                  prob = pulp.LpProblem(label, sense)
+                  x = make_vars(prob)
+                  prob += objective_fn(x)
+                  prob += pulp.lpSum((x[n] for n in names)) >= total_min
+                  prob.solve(pulp.PULP_CBC_CMD(msg=False))
+                  x_vals = {n: pulp.value(x[n]) or 0.0 for n in names}
+                  total = sum(x_vals.values())
+                  cost_v, quality_v, risk_v = calc_metrics(x_vals, total)
+                  anchor = {'cost': round(cost_v, 2), 'quality': round(quality_v, 6), 'risk': round(risk_v, 6)}
+                  for name in names:
+                      anchor[f'x{name[0]}'] = round(float(x_vals[name]), 2)
+                  anchors[label] = anchor
+              except Exception as e:
+                  anchors[label] = {'error': str(e)}
+          return json.dumps(anchors)
+      _spl_result = compute_utopia_anchors(problem_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    tool_returns: TEXT
+- solve_workforce_platypus:
+    node: SOLVE
+    in:
+      problem_json: extract_workforce_problem
+      n_eval: $in.n_eval
+      pop_size: $in.pop_size
+    out: front_json
+    tool: solve_workforce_platypus
+    backend: kernel
+    arguments:
+    - '@problem_json'
+    - '@n_eval'
+    - '@pop_size'
+    code: |
+      import json
+
+      import random
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def solve_workforce_platypus(problem_json: str, n_eval: str='5000', pop_size: str='100') -> str:
+          """Run platypus NSGA-II on the 3-objective integer workforce problem.
+
+          Returns:
+              {"status": "OK", "n_points": int, "algorithm": "platypus-NSGA-II", "pareto_front": [
+                  {"xD": int, "xE": int, "xN": int, "cost": float, "quality": float, "risk": float}
+              ]}
+
+          Requires: pip install platypus-opt
+          """
+          from platypus import NSGAII, Problem, Integer, nondominated
+          try:
+              data = json.loads(_strip_fences(problem_json))
+          except Exception as e:
+              return json.dumps({'status': 'PARSE_ERROR', 'error': str(e)})
+          shifts = data.get('shifts', [])
+          total_min = int(data.get('total_min', 30))
+          if len(shifts) < 2:
+              return json.dumps({'status': 'INVALID_INPUT', 'error': 'need at least 2 shifts'})
+          costs_list = [s['cost'] for s in shifts]
+          qualities_list = [s['quality'] for s in shifts]
+          risks_list = [s['risk'] for s in shifts]
+
+          def evaluate(variables):
+              xs = [int(v) for v in variables]
+              total = sum(xs)
+              cost_v = sum((xs[i] * costs_list[i] for i in range(len(xs))))
+              quality_v = -(sum((xs[i] * qualities_list[i] for i in range(len(xs)))) / total)
+              risk_v = sum((xs[i] * risks_list[i] for i in range(len(xs)))) / total
+              return ([cost_v, quality_v, risk_v], [total - total_min])
+          try:
+              n_var = len(shifts)
+              problem = Problem(n_var, 3, 1)
+              problem.types[:] = [Integer(s['min'], s['max']) for s in shifts]
+              problem.constraints[:] = '>=0'
+              problem.function = evaluate
+              random.seed(42)
+              algorithm = NSGAII(problem, population_size=int(pop_size))
+              algorithm.run(int(n_eval))
+              front = nondominated(algorithm.result)
+              pareto_points = []
+              seen = set()
+              for sol in front:
+                  if sol.feasible:
+                      xs = [problem.types[i].decode(sol.variables[i]) for i in range(n_var)]
+                      key = tuple(xs)
+                      if key in seen:
+                          continue
+                      seen.add(key)
+                      total = sum(xs)
+                      if total < total_min:
+                          continue
+                      cost_val = float(sum((xs[i] * costs_list[i] for i in range(n_var))))
+                      quality_val = float(sum((xs[i] * qualities_list[i] for i in range(n_var)))) / total
+                      risk_val = float(sum((xs[i] * risks_list[i] for i in range(n_var)))) / total
+                      point = {'cost': round(cost_val, 2), 'quality': round(quality_val, 6), 'risk': round(risk_val, 6)}
+                      for i, s in enumerate(shifts):
+                          point[f"x{s['name'][0]}"] = xs[i]
+                      pareto_points.append(point)
+              pareto_points.sort(key=lambda p: p['cost'])
+              return json.dumps({'status': 'OK', 'algorithm': 'platypus-NSGA-II', 'n_points': len(pareto_points), 'pareto_front': pareto_points})
+          except Exception as e:
+              return json.dumps({'status': 'ERROR', 'error': str(e)})
+      _spl_result = solve_workforce_platypus(problem_json, n_eval, pop_size)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - n_eval
+    - pop_size
+    tool_returns: TEXT
+- is_pareto_feasible:
+    node: SOLVE
+    in:
+      front_json: solve_workforce_platypus
+    out: tool_4
+    tool: is_pareto_feasible
+    backend: kernel
+    arguments:
+    - '@front_json'
+    code: |
+      import json
+
+      def is_pareto_feasible(front_json: str) -> bool:
+          """ASSERT gate: True if status==OK and n_points >= 3."""
+          try:
+              data = json.loads(front_json)
+              return data.get('status') == 'OK' and int(data.get('n_points', 0)) >= 3
+          except Exception:
+              return False
+      _spl_result = is_pareto_feasible(front_json)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - front_json
+    tool_returns: TEXT
+- assert_is_pareto_feasible:
+    assert: '@in_tool_4'
+    in:
+      front_json: solve_workforce_platypus
+      tool_4: is_pareto_feasible
+    out: []
+- json_get:
+    node: SOLVE
+    in:
+      front_json: solve_workforce_platypus
+    out: n_points_str
+    on:
+    - assert_is_pareto_feasible
+    - assert_is_pareto_feasible.fail
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@front_json'
+    - "'n_points'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(front_json, 'n_points')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_pareto_surface:
+    node: SOLVE
+    in:
+      front_json: solve_workforce_platypus
+    out: surface_table
+    tool: format_pareto_surface
+    backend: kernel
+    arguments:
+    - '@front_json'
+    code: |
+      import json
+
+      def format_pareto_surface(front_json: str) -> str:
+          """Format Pareto front as markdown table sorted by cost ascending.
+
+          Columns: xD | xE | xN | Cost ($) | Quality | Risk
+          """
+          try:
+              data = json.loads(front_json)
+              points = data.get('pareto_front', [])
+              algo = data.get('algorithm', 'platypus-NSGA-II')
+              if not points:
+                  return 'No Pareto-optimal points found.'
+              shift_keys = sorted((k for k in points[0].keys() if k.startswith('x') and len(k) == 2))
+              header_parts = ' | '.join(shift_keys)
+              lines = [f'| {header_parts} | Cost ($) | Quality | Risk | Algorithm |', '|' + '|'.join(['---'] * (len(shift_keys) + 4)) + '|']
+              costs = [p['cost'] for p in points]
+              qualities = [p['quality'] for p in points]
+              risks = [p['risk'] for p in points]
+              for pt in points:
+                  shift_vals = ' | '.join((str(pt.get(k, 0)) for k in shift_keys))
+                  lines.append(f"| {shift_vals} | {pt['cost']:,.0f} | {pt['quality']:.4f} | {pt['risk']:.4f} | {algo} |")
+              lines.append('')
+              lines.append(f'**Cost:** ${min(costs):,.0f} – ${max(costs):,.0f}  |  **Quality:** {min(qualities):.4f} – {max(qualities):.4f}  |  **Risk:** {min(risks):.4f} – {max(risks):.4f}')
+              return '\n'.join(lines)
+          except Exception as e:
+              return f'Could not format Pareto surface: {e}'
+      _spl_result = format_pareto_surface(front_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - front_json
+    tool_returns: TEXT
+- interpret_pareto_surface:
+    generate: |-
+      You are a workforce planning expert. Interpret this 3-objective Pareto surface for a manager.
+      The surface was computed by platypus NSGA-II — a pure-Python multi-objective evolutionary solver.
+
+      Problem:
+      {{in_problem}}
+
+      Pareto surface (sorted by cost, showing representative rows):
+      {{in_surface_table}}
+
+      Utopia anchors (best possible per objective, computed analytically):
+      {{in_anchors_json}}
+
+      Your interpretation must cover:
+      1. The nature of the 3-way tradeoff: explain why cost and risk align (both prefer Day shifts)
+         while quality pulls toward Evening shifts.
+      2. Identify 2-3 recommended operating points from the table with justification:
+         - A cost-minimizing option (for budget-constrained operations)
+         - A quality-maximizing option (for customer-facing peak periods)
+         - A balanced option (reasonable cost, acceptable quality and risk)
+      3. How close are the Pareto-optimal points to the utopia anchors?
+      4. One-sentence practical recommendation for a typical service center.
+
+      Be concise (under 200 words). No JSON, no code.
+    in:
+      problem: $in.problem
+      surface_table: format_pareto_surface
+      anchors_json: compute_utopia_anchors
+    out: interpretation
+    function: interpret_pareto_surface
+    params:
+    - problem
+    - surface_table
+    - anchors_json
+    arguments:
+    - '@problem'
+    - '@surface_table'
+    - '@anchors_json'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- format_report_solver_on:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      anchors_json: compute_utopia_anchors
+      n_points_str: json_get
+      surface_table: format_pareto_surface
+      interpretation: interpret_pareto_surface
+      llm_calls: set_llm_calls_3
+    out: report
+    tool: format_report_solver_on
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@anchors_json'
+    - '@n_points_str'
+    - '@surface_table'
+    - '@interpretation'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_on(problem: str, anchors_json: str, n_points_str: str, surface_table: str, interpretation: str, llm_calls: str) -> str:
+          return f'=== Platypus MOEA Workforce Scheduling (r121) | solver=ON ===\n\nProblem:\n{problem}\n\nUtopia Anchors (per-objective best):\n{anchors_json}\n\nPareto Surface ({n_points_str} non-dominated points):\n{surface_table}\n\nInterpretation:\n{interpretation}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_on(problem, anchors_json, n_points_str, surface_table, interpretation, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - anchors_json
+    - n_points_str
+    - surface_table
+    - interpretation
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_on

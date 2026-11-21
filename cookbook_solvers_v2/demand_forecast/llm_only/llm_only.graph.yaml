@@ -1,0 +1,171 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: default_problem_json
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- propose_forecast_heuristic:
+    generate: |-
+      You are a demand planner. Given this historical time-series, forecast the next 6 periods
+      using seasonal trend extrapolation (no solver — use your judgment).
+
+      {{in_problem}}
+
+      Steps:
+      1. Identify the trend (growing, flat, declining).
+      2. Identify any seasonal pattern (e.g. Q4 spike).
+      3. Extrapolate the next 6 periods, respecting both trend and seasonality.
+      4. Return a JSON object:
+      {{
+        "forecast": [<6 numeric values>],
+        "trend": "<growing|flat|declining>",
+        "reasoning": "<one sentence>"
+      }}
+
+      Return ONLY the JSON — no markdown, no prose.
+    in:
+      problem: $in.problem
+    out: forecast_text
+    function: propose_forecast_heuristic
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- set_llm_calls_4:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- verify_forecast_off:
+    node: SOLVE
+    in:
+      default_problem_json: $in.default_problem_json
+      forecast_text: propose_forecast_heuristic
+    out: verify_result
+    tool: verify_forecast_off
+    backend: kernel
+    arguments:
+    - '@default_problem_json'
+    - '@forecast_text'
+    code: |
+      import json
+
+      from spl.stdlib import strip_fences as _strip_fences
+
+      def verify_forecast_off(problem_json: str, forecast_json: str) -> str:
+          """Sanity-check LLM heuristic forecast.
+
+          Checks:
+          - forecast values are positive
+          - forecast stays within ±50% of last observed value (gross sanity)
+          - number of periods matches requested
+
+          Returns {"verdict": "PASS"/"FAIL", "notes": str}
+          """
+          try:
+              problem = json.loads(_strip_fences(problem_json))
+              fc = json.loads(_strip_fences(forecast_json))
+          except Exception as e:
+              return json.dumps({'verdict': 'FAIL', 'notes': f'parse error: {e}'})
+          history = problem.get('history', [])
+          last_val = float(history[-1]) if history else 0.0
+          forecast = fc.get('forecast', [])
+          notes = []
+          ok = True
+          if not forecast:
+              return json.dumps({'verdict': 'FAIL', 'notes': 'forecast list is empty'})
+          for i, v in enumerate(forecast):
+              v = float(v)
+              if v <= 0:
+                  notes.append(f'period +{i + 1}: non-positive value {v}')
+                  ok = False
+              if last_val > 0 and (v < last_val * 0.5 or v > last_val * 1.5):
+                  notes.append(f'period +{i + 1}: value {v:.1f} is >50% away from last observed {last_val:.1f}')
+                  ok = False
+          return json.dumps({'verdict': 'PASS' if ok else 'FAIL', 'notes': '; '.join(notes) if notes else 'all sanity checks passed'})
+      _spl_result = verify_forecast_off(default_problem_json, forecast_text)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem_json
+    - forecast_json
+    tool_returns: TEXT
+- json_get_2:
+    node: SOLVE
+    in:
+      verify_result: verify_forecast_off
+    out: verify_status
+    tool: json_get
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      import json
+
+      def json_get(json_str: str, key: str) -> str:
+          """JSON_GET(json, key) — extract a top-level key from a JSON object string.
+          Supports dot notation: 'a.b' extracts json['a']['b']. Strips markdown
+          ```json code fences before parsing, so raw LLM output works directly.
+          Returns '' if key not found or input is not valid JSON.
+          """
+          try:
+              clean = str(json_str).replace('```json', '').replace('```', '').strip()
+              obj = json.loads(clean)
+              for part in str(key).split('.'):
+                  if isinstance(obj, dict):
+                      obj = obj.get(part, '')
+                  else:
+                      return ''
+              return str(obj) if obj != '' else ''
+          except (json.JSONDecodeError, TypeError):
+              return ''
+      _spl_result = json_get(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - json_str
+    - key
+    tool_returns: TEXT
+    tool_builtin: true
+- format_report_solver_off:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      forecast_text: propose_forecast_heuristic
+      verify_result: verify_forecast_off
+      llm_calls: set_llm_calls_4
+    out: report
+    tool: format_report_solver_off
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@forecast_text'
+    - '@forecast_text'
+    - '@verify_result'
+    - '@llm_calls'
+    code: |
+      def format_report_solver_off(problem: str, forecast_text: str, forecast_json: str, verify_result: str, llm_calls: str) -> str:
+          return f'=== Demand Forecasting (solver=OFF / LLM heuristic) ===\n\nProblem:\n{problem}\n\nLLM Forecast:\n{forecast_text}\n\nExtracted (JSON):\n{forecast_json}\n\nSanity check:\n{verify_result}\n\nLLM calls: {llm_calls}'
+      _spl_result = format_report_solver_off(problem, forecast_text, forecast_text, verify_result, llm_calls)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - forecast_text
+    - forecast_json
+    - verify_result
+    - llm_calls
+    tool_returns: TEXT
+- wf_exit:
+    output: format_report_solver_off
