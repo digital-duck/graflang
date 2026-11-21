@@ -1,6 +1,6 @@
-# The cheapest real run: one cycle, no closure check (about 6 model calls), capped at 8.
+# A cheap real run: one improve round, no closure check. Cap it: the model calls are billed.
 #   graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml
-# Note: the `understand` step keeps `llm: ollama:gemma3` from the original recipe (a node's own llm beats this file), so a local Ollama must be running.
+# For a bigger project, pass your own --param spec=... (and max_cycles=3, check_closure=true; raise max_llm_calls to about 12).
 llm: claude_cli:claude-haiku-5-5
-params: {spec: "a function is_palindrome(s) that ignores case and punctuation", max_cycles: 1, check_closure: false}
+params: {spec: "a function is_palindrome(s) that ignores case and punctuation, with unit tests", max_cycles: 1, check_closure: false}
 limits: {max_llm_calls: 8}

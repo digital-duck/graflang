@@ -1,27 +1,35 @@
-# code_pipeline (layered): the same workflow as cookbook/code_pipeline, written as three composites, each in its own folder.
-#   graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --param spec="..."      graf vis ... --depth 1      graf expand ... --depth all
+# code_pipeline (layered, repository-capable): understand the spec, build a project (write, review, improve, run it, retry), document it, check it against the spec.
+# The build is code_parts' loop: the model writes a folder of files, a program splits the reply into them and RUNS them (syntax, imports, the project's own tests,
+# an optional smoke test), and what failed goes back into the next improve. The files are written as real files in .graf/codes/<run>/, in any layout.
+#   graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --param spec="..." --bind cookbook_v2/code_pipeline/cheap.bind.yaml
+#   graf vis ... --depth 1      graf expand ... --depth all
+# (cookbook_v2/code_pipeline_spl is the faithful port of cookbook/code_pipeline: SPL procedures, one block of code.)
 version: "1.0-graph"
 
 workflow:
   name: code_pipeline
-  description: Turns a plain-language spec into code (written, reviewed, improved, tested, retried under a policy guard), documents it, and optionally checks that the code still matches the spec.
+  description: Turns a plain-language spec into a project folder (written, reviewed, improved, run and retried until its checks pass), documents it, and optionally checks that the code still matches the spec.
   inputs:
     - {name: spec, type: TEXT}
     - {name: lang, type: TEXT, default: python}
-    - {name: max_cycles, type: INTEGER, default: 3}
+    - {name: reference, type: TEXT, default: ""}        # API facts the model cannot know (a library's call signatures); given to write and improve
+    - {name: smoke, type: TEXT, default: ""}            # Python run against the real dependencies after the tests (optional)
+    - {name: max_cycles, type: INTEGER, default: 3}     # improve + verify rounds at most
     - {name: check_closure, type: BOOL, default: true}
   outputs:
     - {name: docs, type: TEXT}
+    - {name: code, type: FILES}                         # the project: real files in .graf/codes/<run>/
+    - {name: report, type: TEXT}                        # what the last verification found
 
 resources:
   parts:
     understand: ./understand/understand.graph.yaml     # is the spec clear enough? (error exit `vague`)
-    build: ./build/build.graph.yaml                    # write, review, improve, test, retry
+    build: ./build/build.graph.yaml                    # write, review, improve, run it, retry
     finish: ./finish/finish.graph.yaml                 # document, and optionally check closure
 
 steps:
   - understand: {use: parts.understand, in: {spec: $in.spec}, out: [analysis], ports: [vague]}
   - stop:       {node: RECOVER, on: understand.vague, action: halt, message: "Spec is too vague. Please refine and retry.", in: {message: understand.analysis}, out: error}
-  - build:      {use: parts.build, on: understand, inherits: [spec, lang, max_cycles], out: [code]}                  # inherits: the same-named inputs of this workflow
+  - build:      {use: parts.build, on: understand, inherits: [spec, lang, reference, smoke, max_cycles], out: [code, files, report]}
   - finish:     {use: parts.finish, inherits: [spec, check_closure], in: {code: build.code}, out: [docs]}
-  - done:       {output: finish.docs}
+  - done:       {output: {docs: finish.docs, code: build.files, report: build.report}}

@@ -9,10 +9,10 @@ workflow:
   errors:
     - {name: vague, code: E_SPEC_VAGUE, description: the analysis did not find the spec clear enough}
 resources:
-  procedures:
-    analyze_spec: ./00_analyze_spec.spl
+  prompts:
+    analyze_spec: ./prompts/analyze_spec.md
 steps:
-  - analyze: {node: GENERATE, procedure_ref: procedures.analyze_spec, llm: "ollama:gemma3", in: {spec: $in.spec}, out: analysis}
+  - analyze: {generate: prompts.analyze_spec, in: {spec: $in.spec}, out: analysis}
   - clear:   {evaluate: "contains(@in_analysis, '[READY]')", in: {analysis: analyze.analysis}}
   - ready:   {output: {analysis: analyze.analysis}, on: clear.pass}
   - vague:   {output: {analysis: analyze.analysis}, on: clear.fail, exit: vague}

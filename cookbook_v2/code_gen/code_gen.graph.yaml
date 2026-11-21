@@ -1,0 +1,30 @@
+# code_gen: the simplest code generator. A spec in, a project folder out: one model call writes the files, a small program splits the reply into them.
+# The files are written as real files in .graf/codes/<run>/ (the output is `type: FILES`), in whatever layout the model chose (backend/, frontend/, ...).
+#   graf run cookbook_v2/code_gen/code_gen.graph.yaml --param spec="..." --param lang=python
+# It does not review, test or document the code; cookbook_v2/code_pipeline does (and uses the same two pieces).
+version: "1.0-graph"
+workflow:
+  name: code_gen
+  description: Writes a project (a README and source files, in modules when the spec has several concerns) from a plain-language specification and gives it as a folder of files.
+  inputs:
+    - {name: spec, type: TEXT}
+    - {name: lang, type: TEXT, default: python}
+    - {name: reference, type: TEXT, default: ""}       # API facts the model cannot know (a library's call signatures)
+  outputs:
+    - {name: code, type: FILES}                        # written as real files in .graf/codes/<run>/
+resources:
+  prompts:
+    write_code: ./prompts/write_code.md
+steps:
+  - write: {generate: prompts.write_code, in: {spec: $in.spec, lang: $in.lang, prior_code: "", prior_test: "", reference: $in.reference}, out: reply, label: Write the project}
+  - split:
+      node: SOLVE
+      in: {text: write.reply, lang: $in.lang, spec: $in.spec}
+      ports: [trigger, complete, in_text, in_lang, in_spec, out_files]
+      out: files
+      backend: subprocess
+      command: ["python3", "-I", "tools/collect_files.py"]
+      out_type: JSON
+      timeout: 30
+      label: Split the reply into the project's files
+  - done: {output: split.files}

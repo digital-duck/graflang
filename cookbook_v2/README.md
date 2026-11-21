@@ -1,12 +1,14 @@
 # cookbook_v2: recipes in the layered form
 
-Eleven recipes from `cookbook/`, rewritten as a short top graph plus composites, each composite in its own subfolder with the prompts, procedures and
+Twelve recipes from `cookbook/` and one new one (`code_gen`), rewritten as a short top graph plus composites, each composite in its own subfolder with the prompts, procedures and
 policies it uses. The originals in `cookbook/` are left alone (the experiments and many tests run them). Status and what each port taught us:
 `docs/DEV/DESIGN/graflang-recipes.md`. The design: `docs/DEV/DESIGN/graflang-layers.md`.
 
 | Recipe | Top level reads | Composites |
 |---|---|---|
-| code_pipeline | understand, build, finish | `understand` (exit `vague`), `build` (the test-gated loop), `finish` |
+| code_gen | write, split | none: one model call and a file splitter; the output is a project folder (`.graf/codes/<run>/`) |
+| code_pipeline | understand, build, finish | **repository-capable** (uses `code_parts`' loop): `understand` (exit `vague`), `build` (write, review, improve, split into files, RUN them, retry), `finish`; outputs `docs`, `code` (FILES), `report` |
+| code_pipeline_spl | understand, build, finish | the faithful port of `cookbook/code_pipeline` (SPL procedures, one block of code; needs SPL.py) |
 | compliance_audit | load, assess, remediate, guard, release or escalate | `assess` (used twice), `remediate` (exit `unfixed`) |
 | your_book | outline, chapters, compile | `outline`, `chapters` (the loop), `compile` |
 | agent_notes | guard, research | `research` (the loop; exit `gave_up`) |
@@ -62,13 +64,14 @@ The editor was checked only by loading all eleven recipes and drawing the depth-
 
 ## 4. Real model runs (billed: always cap them)
 
-Put a `--bind` file with `limits.max_llm_calls` beside the run. One is shipped for `code_pipeline`:
+Put a `--bind` file with `limits.max_llm_calls` beside the run. One is shipped for `code_pipeline` and `code_pipeline_spl`:
 
 ```bash
-graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml
+graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml     # writes the project to .graf/codes/<run>/
+graf run cookbook_v2/code_gen/code_gen.graph.yaml --llm claude_cli:claude-haiku-5-5 --param spec="a Flask backend with /api/todos and a plain HTML/JS frontend"
 ```
 
-(its `understand` step names `ollama:gemma3` itself, so a local Ollama must be running). For the others, copy that file, change `params`, and set
+(`code_pipeline_spl`'s `understand` step names `ollama:gemma3` itself, so a local Ollama must be running there; `code_pipeline` has no such step). For the others, copy that file, change `params`, and set
 `max_llm_calls` from what `graf validate` suggests ("Model calls per run").
 
 ```bash
@@ -83,7 +86,7 @@ Everything a run produces sits in `.graf/` beside the recipe's top graph (git-ig
 
 - `.graf/outputs/<recipe>-<adapter>-<model>-<time>/`: `result.json`, one file per workflow output (e.g. `docs.md`), and `nodes/`, one file per node output
   in firing order (`004-generate.out_code.md`, `006-improve.out_improved_code.md`, ...). Change the place with `--output-dir`.
-- `.graf/codes/<same run name>/`: the code a run emits, as real files in any layout (an output declared `type: FILES`; e.g. a repository with `backend/` and `frontend/`). `cookbook/code_parts` does this; `code_pipeline` does not yet.
+- `.graf/codes/<same run name>/`: the code a run emits, as real files in any layout (an output declared `type: FILES`; e.g. a repository with `backend/` and `frontend/`). `cookbook/code_parts` does this; `code_gen` and `code_pipeline` do; `code_pipeline_spl` does not (one block of code).
 - `.graf/logs/`: the side files a `procedure_ref` step writes (code_pipeline: `target/python/code.py` is the first draft, `tests/`, `spec/`).
 
 (A recipe's own data files, such as heartbeat's `output/state.txt`, are not run results and stay where the recipe puts them.)

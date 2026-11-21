@@ -25,7 +25,7 @@ Named lookups (`cookbook:name`) and the Browse page see only `cookbook/`; run a 
 
 | Recipe | Original | Layered | Status | Levels | Checked |
 |---|---|---|---|---|---|
-| code_pipeline | `cookbook/code_pipeline` | `cookbook_v2/code_pipeline` | **ported, offline-equivalent; not run with a real model** | top (4 boxes) / `understand`, `build` (loop, 6 steps), `finish` | validates clean; outputs and fired steps equal to the original under `echo` (with and without the closure check); a vague spec stops both under `mock`, the layered one with `E_SPEC_VAGUE` |
+| code_pipeline_spl | `cookbook/code_pipeline` | `cookbook_v2/code_pipeline_spl` | **ported, offline-equivalent; not run with a real model** | top (4 boxes) / `understand`, `build` (loop, 6 steps), `finish` | validates clean; outputs and fired steps equal to the original under `echo` (with and without the closure check); a vague spec stops both under `mock`, the layered one with `E_SPEC_VAGUE` |
 | compliance_audit | `cookbook/compliance_audit` | `cookbook_v2/compliance_audit` | **ported, offline-equivalent** (3 scripted paths) | top (load, assess, remediate, guard, 2 outputs) / `assess` (used twice), `remediate` (uses `assess`; exit `unfixed` E_STILL_NONCOMPLIANT) | released after redaction, escalated, clean first time: same output and model calls as the original |
 | your_book | `cookbook/your_book` | `cookbook_v2/your_book` | **ported, offline-equivalent** | `outline`, `chapters` (the loop, review and revision), `compile` | same output, one scripted revision |
 | agent_notes | `cookbook/agent_notes` | `cookbook_v2/agent_notes` | **ported, offline-equivalent** | guard, `research` (the loop; exit `gave_up` E_NO_ANSWER) | reads a note then answers; never answers |
@@ -37,17 +37,23 @@ Named lookups (`cookbook:name`) and the Browse page see only `cookbook/`; run a 
 | notes_digest | `cookbook/notes_digest` | `cookbook_v2/notes_digest` | **ported, offline-equivalent** | guard, `read`, `digest`, `publish` | same output |
 | chat_memory | `cookbook/chat_memory` | `cookbook_v2/chat_memory` | **ported, offline-equivalent** | guard, `recall`, `reply`, `remember` | same output |
 
-### code_pipeline: what to try
+| code_gen | new (uses `code_parts`' prompt and splitter) | `cookbook_v2/code_gen` | **new, offline-tested** (scripted model) | one graph: write, split | the reply becomes a project folder (modules, `__init__.py`, README) |
+| code_pipeline | `cookbook/code_pipeline` + `cookbook/code_parts` | `cookbook_v2/code_pipeline` | **new, offline-tested; not run with a real model**. Deliberately NOT equivalent to the original | top / `understand` (prompt, exit `vague`), `build` (write, review, improve, split, run, retry), `finish` (SPL 05-07) | scripted model: retries after a failing project test then passes, gives up with `[FAILED]`, stops on a vague spec; output `code` is FILES, written to `.graf/codes/<run>/` |
+
+`code_pipeline` is the repository-capable recipe: the build is `code_parts`' loop (the model writes a folder of files, a program splits the reply and runs them: syntax,
+imports, the project's own tests, an optional smoke test). The faithful port of the original is `code_pipeline_spl`, kept for the equivalence check.
+
+### code_pipeline_spl: what to try
 
 ```bash
-graf validate cookbook_v2/code_pipeline/code_pipeline.graph.yaml
-graf vis      cookbook_v2/code_pipeline/code_pipeline.graph.yaml --depth 0     # then --depth 1, --depth all
-graf describe cookbook_v2/code_pipeline/code_pipeline.graph.yaml --depth 0 -o -
-graf expand   cookbook_v2/code_pipeline/code_pipeline.graph.yaml --depth 1     # one level opened, still loads
-graf errors   E_SPEC_VAGUE --dir cookbook_v2/code_pipeline
+graf validate cookbook_v2/code_pipeline_spl/code_pipeline_spl.graph.yaml
+graf vis      cookbook_v2/code_pipeline_spl/code_pipeline_spl.graph.yaml --depth 0     # then --depth 1, --depth all
+graf describe cookbook_v2/code_pipeline_spl/code_pipeline_spl.graph.yaml --depth 0 -o -
+graf expand   cookbook_v2/code_pipeline_spl/code_pipeline_spl.graph.yaml --depth 1     # one level opened, still loads
+graf errors   E_SPEC_VAGUE --dir cookbook_v2/code_pipeline_spl
 pytest tests/test_cookbook_v2.py -q                                            # the equivalence checks
 # a real run (billed; capped at 8 calls by the bind file; the `understand` step needs a local Ollama, as in the original):
-graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml
+graf run cookbook_v2/code_pipeline_spl/code_pipeline_spl.graph.yaml --bind cookbook_v2/code_pipeline_spl/cheap.bind.yaml
 ```
 
 Layout: the top graph is 5 steps (`understand`, `stop`, `build`, `finish`, `done`); the flat graph is the same 11 nodes as the original.

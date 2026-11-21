@@ -1,25 +1,27 @@
-# code_pipeline (layered)
+# code_pipeline (layered, repository-capable)
 
-The same workflow as `cookbook/code_pipeline`, written as a short top graph and three composites, each in its own folder with the procedures
-and files it uses. The original stays as it is (the experiment arms and several tests run it); this one is the layered form.
+A spec in, a verified project folder and its documentation out. The build is `cookbook/code_parts`' loop, inside the layered form.
 
 ```
 code_pipeline.graph.yaml        understand -> build -> finish -> exit          (stop on the error exit `vague`)
-  understand/                   analyze the spec; error exit `vague` (code E_SPEC_VAGUE) when it is not [READY]
-  build/                        the test-gated loop: generate, review, improve, test, guard (+ tools.py, policies/)
-  finish/                       document, then optionally extract + judge + merge (the closure check)
-graflang.errors.yaml            E_SPEC_VAGUE: what it means and what to do
+  understand/                   is the spec clear enough? (prompt) ; error exit `vague` (E_SPEC_VAGUE)
+  build/                        write the project as files, review, then rounds of: improve -> split into files -> RUN them -> retry on failure
+  finish/                       document the code, then optionally derive a spec back from it and judge it against the original (SPL procedures 05-07; needs SPL.py)
+tools/                          collect_files.py (split the reply into files), verify_project.py (syntax, imports, the project's tests, an optional smoke test)
 ```
 
-See the levels:
+Outputs: `docs` (TEXT), `code` (FILES: real files in `.graf/codes/<run>/`, any layout the model chose, e.g. `backend/` and `frontend/`) and `report` (what the last
+verification found, `[PASSED]` or `[FAILED]`). The run's other files (result.json, `nodes/`) are in `.graf/outputs/<run>/`.
 
 ```bash
-graf vis cookbook_v2/code_pipeline/code_pipeline.graph.yaml                  # depth 0: the top level, four boxes
-graf vis cookbook_v2/code_pipeline/code_pipeline.graph.yaml --depth 1        # open them
-graf describe cookbook_v2/code_pipeline/code_pipeline.graph.yaml --depth 0 -o -
-graf expand cookbook_v2/code_pipeline/code_pipeline.graph.yaml --depth all   # the flat graph the runtime runs
-graf errors E_SPEC_VAGUE --dir cookbook_v2/code_pipeline
+graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml          # cheap, capped
+graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --llm claude_cli:claude-sonnet-5-5 \
+    --param spec="a Flask backend with /api/todos (list, add) and a plain HTML/JS frontend that uses it" --param max_cycles=3 --bind <a file with limits.max_llm_calls>
 ```
 
-Same inputs, output and behaviour as the original (see `tests/test_cookbook_v2.py`, which runs both offline and compares). Requirements and the
-real-run notes: `cheap.bind.yaml` and `cookbook/code_pipeline/readme.md`.
+`verify_project.py` RUNS the generated code on this machine (a timeout, no sandbox; Python projects only, other languages are reported as not checked). Give a
+`smoke` parameter (Python run against the real libraries) to catch a wrong call that a model's own fake-based tests let through. `reference` carries API facts the model
+cannot know.
+
+Related: `cookbook_v2/code_gen` is the one-call version (no review, no run); `cookbook_v2/code_pipeline_spl` is the faithful port of `cookbook/code_pipeline` (SPL procedures,
+one block of code, no project folder).

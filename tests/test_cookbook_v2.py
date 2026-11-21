@@ -23,7 +23,7 @@ def test_every_v2_graph_validates_with_no_errors_and_no_warnings(path):
 # ---- code_pipeline ---------------------------------------------------------------------------------------------------------------
 
 ORIGINAL = ROOT / "cookbook" / "code_pipeline" / "code_pipeline.graph.yaml"
-LAYERED = V2 / "code_pipeline" / "code_pipeline.graph.yaml"
+LAYERED = V2 / "code_pipeline_spl" / "code_pipeline_spl.graph.yaml"
 # the steps of the original and the node each became in the layered one (ids are `<composite>__<step>`)
 SAME_STEPS = {"analyze": "understand__analyze", "spec_gate": "understand__clear", "document": "finish__document", "extract": "finish__extract",
               "closure_gate": "finish__closure", "judge": "finish__judge", "merge_docs": "finish__merge"}
@@ -81,6 +81,7 @@ class Scripted:
     """An LLM that answers call number N with script[N] (1-based) and otherwise with 'text N'."""
 
     name = "scripted"
+    adapter_name = "echo"                       # a procedure_ref step (SPL) builds its own model from the adapter's name: the echo one
 
     def __init__(self, script):
         self.script, self.calls = script, 0
@@ -175,6 +176,53 @@ def test_ts_verify_repairs_a_wrong_function_like_the_original(tmp_path, monkeypa
 
 def test_the_ports_have_fewer_top_level_steps_than_their_originals_have_nodes():
     """The point of the layering: the top graph is a handful of boxes."""
-    for name in ("compliance_audit", "your_book", "agent_notes", "supervisor", "self_heal", "heartbeat", "stock_copy", "ts_verify", "notes_digest", "chat_memory"):
+    for name in ("code_gen", "code_pipeline", "code_pipeline_spl", "compliance_audit", "your_book", "agent_notes", "supervisor", "self_heal", "heartbeat", "stock_copy", "ts_verify", "notes_digest", "chat_memory"):
         top = [n for n in load_graph(V2 / name / f"{name}.graph.yaml", levels=0)["nodes"] if n["type"] != "INPUT"]
         assert len(top) <= 10, (name, len(top))
+
+
+# ---- code_gen and the repository-capable code_pipeline ---------------------------------------------------------------------------
+
+def reply(*files):
+    return "\n".join(f"=== FILE: {path} ===\n{text}" for path, text in files)
+
+
+APP = ("README.md", "# demo\n")
+CORE_BAD = ("demo/core.py", "def add(a, b):\n    return a + b + 1\n")
+CORE_OK = ("demo/core.py", "def add(a, b):\n    return a + b\n")
+TEST = ("tests/test_core.py", "import unittest\nfrom demo.core import add\n\nclass T(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(1, 2), 3)\n")
+
+
+def run_new(name, params, script, tmp_path, monkeypatch):
+    graph = copy_recipe(V2 / name, tmp_path / name)
+    monkeypatch.chdir(graph.parent)
+    llm = Scripted(script)
+    rt = GraphLangRuntime(load_graph(graph), llm=llm, verbose=False)
+    return rt, rt.execute(dict(params)), llm
+
+
+def test_code_gen_splits_the_reply_into_a_project_with_modules_and_a_readme(tmp_path, monkeypatch):
+    rt, out, llm = run_new("code_gen", {"spec": "add numbers"}, {1: reply(("backend/app.py", "print(1)\n"), ("frontend/index.html", "<p>hi</p>\n"))}, tmp_path, monkeypatch)
+    assert llm.calls == 1 and set(out["code"]) == {"backend/app.py", "backend/__init__.py", "frontend/index.html", "README.md"}      # a README is added from the spec
+
+
+def test_the_capable_pipeline_runs_the_project_retries_on_a_failed_check_and_gives_the_files(tmp_path, monkeypatch):
+    script = {1: "[READY] the spec is clear", 2: reply(APP, CORE_BAD, TEST), 3: "looks fine",
+              4: reply(APP, CORE_BAD, TEST),                   # round 1: the project's own test fails
+              5: reply(APP, CORE_OK, TEST)}                    # round 2: fixed
+    rt, out, llm = run_new("code_pipeline", {"spec": "add two numbers", "max_cycles": 3, "check_closure": False}, script, tmp_path, monkeypatch)
+    assert rt.loop_iterations["build__repair"] == 2 and out["report"].lstrip().startswith("[PASSED]")
+    assert out["code"]["demo/core.py"] == CORE_OK[1] and "tests/test_core.py" in out["code"] and "demo/__init__.py" in out["code"]
+    assert out["docs"]                                          # the documentation step ran on the improved project
+
+
+def test_the_capable_pipeline_stops_on_a_vague_spec_without_building(tmp_path, monkeypatch):
+    rt, out, llm = run_new("code_pipeline", {"spec": "do things"}, {1: "[VAGUE] what things?"}, tmp_path, monkeypatch)
+    assert llm.calls == 1 and not out.get("code") and rt.loop_iterations.get("build__repair", 0) == 0
+    assert any(x["code"] == "E_SPEC_VAGUE" for x in load_graph(V2 / "code_pipeline" / "code_pipeline.graph.yaml")["_error_exits"])
+
+
+def test_the_capable_pipeline_gives_up_after_max_cycles_with_the_last_report(tmp_path, monkeypatch):
+    script = {1: "[READY]", 2: reply(APP, CORE_BAD, TEST), 3: "ok", 4: reply(APP, CORE_BAD, TEST), 5: reply(APP, CORE_BAD, TEST)}
+    rt, out, llm = run_new("code_pipeline", {"spec": "add", "max_cycles": 2, "check_closure": False}, script, tmp_path, monkeypatch)
+    assert rt.loop_iterations["build__repair"] == 2 and out["report"].lstrip().startswith("[FAILED]") and "demo/core.py" in out["code"]
