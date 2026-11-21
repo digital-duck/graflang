@@ -336,6 +336,59 @@ def cmd_compact(graph, out_file):
                f"{report['edges_kept']} of {report['edges_total']} edges kept in long form; round trip verified.", err=True)
 
 
+@click.command("group", short_help="Turn some nodes into a composite: a part in a subfolder, used as one node.")
+@click.argument("graph")
+@click.option("--nodes", required=True, help="comma-separated node ids (steps) to group")
+@click.option("--name", required=True, help="the composite's name: its subfolder and its node id")
+@click.option("--dry-run", is_flag=True, help="check the selection and show the interface; write nothing")
+def cmd_group(graph, nodes, name, dry_run):
+    """Replace the selected nodes by one SUBGRAPH node whose body is a new part in `<graph folder>/<name>/`. The selection needs one entry
+    and one way out; data crossing the boundary becomes the part's inputs and outputs. A file written with `steps:` stays so. The result
+    is validated; if it does not validate, nothing is left behind."""
+    import shutil
+    from ruamel.yaml import YAML
+    from .compact import expand as expand_compact, is_compact
+    from .compactify import compactify
+    from .group import GroupError, group, write_group
+    from .topology import check
+    from ..yamlfmt import dump_readable
+    graph_path = Path(graph)
+    if not graph_path.exists():
+        console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
+        sys.exit(1)
+    original = YAML(typ="safe").load(graph_path.read_text(encoding="utf-8"))
+    compact = is_compact(original)
+    data = expand_compact(original) if compact else original
+    try:
+        parent, part, files = group(data, [i.strip() for i in nodes.split(",") if i.strip()], name)
+    except GroupError as ex:
+        console.print(f"[red]Error:[/red] {ex}")
+        sys.exit(1)
+    ins = ", ".join(i["name"] for i in part["workflow"]["inputs"]) or "none"
+    outs = ", ".join(o["name"] for o in part["workflow"]["outputs"]) or "none"
+    console.print(f"composite {name!r}: {len(part['nodes']) - 2} nodes; inputs: {ins}; outputs: {outs}")
+    if dry_run:
+        return
+    folder = graph_path.resolve().parent
+    new_text = dump_readable(compactify(parent)[0] if compact else parent)
+    tmp = folder / f".{graph_path.name}.group.tmp"
+    made = None
+    try:
+        made = write_group(folder, name, part, files, folder)
+        tmp.write_text(new_text, encoding="utf-8")
+        errors, _ = check(load_graph(tmp))
+        if errors:
+            raise GroupError(f"the grouped graph does not validate: {errors[0]}")
+        tmp.replace(graph_path)
+    except (GroupError, ValueError) as ex:
+        if made is not None:
+            shutil.rmtree(made.parent, ignore_errors=True)
+        tmp.unlink(missing_ok=True)
+        console.print(f"[red]Error:[/red] {ex}")
+        sys.exit(1)
+    console.print(f"wrote {made.relative_to(folder)} and updated {graph_path.name}")
+
+
 @click.command("parts", short_help="List the parts a workflow uses: where each comes from, its pin, interface, what it touches and costs.")
 @click.argument("graph")
 def cmd_parts(graph):
