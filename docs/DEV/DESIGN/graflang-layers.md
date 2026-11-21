@@ -103,15 +103,34 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
    or add `state:` (name -> initial, type) as the explicit declaration, with `outputs: {from}` reduced to reading a state variable out
    of the loop. Decision pending; the owner chose `state:` before these numbers were known.
 
-## 9. Suggested order
+## 9. Build status
 
-1. (Done) Interface block (`description`, `errors` as named exits) and the neighbour rule, on existing parts. The neighbour rule was
-   NOT enforced before: an edge naming `first__rewrite` (a node inside a use, which exists once expanded) validated cleanly, found by a test
-   and now refused (`parts._refuse_edges_into_uses`). Loop state became `state:` (R10a); Group/Ungroup, `graf vis --depth` and error exits are in.
-2. Scoped context and `inherits`.
-3. Composite as a subfolder; Group/Ungroup in the editor (create the subfolder, move the nodes).
-4. `--depth` on the tools.
-5. Recursion, if wanted.
+This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21. Statuses: done (committed,
+tests pass), partial, open. The gap table in `zinets/docs/graph-vision/claude/readme-design.md` is updated once the whole refactoring is
+tested and finished, not before.
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 1 | Loop-carried values under `state:` (R10a); `collect`/`fired` unreadable in a body; `outputs.from` warns | done | `53d3dc6` |
+| 2 | `graf group` / `graf ungroup`: composite as a subfolder, prompts and part references move with it, composites of composites round-trip | done | `0dcf732`, `6687f4c` |
+| 3 | Editor: Group and "Open a composite again" (Add node tab); Undo removes the folder | done | `6687f4c` |
+| 4 | `graf vis --depth N\|all` (default 0); editor canvas Levels choice | done for `vis` | `7fa94ee`, `26995e0` |
+| 4a | `--depth` on `describe` and `info` | open | |
+| 5 | Neighbour rule enforced (an edge into a composite's inner node is refused); it was not enforced before | done | `906d85f` |
+| 6 | Interface block: `workflow.description`, `workflow.errors` as named exits (a control port of the use), `ports: [name]` in compact `use` | done | `906d85f` |
+| 7 | Error `code` (optional, unique per part and per composed graph), logged as `part.error` | done | `24b5d0a` |
+| 8 | Catalogue `graflang.errors.yaml` (shipped plus one beside the graph), `graf errors` | done | `3c97241` |
+| 9 | `spl2graph` (SPL.py) writes `state:` | done | SPL.py `994c5964` |
+| 10 | Group with several ways out (creates error exits) | open | one way out is refused today |
+| 11 | Editor Group: description field; keep the file's comments | open | comments are dropped, as for a source edit |
+| 12 | Typed inputs and outputs on a grouped part (all `TEXT` today) | open | |
+| 13 | Scoped context and `inherits` (section 4) | open | |
+| 14 | Cookbook rewrite as layered folders (section 10); about 54 recipes in `cookbook_pocketflow/` and `cookbook_solvers/` still warn on `outputs.from` | open | |
+| 15 | Recursion (section 7) | open, later | |
+| 16 | Update the gap table in zinets `readme-design.md` | after the refactoring is tested and done | |
+
+Open questions still to settle: 3 (type and owner of `inherits` keys), 4 (triggers across the interface with several entry points), 5
+(does a MUTATE inside a body see the level above).
 
 ## 10. Cookbook rewrite
 
