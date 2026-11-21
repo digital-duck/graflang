@@ -419,6 +419,24 @@ def _refuse_edges_into_uses(nodes: List[Dict], edges: List[Dict]) -> None:
                                 f"wire to its ports ({owner}.in_*, {owner}.out_*, {owner}.complete) instead")
 
 
+def _check_catalogue(graph: Dict[str, Any], base: Path) -> None:
+    """Every error code a part of the graph uses must be defined in `graflang.errors.yaml` (shipped, or beside the graph). The entry's text
+    is attached to the error-exit wires so a run can log it. Done once, on the top graph, after everything is expanded."""
+    from .errors_catalogue import CatalogueError, catalogue_for
+    try:
+        known = catalogue_for(base)
+    except CatalogueError as e:
+        raise PartError(str(e)) from None
+    missing = sorted(set(graph["_error_codes"]) - set(known))
+    if missing:
+        raise PartError(f"error code {missing} is not defined in graflang.errors.yaml (add it beside the graph, {base}, or in the shipped catalogue); "
+                        "every code needs one entry so a failure names one cause")
+    for x in graph.get("_error_exits") or []:
+        entry = known.get(x.get("code"))
+        if entry:
+            x["description"], x["remedy"] = entry.get("description"), entry.get("remedy")
+
+
 def _flatten_scope(parent: Dict, nodes: List[Dict], edges: List[Dict], base: Path, stack: Tuple[Path, ...]) -> Tuple[List[Dict], List[Dict]]:
     for n in nodes:
         body = n.get("config", {}).get("subgraph")
@@ -443,3 +461,5 @@ def flatten_parts(graph_data: Dict[str, Any], base_dir: Optional[Path] = None, _
         return
     base = Path(base_dir or graph_data.get("_source_dir", "."))
     graph_data["nodes"], graph_data["edges"] = _flatten_scope(graph_data, graph_data["nodes"], graph_data.get("edges", []), base, _stack)
+    if not _stack and graph_data.get("_error_codes"):
+        _check_catalogue(graph_data, base)

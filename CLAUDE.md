@@ -25,6 +25,7 @@ graf compile <graph.yaml> [--lang rust|spl|pocketflow] [-o OUT] [--dry-run]   # 
 graf compact <graph.yaml> [-o FILE]   # long form -> steps:, verified by expanding again (grafr/compactify.py)
 graf group <graph.yaml> --nodes a,b --name N [--dry-run]   # selected steps/nodes -> one SUBGRAPH node whose body is a new part in <graph folder>/N/ (one entry, one way out; data crossing the cut becomes the part's inputs/outputs; prompts move with it; a steps: file stays compact; validated, else nothing is left behind; grafr/group.py; design: docs/DEV/DESIGN/graflang-layers.md)
 graf ungroup <graph.yaml> --node N   # the inverse: the composite's nodes back in the graph under their own names (the folder stays; a part's own uses stay uses; grafr/group.py)
+graf errors [CODE] [--dir D]   # the error-code catalogue graflang.errors.yaml (shipped in graphlang/ plus an optional one beside the top graph; a part's workflow.errors `code` must be defined there, once; grafr/errors_catalogue.py)
 graf prettier <graph.yaml> [-o FILE]  # code/prompt_inline/expression/condition/result as YAML block scalars; every value read back and compared, text in flow-style {..} left alone (grafc/prettier.py)
 graf trace [LOG] [--format tree|otlp] [-o FILE]   # a run's .jsonl log as a timeline or OpenTelemetry spans (grafr/trace.py)
 graf watch <graph.yaml> [--every S] [--times N] [graf run options]   # run it on a schedule, one process per run; `graf run --stream` prints each node as it finishes

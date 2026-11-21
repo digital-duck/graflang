@@ -509,7 +509,7 @@ class GraphLangRuntime:
                 info = self._error_exits.get((f"{node}.{d['source_port']}", f"{tgt}.{d['target_port']}"))
                 if info:                                             # a part ended in one of its declared error exits
                     log_event(_log, "part.error", level=WARNING, use=info["use"], part=info["part"], error=info["error"], code=info["code"],
-                              node=node, depth=self.depth)
+                              description=info.get("description"), remedy=info.get("remedy"), node=node, depth=self.depth)
 
     def _collect_outputs(self, in_data: Dict[str, Any]) -> None:
         names = list(in_data)

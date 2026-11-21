@@ -423,6 +423,32 @@ def cmd_ungroup(graph, node):
     console.print(f"opened {node!r} in {graph_path.name}; its folder is still there")
 
 
+@click.command("errors", short_help="Look up error codes in graflang.errors.yaml: what a code means, why it happens, what to do.")
+@click.argument("code", required=False)
+@click.option("--dir", "base", type=click.Path(file_okay=False), default=".", show_default=True,
+              help="the graph's folder: its graflang.errors.yaml is read with the shipped one")
+def cmd_errors(code, base):
+    """Without CODE, list every code with its description; with CODE, print its entry (description, cause, remedy)."""
+    from .errors_catalogue import CatalogueError, catalogue_for
+    try:
+        known = catalogue_for(Path(base))
+    except CatalogueError as ex:
+        console.print(f"[red]Error:[/red] {ex}")
+        sys.exit(1)
+    if code is None:
+        if not known:
+            click.echo("no error codes are defined")
+        for c, e in sorted(known.items()):
+            click.echo(f"{c}: {e['description']}")
+        return
+    if code not in known:
+        console.print(f"[red]Error:[/red] no code {code!r} in graflang.errors.yaml")
+        sys.exit(1)
+    for k in ("description", "cause", "remedy"):
+        if known[code].get(k):
+            click.echo(f"{k}: {known[code][k]}" if k != "description" else f"{code}: {known[code][k]}")
+
+
 @click.command("parts", short_help="List the parts a workflow uses: where each comes from, its pin, interface, what it touches and costs.")
 @click.argument("graph")
 def cmd_parts(graph):

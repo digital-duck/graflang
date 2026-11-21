@@ -162,6 +162,12 @@ def test_group_takes_a_description_into_the_interface():
 
 # ---- error codes: optional, but one code names one cause ---------------------------------------------------------------
 
+def catalogue(folder, *codes, text=None):
+    """A graflang.errors.yaml beside the graph defining `codes` (each with a description and a remedy)."""
+    entries = "".join(f"  - {{code: {c}, description: {c} happened, remedy: fix {c}}}\n" for c in codes)
+    (folder / "graflang.errors.yaml").write_text(text if text is not None else f"errors:\n{entries}")
+
+
 CODED = PART.replace("{name: invalid, description:", "{name: invalid, code: E_NOT_POSITIVE, description:")
 
 
@@ -171,6 +177,7 @@ def test_the_code_of_a_taken_exit_is_logged_with_the_failure(tmp_path):
     from graphlang.cli import main
     (tmp_path / "checker.graph.yaml").write_text(CODED)
     (tmp_path / "use.graph.yaml").write_text(PARENT)
+    catalogue(tmp_path, "E_NOT_POSITIVE")
     logs = tmp_path / "logs"
 
     def events(n):
@@ -183,6 +190,7 @@ def test_the_code_of_a_taken_exit_is_logged_with_the_failure(tmp_path):
     assert events(5) == []                                                    # the normal way out logs nothing
     (hit,) = events(-1)
     assert (hit["use"], hit["part"], hit["error"], hit["code"]) == ("chk", "checker", "invalid", "E_NOT_POSITIVE")
+    assert hit["description"] == "E_NOT_POSITIVE happened" and hit["remedy"] == "fix E_NOT_POSITIVE"       # the catalogue's text travels with it
 
 
 def test_a_bad_code_and_a_repeated_code_in_one_part_are_refused(tmp_path):
@@ -207,6 +215,7 @@ def _two_parts(tmp_path, other_code):
   - {source: wf_entry.out_n, target: chk2.in_n, type: binds}
   - {source: chk2.invalid, target: sorry.trigger, type: triggers}''').replace("{source: chk.complete, target: good.trigger, type: triggers}", "{source: chk2.complete, target: good.trigger, type: triggers}")
     (tmp_path / "use.graph.yaml").write_text(parent)
+    catalogue(tmp_path, "E_NOT_POSITIVE", other_code)
     return tmp_path / "use.graph.yaml"
 
 
@@ -225,3 +234,60 @@ def test_one_part_used_twice_keeps_its_code_and_the_use_path_tells_the_copies_ap
     use.write_text(use.read_text().replace("./second.graph.yaml", "./checker.graph.yaml"))       # `second` is now the same file as `checker`
     g = load_graph(use)
     assert sorted((x["use"], x["code"]) for x in g["_error_exits"]) == [("chk", "E_NOT_POSITIVE"), ("chk2", "E_NOT_POSITIVE")]
+
+
+# ---- the catalogue: graflang.errors.yaml ----------------------------------------------------------------------------------
+
+def test_a_code_that_the_catalogue_does_not_define_is_refused(tmp_path):
+    (tmp_path / "checker.graph.yaml").write_text(CODED)
+    (tmp_path / "use.graph.yaml").write_text(PARENT)
+    with pytest.raises(PartError, match="not defined in graflang.errors.yaml"):
+        load_graph(tmp_path / "use.graph.yaml")
+    catalogue(tmp_path, "E_NOT_POSITIVE")
+    assert check(load_graph(tmp_path / "use.graph.yaml"))[0] == []
+
+
+def test_a_graph_with_no_codes_needs_no_catalogue(tmp_path):
+    g, out = run_checker(tmp_path, 5)
+    assert out == {"result": "accepted"}
+
+
+def test_a_code_defined_twice_or_in_both_the_shipped_and_the_local_file_is_refused(tmp_path, monkeypatch):
+    from graphlang.grafr import errors_catalogue as ec
+    (tmp_path / "checker.graph.yaml").write_text(CODED)
+    (tmp_path / "use.graph.yaml").write_text(PARENT)
+    catalogue(tmp_path, "E_NOT_POSITIVE", "E_NOT_POSITIVE")
+    with pytest.raises(PartError, match="defined twice"):
+        load_graph(tmp_path / "use.graph.yaml")
+    shipped = tmp_path / "shipped"
+    shipped.mkdir()
+    catalogue(shipped, "E_NOT_POSITIVE")
+    monkeypatch.setattr(ec, "SHIPPED", shipped / "graflang.errors.yaml")
+    catalogue(tmp_path, "E_NOT_POSITIVE")
+    with pytest.raises(PartError, match="also defined in the shipped catalogue"):
+        load_graph(tmp_path / "use.graph.yaml")
+
+
+def test_a_malformed_catalogue_says_what_is_wrong(tmp_path):
+    from graphlang.grafr.errors_catalogue import CatalogueError, load
+    for text, why in (("errors:\n  - {code: '9x', description: d}\n", "needs a `code`"), ("errors:\n  - {code: E1}\n", "needs a one-line `description`"),
+                      ("errors:\n  - {code: E1, description: d, colour: red}\n", "unknown keys"), ("nope: 1\n", "top-level `errors:`")):
+        catalogue(tmp_path, text=text)
+        with pytest.raises(CatalogueError, match=why):
+            load(tmp_path / "graflang.errors.yaml")
+
+
+def test_graf_errors_lists_and_looks_up_codes(tmp_path):
+    from click.testing import CliRunner
+    from graphlang.cli import main
+    catalogue(tmp_path, text="errors:\n  - {code: E_A, description: a happened, cause: because, remedy: do b}\n")
+    r = CliRunner().invoke(main, ["errors", "--dir", str(tmp_path)])
+    assert r.exit_code == 0 and "E_A: a happened" in r.output
+    r = CliRunner().invoke(main, ["errors", "E_A", "--dir", str(tmp_path)])
+    assert r.exit_code == 0 and "cause: because" in r.output and "remedy: do b" in r.output
+    assert CliRunner().invoke(main, ["errors", "E_NOPE", "--dir", str(tmp_path)]).exit_code == 1
+
+
+def test_the_shipped_catalogue_loads():
+    from graphlang.grafr.errors_catalogue import SHIPPED, load
+    assert SHIPPED.is_file() and isinstance(load(SHIPPED), dict)

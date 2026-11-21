@@ -1,0 +1,13 @@
+# The catalogue of error codes: what each one means, why it happens, what to do. One code names one cause.
+#
+# A part may give an error exit a stable `code` (workflow.errors: [{name, code, description}]). Every code a graph's parts use must be
+# defined here, or in a graflang.errors.yaml beside the top graph (a project's own codes); a code may be defined in only one of the two.
+# `graf validate` refuses an unknown code; a run that leaves a part by that exit logs `part.error` with this entry's description and
+# remedy; `graf errors [CODE]` prints it.
+#
+#   errors:
+#     - code: E_EXAMPLE            # letters, digits, _ . -, starting with a letter
+#       description: one line: what went wrong
+#       cause: why it happens (optional)
+#       remedy: what to do about it (optional)
+errors: []
