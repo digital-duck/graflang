@@ -232,3 +232,6 @@ outputs/
 
 # private design chat (kept in the maintainer's private notes, see docs/DEV/readme.md)
 docs/DEV/IDEATION/
+
+# a recipe's own result files (digests, alerts, state), written when it runs
+output/

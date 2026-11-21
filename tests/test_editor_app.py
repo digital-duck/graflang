@@ -345,8 +345,9 @@ def test_a_real_model_run_is_capped_in_calls(at, monkeypatch):
             return "text"
     monkeypatch.setattr("graphlang.grafr.adapters.make_llm", lambda adapter, model=None: Stub())
     assert at.selectbox(key="run_adapter").value != "mock"                    # the real model is the default
-    assert at.number_input(key="run_max_calls").value == 10                  # a real model always runs under a cap
-    at.number_input(key="run_max_calls").set_value(1).run()
+    cap = [n for n in at.number_input if n.label == "Most model calls"][0]
+    assert cap.value == 30                                                   # a real model always runs under a cap (a small graph: 30)
+    cap.set_value(1).run()
     at.text_input(key="run_in_topic").set_value("ducks").run()
     button(at, "run_go").click().run()
     assert not at.exception and len(calls) == 1
@@ -355,7 +356,7 @@ def test_a_real_model_run_is_capped_in_calls(at, monkeypatch):
 
 def test_the_mock_run_has_no_cap_box(at):
     at.selectbox(key="run_adapter").select("mock").run()
-    assert not [n for n in at.number_input if n.key == "run_max_calls"]
+    assert not [n for n in at.number_input if n.label == "Most model calls"]
 
 
 def test_the_edge_lists_follow_the_type_at_once(at):

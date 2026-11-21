@@ -343,9 +343,15 @@ def run_tab(editor: GraphEditor) -> None:
                                help=f"a dry run answers every model step with placeholder text; {spec} (from Settings) makes real, billed model calls"))
     max_calls = None
     if adapter != "mock":
-        max_calls = int(st.number_input("Most model calls", 1, 200, 10, key="run_max_calls",
-                                        help="the run stops with an error when it would make more calls than this; every GENERATE node is a call, and a loop repeats it"))
-        st.caption("This runs the graph as it is now with a real model: billed calls, at most the number above.")
+        from graphlang.grafr import partinfo
+        caps = partinfo.capabilities(editor.data().get("nodes", []))
+        n = int(caps["llm_calls"] or 0)
+        start = max(30, partinfo.suggested_cap(n)) if n else 30
+        max_calls = int(st.number_input("Most model calls", 1, 500, start, key=f"run_max_calls_{start}",
+                                        help="the run stops with an error when it would make more calls than this; every GENERATE node is a call, and a loop repeats it. "
+                                             "This box is the only cap in the editor: a bind file (limits.max_llm_calls) is used by `graf run --bind`, not here"))
+        st.caption("This runs the graph as it is now with a real model: billed calls, at most the number above."
+                   + (f" Static estimate: {'' if caps['llm_exact'] else 'at least '}{n} call(s); a loop counts once, so a long loop (chapters, rounds, tickers) needs more." if n else ""))
     params = {}
     for p in inputs:
         default = p.get("default")

@@ -17,4 +17,4 @@ graf run cookbook_v2/your_book/your_book.graph.yaml --bind cookbook_v2/cap.bind.
     --param subject="entropy" --param num_chapters=2
 ```
 
-Set `max_llm_calls` in the bind file from the formula before a bigger book. Original: `cookbook/your_book`, whose readme explains the loop state.
+Set `max_llm_calls` in the bind file from the formula before a bigger book. In the editor's Run tab the cap is the "Most model calls" box (a bind file is not read there): 5 chapters need about 17. Original: `cookbook/your_book`, whose readme explains the loop state.
