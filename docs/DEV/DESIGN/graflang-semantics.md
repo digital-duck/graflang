@@ -51,6 +51,14 @@ An `expand:` block, like a part use, has no runtime semantics: it is rewritten i
 
 A `SUBGRAPH` node (a *use* of a part listed under `resources.parts`) has no runtime semantics of its own: before anything runs, `load_graph` replaces it by a copy of the part's nodes (ids `<use>__<node>`), wiring the part's INPUT and OUTPUT into direct edges. Every rule above therefore applies to the expanded graph, and two uses of one part are two independent copies with separate state.
 
+## 3d. The interface of a composite
+
+What a level sees of a part (`SUBGRAPH` use) is its interface, and nothing else:
+
+- **Ports.** `workflow.inputs` and `workflow.outputs` (name, type, default, description) become the use's `in_*` and `out_*` ports; `trigger` and `complete` are fixed. `workflow.description` is a one-line statement of what it does (`graf parts`, Browse).
+- **Error exits.** `workflow.errors: [{name, description}]` declares named ways out other than `complete`. Each is a control port of the use; inside the part an `OUTPUT` node with `config: {exit: name}` ends it, and a token reaching it leaves the use by that port. `complete` fires only from OUTPUT nodes with no `exit`. `graf validate` refuses a use port that is none of these, an `exit` that is not declared, and a declared error that no OUTPUT ends.
+- **Neighbour rule.** An edge in a graph may end at a use's ports, never at a node inside it (`first__rewrite`, the name the node gets once expanded). It is refused before expansion with a message naming the composite; after expansion the node exists and the edge would pass every other check.
+
 ## 4. Known gaps, decided in the roadmap
 
 - R6 stale reads and the single-store data model: E5 (explicit fan-in with `JOIN`, merge rules).

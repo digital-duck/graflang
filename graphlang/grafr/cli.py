@@ -340,8 +340,9 @@ def cmd_compact(graph, out_file):
 @click.argument("graph")
 @click.option("--nodes", required=True, help="comma-separated node ids (steps) to group")
 @click.option("--name", required=True, help="the composite's name: its subfolder and its node id")
+@click.option("--description", default="", help="one line saying what the composite does (its interface, shown by `graf parts`)")
 @click.option("--dry-run", is_flag=True, help="check the selection and show the interface; write nothing")
-def cmd_group(graph, nodes, name, dry_run):
+def cmd_group(graph, nodes, name, description, dry_run):
     """Replace the selected nodes by one SUBGRAPH node whose body is a new part in `<graph folder>/<name>/`. The selection needs one entry
     and one way out; data crossing the boundary becomes the part's inputs and outputs. A file written with `steps:` stays so. The result
     is validated; if it does not validate, nothing is left behind."""
@@ -360,7 +361,7 @@ def cmd_group(graph, nodes, name, dry_run):
     compact = is_compact(original)
     data = expand_compact(original) if compact else original
     try:
-        parent, part, files = group(data, [i.strip() for i in nodes.split(",") if i.strip()], name)
+        parent, part, files = group(data, [i.strip() for i in nodes.split(",") if i.strip()], name, description)
     except GroupError as ex:
         console.print(f"[red]Error:[/red] {ex}")
         sys.exit(1)
@@ -444,8 +445,11 @@ def cmd_parts(graph):
     for r in rows:
         ins = ", ".join(f"{i['name']}" + (f" ({i['description']})" if i.get("description") else "") for i in r["inputs"])
         outs = ", ".join(f"{o['name']}" + (f" ({o['description']})" if o.get("description") else "") for o in r["outputs"])
+        errs = ", ".join(f"{e['name']}" + (f" ({e['description']})" if e.get("description") else "") for e in r.get("errors") or [])
         click.echo(f"{r['use']}: {r['name']}  {r['file']}  hash {r['hash']}{'  (pinned)' if r['pinned'] else ''}\n"
-                   f"    takes {ins or '-'}\n    gives {outs or '-'}\n    {describe(r['capabilities'])}")
+                   + (f"    {r['description']}\n" if r.get("description") else "")
+                   + f"    takes {ins or '-'}\n    gives {outs or '-'}\n" + (f"    can end in {errs}\n" if errs else "")
+                   + f"    {describe(r['capabilities'])}")
 
 
 @click.command("trace", short_help="Read a run's log as a trace: a text timeline, or OpenTelemetry (OTLP/JSON).")

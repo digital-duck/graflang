@@ -73,7 +73,7 @@ def _unique(name: str, taken: Set[str], node: str) -> str:
     return f"{node}_{name}{i}"
 
 
-def group(data: Dict[str, Any], ids: List[str], name: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[Tuple[str, str, str]]]:
+def group(data: Dict[str, Any], ids: List[str], name: str, description: str = "") -> Tuple[Dict[str, Any], Dict[str, Any], List[Tuple[str, str, str]]]:
     """(parent graph, part graph, files). `files` are (kind, name in the part, path in the parent's resources) for each prompt, procedure
     or policy a selected node uses: `write_group` copies them into the part's folder."""
     if not name or not name.replace("_", "").isalnum():
@@ -140,6 +140,8 @@ def group(data: Dict[str, Any], ids: List[str], name: str) -> Tuple[Dict[str, An
     # a selected node with several incoming triggers from inside the selection keeps them; ones from outside are the use's trigger
     part = {"version": data.get("version", "1.0-graph"), "workflow": {"name": name, "inputs": wf_in, "outputs": wf_out},
             "nodes": part_nodes, "edges": part_edges}
+    if description.strip():
+        part["workflow"] = {"name": name, "description": description.strip(), "inputs": wf_in, "outputs": wf_out}
 
     # resources the selected nodes use go with them
     files: List[Tuple[str, str, str]] = []

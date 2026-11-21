@@ -14,7 +14,9 @@
         "parts_policy": { "type": "object", "description": "what parts used here may do: forbid [read, write, email, webhook, stdout, program], max_llm_calls N" },
         "policy": { "type": "string", "description": "policies.<name>: Cedar rules for which nodes this workflow may contain (checked by graf validate and graf run)" },
         "inputs": { "type": "array", "items": { "$ref": "#/defs/Param" } },
-        "outputs": { "type": "array", "items": { "$ref": "#/defs/Param" } }
+        "outputs": { "type": "array", "items": { "$ref": "#/defs/Param" } },
+        "errors": { "type": "array", "description": "named error exits of a workflow used as a part: each is a control port of the use node next to `complete`, ended inside the part by an OUTPUT node with config.exit: <name>",
+                    "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "description": { "type": "string" } } } }
       }
     },
     "resources": {

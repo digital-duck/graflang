@@ -191,6 +191,7 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
             cfg["prompt_ref" if isinstance(arg, str) and re.fullmatch(r"prompts\.\w+", arg) else "prompt_inline"] = arg
         elif kind == "use":
             cfg["part"] = arg
+            ports = list(dict.fromkeys([*ports, *body.get("ports", [])]))        # the part's error exits: `ports: [invalid]`
             if "out" not in body:
                 raise CompactError(f"step {sid!r}: `use` needs `out:`, the part's outputs you want to read")
         elif kind == "loop":

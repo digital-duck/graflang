@@ -104,6 +104,24 @@ def _interface(part: Dict, name: str) -> Tuple[Dict[str, Dict], Dict[str, Dict[s
     return inputs, out_maps, in_map, entries[0], exits
 
 
+def _error_exits(part: Dict, exits: List[Dict], pname: str) -> Dict[str, Dict]:
+    """The part's declared error exits (`workflow.errors: [{name, description}]`), checked against its OUTPUT nodes: every OUTPUT that names an
+    `exit` names a declared one, and every declared one has an OUTPUT. They become control ports of the use, next to `complete`."""
+    declared: Dict[str, Dict] = {}
+    for item in part["workflow"].get("errors") or []:
+        name = item.get("name") if isinstance(item, dict) else None
+        if not isinstance(name, str) or not name.isidentifier() or name in ("trigger", "complete") or name.startswith(("in_", "out_")):
+            raise PartError(f"part {pname!r}: workflow.errors needs entries like {{name: invalid, description: ...}} with a name that is not "
+                            "trigger, complete, in_* or out_*")
+        declared[name] = item
+    used = {(x.get("config") or {}).get("exit") for x in exits} - {None}
+    if used - set(declared):
+        raise PartError(f"part {pname!r}: OUTPUT exit {sorted(used - set(declared))} is not declared in workflow.errors")
+    if set(declared) - used:
+        raise PartError(f"part {pname!r}: error {sorted(set(declared) - used)} is declared but no OUTPUT node ends it (`config: {{exit: name}}`)")
+    return declared
+
+
 ROOTS = ("apps", "cookbook", "solvers", "pocketflow")
 
 
@@ -171,6 +189,7 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
     part = _load_part(part_path, stack, flatten)         # flatten=False: the part's own uses stay uses (`graf ungroup`)
     inputs, out_maps, in_map, entry, exits = _interface(part, pname)
     out_names = {o for m in out_maps.values() for o in m.values()}
+    errors = _error_exits(part, exits, pname)
 
     ports = _names(use["ports"])
     ins = {p[3:]: p for p in ports if p.startswith("in_")}
@@ -178,6 +197,10 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
     where = f"SUBGRAPH {uid!r} (part {pname!r})"
     if "trigger" not in ports or "complete" not in ports:
         raise PartError(f"{where}: needs the ports trigger and complete")
+    for port in ports:
+        if port not in ("trigger", "complete") and not port.startswith(("in_", "out_")) and port not in errors:
+            raise PartError(f"{where}: port {port!r} is not an error exit of the part (it declares {sorted(errors) or 'none'}; "
+                            "`workflow.errors` names them, an OUTPUT node with `config: {exit: name}` ends one)")
     for name in ins:
         if name not in inputs:
             raise PartError(f"{where}: port in_{name} is not an input of the part (it has {sorted(inputs)})")
@@ -279,11 +302,15 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
                     target = next(n for n in new_nodes if n["id"] == prefix + tn)
                     target.setdefault("config", {}).setdefault("phases", {}).setdefault("pre", {}).setdefault("defaults", {})[tp] = value
     # control out: part.M.p -> OUTPUT.trigger  +  use.complete -> B.trigger  =>  use__M.p -> B.trigger
-    finishers = [(end(x["source"])) for x in p_edges if x["type"] == "triggers" and end(x["target"])[0] in exit_ids and end(x["target"])[1] == "trigger"]
+    exit_of = {x["id"]: (x.get("config") or {}).get("exit") for x in exits}          # None: the normal way out (`complete`)
+    finishers = [(*end(x["source"]), exit_of[end(x["target"])[0]]) for x in p_edges
+                 if x["type"] == "triggers" and end(x["target"])[0] in exit_ids and end(x["target"])[1] == "trigger"]
     for e in parent_out:
         if e["type"] == "triggers":
-            for (m, p) in finishers:
-                new_edges.append({"source": f"{prefix}{m}.{p}", "target": e["target"], "type": "triggers"})
+            want = None if end(e["source"])[1] == "complete" else end(e["source"])[1]      # `use.complete`, or `use.<error name>`
+            for (m, p, which) in finishers:
+                if which == want:
+                    new_edges.append({"source": f"{prefix}{m}.{p}", "target": e["target"], "type": "triggers"})
         else:
             name = end(e["source"])[1][4:]
             sources = [x for x in p_edges if x["type"] == "binds" and end(x["target"])[0] in exit_ids
@@ -350,11 +377,26 @@ def _rewrite_refs(node: Dict, prefix: str) -> Dict:
     return node
 
 
+def _refuse_edges_into_uses(nodes: List[Dict], edges: List[Dict]) -> None:
+    """A level sees only the interface of a composite below it: an edge may end at the use node's ports, never at a node inside it.
+    After expansion the inside nodes exist as `<use>__<node>`, so such an edge would pass every later check; it is refused here, before."""
+    ids = {n["id"] for n in nodes}
+    uses = {n["id"] for n in nodes if n.get("type") == "SUBGRAPH"}
+    for e in edges:
+        for end in (e["source"], e["target"]):
+            node = end.partition(".")[0]
+            owner = next((u for u in uses if node.startswith(u + SEP)), None)
+            if owner and node not in ids:
+                raise PartError(f"edge {e['source']} -> {e['target']}: {node!r} is inside the composite {owner!r}; "
+                                f"wire to its ports ({owner}.in_*, {owner}.out_*, {owner}.complete) instead")
+
+
 def _flatten_scope(parent: Dict, nodes: List[Dict], edges: List[Dict], base: Path, stack: Tuple[Path, ...]) -> Tuple[List[Dict], List[Dict]]:
     for n in nodes:
         body = n.get("config", {}).get("subgraph")
         if isinstance(body, dict) and has_parts(body.get("nodes", [])):
             body["nodes"], body["edges"] = _flatten_scope(parent, body["nodes"], body.get("edges", []), base, stack)
+    _refuse_edges_into_uses(nodes, edges)
     while True:
         use = next((n for n in nodes if n.get("type") == "SUBGRAPH"), None)
         if use is None:

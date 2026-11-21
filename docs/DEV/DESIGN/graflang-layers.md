@@ -32,7 +32,7 @@ use against the part's inputs and outputs (names, types, defaults) and gives eac
 - **A composite is a subfolder (decided).** Its body is a part file in a subfolder of the recipe, never an inline block: the parent file
   stays short and readable, and the folder is the unit you open, copy, pin and version. Group (section 6) creates the subfolder and
   moves the selected nodes into it.
-- **Interface block.** `inputs`, `outputs` (name -> type, optional default and description), `errors` (named routes out), and a one-line
+- **Interface block (implemented: semantics 3d).** `inputs`, `outputs` (name -> type, optional default and description), `errors` (named routes out), and a one-line
   `description`. This is all another level may know. Control ports are fixed: `trigger`, `complete`, and an error port when `errors` is set.
 - **Neighbour rule.** An edge connects two nodes of the same level, or a node to a port of a composite at that level. An edge may not name
   a node inside a composite. `validate` refuses it with the level's path in the message.
@@ -103,9 +103,9 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
 
 ## 9. Suggested order
 
-1. Interface block and the neighbour rule in `validate`, on existing parts. (Parts already satisfy it by construction: a use is wired only
-   through its INPUT/OUTPUT ports and the expanded ids do not exist before load. Checked by reading `parts.py`, not yet by a test.)
-   Question 6 (loop state) is smaller than first thought; the larger first change is the composite as a subfolder (section 3) with Group/Ungroup.
+1. (Done) Interface block (`description`, `errors` as named exits) and the neighbour rule, on existing parts. The neighbour rule was
+   NOT enforced before: an edge naming `first__rewrite` (a node inside a use, which exists once expanded) validated cleanly, found by a test
+   and now refused (`parts._refuse_edges_into_uses`). Loop state became `state:` (R10a); Group/Ungroup, `graf vis --depth` and error exits are in.
 2. Scoped context and `inherits`.
 3. Composite as a subfolder; Group/Ungroup in the editor (create the subfolder, move the nodes).
 4. `--depth` on the tools.

@@ -122,6 +122,8 @@ def part_summary(path, name: str = "") -> Dict[str, Any]:
     return {"name": name or path.stem.removesuffix(".graph"), "file": str(path.resolve()), "hash": folder_hash(path.resolve().parent),
             "inputs": [{k: v for k, v in i.items() if k in ("name", "type", "default", "description")} for i in wf.get("inputs", [])],
             "outputs": [{k: v for k, v in o.items() if k in ("name", "type", "description", "schema")} for o in wf.get("outputs", [])],
+            "description": str(wf.get("description") or "").strip(),
+            "errors": [{k: v for k, v in e.items() if k in ("name", "description")} for e in wf.get("errors") or []],
             "capabilities": caps}
 
 

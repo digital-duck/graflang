@@ -179,7 +179,7 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
             body["steps"] = sub_steps
         else:
             body[kind] = arg
-            if kind == "node":
+            if kind in ("node", "use"):
                 extra_ports = [p for p in _ctrl(n) if p not in ("trigger", "complete")]
 
         # inputs
