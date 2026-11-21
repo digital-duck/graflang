@@ -16,6 +16,7 @@ from ..logging_config import disable_logging, setup_logging
 from .adapters import default_model, make_llm
 from .metering import CassetteError, LimitExceeded, MeteredLLM, RecordingLLM, ReplayLLM
 from .bindings import bind_graph, load_bindings
+from graphlang.yamlfmt import WIDTH
 from .output import RunOutput, codes_dir, file_outputs, outputs_dir
 from .runtime import load_graph, GraphLangRuntime
 from .topology import check
@@ -329,6 +330,7 @@ def cmd_expand(graph, depth):
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
     yaml.sort_base_mapping_type_on_output = False
+    yaml.width = WIDTH
     yaml.dump(data, sys.stdout)
 
 
@@ -353,11 +355,17 @@ def cmd_compact(graph, out_file):
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
     yaml.sort_base_mapping_type_on_output = False
+    yaml.width = WIDTH                                       # a long quoted string must not be folded: a fold inside `\n` reads back as `\ n`
+    import io
+    buf = io.StringIO()
+    yaml.dump(result, buf)
+    if YAML(typ="safe").load(buf.getvalue()) != json.loads(json.dumps(result, default=str)):
+        console.print("[red]Error:[/red] the written text does not read back as the compact form; nothing was written")
+        sys.exit(1)
     if out_file:
-        with open(out_file, "w") as fh:
-            yaml.dump(result, fh)
+        Path(out_file).write_text(buf.getvalue())
     else:
-        yaml.dump(result, sys.stdout)
+        sys.stdout.write(buf.getvalue())
     click.echo(f"{report['steps']} steps; {report['nodes_kept']} of {report['nodes_total']} nodes and "
                f"{report['edges_kept']} of {report['edges_total']} edges kept in long form; round trip verified.", err=True)
 

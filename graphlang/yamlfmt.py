@@ -20,6 +20,8 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 _INDICATORS = "@`!&*%|>{}[]#?,"
 
 
+WIDTH = 10 ** 9      # never wrap a line: the emitter folds a long quoted string, and can fold it inside an escape (`\n` came back as `\ n`)
+
 def _hard(s: str) -> bool:
     """A string a person would find hard to read once it is quoted: it holds a quote or a line break, or starts with an indicator."""
     return bool(s) and ("'" in s or '"' in s or "\n" in s or s[0] in _INDICATORS) and s == s.strip() and "\t" not in s and "\r" not in s \
@@ -46,7 +48,7 @@ def readable(text: str) -> str:
     """`text` with hard-to-read strings as `|` blocks; the text itself when it does not parse or nothing would change."""
     y = YAML()
     y.preserve_quotes = True
-    y.width = 4096
+    y.width = WIDTH
     try:
         doc = y.load(text)
         if not isinstance(doc, (CommentedMap, CommentedSeq)):
@@ -84,4 +86,4 @@ class _Dumper(yaml.SafeDumper):
 
 
 def dump_readable(doc: Any) -> str:
-    return yaml.dump(doc, Dumper=_Dumper, sort_keys=False, default_flow_style=False, allow_unicode=True, width=4096)
+    return yaml.dump(doc, Dumper=_Dumper, sort_keys=False, default_flow_style=False, allow_unicode=True, width=WIDTH)

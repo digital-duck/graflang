@@ -54,3 +54,31 @@ def test_the_picture_pages_script_has_no_syntax_error(tmp_path):
     js.write_text("(function(){" + body + "})")
     res = subprocess.run(["node", "--check", str(js)], capture_output=True, text=True)
     assert res.returncode == 0, res.stderr
+
+
+def test_a_long_quoted_string_with_escapes_is_never_folded_inside_an_escape():
+    """A code string over 4096 characters used to be folded by the emitter at a width of 4096, and a fold inside `\\n` read back as `\\ n`."""
+    from graphlang.yamlfmt import dump_readable
+    import yaml
+    code = "x = f'a\\n\\n{b}\\n\\n── c ──'\n" * 400
+    doc = {"steps": [{"s": {"node": "SOLVE", "code": code.replace("\n", "\\n") + "\\n\\n── end"}}]}
+    assert yaml.safe_load(dump_readable(doc)) == doc
+    doc = {"nodes": [{"id": "a", "config": {"code": "return f'{x}\\n\\n── Business Explanation ──' + '\\n'" * 300}}]}
+    assert yaml.safe_load(dump_readable(doc)) == doc
+
+
+def test_graf_compact_writes_the_code_of_every_tool_back_exactly(tmp_path):
+    """The code of a SOLVE node holds `\\n` inside an f-string. `graf compact` wrote long quoted strings folded at the emitter's default width,
+    and a fold could land inside the escape: `\\n` read back as `\\ n`, so the compact file ran differently from the long form (found porting
+    cookbook_solvers/pandera_schema: the report lost its blank line)."""
+    from pathlib import Path
+    from click.testing import CliRunner
+    from ruamel.yaml import YAML
+    from graphlang.grafr.cli import cmd_compact
+    src = Path(__file__).resolve().parents[1] / "cookbook_solvers" / "pandera_schema" / "pandera_schema.graph.yaml"
+    out = tmp_path / "c.graph.yaml"
+    r = CliRunner().invoke(cmd_compact, [str(src), "-o", str(out)])
+    assert r.exit_code == 0, r.output
+    before = {n["config"]["tool"]: n["config"]["code"] for n in YAML(typ="safe").load(src.read_text())["nodes"] if n["type"] == "SOLVE"}
+    after = {v["tool"]: v["code"] for s in YAML(typ="safe").load(out.read_text())["steps"] for v in s.values() if isinstance(v, dict) and "code" in v}
+    assert after == before

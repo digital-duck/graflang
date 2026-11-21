@@ -52,7 +52,7 @@ class GraphEditor:
         self.path = Path(path)
         self._yaml = YAML()
         self._yaml.preserve_quotes = True
-        self._yaml.width = 4096                                # never re-wrap the author's long lines
+        self._yaml.width = 10 ** 9                               # never re-wrap the author's long lines
         text = self.path.read_text(encoding="utf-8")
         self._yaml.indent(mapping=2, sequence=self._dash_offset(text) + 2, offset=self._dash_offset(text))   # write lists the way the file does
         self.doc = self._yaml.load(text)

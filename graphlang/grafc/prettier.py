@@ -92,7 +92,7 @@ def prettify(text: str) -> Tuple[str, Report]:
     """(new text, Report) for the graph file `text`. Raises PrettierError when the file cannot be read or would not read back the same."""
     yaml = YAML()
     yaml.preserve_quotes = True
-    yaml.width = 4096                                       # only the blocks folded on purpose break lines
+    yaml.width = 10 ** 9                                      # only the blocks folded on purpose break lines
     yaml.indent(mapping=2)
     try:
         root = yaml.compose(text)
