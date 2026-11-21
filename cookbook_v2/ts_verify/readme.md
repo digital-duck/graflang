@@ -11,7 +11,14 @@ ts_verify       repair -> finalize (a program builds the JSON result)
 Inputs: `spec`, `function` (the name to export), `cases` (a JSON file of calls and expected results), `check_types` (default true), `max_cycles` (default 3).
 Output: `result` (JSON: the final code, whether it passed, the attempts, the type and case reports). Model calls: one per round, at most `max_cycles`.
 
-**Needs Node 22.18+ and `npm install` in this folder** (for `tsc`). The tools stay in `tools/` because a command runs from the top graph's folder.
+**Needs Node 22.18+ and the TypeScript compiler installed in this folder** (`node_modules/` is git-ignored, so do it once after a fresh clone, before the first run):
+
+```bash
+cd cookbook_v2/ts_verify && npm install && cd -
+```
+
+Without it the first type-check stops the run with "typescript is not installed" (after the model has already written the code once, so one call is spent); pass
+`--param check_types=false` to skip the type check and run only the cases. The tools stay in `tools/` because a command runs from the top graph's folder.
 
 ```bash
 graf run cookbook_v2/ts_verify/ts_verify.graph.yaml --bind cookbook_v2/cap.bind.yaml --llm claude_cli:claude-sonnet-5-5 \

@@ -16,7 +16,7 @@ policies it uses. The originals in `cookbook/` are left alone (the experiments a
 | self_heal | extract, heal | `extract`, `heal` (exit `invalid`) |
 | heartbeat | guard, news, announce | `news` (exit `quiet`), `announce`; one extra input `state_file` |
 | stock_copy | gather, report | `gather` (the per-ticker loop), `report` |
-| ts_verify | repair, finalize | `repair` (the loop); needs Node 22.18+ and `npm install` here |
+| ts_verify | repair, finalize | `repair` (the loop); needs Node 22.18+ and `npm install` in `cookbook_v2/ts_verify` (once, after a clone) |
 | notes_digest | guard, read, digest, publish | `read`, `digest`, `publish` |
 | chat_memory | guard, recall, reply, remember | `recall`, `reply`, `remember` |
 
