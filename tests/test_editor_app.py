@@ -503,6 +503,18 @@ def test_the_levels_choice_opens_a_composite_without_error(tmp_path, monkeypatch
     app.multiselect(key="group_ids").select("b").select("c").run()
     app.text_input(key="group_name").set_value("tail").run()
     button(app, "group_go").click().run()
-    for choice in ("Top level", "1 level down", "All levels", "As written"):
+    for choice in ("level-0", "level-1", "all-levels", "as-written"):
         app.selectbox(key="canvas_levels").select(choice).run()
         assert not app.exception and not app.warning, (choice, app.exception, [w.value for w in app.warning])
+
+
+def test_the_picture_has_a_labelled_level_choice_and_no_view_radios(tmp_path, monkeypatch):
+    from test_group import SRC
+    graph = tmp_path / "calc.graph.yaml"
+    graph.write_text(SRC)
+    monkeypatch.setenv("GRAF_EDIT_FILE", str(graph))
+    monkeypatch.setenv("GRAF_PLAIN_EDITOR", "1")
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    assert "canvas_view" not in {r.key for r in app.radio}
+    box = app.selectbox(key="canvas_levels")
+    assert box.label == "Level" and list(box.options) == ["level-0", "level-1", "level-2", "all-levels", "as-written"] and box.value == "as-written"

@@ -51,8 +51,7 @@ graf vis --edit --src-dir cookbook_v2
 
 `--src-dir` is needed: the editor's default work area is `~/.graflang/cookbook`, which does not hold these. On the Edit page try:
 
-- **Levels** select: 0 shows the few top boxes, `all` the flat graph.
-- **Compact / expand** radio: changes the view in memory only, unless you Save.
+- **Level** select (level-0, level-1, level-2, all-levels, as-written): level-0 shows the few top boxes, all-levels the flat graph.
 - **Group / Ungroup**: writes a new composite's folder beside the recipe and validates before saving. Do it on a copy, not on a port.
 - **Opening a composite file on its own** (e.g. `compliance_audit/assess/assess.graph.yaml`): some report errors by themselves; for example `agent_notes/research`
   holds a risky QUERY whose guard is in the top graph. That is expected.
