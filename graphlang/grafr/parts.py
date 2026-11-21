@@ -32,6 +32,7 @@ file) are still left as written, so they are read relative to the graph that use
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -104,6 +105,20 @@ def _interface(part: Dict, name: str) -> Tuple[Dict[str, Dict], Dict[str, Dict[s
     return inputs, out_maps, in_map, entries[0], exits
 
 
+CODE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
+
+
+def _register_codes(parent: Dict, part: Dict, errors: Dict[str, Dict], part_path: Path, where: str) -> None:
+    """Error codes must name one cause in the whole composed graph: two different part files may not declare the same code (one part used
+    twice is one meaning; the use path tells the copies apart). Codes of the part's own parts (already expanded in it) count too."""
+    seen: Dict[str, str] = parent.setdefault("_error_codes", {})
+    mine = {i["code"]: str(part_path) for i in errors.values() if i.get("code") is not None}
+    for code, owner in {**(part.get("_error_codes") or {}), **mine}.items():
+        if seen.setdefault(code, owner) != owner:
+            raise PartError(f"{where}: error code {code!r} is declared by both {Path(seen[code]).name} and {Path(owner).name}; "
+                            "a code must name one cause in a graph, so rename it in one of them")
+
+
 def _error_exits(part: Dict, exits: List[Dict], pname: str) -> Dict[str, Dict]:
     """The part's declared error exits (`workflow.errors: [{name, description}]`), checked against its OUTPUT nodes: every OUTPUT that names an
     `exit` names a declared one, and every declared one has an OUTPUT. They become control ports of the use, next to `complete`."""
@@ -113,7 +128,14 @@ def _error_exits(part: Dict, exits: List[Dict], pname: str) -> Dict[str, Dict]:
         if not isinstance(name, str) or not name.isidentifier() or name in ("trigger", "complete") or name.startswith(("in_", "out_")):
             raise PartError(f"part {pname!r}: workflow.errors needs entries like {{name: invalid, description: ...}} with a name that is not "
                             "trigger, complete, in_* or out_*")
+        code = item.get("code")
+        if code is not None and not (isinstance(code, str) and CODE_RE.match(code)):
+            raise PartError(f"part {pname!r}: error {name!r}: code {code!r} must be letters, digits, _ . - and start with a letter")
         declared[name] = item
+    codes = [i["code"] for i in declared.values() if i.get("code") is not None]
+    dup = sorted({c for c in codes if codes.count(c) > 1})
+    if dup:
+        raise PartError(f"part {pname!r}: error code {dup} is used by more than one error; a code names exactly one cause")
     used = {(x.get("config") or {}).get("exit") for x in exits} - {None}
     if used - set(declared):
         raise PartError(f"part {pname!r}: OUTPUT exit {sorted(used - set(declared))} is not declared in workflow.errors")
@@ -190,6 +212,7 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
     inputs, out_maps, in_map, entry, exits = _interface(part, pname)
     out_names = {o for m in out_maps.values() for o in m.values()}
     errors = _error_exits(part, exits, pname)
+    _register_codes(parent, part, errors, part_path, where=f"SUBGRAPH {uid!r} (part {pname!r})")
 
     ports = _names(use["ports"])
     ins = {p[3:]: p for p in ports if p.startswith("in_")}
@@ -254,6 +277,8 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
                 body["nodes"] = [_rewrite_refs(b, prefix) for b in body.get("nodes", [])]
         return node
 
+    for x in part.get("_error_exits") or []:                      # error exits of parts used inside this part, under their new names
+        parent.setdefault("_error_exits", []).append({**x, "source": prefix + x["source"], "target": prefix + x["target"], "use": prefix + x["use"]})
     new_nodes = [_anchor_paths(rewrite(n), part_dir) for n in inner]
     members = parent.setdefault("_part_of", {})                      # for `graf vis`: which use each copied node came from
     members.update({n["id"]: (uid, pname) for n in new_nodes})
@@ -311,6 +336,9 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
             for (m, p, which) in finishers:
                 if which == want:
                     new_edges.append({"source": f"{prefix}{m}.{p}", "target": e["target"], "type": "triggers"})
+                    if which is not None:
+                        parent.setdefault("_error_exits", []).append({"source": f"{prefix}{m}.{p}", "target": e["target"], "use": uid, "part": pname,
+                                                                      "error": which, "code": errors[which].get("code")})
         else:
             name = end(e["source"])[1][4:]
             sources = [x for x in p_edges if x["type"] == "binds" and end(x["target"])[0] in exit_ids

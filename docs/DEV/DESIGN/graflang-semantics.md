@@ -1,5 +1,7 @@
 # Graph-Lang core semantics (v0, as implemented)
 
+Date: 2026-11-21
+
 What a graph means, independent of how `runtime.py` is written. Each rule R1 to R10 has a test in `tests/test_semantics.py`; the checks S2 and S3 in `graf validate` and `MUTATE` enforce the guarantees in section 3. Rules marked **accident** describe today's behaviour and are pinned so any change is deliberate.
 
 ## 1. Model
@@ -56,7 +58,7 @@ A `SUBGRAPH` node (a *use* of a part listed under `resources.parts`) has no runt
 What a level sees of a part (`SUBGRAPH` use) is its interface, and nothing else:
 
 - **Ports.** `workflow.inputs` and `workflow.outputs` (name, type, default, description) become the use's `in_*` and `out_*` ports; `trigger` and `complete` are fixed. `workflow.description` is a one-line statement of what it does (`graf parts`, Browse).
-- **Error exits.** `workflow.errors: [{name, description}]` declares named ways out other than `complete`. Each is a control port of the use; inside the part an `OUTPUT` node with `config: {exit: name}` ends it, and a token reaching it leaves the use by that port. `complete` fires only from OUTPUT nodes with no `exit`. `graf validate` refuses a use port that is none of these, an `exit` that is not declared, and a declared error that no OUTPUT ends.
+- **Error exits.** `workflow.errors: [{name, description}]` declares named ways out other than `complete`. Each is a control port of the use; inside the part an `OUTPUT` node with `config: {exit: name}` ends it, and a token reaching it leaves the use by that port. `complete` fires only from OUTPUT nodes with no `exit`. An error may carry an optional `code` (letters, digits, `_ . -`, starting with a letter) that names one cause: unique within the part and across the different part files of one graph (one part used twice is one meaning; the use path tells the copies apart). When a token leaves a part by an error exit the run logs `part.error` (use, part, error name, code). `graf validate` refuses a use port that is none of these, an `exit` that is not declared, and a declared error that no OUTPUT ends.
 - **Neighbour rule.** An edge in a graph may end at a use's ports, never at a node inside it (`first__rewrite`, the name the node gets once expanded). It is refused before expansion with a message naming the composite; after expansion the node exists and the edge would pass every other check.
 
 ## 4. Known gaps, decided in the roadmap

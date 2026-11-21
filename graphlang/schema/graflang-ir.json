@@ -16,7 +16,7 @@
         "inputs": { "type": "array", "items": { "$ref": "#/defs/Param" } },
         "outputs": { "type": "array", "items": { "$ref": "#/defs/Param" } },
         "errors": { "type": "array", "description": "named error exits of a workflow used as a part: each is a control port of the use node next to `complete`, ended inside the part by an OUTPUT node with config.exit: <name>",
-                    "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "description": { "type": "string" } } } }
+                    "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "code": { "type": "string", "description": "optional stable identifier of the cause, unique within the part and across the parts of one graph; logged with the failure" }, "description": { "type": "string" } } } }
       }
     },
     "resources": {

@@ -158,3 +158,70 @@ def test_group_takes_a_description_into_the_interface():
     from test_group import long_form
     _, part, _ = group(long_form(), ["b", "c"], "tail", "doubles, then adds ten")
     assert part["workflow"]["description"] == "doubles, then adds ten"
+
+
+# ---- error codes: optional, but one code names one cause ---------------------------------------------------------------
+
+CODED = PART.replace("{name: invalid, description:", "{name: invalid, code: E_NOT_POSITIVE, description:")
+
+
+def test_the_code_of_a_taken_exit_is_logged_with_the_failure(tmp_path):
+    import json
+    from click.testing import CliRunner
+    from graphlang.cli import main
+    (tmp_path / "checker.graph.yaml").write_text(CODED)
+    (tmp_path / "use.graph.yaml").write_text(PARENT)
+    logs = tmp_path / "logs"
+
+    def events(n):
+        for f in logs.glob("*.jsonl") if logs.exists() else []:
+            f.unlink()
+        r = CliRunner().invoke(main, ["run", str(tmp_path / "use.graph.yaml"), "--param", f"n={n}", "--log-dir", str(logs), "--log-format", "jsonl",
+                                      "--no-output"])
+        assert r.exit_code == 0, r.output
+        return [json.loads(line) for f in logs.glob("*.jsonl") for line in f.read_text().splitlines() if '"part.error"' in line]
+    assert events(5) == []                                                    # the normal way out logs nothing
+    (hit,) = events(-1)
+    assert (hit["use"], hit["part"], hit["error"], hit["code"]) == ("chk", "checker", "invalid", "E_NOT_POSITIVE")
+
+
+def test_a_bad_code_and_a_repeated_code_in_one_part_are_refused(tmp_path):
+    with pytest.raises(PartError, match="must be letters"):
+        run_checker(tmp_path, 1, part=PART.replace("{name: invalid, description:", "{name: invalid, code: '9 bad', description:"))
+    two = PART.replace("errors: [{name: invalid, description: the number was not positive}]",
+                       "errors: [{name: invalid, code: E1, description: a}, {name: other, code: E1, description: b}]")
+    two = two.replace('''  - {id: bad, type: OUTPUT, ports: [trigger, exit], config: {exit: invalid}}''', '''  - {id: bad, type: OUTPUT, ports: [trigger, exit], config: {exit: invalid}}
+  - {id: bad2, type: OUTPUT, ports: [trigger, exit], config: {exit: other}}''')
+    with pytest.raises(PartError, match="more than one error"):
+        run_checker(tmp_path, 1, part=two)
+
+
+def _two_parts(tmp_path, other_code):
+    (tmp_path / "checker.graph.yaml").write_text(CODED)
+    (tmp_path / "second.graph.yaml").write_text(CODED.replace("name: checker", "name: second").replace("E_NOT_POSITIVE", other_code))
+    parent = PARENT.replace("resources: {parts: {checker: ./checker.graph.yaml}}",
+                            "resources: {parts: {checker: ./checker.graph.yaml, second: ./second.graph.yaml}}")
+    parent = parent.replace("  - {id: good,", '''  - {id: chk2, type: SUBGRAPH, ports: [trigger, complete, invalid, in_n, out_n], config: {part: parts.second}}
+  - {id: good,''').replace("  - {source: wf_entry.out_n, target: chk.in_n, type: binds}", '''  - {source: wf_entry.out_n, target: chk.in_n, type: binds}
+  - {source: chk.complete, target: chk2.trigger, type: triggers}
+  - {source: wf_entry.out_n, target: chk2.in_n, type: binds}
+  - {source: chk2.invalid, target: sorry.trigger, type: triggers}''').replace("{source: chk.complete, target: good.trigger, type: triggers}", "{source: chk2.complete, target: good.trigger, type: triggers}")
+    (tmp_path / "use.graph.yaml").write_text(parent)
+    return tmp_path / "use.graph.yaml"
+
+
+def test_the_same_code_in_two_different_parts_of_one_graph_is_refused(tmp_path):
+    with pytest.raises(PartError, match="declared by both"):
+        load_graph(_two_parts(tmp_path, "E_NOT_POSITIVE"))
+
+
+def test_different_codes_in_two_parts_are_fine(tmp_path):
+    g = load_graph(_two_parts(tmp_path, "E_SECOND"))
+    assert {x["code"] for x in g["_error_exits"]} == {"E_NOT_POSITIVE", "E_SECOND"}
+
+
+def test_one_part_used_twice_keeps_its_code_and_the_use_path_tells_the_copies_apart(tmp_path):
+    use = _two_parts(tmp_path, "E_SECOND")
+    use.write_text(use.read_text().replace("./second.graph.yaml", "./checker.graph.yaml"))       # `second` is now the same file as `checker`
+    g = load_graph(use)
+    assert sorted((x["use"], x["code"]) for x in g["_error_exits"]) == [("chk", "E_NOT_POSITIVE"), ("chk2", "E_NOT_POSITIVE")]

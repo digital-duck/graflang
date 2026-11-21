@@ -167,6 +167,7 @@ class GraphLangRuntime:
         self._pending_join: Dict[str, set] = {}          # JOIN tokens that have arrived, per node
         self.checkpoint_path: Optional[Path] = None      # set by the caller (graf run --checkpoint) on the top-level runtime
         self._checkpoint_failed = False
+        self._error_exits = {(x["source"], x["target"]): x for x in (graph_data.get("_error_exits") or [])}    # wires that leave a part by an error exit
         self.boundary = _boundary or {}                 # in_* values a LOOP hands to its subgraph
         self.scope = _scope or {}                       # loop state (cycle, previous outputs)
         if _parent is None:
@@ -505,6 +506,10 @@ class GraphLangRuntime:
         for _, tgt, key, d in self.G.out_edges(node, keys=True, data=True):
             if d["type"] == "triggers" and d["source_port"] in chosen:
                 queue.append((tgt, (node, key)))
+                info = self._error_exits.get((f"{node}.{d['source_port']}", f"{tgt}.{d['target_port']}"))
+                if info:                                             # a part ended in one of its declared error exits
+                    log_event(_log, "part.error", level=WARNING, use=info["use"], part=info["part"], error=info["error"], code=info["code"],
+                              node=node, depth=self.depth)
 
     def _collect_outputs(self, in_data: Dict[str, Any]) -> None:
         names = list(in_data)

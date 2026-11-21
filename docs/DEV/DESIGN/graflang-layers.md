@@ -1,5 +1,7 @@
 # Layers: a logical graph that compiles to a flat one (DRAFT, nothing here is implemented)
 
+Date: 2026-11-21
+
 Status: proposal for discussion. Where it says "today" it describes the code as it is; where it says "proposed" it is open for change. When a
 part of this is accepted, its rules move to `graflang-semantics.md` (with tests in `tests/test_semantics.py`) and the gap table in
 `readme-design.md` gets a numbered item.
