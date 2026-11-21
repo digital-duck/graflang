@@ -15,7 +15,7 @@ let ts;
 try {
   ts = (await import("typescript")).default;
 } catch {
-  fail("typescript is not installed: run `npm install` in cookbook/ts_verify, or pass --param check_types=false");
+  fail("typescript is not installed: run `npm install` in the recipe folder (the one with package.json), or pass --param check_types=false");
 }
 
 const options = {
