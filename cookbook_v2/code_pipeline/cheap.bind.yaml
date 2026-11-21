@@ -1,6 +1,6 @@
-# A cheap real run: a small spec, no closure check. Cap it: the model calls are billed (about 1-3 plan drafts + one per task + a fix pass for a failing task).
+# A cheap real run: a small spec, no closure check. Cap it: the model calls are billed (a plan draft and its review, 1-3 rounds; one call per task; a fix pass for a failing task).
 #   graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/code_pipeline/cheap.bind.yaml
-# For a bigger project pass your own --param spec=... (and check_closure=true); raise max_llm_calls to about 3 + 2 per planned task + 3.
+# For a bigger project pass your own --param spec=... (and check_closure=true); raise max_llm_calls to about 6 + 2 per planned task + 3.
 llm: claude_cli:claude-sonnet-5-5
 params: {spec: "a function is_palindrome(s) that ignores case and punctuation, with unit tests", check_closure: false}
-limits: {max_llm_calls: 20}
+limits: {max_llm_calls: 30}

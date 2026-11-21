@@ -1,7 +1,7 @@
 version: "1.0-graph"
 workflow:
   name: analyze
-  description: Turns the spec into a build plan, a list of small ordered tasks (each with its files and an acceptance test). A checker judges the plan; what it finds wrong goes back to the planner for another draft, up to max_plan_rounds. Ends in the error exit `vague` when no usable plan came out.
+  description: Turns the spec into a build plan, a list of small ordered tasks (each with its files and an acceptance test). A checker judges the plan's form and a model reviews it against the spec; what either finds wrong goes back to the planner for another draft, up to max_plan_rounds. Ends in the error exit `vague` when no usable plan came out.
   inputs:
     - {name: spec, type: TEXT}
     - {name: lang, type: TEXT, default: python}
@@ -14,6 +14,7 @@ workflow:
 resources:
   prompts:
     plan: ./prompts/plan.md
+    critique_plan: ./prompts/critique_plan.md
 steps:
   - planning:
       loop: "@in_max_plan_rounds"
@@ -21,9 +22,9 @@ steps:
       in: {spec: $in.spec, lang: $in.lang, reference: $in.reference, max_plan_rounds: $in.max_plan_rounds}
       state:
         prior_plan: {from: draft.plan, init: ""}      # the latest draft, read by the next round as the previous plan
-        feedback: {from: verdict.feedback, init: ""}  # what the checker found wrong with it
+        feedback: {from: [verdict.feedback, note.feedback], init: ""}   # what the checker or the reviewer found wrong with it (the reviewer, when it ran, speaks last)
       out:
-        ok: {fired: good.pass}
+        ok: {fired: approved.pass}
       steps:
         - draft: {generate: prompts.plan, in: {spec: $loop.spec, lang: $loop.lang, reference: $loop.reference, prior_plan: $loop.prior_plan, feedback: $loop.feedback}, out: plan, label: Draft the build plan}
         - check:
@@ -39,6 +40,10 @@ steps:
             label: Check the plan (tasks, files, tests, order)
         - good:    {evaluate: "json_get(@in_check, 'ok') == TRUE", in: {check: check.check}}
         - verdict: {solve: "json_get(@in_check, 'report')", in: {check: check.check}, on: check, out: feedback}
+        # the format is fine: does the plan deliver what the spec wants, or only something that exists? (a model reviews it)
+        - critic:  {generate: prompts.critique_plan, on: good.pass, in: {spec: $loop.spec, plan: draft.plan}, out: review, label: Review the plan against the spec}
+        - approved: {evaluate: "contains(@in_review, '[APPROVED]')", in: {review: critic.review}}
+        - note:    {solve: "@in_review", in: {review: critic.review}, on: approved.fail, out: feedback}
   - planned: {evaluate: "@in_ok == TRUE", in: {ok: planning.ok}}
   - ready:   {output: {plan: planning.prior_plan}, on: planned.pass}
   - vague:   {output: {plan: planning.prior_plan}, on: planned.fail, exit: vague}

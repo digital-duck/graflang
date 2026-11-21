@@ -5,16 +5,18 @@ A spec in, a verified project folder and its documentation out. A one-shot promp
 
 ```
 code_pipeline.graph.yaml     preflight -> analyze -> build -> finish -> exit        (stop on the error exit `vague`)
-  analyze/                   spec -> build plan (JSON list of tasks); a checker judges it and what is wrong goes back for another draft (self-healing, max_plan_rounds);
-                             error exit `vague` (E_PLAN_VAGUE) when no usable plan comes out
+  analyze/                   spec -> build plan (JSON: deliverables and a list of tasks); a checker judges its form and a model reviews it against the spec; what either finds
+                             wrong goes back for another draft (self-healing, max_plan_rounds); error exit `vague` (E_PLAN_VAGUE) when no usable plan comes out
   build/                     a loop over the plan's tasks: write the task's files, merge them into the project, RUN the whole project in a container, one fix pass if it fails
   finish/                    document the code, then optionally derive a spec back from it and judge it against the original (SPL procedures 05-07; needs SPL.py)
 tools/                       check_plan.py, task_context.py, collect_files.py (split a reply into files and merge them), render_files.py, verify_project.py, verify.Dockerfile
 ```
 
-A **plan** is JSON: a `summary`, `assumptions`, and `tasks`, each with an `id`, `title`, `description` (the functions and signatures to write), `files` (at most 5), `depends_on` and `acceptance`.
+A **plan** is JSON: a `summary`, `assumptions`, `deliverables` (what the spec asks the product to produce, each with the `mechanism` that makes its content and the `quality_bar` that separates good from merely present), and `tasks`, each with an `id`, `title`, `description` (the functions and signatures to write), `files` (at most 5), `depends_on` and `acceptance`.
 `tools/check_plan.py` refuses a plan with thin descriptions, tasks without files or acceptance, a file owned by two tasks, a task depending on a later one, too many tasks, or (Python) no
-test file; its list of complaints is the next draft's feedback. Each task's writer sees the plan's summary, its own task and the files written so far, so no reply is larger than one task.
+test file; its list of complaints is the next draft's feedback. A plan that passes is then **reviewed by a model against the spec** (`prompts/critique_plan.md`): every capability must have a task, a deliverable that
+needs prose or reasoning may not be a template that lists names (the product calls a model through an injectable interface; the tests use a fake), the acceptance tests must be able to fail.
+The reviewer's defects feed the next draft too. Each task's writer sees the plan's summary, its own task and the files written so far, so no reply is larger than one task.
 
 Outputs: `docs` (TEXT), `plan` (the build plan, JSON), `code` (FILES: real files in `.graf/codes/<run>/`, any layout, e.g. `backend/` and `frontend/`) and `report` (the last
 verification of the whole project, `[PASSED]` or `[FAILED]`). The run's other files (`result.json`, every node's output under `nodes/`: the drafts of the plan, each task's reply)
@@ -27,7 +29,7 @@ graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind <a file with 
 ```
 
 Inputs: `spec`, `lang` (python), `reference` (API facts the model cannot know), `smoke` (Python run against the real libraries after each task's tests), `max_plan_rounds` (3), `check_closure` (true).
-Calls: 1 to `max_plan_rounds` for the plan, 1 per task (+1 when its check fails), then 3 for `finish` (closure check on) or 1.
+Calls: per plan round 1 draft (+1 review when the draft passes the checker), 1 per task (+1 when its check fails), then 3 for `finish` (closure check on) or 1.
 
 ## The verify container
 

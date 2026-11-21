@@ -99,6 +99,16 @@ graf errors --dir cookbook_v2/compliance_audit                               # E
 - **inherits** cut the top-level plumbing in every port (a `use` line instead of a long `in:` map).
 - **A `use` inside a loop body cannot read the loop's inputs** (known limit): every loop sits inside its own composite.
 
+### What the first real run of the capable code_pipeline showed (doc-agent spec)
+
+All 106 of the project's own tests passed and the output was a listing: the generated "tutorial" and "slide deck" enumerate each module's docstring and function names, with no
+narrative. Causes, in the recipe, not the model: (1) the plan prompt told the planner "tests: no network, only these libraries (no model SDK)", and the planner removed the capability
+instead (its assumption: "No LLM is called: content is derived deterministically"), because a documentation app that writes prose needs a model and a no-network test sandbox cannot call
+one; (2) the tests the model wrote for itself only assert that headings and files exist, so `[PASSED]` measures nothing about quality; (3) nothing between plan and build asked whether the
+plan delivers the spec. Fixes made: the plan separates the offline tests from the product (a model/service is called through an injectable interface, tests use fakes, SDKs are imported lazily),
+it must list `deliverables` with a `mechanism` and a `quality_bar` (checked by `check_plan.py`), and a model reviews each plan that passes the check against the spec before building starts.
+Not done: a check of the built product's real output (run it on a sample and have a model judge it against the quality bar), which is what would catch (2).
+
 ## Next candidates (not committed to; say which)
 
 `code_parts` (already uses parts, but the top level is flat), `stock_analysis`, `doc_it`, `recipe_chain`, `pocketflow/*`, `hello_world`, `release_approval` (waits for a person), `guardrail`, `assembler`.

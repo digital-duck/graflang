@@ -21,6 +21,13 @@ Reply with ONE JSON object and nothing else (no explanation, no code fence):
   "ready": true,
   "summary": "one paragraph: what is built, the package layout, the main modules and how they fit together",
   "assumptions": ["each choice you made where the specification was silent"],
+  "deliverables": [
+    {
+      "name": "what the specification asks the product to produce or do (a document, a report, an answer, a conversion...)",
+      "mechanism": "HOW its content is produced: the component, and what produces the substance of it (a model that writes prose, an algorithm, a parser, a template that only lays out content that already exists)",
+      "quality_bar": "what separates a good result from a merely present one, in a sentence a user would agree with"
+    }
+  ],
   "tasks": [
     {
       "id": "t1",
@@ -36,6 +43,12 @@ Reply with ONE JSON object and nothing else (no explanation, no code fence):
 Rules:
 - 3 to 10 tasks, ordered so that each task depends only on earlier ones (`depends_on` lists task ids). Start with the core library, then what builds on it (CLI, UI, converters), last the glue and the README.
 - Every task lists the files it writes (at most 5) and every file belongs to exactly one task. Use relative paths and a real package layout (a package folder with modules, a `tests/` folder), not one big file.
-- A task that writes code also writes the tests for it in the same task (`tests/test_*.py`), small and fast: no network, no real servers, no real repositories (use temporary folders and fakes).
+- A task that writes code also writes the tests for it in the same task (`tests/test_*.py`), small and fast. The TESTS run offline in a sandbox, but the PRODUCT is not limited by that:
+  where the product's value needs an external service or intelligence (a language model, a web API, a git clone), the product calls it through a small injectable interface (for example a
+  `llm: Callable[[str], str]` parameter), the tests pass a deterministic fake, and the real one is wired in the CLI and the UI (options or environment variables choose the provider).
+  Import a provider's SDK lazily inside the function that uses it, never at the top of a module. Never remove a capability the specification needs because it is hard to test.
+- Do not replace intelligence with a listing. Prose that explains (a tutorial, a user guide, a summary, slides with a message) cannot come from a template that enumerates names and
+  docstrings; it needs a mechanism that can write and reason, fed with facts the product extracted (a knowledge graph, an outline). A template may lay out content; it may not be the content.
+  Every deliverable in `deliverables` must have a mechanism that can reach its quality bar, and some task must build it.
 - The only libraries a project may use are the standard library and: pytest, click, streamlit, networkx, pyyaml, jinja2, markdown, requests, rich, flask, fastapi, httpx, pydantic, numpy, pandas. Anything else cannot be installed.
 - If the specification is silent, decide, and record the decision in `assumptions`: set "ready": true. Set "ready": false (and add "missing": [questions]) only when the specification is so unclear that no sensible plan exists.

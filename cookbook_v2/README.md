@@ -88,7 +88,7 @@ graf run cookbook_v2/code_pipeline/code_pipeline.graph.yaml --bind cookbook_v2/c
     --llm claude_cli:claude-sonnet-5-5 --param spec="$SPEC" --param check_closure=false
 ```
 
-Raise `max_llm_calls` in a copy of the bind file for a big spec: about 3 for the plan, 2 per planned task and 3 for `finish`. Read the `plan` output first (`.graf/outputs/<run>/plan.md`): it shows how the work was split.
+Raise `max_llm_calls` in a copy of the bind file for a big spec: about 6 for the plan (drafts and reviews), 2 per planned task and 3 for `finish`. Read the `plan` output first (`.graf/outputs/<run>/plan.md`): it shows how the work was split.
 
 ```bash
 # the one-call version: no plan, no review, no run, no container

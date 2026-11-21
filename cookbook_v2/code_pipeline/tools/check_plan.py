@@ -3,7 +3,7 @@
 stdin   {"plan": the planner's reply (JSON, or JSON in a code fence), "lang": "python"}
 stdout  one line of JSON: {"ok": bool, "report": text, "tasks": N}
 
-A plan is {"ready": bool, "summary": text, "assumptions": [..], "tasks": [{"id", "title", "description", "files": [paths], "depends_on": [ids], "acceptance"}]}.
+A plan is {"ready": bool, "summary": text, "assumptions": [..], "deliverables": [{"name", "mechanism", "quality_bar"}], "tasks": [{"id", "title", "description", "files": [paths], "depends_on": [ids], "acceptance"}]}.
 The check is the planner's feedback: a plan that is not specific enough to build from is returned with the list of what is missing, and the planner is asked again.
 """
 import json
@@ -49,6 +49,13 @@ def check(plan, lang):
                         + ". State your assumptions in `assumptions` and plan anyway, setting ready=true, unless the specification is truly unusable")
     if not str(plan.get("summary") or "").strip():
         problems.append("`summary` is missing: one paragraph on what is built and how it is laid out")
+    deliverables = plan.get("deliverables")
+    if not isinstance(deliverables, list) or not deliverables:
+        problems.append("`deliverables` is missing: list what the specification asks the product to produce, each with its `mechanism` and `quality_bar`")
+    else:
+        for n, d in enumerate(deliverables, 1):
+            if not isinstance(d, dict) or not all(str(d.get(k) or "").strip() for k in ("name", "mechanism", "quality_bar")):
+                problems.append(f"deliverable {n} needs a `name`, a `mechanism` (how its content is produced) and a `quality_bar` (what makes it good, not merely present)")
     tasks = plan.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         return problems + ["`tasks` must be a non-empty list"]
