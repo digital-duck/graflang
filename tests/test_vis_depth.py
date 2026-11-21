@@ -49,10 +49,12 @@ def test_depth_one_opens_the_top_level_boxes_and_closes_the_ones_inside():
 def test_cli_depth_flag_is_taken_and_validated(tmp_path):
     from click.testing import CliRunner
     from graphlang.cli import main
-    out = tmp_path / "v.html"
+    out, default, full = tmp_path / "v.html", tmp_path / "d.html", tmp_path / "all.html"
     r = CliRunner().invoke(main, ["vis", str(CODE_PARTS), "--depth", "0", "--no-open", "-o", str(out)])
     assert r.exit_code == 0, r.output
-    full = tmp_path / "all.html"
-    assert CliRunner().invoke(main, ["vis", str(CODE_PARTS), "--no-open", "-o", str(full)]).exit_code == 0
+    assert CliRunner().invoke(main, ["vis", str(CODE_PARTS), "--no-open", "-o", str(default)]).exit_code == 0
+    assert CliRunner().invoke(main, ["vis", str(CODE_PARTS), "--depth", "all", "--no-open", "-o", str(full)]).exit_code == 0
+    assert default.read_text() == out.read_text()                              # no flag means --depth 0
     assert out.stat().st_size < full.stat().st_size                           # fewer nodes, a smaller page
-    assert CliRunner().invoke(main, ["vis", str(CODE_PARTS), "--depth", "-1", "--no-open"]).exit_code != 0
+    for bad in ("-1", "deep"):
+        assert CliRunner().invoke(main, ["vis", str(CODE_PARTS), "--depth", bad, "--no-open"]).exit_code != 0

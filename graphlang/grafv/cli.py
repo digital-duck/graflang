@@ -14,6 +14,19 @@ from .engines import DEFAULT_ENGINE, ENGINES, hint, render
 console = Console()
 
 
+def _depth(value: str) -> "int | None":
+    """`--depth` as a number of levels, or None for `all`."""
+    if str(value).lower() == "all":
+        return None
+    try:
+        n = int(value)
+    except ValueError:
+        n = -1
+    if n < 0:
+        raise click.BadParameter("a whole number (0 or more) or `all`", param_hint="--depth")
+    return n
+
+
 @click.command("vis", short_help="Draw a workflow as a diagram (alias: viz).")
 @click.argument("graph", required=False)
 @click.option("--engine", type=click.Choice(sorted(ENGINES)), default=DEFAULT_ENGINE, show_default=True,
@@ -21,8 +34,8 @@ console = Console()
 @click.option("--list-engines", is_flag=True, help="show the engines and whether each is ready")
 @click.option("-o", "--out", type=click.Path(dir_okay=False), default=None,
               help="output file (default ~/.graflang/vis/<graph>-<engine>.<html|svg|mmd|txt>)")
-@click.option("--depth", type=click.IntRange(min=0), default=None,
-              help="open this many levels of composites and loop bodies (0: the top level only, each composite one node); default all")
+@click.option("--depth", default="0", show_default=True, metavar="N|all",
+              help="levels to open: 0 draws the top level only, each composite and loop one node; N opens N levels down; `all` opens everything")
 @click.option("--no-open", is_flag=True, help="write the file but do not open it")
 @click.option("--edit", is_flag=True, help="open the app instead: Create, Edit, Settings and Import/Export pages (saves only a valid graph, keeps "
                                            "your comments); needs `pip install 'graflang[edit]'`. GRAPH is optional with it")
@@ -66,7 +79,7 @@ def cmd_vis(graph, engine, list_engines, out, depth, no_open, edit, src_dir, hos
     stem = graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
     target = Path(out) if out else Path.home() / ".graflang" / "vis" / f"{stem}-{engine}{ENGINES[engine]['ext']}"
     try:
-        path, note, n = render(graph_data, target, engine, depth=depth)
+        path, note, n = render(graph_data, target, engine, depth=_depth(depth))
     except (ValueError, RuntimeError) as e:
         console.print(f"[red]✗ Could not draw:[/red] {escape(str(e))}")
         sys.exit(1)

@@ -120,7 +120,9 @@ def test_cli_vis_writes_the_file_and_reports_it(tmp_path, monkeypatch):
     out = tmp_path / "cb.html"
     result = CliRunner().invoke(main, ["vis", str(CONCEPT_BOOK), "-o", str(out)])
     assert result.exit_code == 0, result.output
-    assert out.exists() and "cytoscape: 10 nodes" in result.output and opened == [out.resolve().as_uri()]
+    assert out.exists() and "cytoscape: 5 nodes" in result.output and opened == [out.resolve().as_uri()]       # the default is --depth 0: the loop is one node
+    result = CliRunner().invoke(main, ["vis", str(CONCEPT_BOOK), "-o", str(out), "--depth", "all"])
+    assert "cytoscape: 10 nodes" in result.output
 
 
 def test_cli_vis_default_location_is_graflang_vis_in_home(tmp_path, monkeypatch):
