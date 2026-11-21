@@ -3,4 +3,4 @@
 # For a bigger project pass your own --param spec=... (and check_closure=true); raise max_llm_calls to about 6 + 2 per planned task + 4 (the appraisal) + 3.
 llm: claude_cli:claude-sonnet-5-5
 params: {spec: "a function is_palindrome(s) that ignores case and punctuation, with unit tests", check_closure: false}
-limits: {max_llm_calls: 30}
+limits: {max_llm_calls: 50}

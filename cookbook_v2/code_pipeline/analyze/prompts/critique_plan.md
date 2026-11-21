@@ -7,13 +7,19 @@ Specification:
 The build plan (JSON):
 {{in_plan}}
 
-Review it like this:
-1. List every capability the specification asks for. For each, find the task that builds it. A capability with no task is a defect.
-2. For each deliverable, ask: would its content be GOOD, or merely present? A "tutorial", "user guide", "summary", "explanation" or "slide deck" produced by a template that lists
-   names and docstrings is a listing, not that document: it needs a mechanism that can write and reason (a language model behind an injectable interface), fed with extracted facts.
+Review it for BLOCKING defects only: things that would make the finished product fail the specification, make the build break, or let the tests pass on a bad product.
+1. A capability the specification asks for that no task builds.
+2. A deliverable whose mechanism cannot reach its quality bar. A "tutorial", "user guide", "summary", "explanation" or "slide deck" produced by a template that lists names and
+   docstrings is a listing, not that document: it needs a mechanism that can write and reason (a language model behind an injectable interface), fed with extracted facts.
    A plan whose assumptions remove such a capability ("no LLM is called", "deterministic only", "offline") to make testing easier is a defect: tests use fakes, the product does not.
-3. Is the split into tasks sound: each task small enough for one reply, ordered by dependency, the riskiest part not left to last, the glue (CLI, UI) thin?
-4. Are the acceptance tests able to fail when the product is bad (do they check substance, not only that headings or files exist)?
+3. A task that is too big for one reply, or a dependency in the wrong order.
+4. Acceptance tests that cannot fail when the product is bad (they only check that headings or files exist).
+5. A demo that cannot run offline, or whose output would not show the deliverables.
 
-Reply with exactly one first line, `[APPROVED]` or `[REVISE]`, then, for `[REVISE]`, a numbered list of concrete defects with the change that fixes each (what to add, replace or
-re-split). Approve only a plan you would be willing to build. Do not rewrite the plan.
+Rules for the review:
+- Report at most 5 defects, the most important first. Each is one or two sentences with the change that fixes it. Do not list polish: naming, extra flags, packaging files, defaults,
+  style, tests for rare paths, or features the specification does not ask for.
+- A plan with no blocking defect is approved, even if you would have done it differently. Approve a plan you would be willing to build.
+- Do not rewrite the plan.
+
+Reply with exactly one first line, `[APPROVED]` or `[REVISE]`, then the numbered defects (for `[APPROVED]` you may add up to 3 short notes, not defects).

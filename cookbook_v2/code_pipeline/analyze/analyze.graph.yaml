@@ -1,13 +1,14 @@
 version: "1.0-graph"
 workflow:
   name: analyze
-  description: Turns the spec into a build plan, a list of small ordered tasks (each with its files and an acceptance test). A checker judges the plan's form and a model reviews it against the spec; what either finds wrong goes back to the planner for another draft, up to max_plan_rounds. Ends in the error exit `vague` when no usable plan came out.
+  description: Turns the spec into a build plan, a list of small ordered tasks (each with its files and an acceptance test). A checker judges the plan's form and a model reviews it against the spec; what either finds wrong goes back to the planner for another draft, up to max_plan_rounds. A plan that passes the checker is used even when the reviewer still has objections after the last round (they are given as `review`). Ends in the error exit `vague` only when no draft passed the checker.
   inputs:
     - {name: spec, type: TEXT}
     - {name: lang, type: TEXT, default: python}
     - {name: reference, type: TEXT, default: ""}
     - {name: max_plan_rounds, type: INTEGER, default: 3}
   outputs:
+    - {name: review, type: TEXT}                  # what the reviewer last said: [APPROVED], or the objections that were left when the rounds ran out
     - {name: plan, type: TEXT}                    # JSON: {summary, assumptions, tasks: [{id, title, description, files, depends_on, acceptance}]}
   errors:
     - {name: vague, code: E_PLAN_VAGUE, description: no usable build plan after the allowed drafts}
@@ -43,7 +44,19 @@ steps:
         # the format is fine: does the plan deliver what the spec wants, or only something that exists? (a model reviews it)
         - critic:  {generate: prompts.critique_plan, on: good.pass, in: {spec: $loop.spec, plan: draft.plan}, out: review, label: Review the plan against the spec}
         - approved: {evaluate: "contains(@in_review, '[APPROVED]')", in: {review: critic.review}}
-        - note:    {solve: "@in_review", in: {review: critic.review}, on: approved.fail, out: feedback}
-  - planned: {evaluate: "@in_ok == TRUE", in: {ok: planning.ok}}
-  - ready:   {output: {plan: planning.prior_plan}, on: planned.pass}
-  - vague:   {output: {plan: planning.prior_plan}, on: planned.fail, exit: vague}
+        - note:    {solve: "@in_review", in: {review: critic.review}, on: critic, out: feedback}
+  # the loop ends when the reviewer approves or the rounds run out; either way the last draft is used if it passes the checker (the reviewer's objections are given, not fatal)
+  - final:
+      node: SOLVE
+      in: {plan: planning.prior_plan, lang: $in.lang}
+      ports: [trigger, complete, in_plan, in_lang, out_check]
+      out: check
+      backend: subprocess
+      command: ["python3", "-I", "tools/check_plan.py"]
+      parse: first_line
+      out_type: TEXT
+      timeout: 30
+      label: The last draft passes the checker?
+  - planned: {evaluate: "json_get(@in_check, 'ok') == TRUE", in: {check: final.check}}
+  - ready:   {output: {plan: planning.prior_plan, review: planning.feedback}, on: planned.pass}
+  - vague:   {output: {plan: planning.prior_plan, review: planning.feedback}, on: planned.fail, exit: vague}

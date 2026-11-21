@@ -109,6 +109,10 @@ plan delivers the spec. Fixes made: the plan separates the offline tests from th
 it must list `deliverables` with a `mechanism` and a `quality_bar` (checked by `check_plan.py`), and a model reviews each plan that passes the check against the spec before building starts.
 Then added: an `appraise` composite after the build that runs the finished product once on the plan's `demo` (offline, in the container, with an offline stand-in for any model) and has a model judge the output against each deliverable's quality bar, reworking a rejected product (max_appraisals). It catches structural failures (a listing, a missing feature, a crashing demo); it cannot judge the prose a real model would write.
 
+A second real run showed the plan loop taking its three rounds: the reviewer rejected two drafts (12 and 9 defects, partly polish such as `.gitignore` or default model ids) and approved the third, while
+the plan grew from 14 KB to 37 KB. Two changes: the reviewer is limited to 5 blocking defects and approves a plan without them; and running out of rounds is no longer fatal (the last draft that
+passes the checker is used and the objections are an output, `plan_review`); only a plan that never passes the checker ends in the `vague` exit.
+
 ## Next candidates (not committed to; say which)
 
 `code_parts` (already uses parts, but the top level is flat), `stock_analysis`, `doc_it`, `recipe_chain`, `pocketflow/*`, `hello_world`, `release_approval` (waits for a person), `guardrail`, `assembler`.

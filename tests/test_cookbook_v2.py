@@ -309,6 +309,20 @@ def test_a_plan_that_never_gets_good_ends_in_the_vague_exit_without_building(doc
     assert any(x["code"] == "E_PLAN_VAGUE" and x["use"] == "analyze" for x in load_graph(V2 / "code_pipeline" / "code_pipeline.graph.yaml")["_error_exits"])
 
 
+def test_a_reviewer_who_never_approves_does_not_stop_the_run(docker, tmp_path, monkeypatch):
+    """Out of plan rounds with the reviewer still unhappy: the last draft passed the checker, so it is used and the objections are reported."""
+    script = {1: GOOD_PLAN, 2: "[REVISE]\n1. first objection", 3: GOOD_PLAN, 4: "[REVISE]\n1. still not happy",
+              5: reply(CORE_OK, TEST), 6: reply(CLI_OK, CLI_TEST), 7: "[ACCEPTED]"}
+    rt, out, llm = run_new("code_pipeline", {**PARAMS, "max_plan_rounds": 2}, script, tmp_path, monkeypatch)
+    assert rt.loop_iterations["analyze__planning"] == 2 and rt.loop_iterations["build__tasks"] == 2          # built anyway
+    assert out["plan_review"].startswith("[REVISE]") and "still not happy" in out["plan_review"] and out["report"].lstrip().startswith("[PASSED]")
+
+
+def test_an_approving_reviewer_is_reported_as_approved(docker, tmp_path, monkeypatch):
+    rt, out, llm = run_new("code_pipeline", PARAMS, {1: GOOD_PLAN, 2: "[APPROVED]\nnote: fine", 3: reply(CORE_OK, TEST), 4: reply(CLI_OK, CLI_TEST), 5: "[ACCEPTED]"}, tmp_path, monkeypatch)
+    assert out["plan_review"].startswith("[APPROVED]")
+
+
 def test_a_planner_that_says_not_ready_is_asked_again(docker, tmp_path, monkeypatch):
     rt, out, llm = run_new("code_pipeline", PARAMS, {1: plan(T1, ready=False), 2: GOOD_PLAN, 3: "[APPROVED]", 4: reply(CORE_OK, TEST), 5: reply(CLI_OK, CLI_TEST), 6: "[ACCEPTED]"}, tmp_path, monkeypatch)
     assert rt.loop_iterations["analyze__planning"] == 2 and out["report"].lstrip().startswith("[PASSED]")

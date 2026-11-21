@@ -18,7 +18,8 @@ A **plan** is JSON: a `summary`, `assumptions`, `demo` (a command that runs the 
 `tools/check_plan.py` refuses a plan with thin descriptions, tasks without files or acceptance, a file owned by two tasks, a task depending on a later one, too many tasks, or (Python) no
 test file; its list of complaints is the next draft's feedback. A plan that passes is then **reviewed by a model against the spec** (`prompts/critique_plan.md`): every capability must have a task, a deliverable that
 needs prose or reasoning may not be a template that lists names (the product calls a model through an injectable interface; the tests use a fake), the acceptance tests must be able to fail.
-The reviewer's defects feed the next draft too. Each task's writer sees the plan's summary, its own task and the files written so far, so no reply is larger than one task.
+The reviewer's defects feed the next draft too. It reports at most 5 blocking defects (no polish, no features the spec does not ask for) and approves a plan with none; if the rounds run out with
+the reviewer still unhappy, the last draft that passed the checker is used anyway and the objections are given as the `plan_review` output. Each task's writer sees the plan's summary, its own task and the files written so far, so no reply is larger than one task.
 
 Outputs: `docs` (TEXT), `plan` (the build plan, JSON), `appraisal` (the verdict on the product's real output: `[ACCEPTED]`, or `[REWORK]` with the defects), `code` (FILES: real files in `.graf/codes/<run>/`, any layout, e.g. `backend/` and `frontend/`) and `report` (the last
 verification of the whole project, `[PASSED]` or `[FAILED]`). The run's other files (`result.json`, every node's output under `nodes/`: the drafts of the plan, each task's reply)

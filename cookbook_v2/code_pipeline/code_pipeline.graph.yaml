@@ -24,6 +24,7 @@ workflow:
   outputs:
     - {name: docs, type: TEXT}
     - {name: plan, type: TEXT}                          # the build plan (JSON)
+    - {name: plan_review, type: TEXT}                   # the plan reviewer's last word: [APPROVED], or the objections left when the rounds ran out
     - {name: code, type: FILES}                         # the project: real files in .graf/codes/<run>/
     - {name: report, type: TEXT}                        # what the last verification found
     - {name: appraisal, type: TEXT}                     # the verdict on the product's real output: [ACCEPTED], or [REWORK] with the defects
@@ -48,9 +49,9 @@ steps:
       out_type: TEXT
       timeout: 120
       label: Check the verify container
-  - analyze:    {use: parts.analyze, inherits: [spec, lang, reference, max_plan_rounds], out: [plan], ports: [vague]}
+  - analyze:    {use: parts.analyze, inherits: [spec, lang, reference, max_plan_rounds], out: [plan, review], ports: [vague]}
   - stop:       {node: RECOVER, on: analyze.vague, action: halt, message: "No usable build plan: the spec is too vague. Please refine and retry.", in: {message: analyze.plan}, out: error}
   - build:      {use: parts.build, on: analyze, inherits: [spec, lang, reference, smoke], in: {plan: analyze.plan}, out: [code, files, report]}
   - appraise:   {use: parts.appraise, inherits: [spec, lang, reference, smoke, max_appraisals], in: {plan: analyze.plan, files: build.files, report: build.report}, out: [code, files, report, appraisal]}
   - finish:     {use: parts.finish, inherits: [spec, check_closure], in: {code: appraise.code}, out: [docs]}
-  - done:       {output: {docs: finish.docs, plan: analyze.plan, code: appraise.files, report: appraise.report, appraisal: appraise.appraisal}}
+  - done:       {output: {docs: finish.docs, plan: analyze.plan, plan_review: analyze.review, code: appraise.files, report: appraise.report, appraisal: appraise.appraisal}}

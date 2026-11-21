@@ -12,7 +12,7 @@ Reference material (APIs and facts about libraries that the specification relies
 Your previous plan (empty on the first attempt):
 {{in_prior_plan}}
 
-What was wrong with it (empty on the first attempt; fix every point):
+What was wrong with it (empty on the first attempt; fix every point, change nothing else: keep every other part of the previous plan exactly as it was):
 {{in_feedback}}
 
 Reply with ONE JSON object and nothing else (no explanation, no code fence):
@@ -48,6 +48,7 @@ Reply with ONE JSON object and nothing else (no explanation, no code fence):
 }
 
 Rules:
+- Keep the plan compact: a `description` is at most about 120 words (what to implement, not the code); the plan guides the developer, it is not the implementation.
 - 3 to 10 tasks, ordered so that each task depends only on earlier ones (`depends_on` lists task ids). Start with the core library, then what builds on it (CLI, UI, converters), last the glue and the README.
 - Every task lists the files it writes (at most 5) and every file belongs to exactly one task. Use relative paths and a real package layout (a package folder with modules, a `tests/` folder), not one big file.
 - A task that writes code also writes the tests for it in the same task (`tests/test_*.py`), small and fast. The TESTS run offline in a sandbox, but the PRODUCT is not limited by that:
