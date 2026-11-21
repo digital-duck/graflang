@@ -329,7 +329,7 @@ def test_vis_src_dir_needs_edit_and_an_existing_folder(tmp_path):
 
 def test_the_picture_height_is_set_on_the_settings_page_and_used_by_the_pages(home, monkeypatch):
     seen = []
-    monkeypatch.setattr(ui, "show_graph", lambda graph, height=None: seen.append(height or ui.canvas_height()))
+    monkeypatch.setattr(ui, "show_graph", lambda graph, height=None, depth=None: seen.append(height or ui.canvas_height()))
     shutil.copytree(ROOT / "cookbook" / "self_refine", home / "apps" / "self_refine", ignore=shutil.ignore_patterns("output"))
     monkeypatch.setenv("GRAF_EDIT_FILE", str(home / "apps" / "self_refine" / "self_refine.graph.yaml"))
     at = AppTest.from_file(str(APP), default_timeout=30).run()

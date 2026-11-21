@@ -62,9 +62,10 @@ def hint(text: str) -> str:
     return text.replace("zinet[pyvis]", "graflang[vis]").replace("zinet[graphify]", "graflang[graphify]")
 
 
-def render(graph_data: Dict[str, Any], out: str | Path, engine: str = DEFAULT_ENGINE, default_layout: "str | None" = None) -> Tuple[Path, str, int]:
-    """Draw the workflow with `engine` into `out`. Returns (file, note, node count)."""
-    G, note = build(graph_data)
+def render(graph_data: Dict[str, Any], out: str | Path, engine: str = DEFAULT_ENGINE, default_layout: "str | None" = None,
+           depth: "int | None" = None) -> Tuple[Path, str, int]:
+    """Draw the workflow with `engine` into `out`; `depth` opens that many levels of composites and loop bodies (None: all). Returns (file, note, node count)."""
+    G, note = build(graph_data, depth)
     if not G.number_of_nodes():
         raise ValueError("nothing to draw: the workflow has no nodes")
     try:

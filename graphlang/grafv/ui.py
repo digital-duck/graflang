@@ -73,10 +73,10 @@ def canvas_height() -> int:
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
-def _graph_html(graph_json: str) -> str:
+def _graph_html(graph_json: str, depth: "int | None" = None) -> str:
     """The picture's page for a graph, made once per distinct graph (every click of the app reruns the script)."""
     with tempfile.TemporaryDirectory() as tmp:
-        path, _, _ = render(json.loads(graph_json), Path(tmp) / "view.html", "cytoscape", default_layout=PICTURE_LAYOUT)
+        path, _, _ = render(json.loads(graph_json), Path(tmp) / "view.html", "cytoscape", default_layout=PICTURE_LAYOUT, depth=depth)
         return path.read_text(encoding="utf-8")
 
 
@@ -124,11 +124,11 @@ def _listen_for_capture() -> None:
 _CAPTURE = None
 
 
-def show_graph(graph: Dict, height: "int | None" = None) -> None:
+def show_graph(graph: Dict, height: "int | None" = None, depth: "int | None" = None) -> None:
     height = height or canvas_height()
     _listen_for_capture()
     try:
-        html = _graph_html(json.dumps(graph, sort_keys=True, default=str))
+        html = _graph_html(json.dumps(graph, sort_keys=True, default=str), depth)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as e:      # also a missing graphviz program
         st.warning(f"cannot draw the graph yet: {e}")
         return

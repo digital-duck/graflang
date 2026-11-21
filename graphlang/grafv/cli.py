@@ -21,6 +21,8 @@ console = Console()
 @click.option("--list-engines", is_flag=True, help="show the engines and whether each is ready")
 @click.option("-o", "--out", type=click.Path(dir_okay=False), default=None,
               help="output file (default ~/.graflang/vis/<graph>-<engine>.<html|svg|mmd|txt>)")
+@click.option("--depth", type=click.IntRange(min=0), default=None,
+              help="open this many levels of composites and loop bodies (0: the top level only, each composite one node); default all")
 @click.option("--no-open", is_flag=True, help="write the file but do not open it")
 @click.option("--edit", is_flag=True, help="open the app instead: Create, Edit, Settings and Import/Export pages (saves only a valid graph, keeps "
                                            "your comments); needs `pip install 'graflang[edit]'`. GRAPH is optional with it")
@@ -30,7 +32,7 @@ console = Console()
 @click.option("--host", default="127.0.0.1", show_default=True,
               help="with --edit: the address the app listens on. The app has no login and can read your files and use your saved API keys, "
                    "so keep it on this computer; any other address is your decision")
-def cmd_vis(graph, engine, list_engines, out, no_open, edit, src_dir, host):
+def cmd_vis(graph, engine, list_engines, out, depth, no_open, edit, src_dir, host):
     """Draw a GraphLang workflow (GRAPH is the path to the .graph.yaml file) and open it."""
     if list_engines:
         for name, spec in ENGINES.items():
@@ -64,7 +66,7 @@ def cmd_vis(graph, engine, list_engines, out, no_open, edit, src_dir, host):
     stem = graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
     target = Path(out) if out else Path.home() / ".graflang" / "vis" / f"{stem}-{engine}{ENGINES[engine]['ext']}"
     try:
-        path, note, n = render(graph_data, target, engine)
+        path, note, n = render(graph_data, target, engine, depth=depth)
     except (ValueError, RuntimeError) as e:
         console.print(f"[red]✗ Could not draw:[/red] {escape(str(e))}")
         sys.exit(1)

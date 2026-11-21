@@ -491,3 +491,18 @@ def test_group_nodes_into_a_composite_then_undo_removes_the_folder(tmp_path, mon
     button(app, "undo").click().run()
     assert not app.exception and not (tmp_path / "tail").exists()
     assert graph.read_text() == SRC                                      # the graph file was never touched
+
+
+def test_the_levels_choice_opens_a_composite_without_error(tmp_path, monkeypatch):
+    from test_group import SRC
+    graph = tmp_path / "calc.graph.yaml"
+    graph.write_text(SRC)
+    monkeypatch.setenv("GRAF_EDIT_FILE", str(graph))
+    monkeypatch.setenv("GRAF_PLAIN_EDITOR", "1")
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    app.multiselect(key="group_ids").select("b").select("c").run()
+    app.text_input(key="group_name").set_value("tail").run()
+    button(app, "group_go").click().run()
+    for choice in ("Top level", "1 level down", "All levels", "As written"):
+        app.selectbox(key="canvas_levels").select(choice).run()
+        assert not app.exception and not app.warning, (choice, app.exception, [w.value for w in app.warning])

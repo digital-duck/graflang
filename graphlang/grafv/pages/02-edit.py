@@ -70,12 +70,28 @@ def attempt(action, success: str = "") -> bool:
     return True
 
 
+NOT_EXPANDED = object()
+LEVELS = {"As written": NOT_EXPANDED, "Top level": 0, "1 level down": 1, "2 levels down": 2, "All levels": None}
+
+
 def picture(editor: GraphEditor) -> None:
     view = st.radio("Canvas", ["Graph", "graf compact", "graf expand"], horizontal=True, key="canvas_view", label_visibility="collapsed",
                     help="Graph: the picture. graf compact / graf expand: the file as text in the short `steps:` form or the long "
                          "`nodes:`/`edges:` form, worked out in memory; nothing is written unless you press the save button.")
     if view == "Graph":
-        ui.show_graph(editor.data())
+        levels = st.selectbox("Levels", list(LEVELS), key="canvas_levels", label_visibility="collapsed",
+                              help="As written: a composite is one node. The others open the composites (parts) and loop bodies that many levels down.")
+        graph = editor.data()
+        if LEVELS[str(levels)] is not NOT_EXPANDED:
+            from graphlang.grafr.parts import PartError, flatten_parts
+            import copy
+            graph = copy.deepcopy(graph)
+            try:
+                flatten_parts(graph, Path(graph["_source_dir"]))
+            except PartError as e:
+                st.warning(f"cannot open the composites: {e}")
+                graph = editor.data()
+        ui.show_graph(graph, depth=None if LEVELS[str(levels)] is NOT_EXPANDED else LEVELS[str(levels)])
         return
     compact = view == "graf compact"
     long_text, _ = editor.form_text(False)

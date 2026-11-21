@@ -123,9 +123,50 @@ def _add(G: nx.MultiDiGraph, nodes: List[Dict], edges: List[Dict], prefix: str, 
             _add(G, sub.get("nodes", []), sub.get("edges", []), qid + "/", qid, notes)
 
 
-def build(graph_data: Dict[str, Any]) -> Tuple[nx.MultiDiGraph, str]:
-    """The workflow as a graph, and a one-line note on anything that could not be drawn."""
+def _level(G: nx.MultiDiGraph, node: str) -> int:
+    """How many boxes (composites, LOOP bodies) enclose the node: 0 at the top level."""
+    n = 0
+    while (node := G.nodes[node].get("parent")) is not None:
+        n += 1
+    return n
+
+
+def collapse(G: nx.MultiDiGraph, depth: int) -> None:
+    """Show `depth` levels: every box with `depth` or more boxes around it becomes a single node (its body hidden, its links kept).
+    `depth=0` draws the top level only, each composite as one node; `depth=1` opens those and closes the ones inside them."""
+    boxes = sorted({d["parent"] for _, d in G.nodes(data=True) if d.get("parent")}, key=lambda b: _level(G, b))
+    for box in boxes:
+        if box not in G or _level(G, box) < depth:
+            continue
+        inside = [n for n in G.nodes if n != box and _is_inside(G, n, box)]
+        if not inside:
+            continue
+        links = []
+        for u, v, d in G.edges(data=True):
+            if (u in inside) != (v in inside):                     # a link across the box's edge now ends at the box
+                a, b = (box if u in inside else u), (box if v in inside else v)
+                if a != b:
+                    links.append((a, b, d["relation"]))
+        G.remove_nodes_from(inside)
+        for a, b, relation in dict.fromkeys(links):
+            G.add_edge(a, b, relation=relation, sport="", tport="", label="")
+        G.nodes[box]["label"] = f"{G.nodes[box].get('label', box)} · {len(inside)} node{'s' if len(inside) != 1 else ''}"
+        G.nodes[box]["collapsed_nodes"] = len(inside)
+
+
+def _is_inside(G: nx.MultiDiGraph, node: str, box: str) -> bool:
+    while (node := G.nodes[node].get("parent")) is not None:
+        if node == box:
+            return True
+    return False
+
+
+def build(graph_data: Dict[str, Any], depth: "int | None" = None) -> Tuple[nx.MultiDiGraph, str]:
+    """The workflow as a graph, and a one-line note on anything that could not be drawn. `depth` limits how many levels of composites and
+    loop bodies are opened (None: all)."""
     G = nx.MultiDiGraph(name=graph_data.get("workflow", {}).get("name", "workflow"))
     notes: List[str] = []
     _add(G, graph_data.get("nodes", []), graph_data.get("edges", []), "", None, notes, graph_data.get("_part_of"))
+    if depth is not None:
+        collapse(G, int(depth))
     return G, "; ".join(notes)

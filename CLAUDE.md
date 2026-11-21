@@ -28,7 +28,7 @@ graf ungroup <graph.yaml> --node N   # the inverse: the composite's nodes back i
 graf prettier <graph.yaml> [-o FILE]  # code/prompt_inline/expression/condition/result as YAML block scalars; every value read back and compared, text in flow-style {..} left alone (grafc/prettier.py)
 graf trace [LOG] [--format tree|otlp] [-o FILE]   # a run's .jsonl log as a timeline or OpenTelemetry spans (grafr/trace.py)
 graf watch <graph.yaml> [--every S] [--times N] [graf run options]   # run it on a schedule, one process per run; `graf run --stream` prints each node as it finishes
-graf vis <graph.yaml> [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o FILE] [--no-open]   # draw the workflow (default ~/.graflang/vis/); `python -m graphlang ...` also works
+graf vis <graph.yaml> [--engine cytoscape|graphviz|pyvis|graphify|mermaid] [-o FILE] [--depth N] [--no-open]   # draw the workflow (--depth N opens N levels of composites and loop bodies, the rest one node each: grafv/model.py `collapse`; the editor canvas has a Levels choice) (default ~/.graflang/vis/); `python -m graphlang ...` also works
 ```
 
 `graf` is one `click` group (`main` in `graphlang/cli.py`); each command lives in its package (`grafr/cli.py`: run/validate/info, `grafc/cli.py`: compile/check, `grafv/cli.py`: vis) as a plain `@click.command("name")` and is registered in `graphlang/cli.py`. There are no `grafr`/`grafc` console scripts. Imports in tests must be `graphlang.grafr...` / `graphlang.grafc...`. Tests under `tests/test_cedar_compiler.py` and `test_policy_slicer.py` exercise the hand-written Cedar compiler and have known failures (gap #18).
