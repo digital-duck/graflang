@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("spl", reason="procedure_ref nodes need SPL.py importable")
+import importlib.util
+
+needs_spl = pytest.mark.skipif(importlib.util.find_spec("spl") is None, reason="procedure_ref nodes (the code_pipeline_spl port) need SPL.py importable")
 
 from graphlang.grafr.adapters import make_llm
 from graphlang.grafr.runtime import GraphLangRuntime, load_graph
@@ -36,6 +38,7 @@ def run(path, adapter, params, cwd, monkeypatch):
     return rt, rt.execute(params)
 
 
+@needs_spl
 @pytest.mark.parametrize("params", [{"spec": "add two numbers", "max_cycles": 2, "check_closure": True},
                                     {"spec": "add two numbers", "max_cycles": 1, "check_closure": False}], ids=["with-closure-check", "without"])
 def test_the_layered_pipeline_gives_the_same_output_and_runs_the_same_steps(params, tmp_path, monkeypatch):
@@ -49,6 +52,7 @@ def test_the_layered_pipeline_gives_the_same_output_and_runs_the_same_steps(para
     assert new.loop_iterations["build__attempts"] == old.loop_iterations["test_gated_loop"]
 
 
+@needs_spl
 def test_a_vague_spec_stops_the_run_in_both_and_the_layered_one_names_the_cause(tmp_path, monkeypatch):
     """The mock adapter's analysis has no [READY]: the gate fails. The original aborts through its RECOVER node; the layered one leaves the
     `understand` composite by its `vague` error exit, which carries the code E_SPEC_VAGUE and its catalogue text."""
@@ -62,6 +66,7 @@ def test_a_vague_spec_stops_the_run_in_both_and_the_layered_one_names_the_cause(
     assert exit_info["use"] == "understand" and "too vague" in exit_info["description"] and exit_info["remedy"]
 
 
+@needs_spl
 def test_the_layered_pipeline_reads_as_three_composites():
     from graphlang.grafv.model import build
     top, _ = build(load_graph(LAYERED), 0)
@@ -297,7 +302,7 @@ def test_the_plan_heals_itself_and_the_project_is_built_task_by_task(docker, tmp
     assert "Task t1 of 2" in prompts[5] and "(nothing written yet)" in prompts[5]                          # task 1 sees its own task, no files yet
     assert "Task t2 of 2" in prompts[6] and "=== FILE: demo/core.py ===" in prompts[6]                     # task 2 sees what task 1 wrote
     assert "FAILED" in prompts[7] and "Task t2" in prompts[7] and "=== FILE: demo/cli.py ===" in prompts[7]     # the fix pass sees the failure and the project
-    assert out["report"].lstrip().startswith("[PASSED]") and llm.calls == 9 and out["appraisal"].startswith("[ACCEPTED]")
+    assert out["report"].lstrip().startswith("[PASSED]") and llm.calls == 10 and out["appraisal"].startswith("[ACCEPTED]")
     assert "a demanding reviewer of a finished software product" in prompts[8] and '"out/x.txt": "HI!"' in prompts[8]       # the judge saw what the demo really wrote
     assert set(out["code"]) >= {"demo/core.py", "demo/cli.py", "demo/__init__.py", "tests/test_core.py", "tests/test_cli.py", "tests/__init__.py", "README.md"}
     assert out["code"]["demo/cli.py"] == CLI_OK[1] and json.loads(out["plan"])["tasks"][1]["id"] == "t2" and out["docs"]
@@ -331,7 +336,7 @@ def test_a_planner_that_says_not_ready_is_asked_again(docker, tmp_path, monkeypa
 def test_a_task_the_fix_cannot_repair_goes_on_and_the_report_says_failed(docker, tmp_path, monkeypatch):
     script = {1: GOOD_PLAN, 2: "[APPROVED]", 3: reply(CORE_OK, TEST), 4: reply(CLI_BAD, CLI_TEST), 5: reply(CLI_BAD), 6: "[ACCEPTED]"}
     rt, out, llm = run_new("code_pipeline", PARAMS, script, tmp_path, monkeypatch)
-    assert llm.calls == 6 and out["report"].lstrip().startswith("[FAILED]") and "demo/cli.py" in out["code"]
+    assert llm.calls == 7 and out["report"].lstrip().startswith("[FAILED]") and "demo/cli.py" in out["code"]
 
 
 def test_a_reply_without_file_markers_goes_into_the_tasks_first_file(docker, tmp_path, monkeypatch):
@@ -366,7 +371,7 @@ def test_a_rejected_product_is_reworked_and_judged_again(docker, tmp_path, monke
     llm = Recording(script)
     rt = GraphLangRuntime(load_graph(graph), llm=llm, verbose=False)
     out = rt.execute(dict(PARAMS))
-    assert rt.loop_iterations["appraise__appraisals"] == 2 and llm.calls == 7
+    assert rt.loop_iterations["appraise__appraisals"] == 2 and llm.calls == 8
     assert "the output is a bare uppercase word" in prompts[5] and "=== FILE: demo/cli.py ===" in prompts[5] and '"out/x.txt": "HI!"' in prompts[5]     # the developer sees defects, project and demo output
     assert out["appraisal"].startswith("[ACCEPTED]") and out["code"]["demo/cli.py"].endswith("'!!'\n") and out["report"].lstrip().startswith("[PASSED]")
     assert '"out/x.txt": "HI!!"' in prompts[6]                                         # the second appraisal saw the reworked product's output
@@ -451,3 +456,11 @@ def test_collect_files_adds_to_the_project_and_replaces_a_file_of_the_same_path(
     old = {"a/x.py": "old\n", "b.txt": "keep\n", "README.md": "# mine\n"}
     got = tool("collect_files.py", {"text": reply(("a/x.py", "new\n"), ("a/y.py", "y\n")), "lang": "python", "spec": "s", "files": old})
     assert got["a/x.py"] == "new\n" and got["a/y.py"] == "y\n" and got["b.txt"] == "keep\n" and got["README.md"] == "# mine\n" and "a/__init__.py" in got
+
+
+def test_code_pipeline_is_self_contained_no_spl_procedures():
+    """finish writes the docs and the closure check with prompts: no procedure_ref and no .spl file anywhere in the recipe, so SPL.py is not needed."""
+    folder = V2 / "code_pipeline"
+    assert not list(folder.rglob("*.spl"))
+    for graph in folder.rglob("*.graph.yaml"):
+        assert "procedure_ref" not in graph.read_text(encoding="utf-8"), graph

@@ -9,15 +9,12 @@ workflow:
   outputs:
     - {name: docs, type: TEXT}
 resources:
-  procedures:
-    document_code: ./05_document_code.spl
-    extract_spec: ./06_extract_spec.spl
-    spec_judge: ./07_spec_judge.spl
+  prompts: {document: ./prompts/document.md, extract_spec: ./prompts/extract_spec.md, judge: ./prompts/judge.md}
 steps:
-  - document: {node: GENERATE, procedure_ref: procedures.document_code, in: {code: $in.code, spec: $in.spec}, out: docs}
-  - extract:  {node: GENERATE, procedure_ref: procedures.extract_spec, in: {code: $in.code}, out: extracted_spec}
+  - document: {generate: prompts.document, in: {code: $in.code, spec: $in.spec}, out: docs}
   - closure:  {evaluate: "@in_check_closure == TRUE", in: {check_closure: $in.check_closure}}
-  - judge:    {node: GENERATE, procedure_ref: procedures.spec_judge, on: closure.pass, params: {spec: in_orig_spec, out_spec: in_derived_spec}, in: {orig_spec: $in.spec, derived_spec: extract.extracted_spec}, out: closure_report}
+  - extract:  {generate: prompts.extract_spec, on: closure.pass, in: {code: $in.code}, out: extracted_spec}
+  - judge:    {generate: prompts.judge, on: closure.pass, in: {orig_spec: $in.spec, derived_spec: extract.extracted_spec}, out: closure_report}
   - merge:    {node: CONTEXT, action: append, target_key: final_docs, in: {base: document.docs, appendage: judge.closure_report}, out: merged}
   - checked:  {output: {docs: merge.merged}}
   - skipped:  {output: {docs: document.docs}, on: closure.fail}

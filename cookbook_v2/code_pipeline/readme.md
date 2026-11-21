@@ -10,7 +10,7 @@ code_pipeline.graph.yaml     preflight -> analyze -> build -> appraise -> finish
   build/                     a loop over the plan's tasks: write the task's files, merge them into the project, RUN the whole project in a container, one fix pass if it fails
   appraise/                  run the finished product once on the plan's demo (offline, in the container, with an offline stand-in for any model) and have a model judge what it
                              wrote against each deliverable's quality bar; a rejected product is reworked and appraised again (max_appraisals)
-  finish/                    document the code, then optionally derive a spec back from it and judge it against the original (SPL procedures 05-07; needs SPL.py)
+  finish/                    document the code, then optionally derive a spec back from it and judge it against the original (three prompts in `finish/prompts/`; no SPL.py needed)
 tools/                       check_plan.py, run_demo.py, task_context.py, collect_files.py (split a reply into files and merge them), render_files.py, verify_project.py, verify.Dockerfile
 ```
 
