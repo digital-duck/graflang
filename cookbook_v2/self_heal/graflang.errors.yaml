@@ -1,0 +1,5 @@
+errors:
+  - code: E_STILL_INVALID
+    description: the record still fails the check after the allowed healing rounds
+    cause: name or email stayed empty after every fix
+    remedy: raise max_rounds, or read the text, which may not hold a name and an email

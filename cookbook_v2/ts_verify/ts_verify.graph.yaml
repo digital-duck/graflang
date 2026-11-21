@@ -1,0 +1,30 @@
+# ts_verify (layered): `repair` is the write / type-check / run-the-cases loop; the top level only starts it and turns its result into the report.
+#   needs Node 22.18+ and `npm install` in this folder (type checking). The tools stay in tools/ here: a command runs from the top graph's folder.
+version: "1.0-graph"
+workflow:
+  name: ts_verify
+  description: An LLM writes a TypeScript function; the TypeScript compiler and a test runner judge it, and their errors drive the retries; then a Python tool cleans the code and writes the report.
+  inputs:
+    - {name: spec, type: TEXT}
+    - {name: function, type: TEXT}                 # the name the function must export
+    - {name: cases, type: TEXT}                    # test cases as JSON, or a path (relative paths start in this folder)
+    - {name: check_types, type: BOOL, default: true}
+    - {name: max_cycles, type: INTEGER, default: 3}
+  outputs:
+    - {name: result, type: JSON}                   # {passed, attempts, code, report}
+resources:
+  parts:
+    repair: ./repair/repair.graph.yaml
+steps:
+  - repair: {use: parts.repair, inherits: [spec, function, cases, check_types, max_cycles], out: [final_code, passed, attempts, type_report, case_report]}
+  - finalize:
+      node: SOLVE
+      in: {code: repair.final_code, passed: repair.passed, type_report: repair.type_report, case_report: repair.case_report, attempts: repair.attempts}
+      ports: [trigger, complete, in_code, in_passed, in_type_report, in_case_report, in_attempts, out_result]
+      out: result
+      backend: subprocess
+      command: ["python3", "-I", "tools/finalize.py"]
+      out_type: JSON
+      timeout: 30
+      label: Clean code and report (Python)
+  - done: {output: finalize.result}

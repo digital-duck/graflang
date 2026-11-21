@@ -1,0 +1,5 @@
+errors:
+  - code: E_NO_ANSWER
+    description: the agent used all its steps without answering
+    cause: every round the model asked to read another note
+    remedy: raise max_steps, or make the question narrower

@@ -1,0 +1,36 @@
+version: "1.0-graph"
+workflow:
+  name: research
+  description: Each round the model decides to read one of the listed notes (pricing, holidays, contacts) or to answer. What it read is added to its history and recorded. Ends in the error exit `gave_up` when it never answers.
+  inputs:
+    - {name: question, type: TEXT}
+    - {name: max_steps, type: INTEGER, default: 4}
+  outputs:
+    - {name: answer, type: TEXT}
+  errors:
+    - {name: gave_up, code: E_NO_ANSWER, description: no answer within max_steps rounds}
+resources:
+  prompts:
+    decide: ./prompts/decide.md
+steps:
+  - seed: {solve: '"(nothing read yet)"', out: history}
+  - agent:
+      loop: "@in_max_steps"
+      while: "NOT @done"
+      in: {max_steps: $in.max_steps, question: $in.question, history: seed.history, answer: ""}
+      state:
+        history: {from: add.history}
+        answer: {from: finish.answer}
+      out:
+        done: {fired: wants_read.fail}
+      steps:
+        - decide: {generate: prompts.decide, in: {question: $loop.question, history: $loop.history}, out: decision}
+        - wants_read: {evaluate: "json_get(@in_decision, 'action') == 'read' AND json_get(@in_decision, 'file') in ['pricing.md', 'holidays.md', 'contacts.md']", in: {decision: decide.decision}}
+        - path: {solve: "'notes/' + json_get(@in_decision, 'file')", on: wants_read.pass, in: {decision: decide.decision}, out: file}
+        - look: {node: QUERY, in: {file: path.file}, ports: [in_file, out_note], out: note, format: text, max_bytes: 20000, default: "(no such note)"}
+        - seen: {node: OBSERVE, in: {note: look.note}, ports: [in_note, out_note], out: note, label: "note read"}
+        - add: {solve: '@in_history + "\n--- " + json_get(@in_decision, "file") + " ---\n" + @in_note', in: {history: $loop.history, decision: decide.decision, note: seen.note}, out: history}
+        - finish: {solve: "json_get(@in_decision, 'text')", on: wants_read.fail, in: {decision: decide.decision}, out: answer}
+  - answered: {evaluate: "NOT is_empty(@in_answer)", in: {answer: agent.answer}}
+  - found:    {output: {answer: agent.answer}, on: answered.pass}
+  - gave_up:  {output: {answer: agent.answer}, on: answered.fail, exit: gave_up}

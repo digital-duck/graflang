@@ -1,0 +1,17 @@
+version: "1.0-graph"
+workflow:
+  name: outline
+  description: Plans the book as a numbered list of chapters.
+  inputs:
+    - {name: subject, type: TEXT}
+    - {name: num_chapters, type: INTEGER, default: 5}
+    - {name: audience, type: TEXT, default: intro}
+    - {name: style, type: TEXT}
+  outputs:
+    - {name: outline, type: TEXT}
+resources:
+  prompts:
+    outline: ./prompts/outline.md
+steps:
+  - outline: {generate: prompts.outline, in: {subject: $in.subject, num_chapters: $in.num_chapters, audience: $in.audience, style: $in.style}, out: outline}
+  - done: {output: outline.outline}

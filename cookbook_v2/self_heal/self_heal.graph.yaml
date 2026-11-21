@@ -1,0 +1,22 @@
+# self_heal (layered): extract a record, then heal it in rounds until it passes the check.
+version: "1.0-graph"
+workflow:
+  name: self_heal
+  description: A model extracts a record (name, email) from text; a check judges it and a fixing model repairs it, round by round, until it is valid or the rounds run out.
+  inputs:
+    - {name: text, type: TEXT}
+    - {name: max_rounds, type: INTEGER, default: 3}
+  outputs:
+    - {name: record, type: TEXT}
+    - {name: status, type: TEXT}
+resources:
+  parts:
+    extract: ./extract/extract.graph.yaml
+    heal: ./heal/heal.graph.yaml
+steps:
+  - extract: {use: parts.extract, inherits: [text], out: [raw]}
+  - heal:    {use: parts.heal, inherits: [text, max_rounds], in: {raw: extract.raw}, out: [record], ports: [invalid]}
+  - good:    {solve: "'valid'", out: status}
+  - good_out: {output: {record: heal.record, status: good.status}, on: good}
+  - bad:     {solve: "'still invalid after ' + str(@in_n) + ' rounds; the last attempt is shown'", on: heal.invalid, in: {n: $in.max_rounds}, out: status}
+  - bad_out: {output: {record: heal.record, status: bad.status}, on: bad}

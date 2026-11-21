@@ -1,0 +1,11 @@
+version: "1.0-graph"
+workflow:
+  name: recall
+  description: Reads the last 8 turns from the memory file (empty when there is none yet).
+  inputs:
+    - {name: memory_file, type: TEXT}
+  outputs:
+    - {name: memory, type: TEXT}
+steps:
+  - recall: {node: QUERY, ports: [in_file, out_memory], in: {file: $in.memory_file}, format: text, tail: 8, default: "", out: memory, label: Recall the last turns}
+  - done: {output: recall.memory}

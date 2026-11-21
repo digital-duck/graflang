@@ -1,0 +1,32 @@
+version: "1.0-graph"
+workflow:
+  name: supervise
+  description: The first answer, then rounds of review and retry until the supervisor says APPROVED. Ends in the error exit `unapproved` (with the last attempt) when the rounds run out.
+  inputs:
+    - {name: question, type: TEXT}
+    - {name: max_rounds, type: INTEGER, default: 3}
+  outputs:
+    - {name: answer, type: TEXT}
+  errors:
+    - {name: unapproved, code: E_NOT_APPROVED, description: not approved within max_rounds}
+resources:
+  prompts:
+    worker: ./prompts/worker.md
+    supervise: ./prompts/supervise.md
+steps:
+  - first: {generate: prompts.worker, in: {question: $in.question, notes: "(no earlier attempt)"}, out: answer}
+  - rounds:
+      loop: "@in_max_rounds"
+      while: "NOT @approved"
+      in: {max_rounds: $in.max_rounds, question: $in.question, answer: first.answer}
+      state:
+        answer: {from: retry.answer}
+      out:
+        approved: {fired: ok.pass}
+      steps:
+        - review: {generate: prompts.supervise, in: {question: $loop.question, answer: $loop.answer}, out: notes}
+        - ok:     {evaluate: "contains(@in_notes, 'APPROVED')", in: {notes: review.notes}}
+        - retry:  {generate: prompts.worker, on: ok.fail, in: {question: $loop.question, notes: review.notes}, out: answer}
+  - passed:   {evaluate: "@in_approved == TRUE", in: {approved: rounds.approved}}
+  - approved:   {output: {answer: rounds.answer}, on: passed.pass}
+  - unapproved: {output: {answer: rounds.answer}, on: passed.fail, exit: unapproved}

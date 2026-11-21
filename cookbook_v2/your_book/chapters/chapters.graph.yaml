@@ -1,0 +1,32 @@
+version: "1.0-graph"
+workflow:
+  name: chapters
+  description: Writes the chapters one per round. Each is reviewed by a model and rewritten when the reviewer asks for a revision; the round keeps the revision if there is one, else the chapter as first written.
+  inputs:
+    - {name: outline, type: TEXT}
+    - {name: subject, type: TEXT}
+    - {name: num_chapters, type: INTEGER, default: 5}
+    - {name: audience, type: TEXT, default: intro}
+    - {name: style, type: TEXT}
+  outputs:
+    - {name: chapters, type: JSON}
+resources:
+  prompts:
+    chapter: ./prompts/chapter.md
+    review: ./prompts/review.md
+    revise: ./prompts/revise.md
+steps:
+  - chapters:
+      loop: "@in_num_chapters"
+      while: "@chapter_index < @in_num_chapters"
+      index: chapter_index
+      in: {outline: $in.outline, subject: $in.subject, num_chapters: $in.num_chapters, audience: $in.audience, style: $in.style}
+      out:
+        chapters: {collect: [write.chapter, revise.chapter]}
+      steps:
+        - number:  {solve: "@in_chapter_index + 1", in: {chapter_index: $loop.chapter_index}, out: number}        # the counter is 0-based, the outline says "Chapter 1"
+        - write:   {generate: prompts.chapter, in: {outline: $loop.outline, chapter_number: number.number, num_chapters: $loop.num_chapters, subject: $loop.subject, audience: $loop.audience, style: $loop.style}, out: chapter}
+        - review:  {generate: prompts.review, in: {chapter: write.chapter, chapter_number: number.number, audience: $loop.audience, style: $loop.style}, out: verdict}
+        - needs_revision: {evaluate: "contains(upper(@in_verdict), 'REVISION_NEEDED')", in: {verdict: review.verdict}}
+        - revise:  {generate: prompts.revise, on: needs_revision.pass, in: {chapter: write.chapter, verdict: review.verdict, subject: $loop.subject, outline: $loop.outline, audience: $loop.audience, style: $loop.style}, out: chapter}
+  - done: {output: chapters.chapters}

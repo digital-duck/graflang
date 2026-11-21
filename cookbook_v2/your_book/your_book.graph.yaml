@@ -1,0 +1,22 @@
+# your_book (layered): outline, then the chapters one at a time (each written, reviewed, revised if asked), then the compiled book.
+version: "1.0-graph"
+workflow:
+  name: your_book
+  description: Writes a book on a subject for an audience, chapter by chapter, with a review and a revision pass on each chapter.
+  inputs:
+    - {name: subject, type: TEXT}
+    - {name: audience, type: TEXT, default: intro}          # intro | intermediate | advanced | research
+    - {name: style, type: TEXT, default: "clear and conversational, with concrete examples"}
+    - {name: num_chapters, type: INTEGER, default: 5}
+  outputs:
+    - {name: book, type: TEXT}
+resources:
+  parts:
+    outline: ./outline/outline.graph.yaml
+    chapters: ./chapters/chapters.graph.yaml
+    compile: ./compile/compile.graph.yaml
+steps:
+  - outline:  {use: parts.outline, inherits: [subject, num_chapters, audience, style], out: [outline]}
+  - chapters: {use: parts.chapters, inherits: [subject, num_chapters, audience, style], in: {outline: outline.outline}, out: [chapters]}
+  - compile:  {use: parts.compile, inherits: [subject, audience, style], in: {outline: outline.outline, chapters: chapters.chapters}, out: [book]}
+  - done:     {output: compile.book}

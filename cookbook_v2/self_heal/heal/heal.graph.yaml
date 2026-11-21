@@ -1,0 +1,30 @@
+version: "1.0-graph"
+workflow:
+  name: heal
+  description: Checks the record (name and email must be filled); while it fails, a model fixes it, up to max_rounds. Ends in the error exit `invalid` with the last attempt when still failing.
+  inputs:
+    - {name: text, type: TEXT}
+    - {name: raw, type: TEXT}
+    - {name: max_rounds, type: INTEGER, default: 3}
+  outputs:
+    - {name: record, type: TEXT}
+  errors:
+    - {name: invalid, code: E_STILL_INVALID, description: still invalid after max_rounds}
+resources:
+  prompts:
+    fix: ./prompts/fix.md
+steps:
+  - heal:
+      loop: "@in_max_rounds"
+      while: "NOT @valid"
+      in: {max_rounds: $in.max_rounds, text: $in.text, raw: $in.raw}
+      state:
+        raw: {from: again.raw}
+      out:
+        valid: {fired: check.pass}
+      steps:
+        - check: {evaluate: "json_get(@in_raw, 'name') != '' AND json_get(@in_raw, 'email') != ''", in: {raw: $loop.raw}}
+        - again: {generate: prompts.fix, on: check.fail, in: {text: $loop.text, raw: $loop.raw}, out: raw}
+  - passed:  {evaluate: "@in_valid == TRUE", in: {valid: heal.valid}}
+  - valid:   {output: {record: heal.raw}, on: passed.pass}
+  - invalid: {output: {record: heal.raw}, on: passed.fail, exit: invalid}

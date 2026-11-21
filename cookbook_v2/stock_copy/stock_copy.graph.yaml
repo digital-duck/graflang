@@ -1,0 +1,18 @@
+# stock_copy (layered): gather one insight line per ticker (a loop over the tickers), then write the report from them.
+version: "1.0-graph"
+workflow:
+  name: stock_copy
+  description: Fetches a few weeks of prices for each ticker, computes metrics with plain Python, has a model interpret each, then writes one report across them.
+  inputs:
+    - {name: tickers, type: TEXT, default: "AAPL,META,GOOG,CRM"}
+    - {name: days, type: INTEGER, default: 30}
+  outputs:
+    - {name: report, type: TEXT}
+resources:
+  parts:
+    gather: ./gather/gather.graph.yaml
+    report: ./report/report.graph.yaml
+steps:
+  - gather: {use: parts.gather, inherits: [tickers, days], out: [state]}
+  - report: {use: parts.report, inherits: [tickers, days], in: {state: gather.state}, out: [report]}
+  - done:   {output: report.report}

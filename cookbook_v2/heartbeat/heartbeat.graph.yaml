@@ -1,0 +1,24 @@
+# heartbeat (layered): one beat. Ask the policy, look for new messages, and only when there are some, summarise, announce and remember how many were seen.
+version: "1.0-graph"
+workflow:
+  name: heartbeat
+  description: "One beat of a watcher. It reads a message file, and if it grew since the last beat, summarises the new messages, prints and logs the summary, and remembers the count."
+  inputs:
+    - {name: inbox, type: TEXT, default: "input/inbox.md", description: "the file to watch (a message per line)"}
+    - {name: state_file, type: TEXT, default: "output/state.txt", description: "where the count of messages seen is kept"}
+  outputs:
+    - {name: status, type: TEXT, description: "what this beat found"}
+resources:
+  parts:
+    news: ./news/news.graph.yaml
+    announce: ./announce/announce.graph.yaml
+  policies:
+    watch: ./policies/watch.cedar
+steps:
+  - allowed:  {guard: policies.watch, principal: 'Service::"heartbeat"', action: 'Action::"watch"', resource: 'File::"inbox"', context_mapping: {}}
+  - news:     {use: parts.news, on: allowed.allow, inherits: [inbox, state_file], out: [lines, count, new], ports: [quiet]}
+  - announce: {use: parts.announce, inherits: [state_file], in: {lines: news.lines, count: news.count, new: news.new}, out: [summary]}
+  - fresh:    {solve: "'new: ' + @in_summary", in: {summary: announce.summary}, out: status}
+  - reported: {output: fresh.status}
+  - quiet:    {solve: "'nothing new (' + str(@in_count) + ' messages)'", on: news.quiet, in: {count: news.count}, out: status}
+  - idle:     {output: quiet.status, on: quiet}

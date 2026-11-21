@@ -1,0 +1,13 @@
+version: "1.0-graph"
+workflow:
+  name: publish
+  description: Saves the digest to output/digest.md (next to this file) and prints it.
+  inputs:
+    - {name: digest, type: TEXT}
+  outputs:
+    - {name: digest, type: TEXT}
+steps:
+  - save: {node: EMIT, channel: file, file: "output/digest.md", mode: write, in: {content: $in.digest}, out: receipt, label: Save the digest}
+  - show: {node: EMIT, channel: stdout, in: {content: $in.digest}, out: receipt, label: Print the digest}
+  - same: {solve: "@in_digest", in: {digest: $in.digest}, out: digest}        # an input cannot go straight to the OUTPUT
+  - done: {output: same.digest}

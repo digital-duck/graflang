@@ -1,0 +1,20 @@
+# supervisor (layered): the worker answers and a supervisor reviews; the whole review loop is one composite whose outcome is approved or an error exit.
+version: "1.0-graph"
+workflow:
+  name: supervisor
+  description: A worker model answers; a supervisor model reviews; the worker retries with the supervisor's notes until approved or out of rounds.
+  inputs:
+    - {name: question, type: TEXT}
+    - {name: max_rounds, type: INTEGER, default: 3}
+  outputs:
+    - {name: answer, type: TEXT}
+    - {name: status, type: TEXT}
+resources:
+  parts:
+    supervise: ./supervise/supervise.graph.yaml
+steps:
+  - supervise: {use: parts.supervise, inherits: [question, max_rounds], out: [answer], ports: [unapproved]}
+  - good:      {solve: "'approved by the supervisor'", out: status}
+  - good_out:  {output: {answer: supervise.answer, status: good.status}, on: good}
+  - bad:       {solve: "'not approved after ' + str(@in_n) + ' rounds; the last attempt is shown'", on: supervise.unapproved, in: {n: $in.max_rounds}, out: status}
+  - bad_out:   {output: {answer: supervise.answer, status: bad.status}, on: bad}

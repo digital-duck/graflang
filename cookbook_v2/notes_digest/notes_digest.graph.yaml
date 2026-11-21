@@ -1,0 +1,21 @@
+# notes_digest (layered): policy guard, read the notes, write the digest, publish it (save and print).
+version: "1.0-graph"
+workflow:
+  name: notes_digest
+  description: Reads a notes file, has a model write a digest of it, records the digest, saves it to output/digest.md and prints it. Everything that touches a file sits behind a Cedar guard.
+  inputs: []
+  outputs:
+    - {name: digest, type: TEXT}
+resources:
+  parts:
+    read: ./read/read.graph.yaml
+    digest: ./digest/digest.graph.yaml
+    publish: ./publish/publish.graph.yaml
+  policies:
+    digest: ./policies/digest.cedar
+steps:
+  - allowed: {guard: policies.digest, principal: 'Service::"notes-digest"', action: 'Action::"digest"', resource: 'File::"notes"', context_mapping: {}, label: "May it read and write?"}
+  - read:    {use: parts.read, on: allowed.allow, out: [notes]}
+  - digest:  {use: parts.digest, in: {notes: read.notes}, out: [digest]}
+  - publish: {use: parts.publish, in: {digest: digest.digest}, out: [digest]}
+  - done:    {output: publish.digest}

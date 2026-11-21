@@ -1,0 +1,38 @@
+version: "1.0-graph"
+workflow:
+  name: build
+  description: Writes the code, reviews and improves it, tests it, and tries again until the tests pass, the policy guard says stop, or max_cycles is reached.
+  inputs:
+    - {name: spec, type: TEXT}
+    - {name: lang, type: TEXT, default: python}
+    - {name: max_cycles, type: INTEGER, default: 3}
+  outputs:
+    - {name: code, type: TEXT}
+resources:
+  procedures:
+    generate_code: ./01_generate_code.spl
+    review_code: ./02_review_code.spl
+    improve_code: ./03_improve_code.spl
+    test_code: ./04_test_code.spl
+  policies:
+    mutation_safety: ./policies/mutation_safety.cedar
+steps:
+  - attempts:
+      loop: "@in_max_cycles"
+      while: "NOT @test_passed AND NOT @denied AND @cycle < @in_max_cycles"
+      in: {spec: $in.spec, lang: $in.lang, max_cycles: $in.max_cycles}
+      state:                                          # carried from one attempt to the next (the body reads them as $loop.<name>)
+        final_code: {from: improve.improved_code}
+        prior_code: {from: improve.improved_code}
+        prior_test: {from: test.result}
+      out:
+        test_passed: {fired: ok.pass}
+        denied: {fired: retry.deny}                   # the policy refused another attempt
+      steps:
+        - generate: {node: GENERATE, procedure_ref: procedures.generate_code, in: {spec: $loop.spec, lang: $loop.lang, prior_code: $loop.prior_code, prior_test: $loop.prior_test}, out: code}
+        - review:   {node: GENERATE, procedure_ref: procedures.review_code, in: {code: generate.code, lang: $loop.lang}, out: feedback}
+        - improve:  {node: GENERATE, procedure_ref: procedures.improve_code, in: {code: generate.code, feedback: review.feedback, spec: $loop.spec}, out: improved_code}
+        - test:     {node: SOLVE, procedure_ref: procedures.test_code, engine: python_eval, in: {code: improve.improved_code, spec: $loop.spec}, out: result}
+        - ok:       {evaluate: "contains(@in_result, '[PASSED]')", in: {result: test.result}}
+        - retry:    {guard: policies.mutation_safety, on: ok.fail, action: 'Action::"allow_retry"', context_mapping: {cycle: "@in_cycle", max_cycles: "@in_max_cycles"}, in: {cycle: $loop.cycle, max_cycles: $loop.max_cycles}}
+  - done: {output: {code: attempts.final_code}}

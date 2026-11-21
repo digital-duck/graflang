@@ -1,0 +1,15 @@
+version: "1.0-graph"
+workflow:
+  name: digest
+  description: Has a model write the digest of the notes, and records it (OBSERVE).
+  inputs:
+    - {name: notes, type: TEXT}
+  outputs:
+    - {name: digest, type: TEXT}
+resources:
+  prompts:
+    digest: ./prompts/digest.md
+steps:
+  - summarise: {generate: prompts.digest, in: {notes: $in.notes}, out: digest, label: Write the digest}
+  - watch:     {node: OBSERVE, in: {digest: summarise.digest}, ports: [in_digest, out_digest], out: digest, label: digest}
+  - done: {output: watch.digest}

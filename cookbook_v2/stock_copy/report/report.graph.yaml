@@ -1,0 +1,26 @@
+version: "1.0-graph"
+workflow:
+  name: report
+  description: Joins the per-ticker lines and has a model write one report.
+  inputs:
+    - {name: state, type: JSON}
+    - {name: tickers, type: TEXT}
+    - {name: days, type: INTEGER, default: 30}
+  outputs:
+    - {name: report, type: TEXT}
+resources:
+  prompts:
+    synthesize: ./prompts/synthesize.md
+steps:
+  - join_lines:
+      node: SOLVE
+      in: {state: $in.state}
+      ports: [trigger, complete, in_state, out_result]
+      out: result
+      backend: subprocess
+      command: ["python3", "-I", "tools/join_lines.py"]
+      out_type: JSON
+      timeout: 30
+  - summaries: {solve: "json_get(@in_result, 'text')", in: {result: join_lines.result}, out: text}
+  - synthesize: {generate: prompts.synthesize, in: {tickers: $in.tickers, days: $in.days, summaries: summaries.text}, out: report}
+  - done: {output: synthesize.report}

@@ -1,0 +1,28 @@
+version: "1.0-graph"
+workflow:
+  name: assess
+  description: Asks a model which kinds of personal data a document holds (types only), then has deterministic rules decide whether it may go to the destination. Gives the verdict as JSON.
+  inputs:
+    - {name: document, type: TEXT}
+    - {name: destination, type: TEXT}
+    - {name: engine, type: TEXT, default: stdlib}
+    - {name: rules_file, type: TEXT, default: ""}
+  outputs:
+    - {name: verdict, type: TEXT}
+resources:
+  prompts:
+    extract_pii: ./prompts/extract_pii.md
+steps:
+  - extract: {generate: prompts.extract_pii, in: {document: $in.document}, out: pii_map, label: Find personal data}
+  - check:
+      node: SOLVE
+      in: {pii_map: extract.pii_map, destination: $in.destination, engine: $in.engine, rules_file: $in.rules_file}
+      ports: [trigger, complete, in_pii_map, in_destination, in_engine, in_rules_file, out_verdict]
+      out: verdict
+      backend: subprocess
+      command: ["python3", "-I", "procedures/compliance_check.py"]
+      parse: first_line
+      out_type: TEXT
+      timeout: 60
+      label: Check the rules
+  - done: {output: {verdict: check.verdict}}

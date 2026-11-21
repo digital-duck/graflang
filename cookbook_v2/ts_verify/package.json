@@ -1,0 +1,9 @@
+{
+  "name": "ts-verify",
+  "private": true,
+  "description": "Tooling for the ts_verify GraphLang recipe: the TypeScript compiler used by tools/typecheck.mjs. Needed only when check_types is true.",
+  "type": "module",
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

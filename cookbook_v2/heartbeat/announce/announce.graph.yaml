@@ -1,0 +1,20 @@
+version: "1.0-graph"
+workflow:
+  name: announce
+  description: Summarises the new messages with a model, prints the summary, appends it to output/alerts.md, and saves the new count.
+  inputs:
+    - {name: lines, type: JSON}
+    - {name: count, type: INTEGER}
+    - {name: new, type: INTEGER}
+    - {name: state_file, type: TEXT, default: "output/state.txt"}
+  outputs:
+    - {name: summary, type: TEXT}
+resources:
+  prompts:
+    summarise: ./prompts/summarise.md
+steps:
+  - summary:  {generate: prompts.summarise, in: {inbox: $in.lines, new: $in.new}, out: summary}
+  - alert:    {node: EMIT, channel: stdout, in: {content: summary.summary}, out: receipt}
+  - log:      {node: EMIT, channel: file, file: "output/alerts.md", mode: append, in: {content: summary.summary}, out: receipt}
+  - remember: {node: EMIT, channel: file, ports: [in_file, in_content, out_receipt], in: {file: $in.state_file, content: $in.count}, out: receipt}
+  - done:     {output: summary.summary}

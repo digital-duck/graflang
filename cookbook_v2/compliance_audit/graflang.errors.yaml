@@ -1,0 +1,5 @@
+errors:
+  - code: E_STILL_NONCOMPLIANT
+    description: the document still breaks the rules after redaction
+    cause: the second check, run on the redacted text, found a violation
+    remedy: a person reviews the document; the audit note lists the violated rules

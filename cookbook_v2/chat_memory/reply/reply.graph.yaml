@@ -1,0 +1,15 @@
+version: "1.0-graph"
+workflow:
+  name: reply
+  description: Replies to the message, given the remembered turns.
+  inputs:
+    - {name: memory, type: TEXT}
+    - {name: message, type: TEXT}
+  outputs:
+    - {name: reply, type: TEXT}
+resources:
+  prompts:
+    reply: ./prompts/reply.md
+steps:
+  - answer: {generate: prompts.reply, in: {memory: $in.memory, message: $in.message}, out: reply, label: Reply}
+  - done: {output: answer.reply}

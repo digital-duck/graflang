@@ -1,0 +1,26 @@
+version: "1.0-graph"
+workflow:
+  name: remediate
+  description: Redacts a document that failed the check (deletes SSNs, masks the rest), then assesses the redacted text again from scratch. Ends in the error exit `unfixed` when it still fails.
+  inputs:
+    - {name: document, type: TEXT}
+    - {name: verdict, type: TEXT}
+    - {name: destination, type: TEXT}
+    - {name: engine, type: TEXT, default: stdlib}
+    - {name: rules_file, type: TEXT, default: ""}
+  outputs:
+    - {name: verdict, type: TEXT}
+    - {name: redacted, type: TEXT}
+  errors:
+    - {name: unfixed, code: E_STILL_NONCOMPLIANT, description: the redacted text still fails the rules}
+resources:
+  parts:
+    assess: ../assess/assess.graph.yaml
+  prompts:
+    redact: ./prompts/redact.md
+steps:
+  - redact: {generate: prompts.redact, in: {document: $in.document, verdict: $in.verdict}, out: redacted, label: Redact}
+  - again:  {use: parts.assess, inherits: [destination, engine, rules_file], in: {document: redact.redacted}, out: [verdict]}
+  - fine:   {evaluate: "json_get(@in_verdict, 'compliant') == TRUE", in: {verdict: again.verdict}}
+  - fixed:   {output: {verdict: again.verdict, redacted: redact.redacted}, on: fine.pass}
+  - unfixed: {output: {verdict: again.verdict, redacted: redact.redacted}, on: fine.fail, exit: unfixed}

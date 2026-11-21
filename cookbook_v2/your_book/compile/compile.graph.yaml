@@ -1,0 +1,18 @@
+version: "1.0-graph"
+workflow:
+  name: compile
+  description: Joins the outline and the chapters into the finished book.
+  inputs:
+    - {name: outline, type: TEXT}
+    - {name: chapters, type: JSON}
+    - {name: subject, type: TEXT}
+    - {name: audience, type: TEXT, default: intro}
+    - {name: style, type: TEXT}
+  outputs:
+    - {name: book, type: TEXT}
+resources:
+  prompts:
+    compile: ./prompts/compile.md
+steps:
+  - compile: {generate: prompts.compile, in: {outline: $in.outline, chapters: $in.chapters, subject: $in.subject, audience: $in.audience, style: $in.style}, out: book}
+  - done: {output: compile.book}

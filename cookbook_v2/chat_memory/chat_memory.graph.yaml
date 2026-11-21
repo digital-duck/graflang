@@ -1,0 +1,23 @@
+# chat_memory (layered): policy guard, recall the last turns, reply, remember the exchange.
+version: "1.0-graph"
+workflow:
+  name: chat_memory
+  description: A chat that remembers. It recalls the last turns from a memory file, replies to the message, and appends the new exchange to the file.
+  inputs:
+    - {name: message, type: TEXT}
+    - {name: memory_file, type: TEXT, default: "output/memory.md"}
+  outputs:
+    - {name: reply, type: TEXT}
+resources:
+  parts:
+    recall: ./recall/recall.graph.yaml
+    reply: ./reply/reply.graph.yaml
+    remember: ./remember/remember.graph.yaml
+  policies:
+    memory: ./policies/memory.cedar
+steps:
+  - allowed:  {guard: policies.memory, principal: 'Service::"chat-memory"', action: 'Action::"remember"', resource: 'File::"memory"', context_mapping: {}, in: {message: $in.message}, ports: [trigger, allow, deny, in_message], label: "May it use the memory?"}
+  - recall:   {use: parts.recall, on: allowed.allow, inherits: [memory_file], out: [memory]}
+  - reply:    {use: parts.reply, inherits: [message], in: {memory: recall.memory}, out: [reply]}
+  - remember: {use: parts.remember, inherits: [message, memory_file], in: {reply: reply.reply}, out: [receipt]}
+  - done:     {output: reply.reply, on: remember}

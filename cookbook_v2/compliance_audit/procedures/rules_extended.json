@@ -1,0 +1,248 @@
+{
+  "name": "Illustrative extended PII data-flow policy (not legal advice)",
+  "notes": "A larger rule set with masking checked per data type. Copy it and adapt the rules to your own policy; pass it with --param rules_file=PATH. Facts: has_<type> (a data type of that kind is in the document) and masked_<type> (every reported item of that type is masked; true when there is none) for the types ssn, ccn, email, phone, address, name, dob, other; also has_pii, is_masked (everything is masked) and is_external. The stdlib engine enumerates assignments, so keep to at most 16 declared variables. Check your edit with: python tools.py rules_extended.json",
+  "external_destinations": [
+    "external_api",
+    "third_party_vendor",
+    "analytics_service",
+    "public_bucket"
+  ],
+  "variables": [
+    "has_ssn",
+    "has_ccn",
+    "has_email",
+    "has_phone",
+    "has_address",
+    "has_name",
+    "has_dob",
+    "has_other",
+    "masked_ccn",
+    "masked_email",
+    "masked_phone",
+    "masked_address",
+    "masked_name",
+    "masked_dob",
+    "masked_other",
+    "is_external"
+  ],
+  "rules": [
+    {
+      "id": "R1",
+      "desc": "Every kind of personal data except an SSN (see R2) must be masked before it goes to an external destination",
+      "expr": {
+        "implies": [
+          {
+            "var": "is_external"
+          },
+          {
+            "and": [
+              {
+                "var": "masked_ccn"
+              },
+              {
+                "var": "masked_email"
+              },
+              {
+                "var": "masked_phone"
+              },
+              {
+                "var": "masked_address"
+              },
+              {
+                "var": "masked_name"
+              },
+              {
+                "var": "masked_dob"
+              },
+              {
+                "var": "masked_other"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "R2",
+      "desc": "A social security number never leaves externally, even masked",
+      "expr": {
+        "not": {
+          "and": [
+            {
+              "var": "has_ssn"
+            },
+            {
+              "var": "is_external"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "R3",
+      "desc": "Card numbers must always be masked, internal or external",
+      "expr": {
+        "var": "masked_ccn"
+      }
+    },
+    {
+      "id": "R4",
+      "desc": "An exposed card number together with an exposed name or date of birth is never sent externally (identity-theft combination)",
+      "expr": {
+        "not": {
+          "and": [
+            {
+              "var": "is_external"
+            },
+            {
+              "not": {
+                "var": "masked_ccn"
+              }
+            },
+            {
+              "or": [
+                {
+                  "not": {
+                    "var": "masked_name"
+                  }
+                },
+                {
+                  "not": {
+                    "var": "masked_dob"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "R5",
+      "desc": "Name, date of birth and address together identify a person: all three must be masked, even internally",
+      "expr": {
+        "implies": [
+          {
+            "and": [
+              {
+                "var": "has_name"
+              },
+              {
+                "var": "has_dob"
+              },
+              {
+                "var": "has_address"
+              }
+            ]
+          },
+          {
+            "and": [
+              {
+                "var": "masked_name"
+              },
+              {
+                "var": "masked_dob"
+              },
+              {
+                "var": "masked_address"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "R6",
+      "desc": "Contact details (email or phone) reported with a name may go outside only if the contact details and the name are masked",
+      "expr": {
+        "implies": [
+          {
+            "and": [
+              {
+                "or": [
+                  {
+                    "var": "has_email"
+                  },
+                  {
+                    "var": "has_phone"
+                  }
+                ]
+              },
+              {
+                "var": "has_name"
+              },
+              {
+                "var": "is_external"
+              }
+            ]
+          },
+          {
+            "and": [
+              {
+                "var": "masked_email"
+              },
+              {
+                "var": "masked_phone"
+              },
+              {
+                "var": "masked_name"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "R7",
+      "desc": "A date of birth with an address may go outside only if both are masked",
+      "expr": {
+        "implies": [
+          {
+            "and": [
+              {
+                "var": "has_dob"
+              },
+              {
+                "var": "has_address"
+              },
+              {
+                "var": "is_external"
+              }
+            ]
+          },
+          {
+            "and": [
+              {
+                "var": "masked_dob"
+              },
+              {
+                "var": "masked_address"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "R8",
+      "desc": "Data of an unclassified kind (has_other) must be masked before it goes outside",
+      "expr": {
+        "implies": [
+          {
+            "and": [
+              {
+                "var": "has_other"
+              },
+              {
+                "var": "is_external"
+              }
+            ]
+          },
+          {
+            "var": "masked_other"
+          }
+        ]
+      }
+    }
+  ]
+}

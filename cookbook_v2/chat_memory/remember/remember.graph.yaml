@@ -1,0 +1,14 @@
+version: "1.0-graph"
+workflow:
+  name: remember
+  description: Writes the exchange (message and reply) and appends it to the memory file.
+  inputs:
+    - {name: message, type: TEXT}
+    - {name: reply, type: TEXT}
+    - {name: memory_file, type: TEXT}
+  outputs:
+    - {name: receipt, type: TEXT}
+steps:
+  - turn:     {solve: '"You: " + strip(@in_message) + "\n" + "Assistant: " + strip(@in_reply)', in: {message: $in.message, reply: $in.reply}, out: turn, label: Write the exchange}
+  - remember: {node: EMIT, channel: file, mode: append, ports: [in_file, in_content, out_receipt], in: {file: $in.memory_file, content: turn.turn}, out: receipt, label: Remember it}
+  - done: {output: remember.receipt}

@@ -1,0 +1,7 @@
+[
+  {"args": ["Hello, World!"], "expected": "hello-world"},
+  {"args": ["  Already--slugged  "], "expected": "already-slugged"},
+  {"args": ["Ünïcode & symbols"], "expected": "n-code-symbols"},
+  {"args": ["---"], "expected": ""},
+  {"args": ["Case 42 Numbers"], "expected": "case-42-numbers"}
+]

@@ -1,0 +1,10 @@
+version: "1.0-graph"
+workflow:
+  name: read
+  description: Reads input/notes.md (next to this file).
+  inputs: []
+  outputs:
+    - {name: notes, type: TEXT}
+steps:
+  - read_notes: {node: QUERY, file: "input/notes.md", format: text, max_bytes: 200000, ports: [trigger, complete, out_notes], out: notes, label: Read the notes}
+  - done: {output: read_notes.notes}

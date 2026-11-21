@@ -1,0 +1,5 @@
+errors:
+  - code: E_NOT_APPROVED
+    description: the supervisor did not approve the answer within the allowed rounds
+    cause: every review asked for another revision
+    remedy: raise max_rounds, or read the last attempt and the supervisor's notes in the log

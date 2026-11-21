@@ -1,0 +1,60 @@
+# compliance_audit (layered): the same audit as cookbook/compliance_audit. The top level reads: load, assess, (remediate if it fails), ask the policy, release or escalate.
+version: "1.0-graph"
+
+workflow:
+  name: compliance_audit
+  description: Finds the personal data in a document, checks it against deterministic rules for the destination, redacts and re-checks once if it fails, and lets a Cedar policy decide the release.
+  inputs:
+    - {name: document, type: TEXT}                       # the text itself, or the path of a text file (read by load_document)
+    - {name: destination, type: TEXT}                    # external_api and third_party_vendor are external
+    - {name: engine, type: TEXT, default: stdlib}        # stdlib, sympy or z3
+    - {name: rules_file, type: TEXT, default: ""}        # optional path to your own rules JSON; empty = procedures/rules.json
+  outputs:
+    - {name: safe_document, type: TEXT}
+    - {name: audit, type: TEXT}
+
+resources:
+  parts:
+    assess: ./assess/assess.graph.yaml
+    remediate: ./remediate/remediate.graph.yaml
+  policies:
+    release_policy: ./policies/release_policy.cedar
+
+steps:
+  - load:
+      node: SOLVE
+      in: {document: $in.document}
+      ports: [trigger, complete, in_document, out_text]
+      out: text
+      backend: subprocess
+      command: ["python3", "-I", "procedures/load_document.py"]
+      parse: {tool: "procedures/load_document.py:parse"}
+      out_type: TEXT
+      timeout: 30
+      label: Load the document
+  - first:   {use: parts.assess, inherits: [destination, engine, rules_file], in: {document: load.text}, out: [verdict]}
+  - fine:    {evaluate: "json_get(@in_verdict, 'compliant') == TRUE", in: {verdict: first.verdict}}
+  - fix:     {use: parts.remediate, on: fine.fail, inherits: [destination, engine, rules_file], in: {document: load.text, verdict: first.verdict}, out: [verdict, redacted], ports: [unfixed]}
+  - guard:
+      guard: policies.release_policy
+      on: [fine.pass, fix]
+      principal: 'Service::"compliance-workflow"'
+      action: 'Action::"release_document"'
+      resource: 'Destination::"target"'
+      context_mapping:
+        compliant: "json_get(@in_verdict, 'compliant') == TRUE"
+        is_external: "json_get(@in_verdict, 'facts.is_external') == TRUE"
+      in: {verdict: [first.verdict, fix.verdict]}
+      label: May it be released?
+  - released_note:
+      solve: "'released to ' + @in_destination + ' (' + json_get(@in_verdict, 'engine') + ' engine)'"
+      on: guard.allow
+      in: {destination: $in.destination, verdict: [first.verdict, fix.verdict]}
+      out: audit
+  - released: {node: OUTPUT, risky: true, on: released_note, in: {safe_document: [load.text, fix.redacted], audit: released_note.audit}, ports: [trigger, exit, in_safe_document, in_audit]}
+  - escalated_note:
+      solve: "'ESCALATED to a human reviewer, not released. Violated: ' + str(json_get(@in_verdict, 'violated'))"
+      on: [guard.deny, fix.unfixed]
+      in: {verdict: [first.verdict, fix.verdict]}
+      out: audit
+  - escalated: {node: OUTPUT, on: escalated_note, in: {audit: escalated_note.audit}, ports: [trigger, exit, in_audit]}

@@ -1,0 +1,14 @@
+version: "1.0-graph"
+workflow:
+  name: extract
+  description: Asks a model to pull a JSON record out of the text.
+  inputs:
+    - {name: text, type: TEXT}
+  outputs:
+    - {name: raw, type: TEXT}
+resources:
+  prompts:
+    extract: ./prompts/extract.md
+steps:
+  - extract: {generate: prompts.extract, in: {text: $in.text}, out: raw}
+  - done: {output: extract.raw}

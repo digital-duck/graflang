@@ -1,0 +1,21 @@
+version: "1.0-graph"
+workflow:
+  name: news
+  description: Reads the message file and the count seen at the last beat. Ends in the exit `quiet` when nothing is new.
+  inputs:
+    - {name: inbox, type: TEXT}
+    - {name: state_file, type: TEXT, default: "output/state.txt"}
+  outputs:
+    - {name: lines, type: JSON}
+    - {name: count, type: INTEGER}
+    - {name: new, type: INTEGER}
+  errors:
+    - {name: quiet, description: no new messages since the last beat}
+steps:
+  - seen:  {node: QUERY, ports: [in_file, out_seen], in: {file: $in.state_file}, format: text, default: "0", out: seen}
+  - inbox: {node: QUERY, ports: [in_file, out_lines], in: {file: $in.inbox}, format: lines, default: [], out: lines}
+  - count: {solve: "len(@in_lines)", in: {lines: inbox.lines}, out: count}
+  - new:   {solve: "@in_count - int(strip(@in_seen))", in: {count: count.count, seen: seen.seen}, out: new}
+  - fresh: {evaluate: "@in_count > int(strip(@in_seen))", in: {count: count.count, seen: seen.seen}}
+  - some:  {output: {lines: inbox.lines, count: count.count, new: new.new}, on: fresh.pass}
+  - none:  {output: {lines: inbox.lines, count: count.count, new: new.new}, on: fresh.fail, exit: quiet}

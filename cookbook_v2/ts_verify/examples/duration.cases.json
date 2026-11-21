@@ -1,0 +1,12 @@
+[
+  {"args": [0], "expected": "0s"},
+  {"args": [59], "expected": "59s"},
+  {"args": [60], "expected": "1m"},
+  {"args": [61], "expected": "1m 1s"},
+  {"args": [3600], "expected": "1h"},
+  {"args": [3661], "expected": "1h 1m 1s"},
+  {"args": [86400], "expected": "1d"},
+  {"args": [90061], "expected": "1d 1h 1m 1s"},
+  {"args": [-5], "expected": "0s"},
+  {"args": [59.9], "expected": "59s"}
+]

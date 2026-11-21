@@ -1,0 +1,21 @@
+# agent_notes (layered): a Cedar guard, then the research loop (decide, read a note, observe, repeat) as one composite, then the answer or a note that none was found.
+version: "1.0-graph"
+workflow:
+  name: agent_notes
+  description: A small agent over a folder of notes. Each round the model either asks to read one listed note or answers; the graph, not the model, decides what a tool call may do.
+  inputs:
+    - {name: question, type: TEXT}
+    - {name: max_steps, type: INTEGER, default: 4}
+  outputs:
+    - {name: answer, type: TEXT}
+resources:
+  parts:
+    research: ./research/research.graph.yaml
+  policies:
+    read: ./policies/read.cedar
+steps:
+  - allowed:  {guard: policies.read, principal: 'Service::"agent-notes"', action: 'Action::"read_note"', resource: 'File::"notes"', context_mapping: {}}
+  - research: {use: parts.research, on: allowed.allow, inherits: [question, max_steps], out: [answer], ports: [gave_up]}
+  - found:    {output: research.answer}
+  - gave_up:  {solve: "'(no answer within ' + str(@in_n) + ' steps)'", on: research.gave_up, in: {n: $in.max_steps}, out: answer}
+  - gave_up_out: {output: gave_up.answer, on: gave_up}
