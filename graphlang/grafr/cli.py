@@ -16,7 +16,7 @@ from ..logging_config import disable_logging, setup_logging
 from .adapters import default_model, make_llm
 from .metering import CassetteError, LimitExceeded, MeteredLLM, RecordingLLM, ReplayLLM
 from .bindings import bind_graph, load_bindings
-from .output import RunOutput, outputs_dir
+from .output import RunOutput, codes_dir, file_outputs, outputs_dir
 from .runtime import load_graph, GraphLangRuntime
 from .topology import check
 
@@ -149,7 +149,8 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, re
     if not no_output:
         run_output = RunOutput(output_dir or outputs_dir(graph_path.resolve().parent),
                                graph_path.name.removesuffix(".graph.yaml").removesuffix(".yaml"), adapter,
-                               model=model or "", params=params, save_nodes=save_nodes)
+                               model=model or "", params=params, save_nodes=save_nodes,
+                               codes_root=None if output_dir else codes_dir(graph_path.resolve().parent))
 
     console.print(f"\n[bold blue]▶ Executing workflow...[/bold blue]")
 
@@ -187,8 +188,7 @@ def cmd_run(graph, llm_spec, adapter, model, max_steps, workers, kernel_name, re
     summary = runtime.summary()
     console.print(f"[dim]{_summary_line(summary)}[/dim]")        # values may hold [brackets], not markup
     if run_output and result:
-        trees = {o["name"] for o in graph_data["workflow"].get("outputs", []) if str(o.get("type", "")).upper() == "FILES"}
-        run_output.save_result(result, trees)
+        run_output.save_result(result, file_outputs(graph_data))
         run_output.save_summary(summary)
         console.print(f"[dim]output: {run_output.dir}[/dim]")
     if log_path:

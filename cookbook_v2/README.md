@@ -83,6 +83,7 @@ Everything a run produces sits in `.graf/` beside the recipe's top graph (git-ig
 
 - `.graf/outputs/<recipe>-<adapter>-<model>-<time>/`: `result.json`, one file per workflow output (e.g. `docs.md`), and `nodes/`, one file per node output
   in firing order (`004-generate.out_code.md`, `006-improve.out_improved_code.md`, ...). Change the place with `--output-dir`.
+- `.graf/codes/<same run name>/`: the code a run emits, as real files in any layout (an output declared `type: FILES`; e.g. a repository with `backend/` and `frontend/`). `cookbook/code_parts` does this; `code_pipeline` does not yet.
 - `.graf/logs/`: the side files a `procedure_ref` step writes (code_pipeline: `target/python/code.py` is the first draft, `tests/`, `spec/`).
 
 (A recipe's own data files, such as heartbeat's `output/state.txt`, are not run results and stay where the recipe puts them.)

@@ -15,7 +15,7 @@ repair loop (at most max_cycles rounds, stops when a round passes):
 | | |
 |---|---|
 | Inputs | `spec` (TEXT, required), `lang` (TEXT, default `python`), `reference` (TEXT, optional: API facts the model cannot know), `smoke` (TEXT, optional: Python run against the real dependencies), `max_cycles` (INTEGER, default 2) |
-| Outputs | `code` (FILES, a project folder: `<run folder>/code/`), `review` (TEXT, `review.md`), `report` (TEXT, `report.md`: what the last verification found) |
+| Outputs | `code` (FILES, a project folder: `.graf/codes/<run>/`), `review` (TEXT, `review.md`), `report` (TEXT, `report.md`: what the last verification found) |
 | LLM calls | 3 + one per repair round (at most 3 + `max_cycles`); 1 if the spec is rejected |
 | Files | `code_parts.graph.yaml` (compact form), `sub_graph/*.graph.yaml` (one part per step), `sub_graph/prompts/*.md` |
 
@@ -46,7 +46,7 @@ output/code_parts-<adapter>-<model>-<time>/
   result.json  run.json  summary.json  nodes/
 ```
 
-Run its tests from the project folder: `cd output/<run>/code && python -m unittest discover -s . -p "test_*.py"`.
+Run its tests from the project folder: `cd .graf/codes/<run> && python -m unittest discover -s . -p "test_*.py"`.
 
 ## Run
 

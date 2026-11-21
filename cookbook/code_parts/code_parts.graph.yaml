@@ -15,7 +15,7 @@ workflow:
     - {name: "smoke", type: "TEXT", default: ""}               # Python run against the real dependencies after the tests (optional)
     - {name: "max_cycles", type: "INTEGER", default: 2}        # improve + verify rounds at most
   outputs:
-    - {name: "code", type: "FILES"}          # a project folder: written as <run folder>/code/...
+    - {name: "code", type: "FILES"}          # a project folder: written as real files in .graf/codes/<run>/...
     - {name: "review", type: "TEXT"}
     - {name: "report", type: "TEXT"}                           # what the last verification found
 

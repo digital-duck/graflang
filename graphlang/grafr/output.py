@@ -4,7 +4,9 @@
     run.json                 what produced it: graph, adapter, model, parameters, start time
     result.json              the workflow outputs (what `graf run` prints as Output)
     <name>.md                one file per text output, e.g. essay.md
-    <name>/...               an output declared `type: FILES` (a mapping of relative path to text) as a real folder of files
+    codes folder             an output declared `type: FILES` (a mapping of relative path to text) is written as real files under
+                             `<graph folder>/.graf/codes/<same run name>/` (a repository layout is fine: backend/app.py, frontend/...);
+                             with two FILES outputs each gets a subfolder named after it. run.json says where (`codes`).
     nodes/003-draft.out_essay.md    with --save-nodes: every node's output ports, numbered by firing order
 
 LLM text lives here, not in the log (see logging_config.py): the log records that a node produced N chars and,
@@ -31,6 +33,16 @@ def outputs_dir(graph_folder: Path) -> Path:
 
 def logs_dir(graph_folder: Path) -> Path:
     return Path(graph_folder) / STATE_DIR / "logs"
+
+
+def codes_dir(graph_folder: Path) -> Path:
+    """Where the code a run emits (its FILES outputs) is written: `.graf/codes/<run>/`."""
+    return Path(graph_folder) / STATE_DIR / "codes"
+
+
+def file_outputs(graph_data: Dict[str, Any]) -> set:
+    """The names of the workflow outputs declared `type: FILES`."""
+    return {o["name"] for o in graph_data["workflow"].get("outputs", []) if str(o.get("type", "")).upper() == "FILES"}
 
 
 def _slug(text: str) -> str:
@@ -67,11 +79,12 @@ class RunOutput:
     """One run's output folder; created on first write."""
 
     def __init__(self, root: Path, stem: str, adapter: str, *, model: str = "", params: Dict[str, Any] | None = None,
-                 save_nodes: bool = False):
+                 save_nodes: bool = False, codes_root: Path | None = None):
         now = datetime.now()
         parts = [_slug(stem), _slug(adapter)] + ([re.sub(r"[^A-Za-z0-9._-]+", "-", model).strip("-")] if model else [])
         self.dir = Path(root) / f"{'-'.join(parts)}-{now:%Y%m%d-%H%M%S}"
         self.save_nodes = save_nodes
+        self.codes = (Path(codes_root) / self.dir.name) if codes_root is not None else self.dir / "codes"     # beside the run folder's own files when no root is given
         self.meta = {"graph": stem, "adapter": adapter, "model": model or None, "params": params or {},
                      "started": now.isoformat(timespec="seconds")}
 
@@ -118,7 +131,8 @@ class RunOutput:
         for name, value in result.items():
             if name in trees:
                 for rel, text in _tree(name, value).items():
-                    path = self.dir / _slug(name) / rel
+                    path = (self.codes / _slug(name) / rel) if len(trees & set(result)) > 1 else (self.codes / rel)
+                    self.meta["codes"] = str(self.codes)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(text, encoding="utf-8")
                     paths.append(path)

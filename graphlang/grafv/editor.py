@@ -119,7 +119,7 @@ class GraphEditor:
         """Run the graph as it is now (saved or not) and report {ok, outputs, error, summary}. Never raises for a failed run.
         `max_calls` caps the model calls (a run that would make more fails with the reason); None is no cap, as for the mock.
         With `save` the run is written to `.graf/outputs/` beside the graph, as `graf run` does (the Logs tab reads it back later)."""
-        from graphlang.grafr.output import RunOutput, outputs_dir
+        from graphlang.grafr.output import RunOutput, codes_dir, file_outputs, outputs_dir
         from graphlang.grafr.adapters import make_llm
         from graphlang.grafr.metering import MeteredLLM
         from graphlang.grafr.runtime import GraphLangRuntime
@@ -127,7 +127,7 @@ class GraphEditor:
         if errors:
             return {"ok": False, "outputs": None, "error": "fix these first: " + "; ".join(errors), "summary": None}
         stem = self.path.name.removesuffix(".graph.yaml").removesuffix(".yaml")
-        out = RunOutput(outputs_dir(self.path.resolve().parent), stem, adapter, model=model or "", params=params or {}, save_nodes=True) if save else None
+        out = RunOutput(outputs_dir(self.path.resolve().parent), stem, adapter, model=model or "", params=params or {}, save_nodes=True, codes_root=codes_dir(self.path.resolve().parent)) if save else None
         try:
             rt = GraphLangRuntime(self.data(), llm=MeteredLLM(make_llm(adapter, model), max_calls=max_calls), max_steps=max_steps, verbose=False,
                                   node_output=out)
@@ -137,8 +137,7 @@ class GraphEditor:
                 out.save_error(f"{type(e).__name__}: {e}")
             return {"ok": False, "outputs": None, "error": f"{type(e).__name__}: {e}", "summary": None}
         if out and outputs:
-            trees = {o["name"] for o in self.data()["workflow"].get("outputs", []) if str(o.get("type", "")).upper() == "FILES"}
-            out.save_result(outputs, trees)
+            out.save_result(outputs, file_outputs(self.data()))
             out.save_summary(rt.summary())
         values: Dict[str, Dict[str, Any]] = {}                 # what each node produced, in the order it was written (the Logs tab)
         for (node, port), value in rt.values.items():

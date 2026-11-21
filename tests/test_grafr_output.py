@@ -223,8 +223,52 @@ def test_a_files_output_is_written_as_a_folder_of_files(tmp_path):
     from graphlang.grafr.output import FilesError, RunOutput
     out = RunOutput(tmp_path, "g", "mock")
     out.save_result({"code": {"pkg/a.py": "x = 1\n", "README.md": "# hi\n"}, "review": "ok"}, {"code"})
-    assert (out.dir / "code" / "pkg" / "a.py").read_text() == "x = 1\n" and (out.dir / "code" / "README.md").exists()
+    assert (out.dir / "codes" / "pkg" / "a.py").read_text() == "x = 1\n" and (out.dir / "codes" / "README.md").exists()          # no codes root: beside the run's files
     assert (out.dir / "review.md").read_text() == "ok" and not (out.dir / "code.md").exists() and "pkg/a.py" in (out.dir / "result.json").read_text()
     for bad in ({"../x.py": "x"}, {"/abs.py": "x"}, {"a.py": 3}, {}, "text"):
         with pytest.raises(FilesError):
             RunOutput(tmp_path, "h", "mock").save_result({"code": bad}, {"code"})
+
+
+def test_files_outputs_go_to_the_codes_folder_beside_outputs_with_the_same_run_name(tmp_path):
+    from graphlang.grafr.output import RunOutput, codes_dir, outputs_dir
+    out = RunOutput(outputs_dir(tmp_path), "g", "mock", codes_root=codes_dir(tmp_path))
+    out.save_result({"repo": {"backend/app.py": "a", "frontend/index.html": "<p/>", "README.md": "r"}, "report": "ok"}, {"repo"})
+    code = tmp_path / ".graf" / "codes" / out.dir.name
+    assert (code / "backend" / "app.py").read_text() == "a" and (code / "frontend" / "index.html").exists() and (code / "README.md").exists()
+    assert out.dir.parent == tmp_path / ".graf" / "outputs" and (out.dir / "report.md").exists() and not (out.dir / "repo").exists()
+    assert json.loads((out.dir / "run.json").read_text())["codes"] == str(code)
+
+
+def test_two_files_outputs_each_get_a_subfolder(tmp_path):
+    from graphlang.grafr.output import RunOutput, codes_dir, outputs_dir
+    out = RunOutput(outputs_dir(tmp_path), "g", "mock", codes_root=codes_dir(tmp_path))
+    out.save_result({"server": {"main.py": "s"}, "client": {"main.ts": "c"}}, {"server", "client"})
+    code = tmp_path / ".graf" / "codes" / out.dir.name
+    assert (code / "server" / "main.py").exists() and (code / "client" / "main.ts").exists()
+
+
+def test_graf_run_writes_a_repository_layout_under_dot_graf_codes(tmp_path):
+    """A recipe whose output is `type: FILES` ends up as real files in .graf/codes/<run>/, outputs and codes side by side."""
+    (tmp_path / "repo.graph.yaml").write_text("""version: "1.0-graph"
+workflow:
+  name: repo
+  inputs: []
+  outputs: [{name: repo, type: FILES}, {name: note, type: TEXT}]
+steps:
+  - build:
+      node: SOLVE
+      ports: [trigger, complete, out_files]
+      out: files
+      backend: subprocess
+      command: ["python3", "-I", "-c", "import json; print(json.dumps({'backend/app.py': 'print(1)', 'frontend/index.html': '<p>hi</p>', 'README.md': '# repo'}))"]
+      out_type: JSON
+  - note: {solve: "'built'", out: note}
+  - done: {output: {repo: build.files, note: note.note}}
+""")
+    result = CliRunner().invoke(main, ["run", str(tmp_path / "repo.graph.yaml"), "--adapter", "mock", "--log-dir", str(tmp_path / "logs")])
+    assert result.exit_code == 0, result.output
+    (run_dir,) = run_dirs(tmp_path / ".graf" / "outputs")
+    code = tmp_path / ".graf" / "codes" / run_dir.name
+    assert (code / "backend" / "app.py").read_text() == "print(1)" and (code / "frontend" / "index.html").is_file() and (code / "README.md").is_file()
+    assert (run_dir / "note.md").read_text() == "built" and not (run_dir / "repo").exists()

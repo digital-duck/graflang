@@ -109,7 +109,11 @@ An output declared `type: FILES` in `workflow.outputs` holds a mapping `{relativ
 - The model part is the one you asked for with `--llm` or `--model` (characters other than letters, digits, `.`, `_`, `-` become `-`, so `gemma3:12b` shows as `gemma3-12b`); log files use the same naming. Without one the name still carries the default (`claude-sonnet-5-5` under `claude_cli`), even if some nodes name a model of their own. Only adapters with no default (`ollama`, ...) give a folder without a model part and `"model": null` in `run.json`.
 - `--output-dir DIR` replaces `<graph folder>/.graf/outputs`. Each run still gets its own subfolder, so runs never overwrite each other.
 - `--no-output` writes nothing. A run that fails, or ends without reaching an `OUTPUT` node, writes no result files.
-- `.graf/` (the run results in `.graf/outputs/` and a procedure's side files in `.graf/logs/`) is in `.gitignore`.
+- **Emitted code:** an output declared `type: FILES` (a mapping of relative path to text, e.g. a repository with `backend/` and `frontend/`) is not written
+  into the run folder but as real files under `<graph folder>/.graf/codes/<same run name>/` (with two FILES outputs, one subfolder each); `run.json` records the
+  place (`codes`). Under `--output-dir DIR` the files go to `<run folder>/codes/` instead. `cookbook/code_parts` is an example (a file splitter turns the model's
+  reply into the project's files).
+- `.graf/` (run results in `.graf/outputs/`, emitted code in `.graf/codes/`, a procedure's side files in `.graf/logs/`) is in `.gitignore`.
 
 LLM text is kept out of the log on purpose: it is a result of the run, not a diagnostic. The log records the folder and file names instead.
 
