@@ -25,8 +25,9 @@ steps:
       loop: "@in_max_rounds"
       while: "NOT @approved"
       in: {max_rounds: $in.max_rounds, text: draft.text}
-      out:
+      state:
         text: {from: improve.text}
+      out:
         approved: {fired: ok.pass}
       steps:
         - critique: {generate: prompts.critique, in: {text: $loop.text}, out: notes}

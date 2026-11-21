@@ -134,6 +134,46 @@ def test_loop_iterations_do_not_share_body_values():
     assert read("w") == [{}, {}]    # `w` starts each iteration, before `r` writes; in iteration 2 it still sees nothing from iteration 1
 
 
+# R10a: loop-carried values are declared under `state:`. A state value starts as the LOOP's input of that name, else `init`; a body
+# `in_<name>` with no edge reads it; an iteration that writes it replaces it; the LOOP's `out_<name>` is the final value.
+def _state_loop(extra_cfg=None, loop_ports=()):
+    body = {"nodes": [{"id": "r", "type": "OBSERVE", "ports": ["trigger", "complete", "in_acc", "out_acc"], "config": {"out": "v"}}], "edges": []}
+    cfg = {"max_iterations": 2, "state": {"acc": {"from": "r.out_acc", "init": "start"}}, "subgraph": body, **(extra_cfg or {})}
+    return {"id": "lp", "type": "LOOP", "ports": ["trigger", "exit", "out_acc", *loop_ports], "config": cfg}
+
+
+def test_state_starts_at_init_then_carries_the_previous_iteration():
+    class Echo(Emit):
+        def execute(self, node_data, in_data, context, resolver, llm):
+            Emit.seen.append((node_data["id"], dict(in_data)))
+            return {"out_acc": f"{in_data.get('in_acc')}+"}
+    register_executor("OBSERVE", Echo())
+    rt = run([_state_loop()], [e("s.entry", "lp.trigger")])
+    assert read("r") == [{"in_acc": "start"}, {"in_acc": "start+"}]
+    assert rt.values[("lp", "out_acc")] == "start++"
+
+
+def test_state_starts_at_the_loops_input_when_it_is_bound():
+    lp = _state_loop(loop_ports=("in_acc",))
+    src = n("a", out="given", ports=("trigger", "complete", "out_y"))
+    run([src, lp], [e("s.entry", "a.trigger"), e("a.complete", "lp.trigger"), e("a.out_y", "lp.in_acc", "binds")])
+    assert read("r")[0] == {"in_acc": "given"}
+
+
+def test_a_name_in_both_state_and_outputs_is_refused():
+    lp = _state_loop({"outputs": {"acc": {"from": "r.out_acc"}}})
+    with pytest.raises(ValueError, match="both in state and in outputs"):
+        run([lp], [e("s.entry", "lp.trigger")])
+
+
+def test_a_collect_output_is_not_readable_inside_the_body():
+    body = {"nodes": [{"id": "r", "type": "OBSERVE", "ports": ["trigger", "complete", "in_seen", "out_y"], "config": {"out": "v"}}], "edges": []}
+    lp = {"id": "lp", "type": "LOOP", "ports": ["trigger", "exit", "out_seen"],
+          "config": {"max_iterations": 2, "outputs": {"seen": {"collect": "r.out_y"}}, "subgraph": body}}
+    run([lp], [e("s.entry", "lp.trigger")])
+    assert read("r") == [{}, {}]            # `seen` is a list the loop builds; the body does not see it (validate refuses the read)
+
+
 # ---- JOIN as fan-in (design decision 2) -------------------------------------------------------------------------------
 
 def test_join_bundles_named_inputs_into_one_object_and_a_reader_takes_a_field():

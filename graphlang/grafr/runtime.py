@@ -546,6 +546,10 @@ class GraphLangRuntime:
           condition       keep looping while true; checked before every iteration (optional)
           max_iterations  a number or an expression such as "@in_max_cycles" (default 100)
           index_var       name of the iteration counter, 0-based (default `cycle`)
+          state           loop-carried variables, name -> {from: "node.out_port" (or a list: whichever wrote last), init: value, type: T}.
+                          The value starts as the LOOP's input `in_<name>` if bound, else `init`, else absent; each iteration that
+                          writes it replaces it; a body `in_<name>` with no edge reads it; the LOOP's `out_<name>` is its final value.
+                          This is the only way a body sees a value from an earlier iteration.
           outputs         the LOOP's out_* ports, each one of
                             {from: "node.out_port"}     the value the latest iteration wrote; if that iteration wrote none, the
                                                         previous one (it starts as the LOOP's input of the same name). A list
@@ -569,14 +573,24 @@ class GraphLangRuntime:
         if "condition" not in cfg and "max_iterations" not in cfg:
             raise ValueError(f"LOOP {node_data['id']!r} needs a condition or max_iterations")
         index_var = cfg.get("index_var", "cycle")
-        specs: Dict[str, Dict] = cfg.get("outputs", {})
+        specs: Dict[str, Dict] = dict(cfg.get("outputs", {}))
+        declared: Dict[str, Dict] = cfg.get("state") or {}
+        for name, decl in declared.items():
+            if name in specs:
+                raise ValueError(f"LOOP {node_data['id']!r}: {name!r} is both in state and in outputs")
+            if not isinstance(decl, dict) or "from" not in decl:
+                raise ValueError(f"LOOP {node_data['id']!r} state {name!r} needs {{from: node.out_port}}")
+            specs[name] = {"from": decl["from"]}
         state: Dict[str, Any] = {}
+        carried: set = set()                     # the names a body may read: loop state, not the collect/fired outputs
         for name, spec in specs.items():
             kinds = [k for k in ("from", "collect", "fired") if k in spec]
             if len(kinds) != 1:
                 raise ValueError(f"LOOP {node_data['id']!r} output {name!r} needs exactly one of from/collect/fired")
-            # a `from` variable starts as the LOOP's input of the same name (its value before the loop), if there is one
-            state[name] = [] if kinds[0] == "collect" else False if kinds[0] == "fired" else in_data.get(f"in_{name}")
+            # a `from` variable starts as the LOOP's input of the same name (its value before the loop), else its `init`
+            state[name] = [] if kinds[0] == "collect" else False if kinds[0] == "fired" else in_data.get(f"in_{name}", (declared.get(name) or {}).get("init"))
+            if kinds[0] == "from":
+                carried.add(name)
 
         persist = bool(cfg.get("persist_mutations"))
         body = {"nodes": body["nodes"], "edges": body.get("edges", [])}
@@ -591,8 +605,9 @@ class GraphLangRuntime:
             except ExpressionError as e:
                 raise ValueError(f"LOOP {node_data['id']!r}: {e}") from None
             log_event(_log, "loop.iteration", level=DEBUG, node=node_data["id"], cycle=cycle, depth=self.depth)
+            seen = {**in_data, **{k: v for k, v in state.items() if k in carried}, index_var: cycle, "cycle": cycle}     # what the body can read
             sub = GraphLangRuntime(self.graph_data, _parent=self, _nodes=body["nodes"], _edges=body["edges"],
-                                   _boundary=in_data, _scope=scope, verbose=self.verbose)
+                                   _boundary=in_data, _scope=seen, verbose=self.verbose)
             queue: deque = deque((n, None) for n in sub._start_nodes())
             sub._drain(queue)
             if persist and sub.mutated:

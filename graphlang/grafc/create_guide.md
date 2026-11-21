@@ -94,8 +94,9 @@ If a branch depends on what an LLM says, make the prompt end its reply with an e
       loop: "@in_max_rounds"          # at most this many rounds
       while: "NOT @approved"          # checked before each round
       in: {max_rounds: $in.max_rounds, text: draft.text}     # outer values the body can read
+      state:
+        text: {from: improve.text}    # carried to the next round: the latest value; starts as the loop input of the same name (or `init:`)
       out:
-        text: {from: improve.text}    # the latest value; starts as the loop input of the same name
         approved: {fired: ok.pass}    # true if that port fired in the latest round
       steps:
         - critique: {generate: prompts.critique, in: {text: $loop.text}, out: notes}
@@ -103,7 +104,7 @@ If a branch depends on what an LLM says, make the prompt end its reply with an e
         - improve:  {generate: prompts.improve, on: ok.fail, in: {text: $loop.text, notes: critique.notes}, out: text}
 ```
 
-In the body, `$loop.<name>` reads a loop input or carried value of that name, and the `in:` key must be that same name. Later steps read the loop's results as `rounds.text`. `$in` does not exist in a body: pass what it needs through the loop's `in:`.
+In the body, `$loop.<name>` reads a loop input or a `state:` value of that name (a loop's `state:` names are also its results, like `rounds.text`), and the `in:` key must be that same name. Later steps read the loop's results as `rounds.text`. `$in` does not exist in a body: pass what it needs through the loop's `in:`.
 
 ### Choosing the LLM
 

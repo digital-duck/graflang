@@ -279,10 +279,22 @@ def _check_loop(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[s
         return
     if "condition" not in cfg and "max_iterations" not in cfg:
         errors.append(f"{where}: needs a condition or max_iterations")
-    outputs = cfg.get("outputs", {})
+    outputs = dict(cfg.get("outputs", {}))
+    declared = cfg.get("state") or {}
+    for name, decl in declared.items():
+        if name in outputs:
+            errors.append(f"{where}: {name!r} is both in state and in outputs")
+        elif not isinstance(decl, dict) or "from" not in decl:
+            errors.append(f"{where}: state {name!r} needs {{from: node.out_port}}")
+        else:
+            outputs[name] = {"from": decl["from"]}
     index_var = cfg.get("index_var", "cycle")
     loop_in = {p for p in n["ports"] if p.startswith("in_")}
-    scope = loop_in | set(outputs) | {index_var, "cycle"}
+    scope = loop_in | set(outputs) | {index_var, "cycle"}                       # what a condition may use
+    readable = loop_in | {k for k, v in outputs.items() if "from" in v} | {index_var, "cycle"}      # what a body may read: loop state only
+    for name, spec in cfg.get("outputs", {}).items():
+        if isinstance(spec, dict) and "from" in spec:
+            warnings.append(f"{where}: {name!r} is loop-carried through outputs.from; declare it under `state:`")
     for key in ("condition", "max_iterations"):
         if isinstance(cfg.get(key), str):
             _check_condition(f"{where} {key}", cfg[key], scope, errors)
@@ -303,7 +315,7 @@ def _check_loop(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[s
     for name in outputs:
         if f"out_{name}" not in n["ports"]:
             warnings.append(f"{where}: output {name!r} has no port 'out_{name}' on the node, so nothing can read it")
-    _check_scope(body["nodes"], body["edges"], f"{prefix}{nid}/", resolver, scope, loop_in, errors, warnings)
+    _check_scope(body["nodes"], body["edges"], f"{prefix}{nid}/", resolver, readable, loop_in, errors, warnings)
 
 
 def _check_batch(n: Dict, prefix: str, resolver: ResourceResolver, errors: List[str], warnings: List[str]) -> None:

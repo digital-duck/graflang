@@ -33,7 +33,7 @@ steps:
       loop: "@in_n"
       while: "TRUE"
       in: {n: count.n, days: $in.days, state: split.result}
-      out:
+      state:
         state: {from: line.result}
       steps:
         - fetch:

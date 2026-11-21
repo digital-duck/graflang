@@ -23,8 +23,9 @@ steps:
       loop: "@in_max_rounds"
       while: "NOT @approved"
       in: {max_rounds: $in.max_rounds, question: $in.question, answer: first.answer}
-      out:
+      state:
         answer: {from: retry.answer}
+      out:
         approved: {fired: ok.pass}
       steps:
         - review: {generate: prompts.supervise, in: {question: $loop.question, answer: $loop.answer}, out: notes}

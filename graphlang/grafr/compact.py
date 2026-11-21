@@ -73,7 +73,7 @@ TYPES = {"generate": "GENERATE", "solve": "SOLVE", "assert": "ASSERT", "evaluate
          "join": "JOIN", "output": "OUTPUT", "fork": "FORK", "use": "SUBGRAPH", "loop": "LOOP", "run_code": "RUN_CODE"}
 RUN_CODE_OUTS = ["program", "output", "ran"]             # what a run_code step gives when `out:` is not written
 RESERVED = {"in", "out", "on", "ports", "config"}
-LOOP_KEYS = {"steps", "while", "index"}                # keys of a `loop` step that are not node config
+LOOP_KEYS = {"steps", "while", "index", "state"}                # keys of a `loop` step that are not node config
 ID = re.compile(r"^[a-zA-Z0-9_]+$")
 
 
@@ -136,6 +136,8 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
     for sid, kind, body in parsed:
         o = body.get("out", RUN_CODE_OUTS if kind == "run_code" else ["result"])
         outs[sid] = [o] if isinstance(o, str) else list(o)
+        if kind == "loop" and isinstance(body.get("state"), dict):
+            outs[sid] += [k for k in body["state"] if k not in outs[sid]]      # a state variable is also a result of the loop
 
     nodes: List[Dict] = [{"id": ENTRY, "type": "INPUT", "ports": ["entry", *[f"out_{i}" for i in inputs]]}] if root else []
     edges: List[Dict] = []
@@ -203,6 +205,8 @@ def _build(steps: List, inputs: List[str], outputs: List[str], root: bool) -> Tu
             sub_nodes, sub_edges = _build(body["steps"], [], [], root=False)
             cfg["subgraph"] = {"nodes": sub_nodes, "edges": sub_edges}
             cfg["outputs"] = _loop_outputs(sid, body.get("out"), sub_nodes)
+            if body.get("state") is not None:
+                cfg["state"] = _loop_state(sid, body["state"], sub_nodes)
         elif kind == "solve":
             cfg["expression"] = arg
         elif kind in ("assert", "evaluate"):
@@ -317,6 +321,18 @@ def _loop_outputs(sid: str, spec: Any, body_nodes: List[Dict]) -> Dict[str, Any]
             refs.append(f"{node}.{port}")
         outs[name] = {kind: refs if isinstance(ref, list) and kind in ("from", "collect") else refs[0]}
     return outs
+
+
+def _loop_state(sid: str, spec: Any, body_nodes: List[Dict]) -> Dict[str, Any]:
+    """`state: {code: {from: improve.code, init: ""}}` -> the LOOP's state, `from` naming body ports (`improve.out_code`); `init`, `type` kept."""
+    if not isinstance(spec, dict):
+        raise CompactError(f"step {sid!r}: a loop's `state:` is a mapping {{name: {{from: step.result, init: value}}}}")
+    out: Dict[str, Any] = {}
+    for name, decl in spec.items():
+        if not isinstance(decl, dict) or "from" not in decl or set(decl) - {"from", "init", "type"}:
+            raise CompactError(f"step {sid!r}: loop state {name!r} is {{from: step.result, init: value, type: T}}")
+        out[name] = {**decl, "from": _loop_outputs(sid, {name: {"from": decl["from"]}}, body_nodes)[name]["from"]}
+    return out
 
 
 def parsed_kind(parsed: List[Tuple[str, str, Dict]], sid: str) -> str:

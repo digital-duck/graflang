@@ -81,7 +81,7 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
             kind = "node"
         kinds[n["id"]] = kind
         if kind == "loop":
-            outs[n["id"]] = list((cfg.get("outputs") or {}))
+            outs[n["id"]] = [*(cfg.get("outputs") or {}), *(cfg.get("state") or {})]
         else:
             outs[n["id"]] = [p[4:] for p in n.get("ports", []) if p.startswith("out_")]
 
@@ -158,6 +158,7 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
         body: Dict[str, Any] = {}
         extra_ports = []
         outputs_spec: Dict = {}
+        state_spec: Dict = {}
         if kind == "loop":
             sub = cfg.pop("subgraph", None) or {}
             try:
@@ -174,6 +175,7 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
             if "index_var" in cfg:
                 body["index"] = cfg.pop("index_var")
             outputs_spec = cfg.pop("outputs", None) or {}
+            state_spec = cfg.pop("state", None) or {}
             body["steps"] = sub_steps
         else:
             body[kind] = arg
@@ -228,6 +230,8 @@ def _pass_once(nodes: List[Dict], edges: List[Dict], inputs: List[str], outputs:
             if in_map:
                 body["in"] = in_map
             if kind == "loop":
+                if state_spec:
+                    body["state"] = {k: {**v, "from": _loop_out({k: {"from": v["from"]}})[k]["from"]} for k, v in state_spec.items()}
                 if outputs_spec:
                     body["out"] = _loop_out(outputs_spec)
             elif outs[sid] == (RUN_CODE_OUTS if kind == "run_code" else ["result"]):

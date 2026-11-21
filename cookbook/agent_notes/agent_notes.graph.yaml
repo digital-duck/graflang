@@ -25,9 +25,10 @@ steps:
       loop: "@in_max_steps"
       while: "NOT @done"
       in: {max_steps: $in.max_steps, question: $in.question, history: seed.history, answer: ""}
-      out:
+      state:
         history: {from: add.history}
         answer: {from: finish.answer}
+      out:
         done: {fired: wants_read.fail}
       steps:
         - decide: {generate: prompts.decide, in: {question: $loop.question, history: $loop.history}, out: decision}

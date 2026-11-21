@@ -61,13 +61,14 @@ nodes:
       # The loop repeats until the tests pass, the guard denies, or max_cycles is reached.
       condition: "NOT @test_passed AND NOT @denied AND @cycle < @in_max_cycles"
       max_iterations: "@in_max_cycles"
-      outputs:
+      state:
         final_code: {from: "loop_imp.out_improved_code"}   # out_final_code: code from the latest iteration
+        prior_code: {from: "loop_imp.out_improved_code"}
+        prior_test: {from: "loop_test.out_result"}
+      outputs:
         test_passed: {fired: "loop_eval.pass"}             # out_test_passed: did the gate pass last time?
         denied: {fired: "loop_guard.deny"}                 # the policy refused another attempt
         # carried into the next attempt: the code it tried and the test result it got (empty on the first attempt)
-        prior_code: {from: "loop_imp.out_improved_code"}
-        prior_test: {from: "loop_test.out_result"}
       subgraph:
         nodes:
           - id: "loop_gen"

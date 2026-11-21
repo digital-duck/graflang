@@ -39,10 +39,11 @@ steps:
       loop: "@in_max_cycles"
       while: "NOT @passed"
       in: {spec: $in.spec, lang: $in.lang, reference: $in.reference, smoke: $in.smoke, max_cycles: $in.max_cycles, feedback: review.feedback, code: write.code}
-      out:
+      state:
         code: {from: improve.code}                  # the reply of the latest round, read by the next round
         test_result: {from: report.result}          # what verification said about it
         files: {from: collect.files}
+      out:
         passed: {fired: ok.pass}
       steps:
         - improve: {generate: prompts.improve_code, in: {spec: $loop.spec, code: $loop.code, feedback: $loop.feedback, test_result: $loop.test_result, lang: $loop.lang, reference: $loop.reference}, out: [code]}

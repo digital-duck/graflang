@@ -24,8 +24,9 @@ steps:
       loop: "@in_max_rounds"
       while: "NOT @valid"
       in: {max_rounds: $in.max_rounds, text: $in.text, raw: extract.raw}
-      out:
+      state:
         raw: {from: again.raw}
+      out:
         valid: {fired: check.pass}
       steps:
         - check: {evaluate: "json_get(@in_raw, 'name') != '' AND json_get(@in_raw, 'email') != ''", in: {raw: $loop.raw}}

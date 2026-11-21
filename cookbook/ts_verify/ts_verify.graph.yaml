@@ -37,14 +37,15 @@ nodes:
     config:
       condition: "NOT @passed AND @cycle < @in_max_cycles"
       max_iterations: "@in_max_cycles"
-      outputs:
+      state:
         final_code: {from: "write.out_code"}
-        passed: {fired: "tests_ok.pass"}
-        attempts: {collect: "write.out_code"}
-        # carried into the next attempt (empty on the first): what it wrote and what the toolchain said
         prior_code: {from: "write.out_code"}
         type_report: {from: "typecheck.out_check"}
         case_report: {from: "run_cases.out_run"}       # none if the types failed, so the cases did not run
+      outputs:
+        passed: {fired: "tests_ok.pass"}
+        attempts: {collect: "write.out_code"}
+        # carried into the next attempt (empty on the first): what it wrote and what the toolchain said
       subgraph:
         nodes:
           - id: "write"

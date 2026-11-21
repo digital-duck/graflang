@@ -182,7 +182,7 @@ def _steps(nodes: List[dict], edges: List[dict], resolver: ResourceResolver, dep
         body = cfg.get("subgraph")
         if isinstance(body, dict) and body.get("nodes"):
             lines += _steps(body["nodes"], body.get("edges", []), resolver, depth + 1)
-            collected = [f"{k} from {v.get('collect') or v.get('from')}" for k, v in (cfg.get("outputs") or {}).items() if isinstance(v, dict)]
+            collected = [f"{k} from {v.get('collect') or v.get('from')}" for k, v in {**(cfg.get("state") or {}), **(cfg.get("outputs") or {})}.items() if isinstance(v, dict)]
             if collected:
                 lines.append(f"{pad}   - keeps: " + ", ".join(collected))
     return lines
