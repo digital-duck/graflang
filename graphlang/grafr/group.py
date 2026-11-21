@@ -200,6 +200,99 @@ def group(data: Dict[str, Any], ids: List[str], name: str) -> Tuple[Dict[str, An
     return parent, part, files
 
 
+def ungroup(data: Dict[str, Any], use_id: str, base: Path) -> Dict[str, Any]:
+    """The inverse of `group`: replace the SUBGRAPH node `use_id` by the nodes of its part, under their own names (`<use>__<node>` only where
+    a name is taken). The part's prompts, procedures and policies stay where they are and are referenced by path; the part's folder is not
+    deleted.  A part's own uses stay uses (composites of composites). `base` is the graph's folder."""
+    import os
+    from .parts import KINDS, PartError, _expand_use, part_file
+    nodes = {n["id"]: n for n in data["nodes"]}
+    use = nodes.get(use_id)
+    if use is None or use.get("type") != "SUBGRAPH":
+        raise GroupError(f"{use_id!r} is not a composite (SUBGRAPH) node")
+    pname = str((use.get("config") or {}).get("part", "")).partition(".")[2]
+    rel = ((data.get("resources") or {}).get("parts") or {}).get(pname)
+    if rel is None:
+        raise GroupError(f"{use_id!r}: part {pname!r} is not listed under resources.parts")
+    from ruamel.yaml import YAML
+    path = part_file(rel, base)
+    try:
+        raw = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
+    except OSError as e:
+        raise GroupError(f"cannot read the part: {e}") from None
+    from .compact import expand as expand_compact, is_compact
+    raw = expand_compact(raw) if is_compact(raw) else raw
+    work = copy.deepcopy({k: v for k, v in data.items() if not str(k).startswith("_")})
+    work["_source_dir"] = str(base)
+    prefix = f"{use_id}__"
+    try:
+        new_nodes, new_edges = _expand_use(work, work["nodes"], work.get("edges", []), use, base, (), flatten=False)
+    except PartError as e:
+        raise GroupError(str(e)) from None
+    taken = {n["id"] for n in new_nodes if not n["id"].startswith(prefix)}
+    rename: Dict[str, str] = {}
+    for n in new_nodes:
+        if n["id"].startswith(prefix):
+            short = n["id"][len(prefix):]
+            rename[n["id"]] = short if short not in taken else n["id"]
+            taken.add(rename[n["id"]])
+    res = work.setdefault("resources", {})
+    new_refs: Dict[str, str] = {}
+    for kind in KINDS:                                       # the part's files, as paths from this graph's folder, under their own names
+        for key in [k for k in (res.get(kind) or {}) if k.startswith(prefix)]:
+            short = key[len(prefix):]
+            target = short if short not in res[kind] else key
+            new_refs[f"{kind}.{key}"] = f"{kind}.{target}"
+            res[kind][target] = "./" + os.path.relpath(res[kind].pop(key), base)
+
+    inner_parts: Dict[str, str] = {}                         # the part's own uses: their entries join this graph's, read from its folder
+    for iname, ipath in ((raw.get("resources") or {}).get("parts") or {}).items():
+        ipath = str(ipath)
+        target = iname if (res.get("parts") or {}).get(iname) in (None, ipath) else f"{prefix}{iname}"
+        named = ipath.partition(":")[0] in ROOTS_ and not ipath.startswith((".", "/"))
+        res.setdefault("parts", {})[target] = ipath if named else "./" + os.path.relpath((path.parent / ipath).resolve(), base)
+        inner_parts[f"parts.{iname}"] = f"parts.{target}"
+
+    def fix(node: Dict) -> None:
+        cfg = node.get("config")
+        if isinstance(cfg, dict):
+            if node.get("type") == "SUBGRAPH" and cfg.get("part") in inner_parts:
+                cfg["part"] = inner_parts[cfg["part"]]
+            for rkey, _ in REF_KEYS:
+                if cfg.get(rkey) in new_refs:
+                    cfg[rkey] = new_refs[cfg[rkey]]
+            if node.get("type") in PATH_NODES and isinstance(cfg.get("file"), str) and os.path.isabs(cfg["file"]):
+                inside = Path(cfg["file"]).resolve()
+                cfg["file"] = os.path.relpath(inside, base)
+                cfg["allow_dirs"] = [d for d in (cfg.get("allow_dirs") or []) if Path(d).resolve() != path.parent.resolve()]
+                if not cfg["allow_dirs"]:
+                    del cfg["allow_dirs"]
+            body = cfg.get("subgraph")
+            if isinstance(body, dict):
+                for b in body.get("nodes", []):
+                    fix(b)
+    result_nodes = []
+    for n in new_nodes:
+        n = copy.deepcopy(n)
+        n["id"] = rename.get(n["id"], n["id"])
+        if n["id"] in rename.values():
+            fix(n)
+        result_nodes.append(n)
+
+    def ren(ref: str) -> str:
+        node, _, port = ref.partition(".")
+        return f"{rename.get(node, node)}.{port}"
+    result_edges = [{**e, "source": ren(e["source"]), "target": ren(e["target"])} for e in new_edges]
+    if not any(n.get("type") == "SUBGRAPH" and str((n.get("config") or {}).get("part", "")) == f"parts.{pname}" for n in result_nodes):
+        del res["parts"][pname]                              # nothing else uses it
+        if not res["parts"]:
+            del res["parts"]
+    for k in ("_part_of", "_parts_calls", "_source_dir"):
+        work.pop(k, None)
+    work["nodes"], work["edges"] = result_nodes, result_edges
+    return work
+
+
 def write_group(folder: Path, name: str, part: Dict[str, Any], files: List[Tuple[str, str, str]], parent_dir: Path) -> Path:
     """Write the part to `<folder>/<name>/<name>.graph.yaml` and copy its resource files beside it. Refuses an existing folder."""
     from ..yamlfmt import dump_readable

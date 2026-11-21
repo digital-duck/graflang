@@ -184,7 +184,7 @@ def recipe_index(rebuild: bool = False):
 
 def forget_widgets() -> None:
     """A text box keeps what was typed in it; after an edit, an undo or a new file the boxes must show the file's state again."""
-    for key in [k for k in st.session_state if str(k).startswith(("cfg_", "ports_", "rename_", "source_"))]:
+    for key in [k for k in st.session_state if str(k).startswith(("cfg_", "ports_", "rename_", "source_", "group_"))]:
         del st.session_state[key]
 
 

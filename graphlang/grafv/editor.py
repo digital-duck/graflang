@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import io
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -68,6 +69,7 @@ class GraphEditor:
             raise EditError("not a GraphLang workflow (needs workflow:, nodes: and edges:)")
         self.doc.setdefault("edges", [])
         self._undo: List[str] = []
+        self._group_dirs: Dict[int, Path] = {}      # undo depth -> the subfolder a Group made there (Undo removes it)
         self.saved_text = self._dump()
 
     @staticmethod
@@ -333,8 +335,47 @@ class GraphEditor:
     def undo(self) -> bool:
         if not self._undo:
             return False
+        made = self._group_dirs.pop(len(self._undo), None)
         self.doc = self._yaml.load(self._undo.pop())
+        if made is not None:
+            shutil.rmtree(made, ignore_errors=True)         # the composite's folder was made by the edit being undone
         return True
+
+    def ungroup(self, node_id: str) -> None:
+        """Replace a composite by its nodes again (the inverse of `group`). The composite's folder stays on disk; the graph changes until Save."""
+        from ..grafr.group import GroupError, ungroup
+        try:
+            new = ungroup(_plain(self.doc), node_id, self.path.resolve().parent)
+        except GroupError as e:
+            raise EditError(str(e)) from None
+
+        def change():
+            self.doc = self._yaml.load(dump_readable(new))
+            self.doc.setdefault("edges", [])
+        self._edit(change)
+
+    def group(self, ids: List[str], name: str) -> Path:
+        """Turn the selected nodes into a composite: a part in a new subfolder `<recipe>/<name>/`, used as one SUBGRAPH node (`graf group`).
+        The folder is written now (new files only, nothing is overwritten) because the graph cannot be checked without it; the graph
+        itself changes in memory until Save. Undo removes the folder. Comments of the graph file are not kept (as for a source edit)."""
+        from ..grafr.group import GroupError, group, write_group
+        folder = self.path.resolve().parent
+        try:
+            parent, part, files = group(_plain(self.doc), [str(i) for i in ids], name)
+            made = write_group(folder, name, part, files, folder)
+        except GroupError as e:
+            raise EditError(str(e)) from None
+
+        def change():
+            self.doc = self._yaml.load(dump_readable(parent))
+            self.doc.setdefault("edges", [])
+        try:
+            self._edit(change)
+        except Exception:
+            shutil.rmtree(made.parent, ignore_errors=True)
+            raise
+        self._group_dirs[len(self._undo)] = made.parent
+        return made.parent
 
     # ---- writing -----------------------------------------------------------------------------
     def clone(self, name: str) -> Path:
@@ -370,3 +411,4 @@ class GraphEditor:
             Path(tmp).unlink(missing_ok=True)
             raise
         self.saved_text = text
+        self._group_dirs.clear()                       # saved: the graph uses these folders now, Undo must not delete them

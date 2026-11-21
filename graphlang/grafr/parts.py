@@ -63,7 +63,7 @@ def _names(ports: Any) -> List[str]:
     return list(ports) if isinstance(ports, (list, tuple)) else list(ports)
 
 
-def _load_part(path: Path, stack: Tuple[Path, ...]) -> Dict:
+def _load_part(path: Path, stack: Tuple[Path, ...], flatten: bool = True) -> Dict:
     if path in stack:
         chain = " -> ".join(p.name for p in (*stack, path))
         raise PartError(f"a part cannot use itself: {chain}")
@@ -76,7 +76,8 @@ def _load_part(path: Path, stack: Tuple[Path, ...]) -> Dict:
         raise PartError(f"{path.name} is not a workflow file (needs workflow:, nodes:, edges:)")
     data.setdefault("edges", [])
     data["_source_dir"] = str(path.parent)
-    flatten_parts(data, _stack=(*stack, path))
+    if flatten:
+        flatten_parts(data, _stack=(*stack, path))
     return data
 
 
@@ -158,7 +159,8 @@ def _port_type(node: Dict, port: str) -> str:
     return "ANY"
 
 
-def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, base: Path, stack: Tuple[Path, ...]) -> Tuple[List[Dict], List[Dict]]:
+def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, base: Path, stack: Tuple[Path, ...],
+                flatten: bool = True) -> Tuple[List[Dict], List[Dict]]:
     uid, cfg = use["id"], use.get("config", {})
     ref = cfg.get("part", "")
     kind, _, pname = ref.partition(".")
@@ -166,7 +168,7 @@ def _expand_use(parent: Dict, nodes: List[Dict], edges: List[Dict], use: Dict, b
     if kind != "parts" or rel is None:
         raise PartError(f"SUBGRAPH {uid!r}: config.part {ref!r} is not listed under resources.parts")
     part_path = part_file(rel, base)
-    part = _load_part(part_path, stack)
+    part = _load_part(part_path, stack, flatten)         # flatten=False: the part's own uses stay uses (`graf ungroup`)
     inputs, out_maps, in_map, entry, exits = _interface(part, pname)
     out_names = {o for m in out_maps.values() for o in m.values()}
 

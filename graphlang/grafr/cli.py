@@ -389,6 +389,39 @@ def cmd_group(graph, nodes, name, dry_run):
     console.print(f"wrote {made.relative_to(folder)} and updated {graph_path.name}")
 
 
+@click.command("ungroup", short_help="Put a composite's nodes back into the graph (the inverse of group).")
+@click.argument("graph")
+@click.option("--node", required=True, help="the composite (SUBGRAPH) node to open")
+def cmd_ungroup(graph, node):
+    """Replace a SUBGRAPH node by the nodes of its part, under their own names. The part's folder and files stay on disk. A file written
+    with `steps:` stays so. The result is validated before the file is replaced."""
+    from ruamel.yaml import YAML
+    from .compact import expand as expand_compact, is_compact
+    from .compactify import compactify
+    from .group import GroupError, ungroup
+    from ..yamlfmt import dump_readable
+    graph_path = Path(graph)
+    if not graph_path.exists():
+        console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
+        sys.exit(1)
+    original = YAML(typ="safe").load(graph_path.read_text(encoding="utf-8"))
+    compact = is_compact(original)
+    folder = graph_path.resolve().parent
+    tmp = folder / f".{graph_path.name}.ungroup.tmp"
+    try:
+        new = ungroup(expand_compact(original) if compact else original, node, folder)
+        tmp.write_text(dump_readable(compactify(new)[0] if compact else new), encoding="utf-8")
+        errors, _ = check(load_graph(tmp))
+        if errors:
+            raise GroupError(f"the opened graph does not validate: {errors[0]}")
+        tmp.replace(graph_path)
+    except (GroupError, ValueError) as ex:
+        tmp.unlink(missing_ok=True)
+        console.print(f"[red]Error:[/red] {ex}")
+        sys.exit(1)
+    console.print(f"opened {node!r} in {graph_path.name}; its folder is still there")
+
+
 @click.command("parts", short_help="List the parts a workflow uses: where each comes from, its pin, interface, what it touches and costs.")
 @click.argument("graph")
 def cmd_parts(graph):

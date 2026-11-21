@@ -473,3 +473,21 @@ def test_a_run_is_titled_by_its_topic_and_the_file_name_is_cut_short():
     long = "word " * 40
     assert len(slug(long)) <= 80 and not slug(long).endswith("_") and slug(long).startswith("word_word")
     assert slug("???") == ""
+
+
+def test_group_nodes_into_a_composite_then_undo_removes_the_folder(tmp_path, monkeypatch):
+    from test_group import SRC
+    graph = tmp_path / "calc.graph.yaml"
+    graph.write_text(SRC)
+    monkeypatch.setenv("GRAF_EDIT_FILE", str(graph))
+    monkeypatch.setenv("GRAF_PLAIN_EDITOR", "1")
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    assert not app.exception, app.exception
+    app.multiselect(key="group_ids").select("b").select("c").run()
+    app.text_input(key="group_name").set_value("tail").run()
+    button(app, "group_go").click().run()
+    assert not app.exception and (tmp_path / "tail" / "tail.graph.yaml").is_file()
+    assert any("grouped into tail/" in s.value for s in app.success) and not button(app, "save").disabled
+    button(app, "undo").click().run()
+    assert not app.exception and not (tmp_path / "tail").exists()
+    assert graph.read_text() == SRC                                      # the graph file was never touched

@@ -266,6 +266,33 @@ def add_tab(editor: GraphEditor) -> None:
                 editor.add_node(node_id.strip(), node_type, [p.strip() for p in ports.split(",") if p.strip()], cfg)
             if attempt(add, f"{node_id} added"):
                 st.rerun()
+    group_box(editor)
+    ungroup_box(editor)
+
+
+def group_box(editor: GraphEditor) -> None:
+    """Group nodes into a composite (a part in a subfolder of the recipe); the graph then reads one node at that place."""
+    labels = node_labels(editor)
+    ids = [i for i, n in zip(editor.node_ids(), editor.data()["nodes"]) if n["type"] not in ("INPUT", "OUTPUT")]
+    with st.expander("Group nodes into a composite"):
+        picked = st.multiselect("Nodes", ids, key="group_ids", format_func=lambda i: labels.get(i, i),
+                                help="one entry (outside nodes trigger one of them) and one way out; data crossing the cut becomes the composite's inputs and outputs")
+        name = st.text_input("Name (its subfolder and node id)", key="group_name")
+        if st.button("Group", key="group_go", disabled=not picked or not name.strip(),
+                     help="Writes the new subfolder now; the graph changes until Save. Undo removes the folder."):
+            if attempt(lambda: editor.group(picked, name.strip()), f"grouped into {name.strip()}/"):
+                st.rerun()
+
+
+def ungroup_box(editor: GraphEditor) -> None:
+    uses = [str(n["id"]) for n in editor.data()["nodes"] if n["type"] == "SUBGRAPH"]
+    if not uses:
+        return
+    with st.expander("Open a composite again"):
+        which = st.selectbox("Composite", uses, key="group_open")
+        if st.button("Ungroup", key="group_ungroup", help="Put its nodes back in this graph. Its folder stays on disk. Undo takes it back."):
+            if attempt(lambda: editor.ungroup(str(which)), f"{which} opened"):
+                st.rerun()
 
 
 def edge_tab(editor: GraphEditor) -> None:
