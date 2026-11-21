@@ -71,7 +71,37 @@ def attempt(action, success: str = "") -> bool:
 
 
 def picture(editor: GraphEditor) -> None:
-    ui.show_graph(editor.data())
+    view = st.radio("Canvas", ["Graph", "graf compact", "graf expand"], horizontal=True, key="canvas_view", label_visibility="collapsed",
+                    help="Graph: the picture. graf compact / graf expand: the file as text in the short `steps:` form or the long "
+                         "`nodes:`/`edges:` form, worked out in memory; nothing is written unless you press the save button.")
+    if view == "Graph":
+        ui.show_graph(editor.data())
+        return
+    compact = view == "graf compact"
+    long_text, _ = editor.form_text(False)
+    try:
+        text, report = editor.form_text(compact)
+    except EditError as e:
+        st.error(str(e))
+        return
+    if compact:
+        st.caption(f"{len(long_text.splitlines())} lines long form -> {len(text.splitlines())} lines compact; {report['steps']} steps; "
+                   f"{report['nodes_kept']} of {report['nodes_total']} nodes and {report['edges_kept']} of {report['edges_total']} edges "
+                   "stay in long form. Comments are not kept.")
+    else:
+        st.caption(f"{len(long_text.splitlines())} lines in the long form.")
+    st.code(text, language="yaml", height=max(300, ui.canvas_height() - 120))
+    already = editor.compact_origin == compact
+    errors, _ = editor.problems()
+    if st.button(f"Save the file in the {'compact' if compact else 'expanded'} form", key="save_form", disabled=already or bool(errors),
+                 help="Writes the file now (also any unsaved edits); it then stays in this form on later saves."
+                      if not already else "the file is already saved in this form"):
+        previous = editor.compact_origin
+        editor.compact_origin = compact
+        if not attempt(editor.save, f"saved in the {'compact' if compact else 'expanded'} form"):
+            editor.compact_origin = previous
+        else:
+            st.rerun()
 
 
 def node_labels(editor: GraphEditor) -> dict:

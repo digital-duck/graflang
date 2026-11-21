@@ -197,6 +197,17 @@ class GraphEditor:
         except (NotCompactable, CompactError, ValueError, TypeError):
             return text                                   # cannot be written short right now (a half-finished edit): the long form
 
+    def form_text(self, compact: bool) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """(the file as text in the short `steps:` form or the long `nodes:`/`edges:` form, the compactify report or None). In memory only:
+        nothing is written. Raises EditError when the graph cannot be written short."""
+        if not compact:
+            return self._dump(), None
+        try:
+            result, report = compactify(_plain(self.doc))
+        except (NotCompactable, CompactError, ValueError, TypeError) as e:
+            raise EditError(f"cannot be written in the short form: {e}") from None
+        return readable(dump_readable(result)), report
+
     def _same_as_now(self, doc: Any) -> bool:
         buf = io.StringIO()
         self._yaml.dump(doc, buf)
