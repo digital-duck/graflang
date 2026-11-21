@@ -20,6 +20,7 @@ policies it uses. The originals in `cookbook/` are left alone (the experiments a
 | notes_digest | guard, read, digest, publish | `read`, `digest`, `publish` |
 | chat_memory | guard, recall, reply, remember | `recall`, `reply`, `remember` |
 
+Each recipe has a `readme.md` of its own (what it does, its composites and exits, inputs and outputs, model calls, a run command).
 Run a recipe by path (named lookups such as `cookbook:name` and the Browse page only see `cookbook/`). Use the `graf` conda env.
 
 ## 1. Offline checks (free, no model)
@@ -65,8 +66,7 @@ The editor was checked only by loading all eleven recipes and drawing the depth-
 ## 4. Real model runs (billed: always cap them)
 
 Every real run needs a `--bind` file with `limits.max_llm_calls` (a loop that never converges would otherwise keep spending). `cheap.bind.yaml` in `code_pipeline/` and
-`code_pipeline_spl/` is a ready one (a model, a small spec, 20 calls); `--param` on the command line beats its `params`. For the other recipes copy it, change `params`, and set
-`max_llm_calls` from what `graf validate` suggests ("Model calls per run").
+`code_pipeline_spl/` is a ready one (a model, a small spec, 20 calls); `--param` on the command line beats its `params`. For every other recipe use `cookbook_v2/cap.bind.yaml` (only a call limit of 20; raise it from what the recipe's `readme.md` or `graf validate` says about model calls).
 
 **`code_pipeline` runs the generated project in a Docker container** (no network, read-only root, 1 GB, 2 CPUs), so a model's tests cannot reach the network or touch your files.
 Build the image once, with Docker running (the recipe folder must be under your home directory with Docker Desktop):
