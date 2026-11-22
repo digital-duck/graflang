@@ -1,0 +1,375 @@
+version: 1.0-graph
+workflow:
+  name: sympy_llm_v2_solver_arm
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: log_dir
+    type: TEXT
+  outputs:
+  - name: explanation
+    type: TEXT
+  - name: set_explanation_2_explanation
+    type: TEXT
+  - name: set_explanation_3_explanation
+    type: TEXT
+  - name: set_set_12_explanation
+    type: TEXT
+  - name: set_set_13_explanation
+    type: TEXT
+  - name: trim_3_explanation
+    type: TEXT
+resources:
+  parts:
+    plan: ./plan/plan.graph.yaml
+    run_steps: ./run_steps/run_steps.graph.yaml
+    narrate: ./narrate/narrate.graph.yaml
+steps:
+- plan:
+    use: parts.plan
+    in:
+      problem: $in.problem
+    out:
+    - n_steps
+    - steps_text
+- gate_2:
+    evaluate: "@in_n_steps == '0'"
+    in:
+      n_steps: plan
+    out: []
+    branch: 1
+- write_file:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      steps_text: plan.steps_text
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - f'(planning failed — raw decomposition output below)\n{@steps_text}'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', f'(planning failed — raw decomposition output below)\n{steps_text}')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- set_explanation:
+    node: CONTEXT
+    in:
+      problem: $in.problem
+      steps_text: plan.steps_text
+    out: explanation
+    action: set
+    expression: >-
+      f'[PLAN FAILURE] The planning step could not decompose "{@in_problem}"
+      into usable operations.\nRaw decomposition output: {@in_steps_text}'
+- validate_plan:
+    node: SOLVE
+    in:
+      steps_text: plan.steps_text
+    out: plan_format
+    on: gate_2.fail
+    tool: validate_plan
+    backend: kernel
+    arguments:
+    - '@steps_text'
+    code: |
+      def validate_plan(steps_text: str) -> str:
+          """Deterministic, 0-token check of the chain-protocol contract:
+          line 1 = <expression>|<operation>, every later line = PREV|<operation>,
+          every operation from the allowed vocabulary. Returns 'ok' or
+          'fail | <reason>' — catches a model that emits a fresh expression
+          mid-chain (e.g. parroting a few-shot example) before any LLM gate."""
+          allowed = {'solve', 'diff', 'integrate', 'simplify', 'expand', 'factor',
+                     'series', 'apart', 'limit', 'laplace', 'inverse_laplace',
+                     'trigsimp', 'summation', 'eigenvalues', 'solve_system', 'dsolve', 'dsolve_ic'}
+          lines = [l.strip() for l in steps_text.splitlines() if l.strip()]
+          if not lines:
+              return 'fail | empty plan'
+          for i, line in enumerate(lines, 1):
+              if line.count('|') != 1:
+                  return f'fail | line {i} is not <expression>|<operation>: {line}'
+              expr, op = (p.strip() for p in line.split('|'))
+              if not expr or not op:
+                  return f'fail | line {i} has an empty field: {line}'
+              if '\\' in expr:
+                  return f'fail | line {i} expression contains LaTeX markup: {expr}'
+              if op.split('(')[0].strip() not in allowed:
+                  return f'fail | line {i} operation not in the allowed list: {op}'
+              if i == 1 and expr.upper() == 'PREV':
+                  return 'fail | line 1 must carry the starting expression, not PREV'
+              if i > 1 and expr.upper() != 'PREV':
+                  return f'fail | line {i} must use PREV, got a new expression: {expr}'
+          return 'ok'
+      _spl_result = validate_plan(steps_text)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - steps_text
+    tool_returns: TEXT
+- gate_3:
+    evaluate: "@in_plan_format != 'ok'"
+    in:
+      plan_format: validate_plan
+    out: []
+    branch: 1
+- write_file_2:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      steps_text: plan.steps_text
+      plan_format: validate_plan
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - "f'(plan failed the deterministic format check)\\n{@steps_text}\\nPLAN FORMAT: {@plan_format}\\n'"
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', f'(plan failed the deterministic format check)\n{steps_text}\nPLAN FORMAT: {plan_format}\n')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- set_explanation_2:
+    node: CONTEXT
+    in:
+      plan_format: validate_plan
+      steps_text: plan.steps_text
+    out: explanation
+    action: set
+    expression: >-
+      f'[PLAN FORMAT FAILURE] The decomposed plan violates the chain protocol:
+      {@in_plan_format}\nPlan:\n{@in_steps_text}'
+- sanity_check_plan:
+    generate: |-
+      A student asked the following question: "{{in_problem}}"
+
+      A planner translated it into this ordered plan, one step per line in the
+      format <expression>|<operation>, where PREV means "the result of the
+      previous step":
+      {{in_plan}}
+
+      Your ONLY job is to check whether this plan sets up the question that
+      was actually asked. Do NOT execute any math. Check ONLY for:
+
+      - Wrong starting expression: line 1 does not transcribe the expression
+        stated in the problem. FIRST extract the expression from the problem
+        statement, THEN compare it to line 1 symbol by symbol — every digit,
+        sign, exponent, and function name must match. If the problem says
+        7*y**2 - y and line 1 says anything else, that is a fail.
+      - Wrong operation: the problem asks for one operation (e.g. integrate)
+        but the plan uses another (e.g. diff)
+      - Missing final step: the problem asks for a final result (e.g. "solve
+        for x") that the plan never reaches
+      - Extra steps that change what the final result means
+
+      Reply with EXACTLY one line and nothing else:
+        pass
+      or
+        fail | <one short reason>
+    in:
+      problem: $in.problem
+      plan: plan.steps_text
+    out: plan_verdict_raw
+    on: gate_3.fail
+    function: sanity_check_plan
+    params:
+    - problem
+    - plan
+    arguments:
+    - '@problem'
+    - '@steps_text'
+- split_part:
+    node: SOLVE
+    in:
+      plan_verdict_raw: sanity_check_plan
+    out: plan_verdict
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@plan_verdict_raw'
+    - "'|'"
+    - "'1'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(plan_verdict_raw, '|', '1')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- lower_2:
+    node: SOLVE
+    in:
+      plan_verdict: split_part
+    out: plan_verdict
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@plan_verdict'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(plan_verdict)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- gate_4:
+    evaluate: "@in_plan_verdict != 'pass'"
+    in:
+      plan_verdict: lower_2
+    out: []
+    branch: 1
+- write_file_3:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      steps_text: plan.steps_text
+      plan_verdict_raw: sanity_check_plan
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - "f'(plan failed the sanity gate)\\n{@steps_text}\\nPLAN SANITY: {@plan_verdict_raw}\\n'"
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', f'(plan failed the sanity gate)\n{steps_text}\nPLAN SANITY: {plan_verdict_raw}\n')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- set_explanation_3:
+    node: CONTEXT
+    in:
+      plan_verdict_raw: sanity_check_plan
+      steps_text: plan.steps_text
+    out: explanation
+    action: set
+    expression: >-
+      f'[PLAN SANITY FAILURE] The decomposed plan does not set up the problem
+      as asked.\nGate verdict:
+      {@in_plan_verdict_raw}\nPlan:\n{@in_steps_text}'
+- run_steps:
+    use: parts.run_steps
+    in:
+      log_dir: $in.log_dir
+      steps_text: plan.steps_text
+      n_steps: plan
+    out: trace
+    on: gate_4.fail
+- narrate:
+    use: parts.narrate
+    in:
+      log_dir: $in.log_dir
+      problem: $in.problem
+      trace: run_steps
+    out:
+    - explanation
+    - set_set_13_explanation
+    - trim_3_explanation
+- wf_exit:
+    output:
+      explanation: set_explanation
+      set_explanation_2_explanation: set_explanation_2
+      set_explanation_3_explanation: set_explanation_3
+      set_set_12_explanation: narrate
+      set_set_13_explanation: narrate.set_set_13_explanation
+      trim_3_explanation: narrate.trim_3_explanation
+    on:
+    - set_explanation
+    - set_explanation_2
+    - set_explanation_3
+    - narrate

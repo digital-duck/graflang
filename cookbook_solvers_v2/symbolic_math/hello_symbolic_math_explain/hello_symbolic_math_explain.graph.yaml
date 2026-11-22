@@ -1,0 +1,36 @@
+version: 1.0-graph
+workflow:
+  name: hello_symbolic_math_explain
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: sympy_result
+    type: TEXT
+  outputs:
+  - name: explanation
+    type: TEXT
+steps:
+- explain_solution:
+    generate: |-
+      A student asked: "{{in_problem}}"
+
+      The symbolic math engine computed: {{in_sympy_result}}
+
+      Write a clear, friendly explanation in less than 5 sentences that:
+      1. Restates what the problem is asking in plain English
+      2. States the exact answer from the computation above
+      3. Briefly explains the key concept or method used
+      Do not re-derive the answer — trust the symbolic result above as exact.
+    in:
+      problem: $in.problem
+      sympy_result: $in.sympy_result
+    out: explanation
+    function: explain_solution
+    params:
+    - problem
+    - sympy_result
+    arguments:
+    - '@problem'
+    - '@sympy_result'
+- wf_exit:
+    output: explain_solution

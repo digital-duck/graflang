@@ -1,0 +1,100 @@
+version: 1.0-graph
+workflow:
+  name: constraint_opt
+  inputs:
+  - name: problem
+    type: TEXT
+    default: A bakery produces artisan bread and croissants. Each loaf of bread requires 3 hours of labor and 2 kg of flour, earning $12 profit. Each batch of croissants requires 1 hour of labor and 3 kg of flour, earning $8 profit. The bakery has 12 hours of labor and 15 kg of flour available each day. Both products must have non-negative quantities. Maximize daily profit.
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INTEGER
+    default: 3
+  - name: lang
+    type: TEXT
+    default: English
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook/78_constraint_opt/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    constraint_opt_setup: ./constraint_opt_setup/constraint_opt_setup.graph.yaml
+    constraint_opt_solver_arm: ./constraint_opt_solver_arm/constraint_opt_solver_arm.graph.yaml
+    constraint_opt_llm_only: ./constraint_opt_llm_only/constraint_opt_llm_only.graph.yaml
+    constraint_opt_report: ./constraint_opt_report/constraint_opt_report.graph.yaml
+steps:
+- constraint_opt_setup:
+    use: parts.constraint_opt_setup
+    out:
+    - llm_calls
+    - t_start
+    - tries
+    - solution
+    - lp_code
+    - stage2_s
+    - ts_safe
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: $in.use_solver
+    out: []
+    branch: 1
+- constraint_opt_solver_arm:
+    use: parts.constraint_opt_solver_arm
+    in:
+      max_tries: $in.max_tries
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: constraint_opt_setup
+      tries: constraint_opt_setup.tries
+      solution: constraint_opt_setup.solution
+      lp_code: constraint_opt_setup.lp_code
+    out:
+    - llm_calls
+    - stage1_s
+    - stage2_s
+    - lp_code
+    - solution
+    - narrative
+- constraint_opt_llm_only:
+    use: parts.constraint_opt_llm_only
+    in:
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: constraint_opt_setup
+    out:
+    - llm_calls
+    - stage1_s
+    - narrative
+    'on': solver_on.fail
+- constraint_opt_report:
+    use: parts.constraint_opt_report
+    in:
+      t_start: constraint_opt_setup.t_start
+      use_solver: $in.use_solver
+      problem: $in.problem
+      out_dir: $in.out_dir
+      stage2_s: constraint_opt_setup.stage2_s
+      lp_code: constraint_opt_setup.lp_code
+      solution: constraint_opt_setup.solution
+      ts_safe: constraint_opt_setup.ts_safe
+      llm_calls: constraint_opt_solver_arm
+      stage1_s: constraint_opt_solver_arm.stage1_s
+      make_metrics_stage2_s: constraint_opt_solver_arm.stage2_s
+      format_report_lp_code: constraint_opt_solver_arm.lp_code
+      format_report_solution: constraint_opt_solver_arm.solution
+      narrative: constraint_opt_solver_arm.narrative
+      make_metrics_llm_calls: constraint_opt_llm_only
+      make_metrics_stage1_s: constraint_opt_llm_only.stage1_s
+      format_report_narrative: constraint_opt_llm_only.narrative
+    out: report
+    'on':
+    - constraint_opt_solver_arm
+    - constraint_opt_llm_only
+- wf_exit:
+    output: constraint_opt_report

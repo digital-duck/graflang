@@ -1,0 +1,100 @@
+version: 1.0-graph
+workflow:
+  name: supply_chain
+  inputs:
+  - name: problem
+    type: TEXT
+    default: 'A company has two warehouses and three retail stores. Warehouse W1 has 80 units of inventory; Warehouse W2 has 60 units. Store S1 needs 50 units, Store S2 needs 40 units, Store S3 needs 50 units. Shipping costs per unit: W1 to S1 costs $2, W1 to S2 costs $3, W1 to S3 costs $1; W2 to S1 costs $5, W2 to S2 costs $4, W2 to S3 costs $8. All store demand must be met exactly. Minimize total shipping cost.'
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INTEGER
+    default: 3
+  - name: lang
+    type: TEXT
+    default: English
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook/78_constraint_opt/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    supply_chain_setup: ./supply_chain_setup/supply_chain_setup.graph.yaml
+    supply_chain_solver_arm: ./supply_chain_solver_arm/supply_chain_solver_arm.graph.yaml
+    supply_chain_llm_only: ./supply_chain_llm_only/supply_chain_llm_only.graph.yaml
+    supply_chain_report: ./supply_chain_report/supply_chain_report.graph.yaml
+steps:
+- supply_chain_setup:
+    use: parts.supply_chain_setup
+    out:
+    - llm_calls
+    - t_start
+    - tries
+    - solution
+    - lp_code
+    - stage2_s
+    - ts_safe
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: $in.use_solver
+    out: []
+    branch: 1
+- supply_chain_solver_arm:
+    use: parts.supply_chain_solver_arm
+    in:
+      max_tries: $in.max_tries
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: supply_chain_setup
+      tries: supply_chain_setup.tries
+      solution: supply_chain_setup.solution
+      lp_code: supply_chain_setup.lp_code
+    out:
+    - llm_calls
+    - stage1_s
+    - stage2_s
+    - lp_code
+    - solution
+    - narrative
+- supply_chain_llm_only:
+    use: parts.supply_chain_llm_only
+    in:
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: supply_chain_setup
+    out:
+    - llm_calls
+    - stage1_s
+    - narrative
+    'on': solver_on.fail
+- supply_chain_report:
+    use: parts.supply_chain_report
+    in:
+      t_start: supply_chain_setup.t_start
+      use_solver: $in.use_solver
+      problem: $in.problem
+      out_dir: $in.out_dir
+      stage2_s: supply_chain_setup.stage2_s
+      lp_code: supply_chain_setup.lp_code
+      solution: supply_chain_setup.solution
+      ts_safe: supply_chain_setup.ts_safe
+      llm_calls: supply_chain_solver_arm
+      stage1_s: supply_chain_solver_arm.stage1_s
+      make_metrics_stage2_s: supply_chain_solver_arm.stage2_s
+      format_report_lp_code: supply_chain_solver_arm.lp_code
+      format_report_solution: supply_chain_solver_arm.solution
+      narrative: supply_chain_solver_arm.narrative
+      make_metrics_llm_calls: supply_chain_llm_only
+      make_metrics_stage1_s: supply_chain_llm_only.stage1_s
+      format_report_narrative: supply_chain_llm_only.narrative
+    out: report
+    'on':
+    - supply_chain_solver_arm
+    - supply_chain_llm_only
+- wf_exit:
+    output: supply_chain_report

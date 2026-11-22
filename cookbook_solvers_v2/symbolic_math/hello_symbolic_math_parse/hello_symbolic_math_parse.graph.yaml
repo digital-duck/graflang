@@ -1,0 +1,59 @@
+version: 1.0-graph
+workflow:
+  name: hello_symbolic_math_parse
+  inputs:
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: parsed
+    type: TEXT
+steps:
+- parse_math_problem:
+    generate: |-
+      Convert this math problem into SymPy notation.
+      Reply with exactly one line in this format (no other text):
+        <expression>|<operation>
+
+      Rules:
+      - Use Python/SymPy syntax: ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+      - operation must be exactly one of: solve, diff, integrate, simplify, expand, factor
+      - For "solve", write f(x) with everything moved to the left side (= 0 form)
+
+      Examples:
+        "find the roots of x squared minus 5x plus 6"    →  x**2 - 5*x + 6|solve
+        "differentiate 3x cubed plus 2x"                 →  3*x**3 + 2*x|diff
+        "integrate sine of x"                            →  sin(x)|integrate
+        "factor x squared minus 9"                       →  x**2 - 9|factor
+        "simplify (x^2-1)/(x-1)"                         →  (x**2 - 1)/(x - 1)|simplify
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: parsed
+    function: parse_math_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- trim:
+    node: SOLVE
+    in:
+      parsed: parse_math_problem
+    out: parsed
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@parsed'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(parsed)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: trim

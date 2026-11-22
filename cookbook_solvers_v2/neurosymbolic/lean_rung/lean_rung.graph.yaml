@@ -1,0 +1,197 @@
+version: 1.0-graph
+workflow:
+  name: lean_rung
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: max_tries
+    type: INT
+  - name: log_dir
+    type: TEXT
+  outputs:
+  - name: result
+    type: TEXT
+resources:
+  parts:
+    setup: ./setup/setup.graph.yaml
+    formalize: ./formalize/formalize.graph.yaml
+    judge: ./judge/judge.graph.yaml
+    cite: ./cite/cite.graph.yaml
+    prove: ./prove/prove.graph.yaml
+    report: ./report/report.graph.yaml
+steps:
+- setup:
+    use: parts.setup
+    out:
+    - stmt_ok_lc
+    - tries
+    - lean_stmt
+- formalize:
+    use: parts.formalize
+    in:
+      problem: $in.problem
+      max_tries: $in.max_tries
+      stmt_ok_lc: setup
+      tries: setup.tries
+      lean_stmt: setup.lean_stmt
+    out:
+    - stmt_ok_lc
+    - lean_stmt
+    - tactics
+    - lean_feedback
+    - proof
+    - check_code
+    - faithful
+    - badge
+    - citation
+- statement_ok:
+    evaluate: "@in_stmt_ok_lc == 'true'"
+    in:
+      stmt_ok_lc: formalize
+    out: []
+    branch: 1
+- judge:
+    use: parts.judge
+    in:
+      claim: $in.problem
+      lean_stmt: formalize.lean_stmt
+    out:
+    - faithful
+    - badge
+- unfaithful:
+    evaluate: contains(@in_subject, 'UNFAITHFUL')
+    in:
+      subject: judge
+    out: []
+    branch: 1
+- set_badge_3:
+    node: CONTEXT
+    out: badge
+    action: set
+    expression: "'unfaithful'"
+- cite:
+    use: parts.cite
+    in:
+      lean_stmt: formalize.lean_stmt
+    out:
+    - proof_ok_lc
+    - lower_proof_ok_proof_ok_lc
+    - tactics
+    - lean_feedback
+    - proof
+    - check_code
+    - proof_ok
+    - citation
+    - find_citation_citation
+    on: unfaithful.fail
+- prove:
+    use: parts.prove
+    in:
+      max_tries: $in.max_tries
+      lean_stmt: formalize.lean_stmt
+      tactics: formalize.tactics
+      lean_feedback: formalize.lean_feedback
+      proof: formalize.proof
+      check_code: formalize.check_code
+      proof_ok_lc: cite
+      prove_loop_proof_ok_lc: cite.lower_proof_ok_proof_ok_lc
+      prove_loop_tactics: cite.tactics
+      prove_loop_lean_feedback: cite.lean_feedback
+      prove_loop_proof: cite.proof
+      prove_loop_check_code: cite.check_code
+      proof_ok: cite.proof_ok
+    out:
+    - proof
+    - set_proof_2_proof
+    - badge
+nodes:
+- id: report
+  type: SUBGRAPH
+  ports:
+  - trigger
+  - complete
+  - in_badge
+  - in_problem
+  - in_log_dir
+  - in_lean_stmt
+  - in_faithful
+  - in_proof
+  - in_lean_report_badge
+  - in_citation
+  - in_lean_report_faithful
+  - in_lean_report_badge2
+  - in_lean_report_citation
+  - in_lean_report_citation2
+  - in_lean_report_proof
+  - in_lean_report_proof2
+  - in_lean_report_badge3
+  - out_result
+  config:
+    part: parts.report
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+edges:
+- source: set_badge_3.complete
+  target: report.trigger
+  type: triggers
+- source: statement_ok.fail
+  target: report.trigger
+  type: triggers
+- source: prove.complete
+  target: report.trigger
+  type: triggers
+- source: report.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_badge_3.out_badge
+  target: report.in_badge
+  type: binds
+- source: wf_entry.out_problem
+  target: report.in_problem
+  type: binds
+- source: wf_entry.out_log_dir
+  target: report.in_log_dir
+  type: binds
+- source: formalize.out_lean_stmt
+  target: report.in_lean_stmt
+  type: binds
+- source: formalize.out_faithful
+  target: report.in_faithful
+  type: binds
+- source: formalize.out_proof
+  target: report.in_proof
+  type: binds
+- source: formalize.out_badge
+  target: report.in_lean_report_badge
+  type: binds
+- source: formalize.out_citation
+  target: report.in_citation
+  type: binds
+- source: judge.out_faithful
+  target: report.in_lean_report_faithful
+  type: binds
+- source: judge.out_badge
+  target: report.in_lean_report_badge2
+  type: binds
+- source: cite.out_citation
+  target: report.in_lean_report_citation
+  type: binds
+- source: cite.out_find_citation_citation
+  target: report.in_lean_report_citation2
+  type: binds
+- source: prove.out_proof
+  target: report.in_lean_report_proof
+  type: binds
+- source: prove.out_set_proof_2_proof
+  target: report.in_lean_report_proof2
+  type: binds
+- source: prove.out_badge
+  target: report.in_lean_report_badge3
+  type: binds
+- source: report.out_result
+  target: wf_exit.in_result
+  type: binds

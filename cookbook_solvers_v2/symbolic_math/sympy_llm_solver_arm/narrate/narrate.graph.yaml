@@ -1,0 +1,119 @@
+version: 1.0-graph
+workflow:
+  name: narrate
+  inputs:
+  - name: log_dir
+    type: TEXT
+  - name: problem
+    type: TEXT
+  - name: trace
+    type: TEXT
+  outputs:
+  - name: explanation
+    type: TEXT
+  - name: trim_3_explanation
+    type: TEXT
+steps:
+- write_file_3:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      trace: $in.trace
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - '@trace'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', trace)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- explain_chain:
+    generate: |-
+      A student asked: "{{in_problem}}"
+
+      The symbolic math engine computed this chain of EXACT steps, in order:
+      {{in_trace}}
+
+      Write a clear, friendly explanation in less than 6 sentences that:
+      1. Restates what the problem is asking in plain English
+      2. Walks through the chain step by step, in order, stating each exact result
+      3. Gives the final answer plainly at the end
+      Do not re-derive any step — trust the computed chain above as exact.
+    in:
+      problem: $in.problem
+      trace: $in.trace
+    out: explanation
+    function: explain_chain
+    params:
+    - problem
+    - trace
+    arguments:
+    - '@problem'
+    - '@trace'
+- trim_3:
+    node: SOLVE
+    in:
+      explanation: explain_chain
+    out: explanation
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@explanation'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- gate_4:
+    evaluate: "@in_explanation == ''"
+    in:
+      explanation: trim_3
+    out: []
+    branch: 1
+- set_set_10:
+    node: CONTEXT
+    in:
+      trace: $in.trace
+    out: explanation
+    action: set
+    expression: >-
+      f'[NARRATION FAILURE] The chain verified correctly but the explanation
+      step returned nothing.\nVerified chain:\n{@in_trace}'
+- wf_exit:
+    output:
+      explanation: set_set_10
+      trim_3_explanation: trim_3
+    on:
+    - gate_4.fail
+    - set_set_10

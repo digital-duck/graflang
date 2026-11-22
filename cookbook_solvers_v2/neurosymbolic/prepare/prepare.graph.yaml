@@ -1,0 +1,103 @@
+version: 1.0-graph
+workflow:
+  name: prepare
+  inputs:
+  - name: enable_solver
+    type: TEXT
+  - name: backend
+    type: TEXT
+  outputs:
+  - name: use_solver
+    type: TEXT
+  - name: set_use_solver_2_use_solver
+    type: TEXT
+  - name: backend_lc
+    type: TEXT
+steps:
+- lower:
+    node: SOLVE
+    in:
+      enable_solver: $in.enable_solver
+    out: solver_mode
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@enable_solver'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(enable_solver)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- lower_2:
+    node: SOLVE
+    in:
+      backend: $in.backend
+    out: backend_lc
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@backend'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(backend)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- trim:
+    node: SOLVE
+    in:
+      backend_lc: lower_2
+    out: backend_lc
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@backend_lc'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(backend_lc)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- solver_on:
+    evaluate: >-
+      (@in_solver_mode == 'true' OR @in_solver_mode == '1' OR @in_solver_mode
+      == 'yes')
+    in:
+      solver_mode: lower
+    out: []
+    branch: 1
+- set_use_solver:
+    node: CONTEXT
+    out: use_solver
+    action: set
+    expression: "'yes'"
+- set_use_solver_2:
+    node: CONTEXT
+    out: use_solver
+    on: solver_on.fail
+    action: set
+    expression: "'no'"
+- wf_exit:
+    output:
+      use_solver: set_use_solver
+      set_use_solver_2_use_solver: set_use_solver_2
+      backend_lc: trim
+    on:
+    - set_use_solver
+    - set_use_solver_2

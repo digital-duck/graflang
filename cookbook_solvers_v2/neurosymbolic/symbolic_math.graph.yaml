@@ -1,0 +1,127 @@
+version: 1.0-graph
+workflow:
+  name: neurosymbolic_solver
+  inputs:
+  - name: problem
+    type: TEXT
+    default: find the Galois group of x**5 - x - 1 over the rationals
+  - name: backend
+    type: TEXT
+    default: sage
+  - name: enable_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INT
+    default: 3
+  - name: log_dir
+    type: TEXT
+    default: cookbook/77_neurosymbolic/logs-spl
+  - name: hostname
+    type: TEXT
+    default: ''
+  - name: pid
+    type: TEXT
+    default: ''
+  - name: thinking_note
+    type: TEXT
+    default: ''
+  outputs:
+  - name: result
+    type: TEXT
+resources:
+  parts:
+    prepare: ./prepare/prepare.graph.yaml
+    llm_only: ./llm_only/llm_only.graph.yaml
+    lean_rung: ./lean_rung/lean_rung.graph.yaml
+    step_rung: ./step_rung/step_rung.graph.yaml
+steps:
+- prepare:
+    use: parts.prepare
+    in:
+      enable_solver: $in.enable_solver
+      backend: $in.backend
+    out:
+    - use_solver
+    - set_use_solver_2_use_solver
+    - backend_lc
+- solver_off:
+    evaluate: |-
+      @in_use_solver == 'no'
+    in:
+      use_solver:
+      - prepare
+      - prepare.set_use_solver_2_use_solver
+    out: []
+    branch: 1
+- llm_only:
+    use: parts.llm_only
+    in:
+      log_dir: $in.log_dir
+      problem: $in.problem
+      thinking_note: $in.thinking_note
+    out:
+    - result
+    - trim_2_result
+- backend_is_lean:
+    evaluate: |-
+      @in_backend_lc == 'lean'
+    in:
+      backend_lc: prepare.backend_lc
+    out: []
+    'on': solver_off.fail
+    branch: 1
+- step_rung:
+    use: parts.step_rung
+    in:
+      problem: $in.problem
+      thinking_note: $in.thinking_note
+      log_dir: $in.log_dir
+      pid: $in.pid
+      backend_lc: prepare.backend_lc
+    out:
+    - result
+    - set_narration_failure_result
+    - trim_3_result
+    'on': backend_is_lean.fail
+- wf_exit:
+    output:
+    - llm_only
+    - llm_only.trim_2_result
+    - step_rung
+    - step_rung.set_narration_failure_result
+    - step_rung.trim_3_result
+    'on':
+    - llm_only
+    - step_rung
+nodes:
+- id: lean_rung
+  type: SUBGRAPH
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - in_max_tries
+  - in_log_dir
+  - out_result
+  config:
+    part: parts.lean_rung
+edges:
+- source: backend_is_lean.pass
+  target: lean_rung.trigger
+  type: triggers
+- source: lean_rung.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: wf_entry.out_problem
+  target: lean_rung.in_problem
+  type: binds
+- source: wf_entry.out_max_tries
+  target: lean_rung.in_max_tries
+  type: binds
+- source: wf_entry.out_log_dir
+  target: lean_rung.in_log_dir
+  type: binds
+- source: lean_rung.out_result
+  target: wf_exit.in_result
+  type: binds

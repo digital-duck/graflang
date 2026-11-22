@@ -1,0 +1,173 @@
+version: 1.0-graph
+workflow:
+  name: report
+  inputs:
+  - name: badge
+    type: TEXT
+  - name: cacheable_badge
+    type: TEXT
+  - name: cacheable_badge2
+    type: TEXT
+  - name: claim
+    type: TEXT
+  - name: lean_stmt
+    type: TEXT
+  - name: faithful
+    type: TEXT
+  - name: make_report_faithful
+    type: TEXT
+  - name: proof
+    type: TEXT
+  - name: make_report_proof
+    type: TEXT
+  - name: make_report_proof2
+    type: TEXT
+  - name: citation
+    type: TEXT
+  - name: make_report_citation
+    type: TEXT
+  - name: make_report_citation2
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- make_report:
+    node: SOLVE
+    in:
+      claim: $in.claim
+      lean_stmt: $in.lean_stmt
+      faithful:
+      - $in.faithful
+      - $in.make_report_faithful
+      proof:
+      - $in.proof
+      - $in.make_report_proof
+      - $in.make_report_proof2
+      badge:
+      - $in.badge
+      - $in.cacheable_badge
+      - $in.cacheable_badge2
+      citation:
+      - $in.citation
+      - $in.make_report_citation
+      - $in.make_report_citation2
+    out: report
+    tool: make_report
+    backend: kernel
+    arguments:
+    - '@claim'
+    - '@lean_stmt'
+    - '@faithful'
+    - '@proof'
+    - '@badge'
+    - '@citation'
+    code: |
+      def make_report(claim: str, stmt: str, faithful: str,
+                      proof: str, badge: str, citation: str) -> str:
+          lines = [
+              f"# Lean verification report",
+              f"",
+              f"**Claim (prose):** {claim}",
+              f"",
+              f"**Formalization:** `{stmt}`",
+              f"",
+              f"**Faithfulness (LLM judge):** {faithful.strip()}",
+              f"",
+              f"**Badge:** `{badge}`",
+          ]
+          if proof.strip():
+              lines += ["", "**Kernel-checked proof:**", "```lean", proof, "```"]
+          if citation.strip() and citation.strip() != "None":
+              lines += ["", f"**Library search (exact?):** `{citation.strip()}`"]
+          return "\n".join(lines)
+      _spl_result = make_report(claim, lean_stmt, faithful, proof, badge, citation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - claim
+    - stmt
+    - faithful
+    - proof
+    - badge
+    - citation
+    tool_returns: TEXT
+- set_cache_key:
+    node: CONTEXT
+    out: cache_key
+    action: set
+    expression: "''"
+- cacheable:
+    evaluate: "@in_badge == 'machine_proved'"
+    in:
+      badge:
+      - $in.badge
+      - $in.cacheable_badge
+      - $in.cacheable_badge2
+    out: []
+    branch: 1
+- cache_put:
+    node: SOLVE
+    in:
+      claim: $in.claim
+      report: make_report
+      lean_stmt: $in.lean_stmt
+    out: cache_key
+    tool: cache_put
+    backend: kernel
+    arguments:
+    - '@claim'
+    - '@report'
+    - badges='machine_proved'
+    - verifier='lean'
+    - statement=@lean_stmt
+    code: |
+      import json
+
+      def cache_put(concept: str, content: str, badges: str='', rubric_version: str='v1', params_json: str='{}', token_cost: str='0', verifier: str='', statement: str='') -> str:
+          """Store a generated section in the Layer 2 content cache.
+
+          Returns the cache key on success, or an error string on failure.
+          `badges` is a comma-separated trust badge set (claim axis:
+          machine_verified, machine_proved; exposition axis: ai_reviewed,
+          human_verified; empty = machine_generated baseline). `verifier` records
+          the engine-of-record that checked the content ("sympy", "sage",
+          "lean", ...). `statement` carries the kernel-checked Lean proposition
+          backing a machine_proved badge, rendered alongside the prose wherever
+          the badge appears.
+
+          Usage in SPL:
+              CALL cache_put(@concept, @section) INTO @cache_key
+              CALL cache_put(@concept, @section, badges='machine_verified', verifier='sage') INTO @cache_key
+              CALL cache_put(@concept, @report, badges='machine_proved', verifier='lean', statement=@lean_stmt) INTO @cache_key
+          """
+          try:
+              from spl3.cache import get_content_cache
+              params = json.loads(params_json) if params_json else {}
+              badge_set = [b.strip() for b in badges.split(',') if b.strip()]
+              if badge_set == ['machine_generated']:
+                  badge_set = []
+              cache = get_content_cache()
+              entry = cache.put(concept=concept, content=content, badges=badge_set, params=params, rubric_version=rubric_version, dep_hashes={}, token_cost=int(token_cost) if token_cost.isdigit() else 0, verifier=verifier, statement=statement)
+              return entry.key
+          except Exception as e:
+              return f'cache_put error: {e}'
+      _spl_result = cache_put(claim, report, badges='machine_proved', verifier='lean', statement=lean_stmt)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - concept
+    - content
+    - badges
+    - rubric_version
+    - params_json
+    - token_cost
+    - verifier
+    - statement
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: make_report
+    on:
+    - cache_put
+    - cacheable.fail

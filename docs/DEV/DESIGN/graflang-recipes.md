@@ -121,9 +121,12 @@ passes the checker is used and the objections are an output, `plan_review`); onl
 ## Solver and PocketFlow recipes (`cookbook_solvers_v2/`, `cookbook_pocketflow_v2/`)
 
 Updated 2026-11-21. The lifted recipes of `cookbook_solvers/` and `cookbook_pocketflow/` are ported with `scripts/port_recipe.py` (compact, name every step after its tool or prompt, `graf group` into
-composites, prettify, validate). Status: **43 of 47 solver recipes** (all except `constraint_opt`, `symbolic_math`, `lean_proof`, `neurosymbolic`, whose retry loops are interleaved with timing steps so no group
-has one entry) and **8 of 41 PocketFlow recipes** (the staged ones; the retry-loop recipes are already one box at the top level). Every graph is offline-equivalent to its original on the mock adapter
+composites, prettify, validate). Status: **all 47 solver recipes** (the four loop-heavy ones, `constraint_opt`, `symbolic_math`, `lean_proof`, `neurosymbolic`, by hand) and **8 of 41 PocketFlow recipes** (the staged ones; the retry-loop recipes are already one box at the top level). Every graph is offline-equivalent to its original on the mock adapter
 (`tests/test_cookbook_solvers_v2.py`, `tests/test_cookbook_pocketflow_v2.py`). Not run with a real model.
+
+The loop-heavy solver recipes: their retry loops are kept in long form, so no group could be inferred, but the trigger edges are a plain chain of stages, each with one entry and one way out. Porting them by hand found a second
+bug: **`graf group` left behind a prompt or procedure used by a node inside a loop body** (it looked only at the selected nodes' own config), so the part did not validate (`procedures.step_rung__solve_chain_step ... does not exist`).
+Fixed (`group.py` looks into loop bodies, as `ungroup` already did) with a test that fails without it.
 
 What the port taught us: **`graf compact` could corrupt a long code string.** It wrote long quoted strings folded at the emitter's default width, and a fold could land inside an escape (`\n` read back as
 `\ n`), so the report of `pandera_schema` lost a blank line; the "round trip verified" check compared objects in memory, not the text it wrote. Fixed: no wrapping anywhere (`yamlfmt.WIDTH`) and

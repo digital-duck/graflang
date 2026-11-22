@@ -1,0 +1,871 @@
+version: 1.0-graph
+workflow:
+  name: step_rung
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: thinking_note
+    type: TEXT
+  - name: log_dir
+    type: TEXT
+  - name: pid
+    type: TEXT
+  - name: backend_lc
+    type: TEXT
+  outputs:
+  - name: result
+    type: TEXT
+  - name: set_narration_failure_result
+    type: TEXT
+  - name: trim_3_result
+    type: TEXT
+resources:
+  procedures:
+    solve_chain_step: ./procedures/symbolic_math.spl
+steps:
+- decompose_problem:
+    generate: |-
+      {{in_thinking_note}}Translate this math problem into an ordered list of symbolic operations.
+
+      Output format — one step per line, NOTHING ELSE:
+        <expression>|<operation>
+
+      The correct answer is always a short list of lines (rarely more than 5) — keep your
+      entire response under 1000 tokens. A long response means you have gone wrong.
+
+      STRICT OUTPUT RULES (violating any of these causes the pipeline to fail):
+      - Plain text output ONLY — no code fences, no backticks, no markdown, no numbering
+      - No Python code (no import statements, no variable assignments, no function calls)
+      - No prose, no explanations, no blank lines
+      - The FIRST step's <expression> is the starting expression in Python syntax:
+          ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+      - Every step AFTER the first must use the literal word PREV as the expression —
+          it means "the result of the previous step". NEVER write a new expression
+          after the first line.
+      - <operation> must be exactly one token from this list:
+          solve, diff, integrate, simplify, expand, factor,
+          series, apart, limit(x,0), laplace, inverse_laplace,
+          trigsimp, summation(n,1,oo), eigenvalues, solve_system,
+          ode_solve, galois, conic, rank, factor_qq
+      - solve_system: ALL equations must be combined into ONE step as a Python list
+          [eq1_lhs - eq1_rhs, eq2_lhs - eq2_rhs, ...]|solve_system
+          NEVER use PREV with solve_system — put every equation in the same list
+      - ode_solve: <expression> is the ODE left-hand side in Python using y(x).diff(x,n)
+          notation, with the right-hand side assumed 0:
+          "y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)"  (not  y'', y', prime notation)
+          For ODE problems the plan is ALWAYS exactly ONE line — never add a second step
+      - galois:    <expression> is a polynomial in x over the rationals
+      - factor_qq: <expression> is a polynomial in x to factor over the rationals
+      - conic:     <expression> is a homogeneous quadratic in x, y, z moved to
+          the "= 0" form (e.g. "x**2 + y**2 = 3*z**2" becomes "x**2 + y**2 - 3*z**2")
+      - rank:      <expression> is the 5-element Weierstrass coefficient list
+          [a1, a2, a3, a4, a6] of the elliptic curve
+          y^2 + a1*x*y + a3*y = x^3 + a2*x^2 + a4*x + a6
+      - If the problem needs only ONE operation, output exactly one line
+      - The expressions in the examples below (exp(x), x**2 - 4, sin(x)/x, ...)
+          illustrate the FORMAT only. Your first <expression> must be transcribed
+          from the Problem at the bottom — copying an expression from an example
+          is a failure.
+
+      CORRECT examples:
+        "differentiate e to the x and then simplify the result"
+          exp(x)|diff
+          PREV|simplify
+
+        "integrate 5*x**4 + 2, then expand the result, then solve for x"
+          5*x**4 + 2|integrate
+          PREV|expand
+          PREV|solve
+
+        "expand (x+1) squared, then factor the expanded form"
+          (x + 1)**2|expand
+          PREV|factor
+
+        "find the roots of x squared minus 4"
+          x**2 - 4|solve
+
+        "find the limit of sin(x)/x as x approaches 0"
+          sin(x)/x|limit(x,0)
+
+        "expand sin(x) as a Taylor series around x=0 up to degree 5"
+          sin(x)|series
+
+        "find the partial fraction decomposition of 1/(x**2-1)"
+          1/(x**2 - 1)|apart
+
+        "find the Laplace transform of exp(-2*t)"
+          exp(-2*t)|laplace
+
+        "compute the sum of 1/n**2 from n=1 to infinity"
+          1/n**2|summation(n,1,oo)
+
+        "find the eigenvalues of the matrix [[1,2],[3,4]]"
+          [[1,2],[3,4]]|eigenvalues
+
+        "solve the system x + y = 5 and x - y = 1"
+          [x + y - 5, x - y - 1]|solve_system
+
+        "compute the inverse Laplace transform of s/(s**2+4), then verify"
+          s/(s**2 + 4)|inverse_laplace
+          PREV|laplace
+
+        "solve the ODE y''(x) - 3*y'(x) + 2*y(x) = 0"
+          y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)|ode_solve
+
+        "solve y'(x) = y(x) with y(0) = 1"
+          y(x).diff(x) - y(x)|ode_solve
+
+        "find the Galois group of x to the fifth minus x minus 1"
+          x**5 - x - 1|galois
+
+        "does x**2 + y**2 = 3*z**2 have a rational solution?"
+          x**2 + y**2 - 3*z**2|conic
+
+        "rank of the curve y^2 + y = x^3 - x^2 - 10*x - 20"
+          [0, -1, 1, -10, -20]|rank
+
+        "factor x**12 - 1 into irreducibles over the rationals"
+          x**12 - 1|factor_qq
+
+      INCORRECT examples (DO NOT produce output like this):
+        ```plaintext              ← NO: code fences are forbidden
+        exp(x)|diff
+        ```
+        x = sp.symbols('x')      ← NO: Python variable assignments are forbidden
+        from sympy import diff    ← NO: Python import statements are forbidden
+        Step 1: exp(x)|diff       ← NO: labels and numbering are forbidden
+        x + y - 5|solve_system
+        PREV - y - 1|solve_system ← NO: solve_system takes ALL equations at once in a list
+        y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)|ode_solve
+        PREV|ode_solve            ← NO: ode_solve is always exactly one step
+        1. exp(x)|diff             ← NO: numbered lists are forbidden
+        x**2 - 4|solve             ← NO (as a later line): every line after the
+                                      first must be PREV|<operation>
+        exp(x)|diff                ← NO (when the problem says something else):
+                                      this copies an example instead of the Problem
+        y''(x) - 3*y'(x)|ode_solve ← NO: prime notation is forbidden; use y(x).diff(x,n)
+        √(4 - x**2)|integrate      ← NO: Unicode symbols are forbidden; use sqrt(4 - x**2)
+
+      Now translate ONLY the problem below. Transcribe its expression EXACTLY —
+      same digits, signs, exponents — and use PREV for every step after the first.
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+      thinking_note: $in.thinking_note
+    out: steps_text
+    function: decompose_problem
+    params:
+    - problem
+    - thinking_note
+    arguments:
+    - '@problem'
+    - '@thinking_note'
+    output_budget: 2500
+- strip_fences:
+    node: SOLVE
+    in:
+      steps_text: decompose_problem
+    out: steps_text
+    tool: strip_fences
+    backend: kernel
+    arguments:
+    - '@steps_text'
+    code: |
+      def strip_fences(text: str) -> str:
+          """Remove markdown code fences and surrounding noise from LLM output."""
+          import re
+          s = text.strip()
+          # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+          m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+          if m:
+              s = m.group(1)
+          else:
+              # Case 2: stray fence lines scattered through otherwise plain output
+              s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+              s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+          return s.strip().replace("'''", "")
+      _spl_result = strip_fences(steps_text)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - text
+    tool_returns: TEXT
+- step_count:
+    node: SOLVE
+    in:
+      steps_text: strip_fences
+    out: n_steps
+    tool: step_count
+    backend: kernel
+    arguments:
+    - '@steps_text'
+    code: |
+      def step_count(steps_text: str) -> str:
+          """Deterministic, 0-token: counts non-blank lines in the
+          decomposed step list (mirrors chunk_plan in recipe 13)."""
+          return str(len([line for line in steps_text.splitlines() if line.strip()]))
+      _spl_result = step_count(steps_text)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - steps_text
+    tool_returns: TEXT
+- no_steps:
+    evaluate: "@in_n_steps == '0'"
+    in:
+      n_steps: step_count
+    out: []
+    branch: 1
+- write_file_2:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      steps_text: strip_fences
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - f'(planning failed — raw decomposition output below)\n{@steps_text}'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', f'(planning failed — raw decomposition output below)\n{steps_text}')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- set_plan_failure:
+    node: CONTEXT
+    in:
+      problem: $in.problem
+      steps_text: strip_fences
+    action: set
+    expression: >-
+      f'[PLAN FAILURE] The planning step could not decompose "{@in_problem}"
+      into usable operations.\nRaw decomposition output: {@in_steps_text}'
+- set_i:
+    node: CONTEXT
+    out: i
+    on: no_steps.fail
+    action: set
+    expression: '0'
+- set_running_expression:
+    node: CONTEXT
+    out: running_expression
+    action: set
+    expression: "''"
+- set_trace:
+    node: CONTEXT
+    out: trace
+    action: set
+    expression: "''"
+nodes:
+- id: run_steps
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < int(@in_n_steps)
+    state:
+      step:
+        from: tool_36.out_step
+      step_summary:
+        from: call_1.out_step_summary
+      running_expression:
+        from: tool_37.out_running_expression
+      trace_line:
+        from: tool_38.out_trace_line
+      step_no:
+        from: set_36.out_step_no
+      write_file:
+        from: tool_39.out_write_file
+      trace:
+        from: set_37.out_trace
+      i:
+        from: set_38.out_i
+    subgraph:
+      nodes:
+      - id: tool_36
+        type: SOLVE
+        config:
+          tool: extract_step
+          backend: kernel
+          arguments:
+          - '@steps_text'
+          - '@i'
+          code: |
+            def extract_step(steps_text: str, index: str) -> str:
+                """Deterministic, 0-token: returns the i-th non-blank line of
+                the decomposed step list (mirrors extract_chunk in recipe 13)."""
+                lines = [line.strip() for line in steps_text.splitlines() if line.strip()]
+                i = int(index)
+                return lines[i] if 0 <= i < len(lines) else ""
+            _spl_result = extract_step(steps_text, i)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - steps_text
+          - index
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_steps_text
+        - in_i
+        - out_step
+      - id: call_1
+        type: GENERATE
+        config:
+          procedure_ref: procedures.solve_chain_step
+          arguments:
+          - '@step'
+          - '@running_expression'
+          - '@backend_lc'
+        ports:
+        - trigger
+        - complete
+        - in_step
+        - in_running_expression
+        - in_backend_lc
+        - out_step_summary
+      - id: tool_37
+        type: SOLVE
+        config:
+          tool: split_part
+          backend: kernel
+          arguments:
+          - '@step_summary'
+          - "'|'"
+          - "'1'"
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+
+            def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                The part comes back whitespace-trimmed by default: delimited protocol
+                lines ('a | b') are padded for readability and virtually every caller
+                wants the bare field (list_get behaves the same way). Pass trim='false'
+                to keep the raw part, padding included.
+                """
+                parts = str(value).split(str(delimiter))
+                idx = int(part) - 1
+                if not 0 <= idx < len(parts):
+                    return ''
+                raw = parts[idx]
+                if str(trim).strip().lower() in {'false', '0', 'no'}:
+                    return raw
+                return raw.strip()
+            _spl_result = split_part(step_summary, '|', '1')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - delimiter
+          - part
+          - trim
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_step_summary
+        - out_running_expression
+      - id: tool_38
+        type: SOLVE
+        config:
+          tool: split_part
+          backend: kernel
+          arguments:
+          - '@step_summary'
+          - "'|'"
+          - "'2'"
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+
+            def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                The part comes back whitespace-trimmed by default: delimited protocol
+                lines ('a | b') are padded for readability and virtually every caller
+                wants the bare field (list_get behaves the same way). Pass trim='false'
+                to keep the raw part, padding included.
+                """
+                parts = str(value).split(str(delimiter))
+                idx = int(part) - 1
+                if not 0 <= idx < len(parts):
+                    return ''
+                raw = parts[idx]
+                if str(trim).strip().lower() in {'false', '0', 'no'}:
+                    return raw
+                return raw.strip()
+            _spl_result = split_part(step_summary, '|', '2')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - delimiter
+          - part
+          - trim
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_step_summary
+        - out_trace_line
+      - id: set_36
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_step_no
+      - id: eval_14
+        type: EVALUATE
+        config:
+          condition: |-
+            @in_running_expression == 'solver_error'
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_running_expression
+      - id: tool_39
+        type: SOLVE
+        config:
+          tool: write_file
+          backend: kernel
+          arguments:
+          - f'{@log_dir}/chain_trace.md'
+          - f'{@trace}{@step_no}. SOLVER ERROR — {@trace_line}\n'
+          code: |
+            import pathlib
+
+            def write_file(file_path: str, content: str, mode: str='w') -> str:
+                """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+                mode: 'w' (overwrite, default) or 'a' (append).
+                Creates parent directories automatically.
+                Returns the absolute path written.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                p.parent.mkdir(parents=True, exist_ok=True)
+                m = str(mode).strip().lower()
+                if m not in ('w', 'a'):
+                    m = 'w'
+                with p.open(m, encoding='utf-8') as fh:
+                    fh.write(str(content))
+                return str(p.resolve())
+            _spl_result = write_file(f'{log_dir}/chain_trace.md', f'{trace}{step_no}. SOLVER ERROR — {trace_line}\n')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          - content
+          - mode
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_log_dir
+        - in_trace
+        - in_step_no
+        - in_trace_line
+        - out_write_file
+      - id: set_37
+        type: CONTEXT
+        config:
+          action: set
+          expression: |-
+            @in_trace + f'{@in_step_no}. {@in_trace_line}\n'
+        ports:
+        - trigger
+        - complete
+        - in_trace
+        - in_step_no
+        - in_trace_line
+        - out_trace
+      - id: set_38
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_36.complete
+        target: call_1.trigger
+        type: triggers
+      - source: tool_36.out_step
+        target: call_1.in_step
+        type: binds
+      - source: call_1.complete
+        target: tool_37.trigger
+        type: triggers
+      - source: call_1.out_step_summary
+        target: tool_37.in_step_summary
+        type: binds
+      - source: tool_37.complete
+        target: tool_38.trigger
+        type: triggers
+      - source: call_1.out_step_summary
+        target: tool_38.in_step_summary
+        type: binds
+      - source: tool_38.complete
+        target: set_36.trigger
+        type: triggers
+      - source: set_36.complete
+        target: eval_14.trigger
+        type: triggers
+      - source: tool_37.out_running_expression
+        target: eval_14.in_running_expression
+        type: binds
+      - source: eval_14.pass
+        target: tool_39.trigger
+        type: triggers
+      - source: set_36.out_step_no
+        target: tool_39.in_step_no
+        type: binds
+      - source: tool_38.out_trace_line
+        target: tool_39.in_trace_line
+        type: binds
+      - source: tool_39.complete
+        target: set_37.trigger
+        type: triggers
+      - source: eval_14.fail
+        target: set_37.trigger
+        type: triggers
+      - source: set_36.out_step_no
+        target: set_37.in_step_no
+        type: binds
+      - source: tool_38.out_trace_line
+        target: set_37.in_trace_line
+        type: binds
+      - source: set_37.complete
+        target: set_38.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_steps_text
+  - in_i
+  - in_running_expression
+  - in_backend_lc
+  - in_log_dir
+  - in_trace
+  - in_n_steps
+  - out_step
+  - out_step_summary
+  - out_running_expression
+  - out_trace_line
+  - out_step_no
+  - out_write_file
+  - out_trace
+  - out_i
+- id: write_file_4
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - '@trace'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', trace)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_log_dir
+  - in_trace
+  - out_write_file
+- id: explain_chain
+  type: GENERATE
+  config:
+    function: explain_chain
+    params:
+    - problem
+    - trace
+    - thinking_note
+    prompt_inline: |-
+      {{in_thinking_note}}A student asked: "{{in_problem}}"
+
+      The symbolic math engine computed this chain of EXACT steps, in order:
+      {{in_trace}}
+
+      Write a clear, friendly explanation in less than 6 sentences that:
+      1. Restates what the problem is asking in plain English
+      2. Walks through the chain step by step, in order, stating each exact result
+      3. Gives the final answer plainly at the end
+      Do not re-derive any step — trust the computed chain above as exact.
+    arguments:
+    - '@problem'
+    - '@trace'
+    - '@thinking_note'
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - in_trace
+  - in_thinking_note
+  - out_result
+- id: trim_3
+  type: SOLVE
+  config:
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@result'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(result)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_result
+  - out_result
+- id: round_trip_check
+  type: SOLVE
+  config:
+    tool: round_trip_check
+    backend: kernel
+    arguments:
+    - '@pid'
+    - '@running_expression'
+    - '@result'
+    code: |
+      def round_trip_check(pid: str, running_expression: str, output_text: str) -> str:
+          """Live round-trip / back-substitution verification of the solver arm's
+          final result, called once the chain of solve_chain_step calls has
+          produced @running_expression (and, since p015's check needs it as a
+          fallback -- see below -- after explain_chain has produced @result).
+          Substitutes the result back into the original problem's defining
+          relation (the same 20 per-pid checks used by the post-hoc
+          verify_roundtrip.py script, imported from roundtrip_checks.py so the
+          two paths can never silently diverge) rather than comparing against a
+          precomputed answer form -- this sidesteps ambiguities like free
+          constants in indefinite integrals/ODE solutions or root/eigenvalue
+          ordering.
+
+          output_text is the workflow's natural-language narration (@result):
+          unused by every check except p015, whose solve_system(...) result can
+          render as a multi-line SymPy repr that split_part(@step_summary, "|", ...)
+          and LOGGING can garble -- output_text gives check_p015 the same
+          narration-text fallback verify_roundtrip.py's post-hoc classify() uses.
+
+          Returns one of: ROUNDTRIP_PASS, ROUNDTRIP_FAIL, UNPARSEABLE, NO_CHECK
+          (pid not in the registered 20 T0-T5 problems, e.g. the Lean/T6 arms
+          this check does not apply to) -- the same verdict vocabulary
+          verify_roundtrip.py's classify() uses, so a live verdict and a
+          post-hoc re-check of the same row are directly comparable."""
+          import sys, os
+          for _cand in (os.path.join(os.getcwd(), "cookbook_solvers", "neurosymbolic"), os.path.join(os.getcwd(), "cookbook", "77_neurosymbolic"), os.getcwd()):
+              if _cand not in sys.path:
+                  sys.path.insert(0, _cand)
+          from roundtrip_checks import classify_from_value
+          verdict, _detail = classify_from_value(pid, running_expression, output_text)
+          return verdict
+      _spl_result = round_trip_check(pid, running_expression, result)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - pid
+    - running_expression
+    - output_text
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_pid
+  - in_running_expression
+  - in_result
+  - out_roundtrip
+- id: narration_empty
+  type: EVALUATE
+  config:
+    condition: "@in_result == ''"
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_result
+- id: set_narration_failure
+  type: CONTEXT
+  config:
+    action: set
+    expression: >-
+      f'[NARRATION FAILURE] The chain verified correctly but the explanation
+      step returned nothing.\nVerified chain:\n{@in_trace}'
+  ports:
+  - trigger
+  - complete
+  - in_trace
+  - out_result
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_result
+  - in_set_narration_failure_result
+  - in_trim_3_result
+edges:
+- source: set_trace.complete
+  target: run_steps.trigger
+  type: triggers
+- source: strip_fences.out_steps_text
+  target: run_steps.in_steps_text
+  type: binds
+- source: set_i.out_i
+  target: run_steps.in_i
+  type: binds
+- source: set_running_expression.out_running_expression
+  target: run_steps.in_running_expression
+  type: binds
+- source: set_trace.out_trace
+  target: run_steps.in_trace
+  type: binds
+- source: step_count.out_n_steps
+  target: run_steps.in_n_steps
+  type: binds
+- source: run_steps.exit
+  target: write_file_4.trigger
+  type: triggers
+- source: run_steps.out_trace
+  target: write_file_4.in_trace
+  type: binds
+- source: write_file_4.complete
+  target: explain_chain.trigger
+  type: triggers
+- source: run_steps.out_trace
+  target: explain_chain.in_trace
+  type: binds
+- source: explain_chain.complete
+  target: trim_3.trigger
+  type: triggers
+- source: explain_chain.out_result
+  target: trim_3.in_result
+  type: binds
+- source: trim_3.complete
+  target: round_trip_check.trigger
+  type: triggers
+- source: run_steps.out_running_expression
+  target: round_trip_check.in_running_expression
+  type: binds
+- source: trim_3.out_result
+  target: round_trip_check.in_result
+  type: binds
+- source: round_trip_check.complete
+  target: narration_empty.trigger
+  type: triggers
+- source: trim_3.out_result
+  target: narration_empty.in_result
+  type: binds
+- source: narration_empty.pass
+  target: set_narration_failure.trigger
+  type: triggers
+- source: run_steps.out_trace
+  target: set_narration_failure.in_trace
+  type: binds
+- source: narration_empty.fail
+  target: wf_exit.trigger
+  type: triggers
+- source: set_narration_failure.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_plan_failure.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: wf_entry.out_log_dir
+  target: run_steps.in_log_dir
+  type: binds
+- source: wf_entry.out_log_dir
+  target: write_file_4.in_log_dir
+  type: binds
+- source: wf_entry.out_problem
+  target: explain_chain.in_problem
+  type: binds
+- source: wf_entry.out_thinking_note
+  target: explain_chain.in_thinking_note
+  type: binds
+- source: wf_entry.out_pid
+  target: round_trip_check.in_pid
+  type: binds
+- source: wf_entry.out_backend_lc
+  target: run_steps.in_backend_lc
+  type: binds
+- source: set_plan_failure.out_result
+  target: wf_exit.in_result
+  type: binds
+- source: set_narration_failure.out_result
+  target: wf_exit.in_set_narration_failure_result
+  type: binds
+- source: trim_3.out_result
+  target: wf_exit.in_trim_3_result
+  type: binds

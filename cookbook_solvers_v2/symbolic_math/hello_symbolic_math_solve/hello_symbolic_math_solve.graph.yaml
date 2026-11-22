@@ -1,0 +1,191 @@
+version: 1.0-graph
+workflow:
+  name: hello_symbolic_math_solve
+  inputs:
+  - name: parsed
+    type: TEXT
+  outputs:
+  - name: sympy_result
+    type: TEXT
+steps:
+- split_part:
+    node: SOLVE
+    in:
+      parsed: $in.parsed
+    out: expression
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@parsed'
+    - "'|'"
+    - "'1'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(parsed, '|', '1')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- split_part_2:
+    node: SOLVE
+    in:
+      parsed: $in.parsed
+    out: operation
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@parsed'
+    - "'|'"
+    - "'2'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(parsed, '|', '2')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- trim_2:
+    node: SOLVE
+    in:
+      expression: split_part
+    out: expression
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@expression'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(expression)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- trim_3:
+    node: SOLVE
+    in:
+      operation: split_part_2
+    out: operation
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@operation'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(operation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- solve_with_sympy:
+    node: SOLVE
+    in:
+      expression: trim_2
+      operation: trim_3
+    out: sympy_result
+    tool: solve_with_sympy
+    backend: kernel
+    arguments:
+    - '@expression'
+    - '@operation'
+    code: |
+      def solve_with_sympy(expression: str, operation: str) -> str:
+          """Exact symbolic computation. Imports SymPy at call time so the
+          kernel can auto-install it on first use with --self-healing."""
+          from sympy import (
+              symbols, sympify, solve, diff, integrate,
+              simplify, expand, factor, limit, oo
+          )
+
+          try:
+              x, y, z, n = symbols('x y z n')
+              expr = sympify(expression.strip())
+              op = operation.strip().lower()
+
+              if op in ('solve', 'roots', 'zeros'):
+                  result = solve(expr, x)
+                  return f"solve({expression} = 0) → x = {result}"
+              elif op in ('diff', 'differentiate', 'derivative', 'gradient'):
+                  result = diff(expr, x)
+                  return f"d/dx({expression}) = {result}"
+              elif op in ('integrate', 'integral', 'antiderivative'):
+                  result = integrate(expr, x)
+                  return f"∫ {expression} dx = {result} + C"
+              elif op == 'simplify':
+                  result = simplify(expr)
+                  return f"simplify({expression}) = {result}"
+              elif op == 'expand':
+                  result = expand(expr)
+                  return f"expand({expression}) = {result}"
+              elif op == 'factor':
+                  result = factor(expr)
+                  return f"factor({expression}) = {result}"
+              else:
+                  result = simplify(expr)
+                  return f"{expression} = {result}"
+          except Exception as e:
+              return f"sympy_error: {e}"
+      _spl_result = solve_with_sympy(expression, operation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - expression
+    - operation
+    tool_returns: TEXT
+- wf_exit:
+    output: solve_with_sympy

@@ -1,0 +1,276 @@
+version: 1.0-graph
+workflow:
+  name: narrate
+  inputs:
+  - name: log_dir
+    type: TEXT
+  - name: problem
+    type: TEXT
+  - name: trace
+    type: TEXT
+  outputs:
+  - name: explanation
+    type: TEXT
+  - name: set_set_13_explanation
+    type: TEXT
+  - name: trim_3_explanation
+    type: TEXT
+steps:
+- write_file_5:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      trace: $in.trace
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - '@trace'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', trace)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- sanity_check_chain:
+    generate: |-
+      A student asked the following question: "{{in_problem}}"
+
+      A symbolic math engine computed this chain of EXACT steps, in order:
+      {{in_trace}}
+
+      Your ONLY job is to check whether this chain answers the question that
+      was actually asked. Do NOT re-verify the arithmetic — every step above
+      is already machine-verified. Check ONLY for plan-level mismatches:
+
+      - Wrong starting expression: step 1 does not operate on the expression
+        stated in the problem (changed coefficient, sign, exponent, function)
+      - Wrong operation: the problem asks for one operation (e.g. integrate)
+        but the chain performs another (e.g. differentiate)
+      - Missing final step: the problem asks for a final result (e.g. "solve
+        for x") that the chain never reaches
+      - Extra steps that change what the final result means
+
+      Reply with EXACTLY one line and nothing else:
+        pass
+      or
+        fail | <one short reason>
+    in:
+      problem: $in.problem
+      trace: $in.trace
+    out: verdict_raw
+    function: sanity_check_chain
+    params:
+    - problem
+    - trace
+    arguments:
+    - '@problem'
+    - '@trace'
+- split_part_2:
+    node: SOLVE
+    in:
+      verdict_raw: sanity_check_chain
+    out: verdict
+    tool: split_part
+    backend: kernel
+    arguments:
+    - '@verdict_raw'
+    - "'|'"
+    - "'1'"
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+
+      def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+          """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+          The part comes back whitespace-trimmed by default: delimited protocol
+          lines ('a | b') are padded for readability and virtually every caller
+          wants the bare field (list_get behaves the same way). Pass trim='false'
+          to keep the raw part, padding included.
+          """
+          parts = str(value).split(str(delimiter))
+          idx = int(part) - 1
+          if not 0 <= idx < len(parts):
+              return ''
+          raw = parts[idx]
+          if str(trim).strip().lower() in {'false', '0', 'no'}:
+              return raw
+          return raw.strip()
+      _spl_result = split_part(verdict_raw, '|', '1')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    - delimiter
+    - part
+    - trim
+    tool_returns: TEXT
+    tool_builtin: true
+- lower_3:
+    node: SOLVE
+    in:
+      verdict: split_part_2
+    out: verdict
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@verdict'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(verdict)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- gate_6:
+    evaluate: "@in_verdict != 'pass'"
+    in:
+      verdict: lower_3
+    out: []
+    branch: 1
+- write_file_6:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      trace: $in.trace
+      verdict_raw: sanity_check_chain
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - "f'{@trace}\\nSANITY: {@verdict_raw}\\n'"
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', f'{trace}\nSANITY: {verdict_raw}\n')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- set_set_12:
+    node: CONTEXT
+    in:
+      verdict_raw: sanity_check_chain
+      trace: $in.trace
+    out: explanation
+    action: set
+    expression: >-
+      f'[SANITY FAILURE] The chain verified correctly but the sanity gate did
+      not pass it.\nGate verdict: {@in_verdict_raw}\nVerified
+      chain:\n{@in_trace}'
+- explain_chain:
+    generate: |-
+      A student asked: "{{in_problem}}"
+
+      The symbolic math engine computed this chain of EXACT steps, in order:
+      {{in_trace}}
+
+      Write a clear, friendly explanation in less than 6 sentences that:
+      1. Restates what the problem is asking in plain English
+      2. Walks through the chain step by step, in order, stating each exact result
+      3. Gives the final answer plainly at the end
+      Do not re-derive any step — trust the computed chain above as exact.
+    in:
+      problem: $in.problem
+      trace: $in.trace
+    out: explanation
+    on: gate_6.fail
+    function: explain_chain
+    params:
+    - problem
+    - trace
+    arguments:
+    - '@problem'
+    - '@trace'
+- trim_3:
+    node: SOLVE
+    in:
+      explanation: explain_chain
+    out: explanation
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@explanation'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- gate_7:
+    evaluate: "@in_explanation == ''"
+    in:
+      explanation: trim_3
+    out: []
+    branch: 1
+- set_set_13:
+    node: CONTEXT
+    in:
+      trace: $in.trace
+    out: explanation
+    action: set
+    expression: >-
+      f'[NARRATION FAILURE] The chain verified correctly but the explanation
+      step returned nothing.\nVerified chain:\n{@in_trace}'
+- wf_exit:
+    output:
+      explanation: set_set_12
+      set_set_13_explanation: set_set_13
+      trim_3_explanation: trim_3
+    on:
+    - gate_7.fail
+    - set_set_12
+    - set_set_13

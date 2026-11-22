@@ -1,0 +1,813 @@
+version: 1.0-graph
+workflow:
+  name: resource_allocation_solver_arm
+  inputs:
+  - name: max_tries
+    type: INTEGER
+  - name: problem
+    type: TEXT
+  - name: lang
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: tries
+    type: TEXT
+  - name: solution
+    type: TEXT
+  - name: lp_code
+    type: TEXT
+  outputs:
+  - name: llm_calls
+    type: TEXT
+  - name: stage1_s
+    type: TEXT
+  - name: stage2_s
+    type: TEXT
+  - name: lp_code
+    type: TEXT
+  - name: solution
+    type: TEXT
+  - name: narrative
+    type: TEXT
+steps:
+- time_monotonic_2:
+    node: SOLVE
+    out: t_s1
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- set_status_2:
+    node: CONTEXT
+    out: status
+    action: set
+    expression: "'init'"
+- time_elapsed:
+    node: SOLVE
+    in:
+      t_s1: time_monotonic_2
+    out: stage1_s
+    on: []
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - '@t_s1'
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_s1)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+- time_monotonic_3:
+    node: SOLVE
+    out: t_s3
+    on: []
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- time_elapsed_2:
+    node: SOLVE
+    in:
+      t_s3: time_monotonic_3
+    out: stage2_s
+    on: []
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - '@t_s3'
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_s3)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+nodes:
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_tries, @tries) < @in_max_tries
+    state:
+      tries:
+        from:
+        - set_12.out_tries
+        - set_14.out_tries
+        - set_16.out_tries
+      lp_code:
+        from:
+        - gen_1.out_lp_code
+        - gen_2.out_lp_code
+      llm_calls:
+        from:
+        - set_13.out_llm_calls
+        - set_15.out_llm_calls
+      solution:
+        from:
+        - tool_4.out_solution
+        - tool_7.out_solution
+      status:
+        from:
+        - tool_5.out_status
+        - tool_8.out_status
+      error_info:
+        from: tool_6.out_error_info
+    subgraph:
+      nodes:
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: "@in_status == 'Optimal'"
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_status
+      - id: set_12
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_tries'
+        ports:
+        - trigger
+        - complete
+        - in_max_tries
+        - out_tries
+      - id: eval_3
+        type: EVALUATE
+        config:
+          condition: "@in_status == 'init'"
+          branch: 2
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_status
+      - id: gen_1
+        type: GENERATE
+        config:
+          function: formulate_portfolio_ilp
+          params:
+          - problem
+          prompt_inline: |-
+            You are an operations research expert. Convert this project selection problem to
+            runnable PuLP Binary ILP code. Follow the template below EXACTLY — replace the
+            placeholder data with the actual numbers from the problem.
+
+            The `pulp` module is already in scope. Do NOT import anything.
+            Output ONLY raw Python code — no markdown fences, no comments.
+
+            TEMPLATE (copy this structure, fill in the actual project IDs, costs, dev-months, values, budget, capacity):
+
+            projects = ["P1", "P2", "P3"]          # list every project ID
+            cost     = {"P1": 120, "P2": 80, "P3": 200}   # cost in $K per project
+            devmos   = {"P1": 3,   "P2": 2,  "P3": 5}     # developer-months per project
+            value    = {"P1": 8,   "P2": 5,  "P3": 10}    # strategic value per project
+            budget   = 500    # total budget in $K
+            capacity = 10     # total developer-months available
+
+            prob = pulp.LpProblem("portfolio", pulp.LpMaximize)
+            y = {{p: pulp.LpVariable(f"y_{{p}}", cat="Binary") for p in projects}}
+            prob += pulp.lpSum(value[p] * y[p] for p in projects)
+            prob += (pulp.lpSum(cost[p] * y[p] for p in projects) <= budget)
+            prob += (pulp.lpSum(devmos[p] * y[p] for p in projects) <= capacity)
+            prob.solve(pulp.PULP_CBC_CMD(msg=0))
+            _result = {{
+                "status": pulp.LpStatus[prob.status],
+                "objective": pulp.value(prob.objective),
+                "variables": {{v.name: pulp.value(v) for v in prob.variables()}}
+            }}
+
+            Now write the code for this problem (use the SAME structure — dicts keyed by project ID):
+
+            Problem:
+            {{in_problem}}
+          arguments:
+          - '@problem'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - out_lp_code
+      - id: set_13
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_llm_calls + 1'
+        ports:
+        - trigger
+        - complete
+        - in_llm_calls
+        - out_llm_calls
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: run_pulp
+          backend: kernel
+          arguments:
+          - '@lp_code'
+          code: |
+            def run_pulp(code: str) -> str:
+                import json, re, pulp
+                code = re.sub(r'^```(?:python)?\s*\n?', '', code.strip(), flags=re.IGNORECASE)
+                code = re.sub(r'\n?```\s*$', '', code)
+                code = re.sub(r'(?m)^\s*import\s+pulp\s*(?:#.*)?$', '', code)
+                code = re.sub(r'(?m)^\s*from\s+pulp\s+import\s+.*$', '', code)
+                code = code.replace('pulp.pulp.LpStatus', 'pulp.LpStatus')
+                namespace = {"pulp": pulp}
+                namespace.update({k: getattr(pulp, k) for k in dir(pulp) if not k.startswith('_') and k != 'pulp'})
+                try:
+                    exec(code, namespace)
+                    result = namespace.get("_result")
+                    if result is None:
+                        return json.dumps({"status": "Error",
+                                           "error": "code did not set _result"})
+                    return json.dumps(result, default=str)
+                except Exception as e:
+                    err = str(e)
+                    hints = []
+                    if "pulp.pulp" in err and "LpStatus" in err:
+                        hints.append("use pulp.LpStatus[prob.status], never pulp.pulp.LpStatus")
+                    if "Error while executing" in err and "cbc" in err.lower():
+                        hints.append(
+                            "CBC rejected the LP — likely cause: coefficient is a string not a number, "
+                            "or variable not declared before use. Check all dict values are int/float."
+                        )
+                    suffix = (" — HINTS: " + "; ".join(hints)) if hints else ""
+                    return json.dumps({"status": "Error", "error": err + suffix})
+            _spl_result = run_pulp(lp_code)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_lp_code
+        - out_solution
+      - id: tool_5
+        type: SOLVE
+        config:
+          tool: result_status
+          backend: kernel
+          arguments:
+          - '@solution'
+          code: |
+            import json
+
+            def result_status(result_json: str) -> str:
+                """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                result JSON dict, or 'Error' if missing/unparseable."""
+                try:
+                    return json.loads(result_json).get('status', 'Error')
+                except Exception:
+                    return 'Error'
+            _spl_result = result_status(solution)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - result_json
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_solution
+        - out_status
+      - id: set_14
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      - id: tool_6
+        type: SOLVE
+        config:
+          tool: result_error
+          backend: kernel
+          arguments:
+          - '@solution'
+          code: |
+            import json
+
+            def result_error(result_json: str) -> str:
+                """RESULT_ERROR(result_json) — extract the 'error' field from a SOLVER
+                result JSON dict (falls back to 'status', then 'unknown error')."""
+                try:
+                    d = json.loads(result_json)
+                    return d.get('error', d.get('status', 'unknown error'))
+                except Exception:
+                    return result_json
+            _spl_result = result_error(solution)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - result_json
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_solution
+        - out_error_info
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: repair_portfolio_ilp
+          params:
+          - problem
+          - lp_code
+          - error_info
+          prompt_inline: |-
+            This PuLP project portfolio ILP produced an error. Fix it.
+
+            Problem:
+            {{in_problem}}
+
+            Previous (broken) code:
+            {{in_lp_code}}
+
+            Error:
+            {{in_error_info}}
+
+            REQUIRED fix — rewrite using this exact structure (dicts keyed by project ID, never lists):
+
+            projects = ["P1", "P2", ...]          # all project IDs as strings
+            cost     = {{"P1": 120, "P2": 80, ...}}   # cost in $K
+            devmos   = {{"P1": 3,   "P2": 2,  ...}}   # developer-months
+            value    = {{"P1": 8,   "P2": 5,  ...}}   # strategic value
+            budget   = ...    # from problem
+            capacity = ...    # from problem
+
+            prob = pulp.LpProblem("portfolio", pulp.LpMaximize)
+            y = {{p: pulp.LpVariable(f"y_{{p}}", cat="Binary") for p in projects}}
+            prob += pulp.lpSum(value[p] * y[p] for p in projects)
+            prob += (pulp.lpSum(cost[p] * y[p] for p in projects) <= budget)
+            prob += (pulp.lpSum(devmos[p] * y[p] for p in projects) <= capacity)
+            prob.solve(pulp.PULP_CBC_CMD(msg=0))
+            _result = {{
+                "status": pulp.LpStatus[prob.status],
+                "objective": pulp.value(prob.objective),
+                "variables": {{v.name: pulp.value(v) for v in prob.variables()}}
+            }}
+
+            Rules:
+            - Use DICTS (cost["P1"], not cost[0]) — list indexing by string causes TypeError
+            - Use y[p] everywhere — no bare variable named p
+            - cat="Binary" is required — never LpContinuous
+            - Objective must be LpMaximize (maximise value)
+            - Output ONLY raw Python code — no markdown fences, no commentary
+          arguments:
+          - '@problem'
+          - '@lp_code'
+          - '@error_info'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - in_lp_code
+        - in_error_info
+        - out_lp_code
+      - id: set_15
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_llm_calls + 1'
+        ports:
+        - trigger
+        - complete
+        - in_llm_calls
+        - out_llm_calls
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: run_pulp
+          backend: kernel
+          arguments:
+          - '@lp_code'
+          code: |
+            def run_pulp(code: str) -> str:
+                import json, re, pulp
+                code = re.sub(r'^```(?:python)?\s*\n?', '', code.strip(), flags=re.IGNORECASE)
+                code = re.sub(r'\n?```\s*$', '', code)
+                code = re.sub(r'(?m)^\s*import\s+pulp\s*(?:#.*)?$', '', code)
+                code = re.sub(r'(?m)^\s*from\s+pulp\s+import\s+.*$', '', code)
+                code = code.replace('pulp.pulp.LpStatus', 'pulp.LpStatus')
+                namespace = {"pulp": pulp}
+                namespace.update({k: getattr(pulp, k) for k in dir(pulp) if not k.startswith('_') and k != 'pulp'})
+                try:
+                    exec(code, namespace)
+                    result = namespace.get("_result")
+                    if result is None:
+                        return json.dumps({"status": "Error",
+                                           "error": "code did not set _result"})
+                    return json.dumps(result, default=str)
+                except Exception as e:
+                    err = str(e)
+                    hints = []
+                    if "pulp.pulp" in err and "LpStatus" in err:
+                        hints.append("use pulp.LpStatus[prob.status], never pulp.pulp.LpStatus")
+                    if "Error while executing" in err and "cbc" in err.lower():
+                        hints.append(
+                            "CBC rejected the LP — likely cause: coefficient is a string not a number, "
+                            "or variable not declared before use. Check all dict values are int/float."
+                        )
+                    suffix = (" — HINTS: " + "; ".join(hints)) if hints else ""
+                    return json.dumps({"status": "Error", "error": err + suffix})
+            _spl_result = run_pulp(lp_code)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_lp_code
+        - out_solution
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: result_status
+          backend: kernel
+          arguments:
+          - '@solution'
+          code: |
+            import json
+
+            def result_status(result_json: str) -> str:
+                """RESULT_STATUS(result_json) — extract the 'status' field from a SOLVER
+                result JSON dict, or 'Error' if missing/unparseable."""
+                try:
+                    return json.loads(result_json).get('status', 'Error')
+                except Exception:
+                    return 'Error'
+            _spl_result = result_status(solution)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - result_json
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_solution
+        - out_status
+      - id: set_16
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      edges:
+      - source: eval_2.pass
+        target: set_12.trigger
+        type: triggers
+      - source: eval_2.fail
+        target: eval_3.trigger
+        type: triggers
+      - source: eval_3.pass
+        target: gen_1.trigger
+        type: triggers
+      - source: gen_1.complete
+        target: set_13.trigger
+        type: triggers
+      - source: set_13.complete
+        target: tool_4.trigger
+        type: triggers
+      - source: gen_1.out_lp_code
+        target: tool_4.in_lp_code
+        type: binds
+      - source: tool_4.complete
+        target: tool_5.trigger
+        type: triggers
+      - source: tool_4.out_solution
+        target: tool_5.in_solution
+        type: binds
+      - source: tool_5.complete
+        target: set_14.trigger
+        type: triggers
+      - source: eval_3.fail
+        target: tool_6.trigger
+        type: triggers
+      - source: tool_6.complete
+        target: gen_2.trigger
+        type: triggers
+      - source: tool_6.out_error_info
+        target: gen_2.in_error_info
+        type: binds
+      - source: gen_2.complete
+        target: set_15.trigger
+        type: triggers
+      - source: set_15.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: gen_2.out_lp_code
+        target: tool_7.in_lp_code
+        type: binds
+      - source: tool_7.complete
+        target: tool_8.trigger
+        type: triggers
+      - source: tool_7.out_solution
+        target: tool_8.in_solution
+        type: binds
+      - source: tool_8.complete
+        target: set_16.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_status
+  - in_max_tries
+  - in_problem
+  - in_llm_calls
+  - in_tries
+  - in_solution
+  - in_lp_code
+  - out_tries
+  - out_lp_code
+  - out_llm_calls
+  - out_solution
+  - out_status
+  - out_error_info
+- id: is_optimal
+  type: SOLVE
+  config:
+    tool: is_optimal
+    backend: kernel
+    arguments:
+    - '@solution'
+    code: |
+      def is_optimal(result_json: str) -> bool:
+          import json
+          try:
+              return json.loads(result_json).get("status") == "Optimal"
+          except Exception:
+              return False
+      _spl_result = is_optimal(solution)
+    result: _spl_result
+    out_type: BOOL
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_solution
+  - out_tool_10
+- id: assert_assert_1
+  type: ASSERT
+  config:
+    condition: '@in_tool_10'
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_solution
+  - in_tool_10
+- id: json_get_objective
+  type: SOLVE
+  config:
+    tool: json_get_objective
+    backend: kernel
+    arguments:
+    - '@solution'
+    code: |
+      def json_get_objective(result_json: str) -> str:
+          import json
+          try:
+              v = json.loads(result_json).get("objective")
+              return str(v) if v is not None else ""
+          except Exception:
+              return ""
+      _spl_result = json_get_objective(solution)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_solution
+  - out_obj_str
+- id: interpret_portfolio
+  type: GENERATE
+  config:
+    function: interpret_portfolio
+    params:
+    - problem
+    - solution_json
+    - lang
+    prompt_inline: |-
+      You are a strategic planning analyst. Interpret this project portfolio optimization
+      result for a leadership team making investment decisions.
+
+      Problem:
+      {{in_problem}}
+
+      Optimal portfolio (JSON — variables with value 1.0 are selected):
+      {{in_solution_json}}
+
+      Your response must have two sections:
+
+      ## Interpretation
+      Concise briefing (under 200 words):
+      1. Which projects are selected and what is the total portfolio value?
+      2. What is the total cost and headcount utilized vs. available?
+      3. Which high-value projects were left out and why (budget, headcount, or both)?
+      4. One strategic observation — e.g., is there a project combination the team might
+         revisit if additional budget or headcount became available?
+
+      ## Solution Verification
+      Walk through the math to confirm correctness:
+      - Sum the costs of selected projects and confirm total ≤ budget (show arithmetic).
+      - Sum the dev-months of selected projects and confirm total ≤ headcount (show arithmetic).
+      - Sum the values of selected projects (show arithmetic).
+      - Show one rejected alternative (e.g., swapping one project) and confirm it scores
+        lower or violates a constraint.
+      - Confirm computed value matches the solver's reported value.
+
+      Write in {{in_lang}}. No JSON, no code. Address to decision-makers, not engineers.
+    arguments:
+    - '@problem'
+    - '@solution'
+    - '@lang'
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - in_solution_json
+  - in_lang
+  - out_narrative
+- id: set_set_17
+  type: CONTEXT
+  config:
+    action: set
+    expression: '@in_llm_calls + 1'
+  ports:
+  - trigger
+  - complete
+  - in_llm_calls
+  - out_llm_calls
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_llm_calls
+  - in_stage1_s
+  - in_stage2_s
+  - in_lp_code
+  - in_solution
+  - in_narrative
+edges:
+- source: set_status_2.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_status_2.out_status
+  target: loop_1.in_status
+  type: binds
+- source: loop_1.exit
+  target: time_elapsed.trigger
+  type: triggers
+- source: time_elapsed.complete
+  target: is_optimal.trigger
+  type: triggers
+- source: loop_1.out_solution
+  target: is_optimal.in_solution
+  type: binds
+- source: is_optimal.complete
+  target: assert_assert_1.trigger
+  type: triggers
+- source: loop_1.out_solution
+  target: assert_assert_1.in_solution
+  type: binds
+- source: is_optimal.out_tool_10
+  target: assert_assert_1.in_tool_10
+  type: binds
+- source: assert_assert_1.pass
+  target: json_get_objective.trigger
+  type: triggers
+- source: assert_assert_1.fail
+  target: json_get_objective.trigger
+  type: triggers
+- source: loop_1.out_solution
+  target: json_get_objective.in_solution
+  type: binds
+- source: json_get_objective.complete
+  target: time_monotonic_3.trigger
+  type: triggers
+- source: time_monotonic_3.complete
+  target: interpret_portfolio.trigger
+  type: triggers
+- source: loop_1.out_solution
+  target: interpret_portfolio.in_solution_json
+  type: binds
+- source: interpret_portfolio.complete
+  target: set_set_17.trigger
+  type: triggers
+- source: loop_1.out_llm_calls
+  target: set_set_17.in_llm_calls
+  type: binds
+- source: set_set_17.complete
+  target: time_elapsed_2.trigger
+  type: triggers
+- source: time_elapsed_2.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: wf_entry.out_max_tries
+  target: loop_1.in_max_tries
+  type: binds
+- source: wf_entry.out_problem
+  target: loop_1.in_problem
+  type: binds
+- source: wf_entry.out_problem
+  target: interpret_portfolio.in_problem
+  type: binds
+- source: wf_entry.out_lang
+  target: interpret_portfolio.in_lang
+  type: binds
+- source: wf_entry.out_llm_calls
+  target: loop_1.in_llm_calls
+  type: binds
+- source: wf_entry.out_tries
+  target: loop_1.in_tries
+  type: binds
+- source: wf_entry.out_solution
+  target: loop_1.in_solution
+  type: binds
+- source: wf_entry.out_lp_code
+  target: loop_1.in_lp_code
+  type: binds
+- source: set_set_17.out_llm_calls
+  target: wf_exit.in_llm_calls
+  type: binds
+- source: time_elapsed.out_stage1_s
+  target: wf_exit.in_stage1_s
+  type: binds
+- source: time_elapsed_2.out_stage2_s
+  target: wf_exit.in_stage2_s
+  type: binds
+- source: loop_1.out_lp_code
+  target: wf_exit.in_lp_code
+  type: binds
+- source: loop_1.out_solution
+  target: wf_exit.in_solution
+  type: binds
+- source: interpret_portfolio.out_narrative
+  target: wf_exit.in_narrative
+  type: binds

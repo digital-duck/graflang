@@ -1,0 +1,113 @@
+-- ============================================================
+-- Recipe 67b: Multi-Step Symbolic Math Solver
+--
+-- Extends symbolic_math.spl to problems that need a CHAIN of
+-- operations, e.g. "differentiate e**x and then simplify the
+-- result" — by (1) decomposing the problem into an ordered list
+-- of single-operation steps, then (2) running each step through
+-- a reusable sub-WORKFLOW via CALL <workflow>(...), threading the
+-- running expression from one step's output into the next step's
+-- input. This is the "CALL <workflow> step-by-step" pattern, the
+-- same mechanism self_refine.spl uses for critique_workflow.
+--
+--   Probabilistic (LLM)   — decompose the problem into ordered steps
+--   Deterministic (SymPy) — each step computed exactly, in sequence,
+--                           via CALL solve_one_step(...) per item
+--   Probabilistic (LLM)   — explain the whole chain in plain English
+--
+-- Same "LLM never approximates the math" contract as recipe 67,
+-- just stretched across N steps instead of one. Crucially, the
+-- intermediate result that one step feeds to the next is read
+-- straight off SymPy's output (split on '|', deterministic) —
+-- the LLM is never asked to re-read its own prior numeric output
+-- and re-emit it, which is exactly the kind of multi-hop string
+-- task where weaker instruction-following shows up (see this
+-- recipe's readme for a gemma3-vs-gemma4:12b comparison on the
+-- single-step version).
+--
+-- Requires: pip install sympy
+--   (or run with --self-healing for automatic install)
+-- ============================================================
+
+IMPORT 'sympy_tools'
+
+-- ── Reusable sub-workflow: ONE chain step, CALLed once per item ──
+-- (same "WORKFLOW calls WORKFLOW" pattern as critique_workflow in
+--  cookbook/05_v3_self_refine/self_refine.spl)
+
+WORKFLOW solve_one_step
+  INPUT @step TEXT
+  INPUT @running_expression TEXT := ""
+  OUTPUT @step_summary TEXT
+DO
+  CALL split_part(@step, '|', '1') INTO @raw_expression;
+  CALL split_part(@step, '|', '2') INTO @operation;
+
+  -- Resolve the PREV placeholder deterministically — the running
+  -- expression never makes a round trip through the LLM. Compare
+  -- lower-cased: EVALUATE lower-cases the right-hand literal but not
+  -- the left-hand value, so 'PREV' = 'PREV' would NOT match — only
+  -- a lower-cased comparison is case-insensitive both ways.
+  CALL lower(@raw_expression) INTO @raw_expression_lc;
+  EVALUATE @raw_expression_lc
+    WHEN = 'prev' THEN
+      @expression := @running_expression
+    ELSE
+      @expression := @raw_expression
+  END
+
+  CALL solve_step_with_sympy(@expression, @operation) INTO @step_summary;
+
+  -- @step_summary stays '<bare_result>|<human_readable_line>' —
+  -- the caller below splits it the same way solve_with_sympy's
+  -- output is consumed in symbolic_math.spl
+  RETURN @step_summary
+END;
+
+-- ── WORKFLOW ─────────────────────────────────────────────────
+
+WORKFLOW math_solver_multi_step
+  INPUT @problem TEXT := 'differentiate e**x and then simplify the result'
+  INPUT @log_dir TEXT := 'cookbook/67_symbolic_math/logs-spl'
+  OUTPUT @explanation TEXT
+DO
+  -- Step 1 (probabilistic): LLM decomposes the problem into an ordered chain
+  GENERATE decompose_problem(@problem) INTO @steps_text;
+
+  LOGGING f"Problem '@{@problem}' decomposed into:\n\n\n{@steps_text}\n\n" LEVEL INFO
+
+  CALL step_count(@steps_text) INTO @n_steps;
+
+  @i := 0
+  @running_expression := ""
+  @trace := ""
+
+  -- Step 2 (deterministic, chained): CALL the reusable sub-workflow
+  -- once per step — this is the "CALL <workflow> step-by-step" part.
+  -- Each call's @running_expression output becomes the next call's input.
+  WHILE @i < @n_steps DO
+    CALL extract_step(@steps_text, @i) INTO @step;
+
+    CALL solve_one_step(@step, @running_expression) INTO @step_summary;
+    CALL split_part(@step_summary, '|', '1') INTO @running_expression;
+    CALL split_part(@step_summary, '|', '2') INTO @trace_line;
+
+    -- f-string interpolation only substitutes bare {@var} placeholders
+    -- (no inline arithmetic), so compute the 1-based display index first
+    @step_no := @i + 1
+    @trace := @trace + f'{@step_no}. {@trace_line}\n'
+    LOGGING f'[step {@step_no}/{@n_steps}] {@trace_line}' LEVEL INFO
+
+    @i := @i + 1
+  END
+
+  CALL write_file(f'{@log_dir}/chain_trace.md', @trace) INTO NONE;
+
+  -- Step 3 (probabilistic): LLM explains the whole chain in plain English
+  GENERATE explain_chain(@problem, @trace) INTO @explanation;
+
+  RETURN @explanation WITH status = 'complete', steps = @n_steps;
+EXCEPTION
+  WHEN BudgetExceeded THEN
+    RETURN @trace WITH status = 'budget_limit';
+END;

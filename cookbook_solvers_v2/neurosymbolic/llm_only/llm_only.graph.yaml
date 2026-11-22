@@ -1,0 +1,115 @@
+version: 1.0-graph
+workflow:
+  name: llm_only
+  inputs:
+  - name: log_dir
+    type: TEXT
+  - name: problem
+    type: TEXT
+  - name: thinking_note
+    type: TEXT
+  outputs:
+  - name: result
+    type: TEXT
+  - name: trim_2_result
+    type: TEXT
+steps:
+- write_file:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - "'(solver disabled for this run — no verified chain; the LLM solved it unaided)\\n'"
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', '(solver disabled for this run — no verified chain; the LLM solved it unaided)\n')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- solve_directly:
+    generate: |-
+      {{in_thinking_note}}A student asked: "{{in_problem}}"
+
+      There is NO symbolic math engine or proof assistant backing you up this
+      time — every computation and every proof step must be done correctly by
+      you, from scratch.
+
+      Write a clear, friendly walkthrough in less than 8 sentences that:
+      1. Restates what the problem is asking in plain English
+      2. Shows your own working, step by step, in order — state the exact
+         result of each step as you derive it (do not skip steps)
+      3. Gives the final answer plainly at the end
+
+      Show your work. Do not state any result you have not derived above.
+    in:
+      problem: $in.problem
+      thinking_note: $in.thinking_note
+    function: solve_directly
+    params:
+    - problem
+    - thinking_note
+    arguments:
+    - '@problem'
+    - '@thinking_note'
+- trim_2:
+    node: SOLVE
+    in:
+      result: solve_directly
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@result'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(result)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- direct_empty:
+    evaluate: "@in_result == ''"
+    in:
+      result: trim_2
+    out: []
+    branch: 1
+- set_empty_failure:
+    node: CONTEXT
+    action: set
+    expression: |-
+      '[FAILURE] The unaided LLM returned nothing for this problem.'
+- wf_exit:
+    output:
+      result: set_empty_failure
+      trim_2_result: trim_2
+    on:
+    - direct_empty.fail
+    - set_empty_failure

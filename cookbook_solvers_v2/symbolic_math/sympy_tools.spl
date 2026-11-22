@@ -1,0 +1,368 @@
+-- ============================================================
+-- sympy_tools.spl — shared TOOL_API + FUNCTION definitions
+-- for Recipe-67 symbolic math scripts.
+--
+-- Imported by sympy_llm.spl and sympy_math_multi_step.spl via:
+--   IMPORT 'sympy_tools'
+--
+-- Contains:
+--   TOOL_API  solve_step_with_sympy  — exact SymPy kernel (one step)
+--   TOOL_API  step_count             — count non-blank lines in plan
+--   TOOL_API  extract_step           — get i-th line from plan
+--   FUNCTION  decompose_problem      — LLM → structured DSL plan
+--   FUNCTION  explain_chain          — LLM narration of verified chain
+--   FUNCTION  solve_directly         — LLM-only baseline (no kernel)
+-- ============================================================
+
+-- ── Deterministic regime: SymPy + step bookkeeping ──────────
+
+CREATE TOOL_API solve_step_with_sympy(expression TEXT, operation TEXT)
+RETURNS TEXT AS PYTHON $$
+def solve_step_with_sympy(expression: str, operation: str) -> str:
+    """Exact symbolic computation for ONE step in a chain.
+
+    Returns '<bare_result>|<human_readable_line>' so the caller can
+    both (a) feed <bare_result> into the next step verbatim and
+    (b) keep a readable trace — never asking the LLM to parse
+    SymPy's own output back into an expression. On failure, returns
+    'sympy_error|<expression>: <exception>' — a sentinel the caller
+    checks for explicitly (see the fail-fast WHILE loop in the
+    importing workflow)."""
+    import re as _re
+    from sympy import (symbols, sympify, solve, diff, integrate, simplify, expand, factor,
+                       series, apart, limit, laplace_transform, inverse_laplace_transform,
+                       trigsimp, summation, oo, Symbol, Function, dsolve, Eq)
+
+    try:
+        x, y, z, n, t, s = symbols('x y z n t s')
+        expr = sympify(expression.strip())
+        op = operation.strip().lower()
+
+        if op in ('solve', 'roots', 'zeros'):
+            result = solve(expr, x)
+            return f"{result}|solve({expression} = 0) -> x = {result}"
+        elif op in ('diff', 'differentiate', 'derivative', 'gradient'):
+            result = diff(expr, x)
+            return f"{result}|d/dx({expression}) = {result}"
+        elif op in ('integrate', 'integral', 'antiderivative'):
+            result = integrate(expr, x)
+            return f"{result}|integral of {expression} dx = {result} + C"
+        elif op == 'simplify':
+            if isinstance(expr, (list, tuple)):
+                result = [simplify(e) for e in expr]
+            else:
+                result = simplify(expr)
+            return f"{result}|simplify({expression}) = {result}"
+        elif op == 'expand':
+            result = expand(expr)
+            return f"{result}|expand({expression}) = {result}"
+        elif op == 'factor':
+            result = factor(expr)
+            return f"{result}|factor({expression}) = {result}"
+        elif op in ('series', 'taylor', 'maclaurin'):
+            result = series(expr, x, 0, 6).removeO()
+            return f"{result}|series({expression}, x=0, deg≤5) = {result}"
+        elif op in ('apart', 'partial_fractions', 'partial_fraction'):
+            result = apart(expr, x)
+            return f"{result}|apart({expression}) = {result}"
+        elif op.startswith('limit'):
+            m = _re.match(r'limit\((\w+),\s*(.+)\)', op)
+            if m:
+                var = Symbol(m.group(1))
+                point = sympify(m.group(2))
+            else:
+                var, point = x, sympify('0')
+            result = limit(expr, var, point)
+            return f"{result}|limit({expression}, {var}->{point}) = {result}"
+        elif op in ('laplace', 'laplace_transform'):
+            result = laplace_transform(expr, t, s)[0]
+            return f"{result}|laplace_transform({expression}) = {result}"
+        elif op in ('inverse_laplace', 'inverse_laplace_transform'):
+            result = inverse_laplace_transform(expr, s, t)
+            return f"{result}|inverse_laplace_transform({expression}) = {result}"
+        elif op in ('trigsimp', 'trig_simplify'):
+            result = trigsimp(expr)
+            return f"{result}|trigsimp({expression}) = {result}"
+        elif op.startswith('summation') or op.startswith('sum('):
+            m = _re.match(r'(?:summation|sum)\((\w+),\s*(.+),\s*(.+)\)', op)
+            if m:
+                var = Symbol(m.group(1))
+                start = sympify(m.group(2))
+                end = sympify(m.group(3))
+            else:
+                var, start, end = n, sympify('1'), oo
+            result = summation(expr, (var, start, end))
+            return f"{result}|sum({expression}, {var}={start}..{end}) = {result}"
+        elif op in ('eigenvalues', 'eig'):
+            from sympy import Matrix
+            m = sympify(expression.strip())
+            result = Matrix(m).eigenvals()
+            return f"{result}|eigenvalues({expression}) = {result}"
+        elif op in ('solve_system', 'system'):
+            # expression is expected as a Python list of equations, e.g.
+            # "[x + y - 5, x - y - 1]"
+            from sympy import solve as sym_solve
+            eqs = sympify(expression.strip())
+            result = sym_solve(eqs, [x, y, z])
+            return f"{result}|solve_system({expression}) = {result}"
+        elif op in ('dsolve', 'ode_solve'):
+            from sympy import Function as Func, dsolve as sym_dsolve, Eq
+            y_f = Func('y')
+            local_ns = {'y': y_f, 'Eq': Eq, 'x': x, 'n': n, 't': t, 's': s}
+            ode = sympify(expression.strip(), locals=local_ns)
+            result = sym_dsolve(ode)
+            return f"{result}|dsolve({expression}) = {result}"
+        elif op in ('dsolve_ic', 'ode_solve_ic'):
+            from sympy import Function as Func, dsolve as sym_dsolve, Eq
+            y_f = Func('y')
+            local_ns = {'y': y_f, 'Eq': Eq, 'x': x, 'n': n, 't': t, 's': s}
+            # eval preserves the Python dict for ICs; sympify would lose the dict type
+            parsed = eval(expression.strip(), local_ns)  # noqa: S307
+            if not (isinstance(parsed, (list, tuple)) and len(parsed) == 2):
+                return f"sympy_error|dsolve_ic expects [Eq(ODE), {{y(0): val}}]: {expression}"
+            ode_eq, ics = parsed[0], parsed[1]
+            if not isinstance(ics, dict):
+                return f"sympy_error|dsolve_ic second element must be a dict of ICs: {ics}"
+            result = sym_dsolve(ode_eq, ics=ics)
+            return f"{result}|dsolve_ic({expression}) = {result}"
+        else:
+            return f"sympy_error|unknown operation '{op}' — not in kernel"
+    except Exception as e:
+        return f"sympy_error|{expression}: {e}"
+$$;
+
+CREATE TOOL_API step_count(steps_text TEXT)
+RETURNS TEXT AS PYTHON $$
+def step_count(steps_text: str) -> str:
+    """Deterministic, 0-token: counts non-blank lines in the
+    decomposed step list (mirrors chunk_plan in recipe 13)."""
+    return str(len([line for line in steps_text.splitlines() if line.strip()]))
+$$;
+
+CREATE TOOL_API extract_step(steps_text TEXT, index TEXT)
+RETURNS TEXT AS PYTHON $$
+def extract_step(steps_text: str, index: str) -> str:
+    """Deterministic, 0-token: returns the i-th non-blank line of
+    the decomposed step list (mirrors extract_chunk in recipe 13)."""
+    lines = [line.strip() for line in steps_text.splitlines() if line.strip()]
+    i = int(index)
+    return lines[i] if 0 <= i < len(lines) else ""
+$$;
+
+CREATE TOOL_API validate_plan(steps_text TEXT)
+RETURNS TEXT AS PYTHON $$
+def validate_plan(steps_text: str) -> str:
+    """Deterministic, 0-token check of the chain-protocol contract:
+    line 1 = <expression>|<operation>, every later line = PREV|<operation>,
+    every operation from the allowed vocabulary. Returns 'ok' or
+    'fail | <reason>' — catches a model that emits a fresh expression
+    mid-chain (e.g. parroting a few-shot example) before any LLM gate."""
+    allowed = {'solve', 'diff', 'integrate', 'simplify', 'expand', 'factor',
+               'series', 'apart', 'limit', 'laplace', 'inverse_laplace',
+               'trigsimp', 'summation', 'eigenvalues', 'solve_system', 'dsolve', 'dsolve_ic'}
+    lines = [l.strip() for l in steps_text.splitlines() if l.strip()]
+    if not lines:
+        return 'fail | empty plan'
+    for i, line in enumerate(lines, 1):
+        if line.count('|') != 1:
+            return f'fail | line {i} is not <expression>|<operation>: {line}'
+        expr, op = (p.strip() for p in line.split('|'))
+        if not expr or not op:
+            return f'fail | line {i} has an empty field: {line}'
+        if '\\' in expr:
+            return f'fail | line {i} expression contains LaTeX markup: {expr}'
+        if op.split('(')[0].strip() not in allowed:
+            return f'fail | line {i} operation not in the allowed list: {op}'
+        if i == 1 and expr.upper() == 'PREV':
+            return 'fail | line 1 must carry the starting expression, not PREV'
+        if i > 1 and expr.upper() != 'PREV':
+            return f'fail | line {i} must use PREV, got a new expression: {expr}'
+    return 'ok'
+$$;
+
+-- ── Probabilistic regime: LLM prompt templates ───────────────
+
+CREATE FUNCTION decompose_problem(problem TEXT)
+RETURNS TEXT AS $$
+Translate this math problem into an ordered list of symbolic operations.
+
+Output format — one step per line, NOTHING ELSE:
+  <expression>|<operation>
+
+STRICT OUTPUT RULES (violating any of these causes the pipeline to fail):
+- Plain text output ONLY — no code fences, no backticks, no markdown, no numbering
+- No Python code (no import statements, no variable assignments, no function calls)
+- No prose, no explanations, no blank lines
+- The FIRST step's <expression> is the starting expression in Python/SymPy syntax:
+    ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+- Every step AFTER the first must use the literal word PREV as the expression —
+    it means "the result of the previous step". NEVER write a new expression
+    after the first line.
+- <operation> must be exactly one token from this list:
+    solve, diff, integrate, simplify, expand, factor,
+    series, apart, limit(x,0), laplace, inverse_laplace,
+    trigsimp, summation(n,1,oo), eigenvalues, solve_system,
+    dsolve, dsolve_ic
+- dsolve   — general ODE solution (no initial conditions)
+- dsolve_ic — IVP: expression MUST be [Eq(ODE), {y(0): val, ...}]
+- If the problem needs only ONE operation, output exactly one line
+- The expressions in the examples below (exp(x), x**2 - 4, sin(x)/x, ...)
+    illustrate the FORMAT only. Your first <expression> must be transcribed
+    from the Problem at the bottom — copying an expression from an example
+    is a failure.
+
+CORRECT examples:
+  "differentiate e to the x and then simplify the result"
+    exp(x)|diff
+    PREV|simplify
+
+  "integrate 5*x**4 + 2, then expand the result, then solve for x"
+    5*x**4 + 2|integrate
+    PREV|expand
+    PREV|solve
+
+  "expand (x+1) squared, then factor the expanded form"
+    (x + 1)**2|expand
+    PREV|factor
+
+  "find the roots of x squared minus 4"
+    x**2 - 4|solve
+
+  "find the limit of sin(x)/x as x approaches 0"
+    sin(x)/x|limit(x,0)
+
+  "expand sin(x) as a Taylor series around x=0 up to degree 5"
+    sin(x)|series
+
+  "find the partial fraction decomposition of 1/(x**2-1)"
+    1/(x**2 - 1)|apart
+
+  "find the Laplace transform of exp(-2*t)"
+    exp(-2*t)|laplace
+
+  "compute the sum of 1/n**2 from n=1 to infinity"
+    1/n**2|summation(n,1,oo)
+
+  "find the eigenvalues of the matrix [[1,2],[3,4]]"
+    [[1,2],[3,4]]|eigenvalues
+
+  "solve the system x + y = 5 and x - y = 1"
+    [x + y - 5, x - y - 1]|solve_system
+
+  "compute the inverse Laplace transform of s/(s**2+4), then verify"
+    s/(s**2 + 4)|inverse_laplace
+    PREV|laplace
+
+  "find the general solution to y'(x) = y(x)"
+    Eq(y(x).diff(x), y(x))|dsolve
+
+  "solve the ODE y'(x) = y(x) with initial condition y(0) = 1"
+    [Eq(y(x).diff(x), y(x)), {y(0): 1}]|dsolve_ic
+
+  "solve the second-order ODE y''(x) - 3*y'(x) + 2*y(x) = 0"
+    Eq(y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x), 0)|dsolve
+
+INCORRECT examples (DO NOT produce output like this):
+  \boxed{sin(x)*cos(x)}|integrate  ← NO: LaTeX wrappers in expressions are forbidden
+  ```plaintext              ← NO: code fences are forbidden
+  exp(x)|diff
+  ```
+  x = sp.symbols('x')      ← NO: Python variable assignments are forbidden
+  from sympy import diff    ← NO: Python import statements are forbidden
+  Step 1: exp(x)|diff       ← NO: labels and numbering are forbidden
+  1. exp(x)|diff             ← NO: numbered lists are forbidden
+  x**2 - 4|solve             ← NO (as a later line): every line after the
+                                first must be PREV|<operation>
+  exp(x)|diff                ← NO (when the problem says something else):
+                                this copies an example instead of the Problem
+
+Now translate ONLY the problem below. Transcribe its expression EXACTLY —
+same digits, signs, exponents — and use PREV for every step after the first.
+
+Problem: {problem}
+$$;
+
+CREATE FUNCTION explain_chain(problem TEXT, trace TEXT)
+RETURNS TEXT AS $$
+A student asked: "{problem}"
+
+The symbolic math engine computed this chain of EXACT steps, in order:
+{trace}
+
+Write a clear, friendly explanation in less than 6 sentences that:
+1. Restates what the problem is asking in plain English
+2. Walks through the chain step by step, in order, stating each exact result
+3. Gives the final answer plainly at the end
+Do not re-derive any step — trust the computed chain above as exact.
+$$;
+
+CREATE FUNCTION solve_directly(problem TEXT, number_of_sentences TEXT DEFAULT "8")
+RETURNS TEXT AS $$
+A student asked: "{problem}"
+
+There is NO symbolic math engine backing you up this time — every
+computation must be done correctly by you, from scratch.
+
+Write a clear, friendly walkthrough in less than {number_of_sentences} sentences that:
+1. Restates what the problem is asking in plain English
+2. Shows your own working, step by step, in order — state the exact
+   result of each step as you derive it (do not skip steps)
+3. Gives the final answer plainly at the end
+
+Show your work. Do not state any result you have not derived above.
+$$;
+
+
+CREATE FUNCTION sanity_check_plan(problem TEXT, plan TEXT)
+RETURNS TEXT AS $$
+A student asked the following question: "{problem}"
+
+A planner translated it into this ordered plan, one step per line in the
+format <expression>|<operation>, where PREV means "the result of the
+previous step":
+{plan}
+
+Your ONLY job is to check whether this plan sets up the question that
+was actually asked. Do NOT execute any math. Check ONLY for:
+
+- Wrong starting expression: line 1 does not transcribe the expression
+  stated in the problem. FIRST extract the expression from the problem
+  statement, THEN compare it to line 1 symbol by symbol — every digit,
+  sign, exponent, and function name must match. If the problem says
+  7*y**2 - y and line 1 says anything else, that is a fail.
+- Wrong operation: the problem asks for one operation (e.g. integrate)
+  but the plan uses another (e.g. diff)
+- Missing final step: the problem asks for a final result (e.g. "solve
+  for x") that the plan never reaches
+- Extra steps that change what the final result means
+
+Reply with EXACTLY one line and nothing else:
+  pass
+or
+  fail | <one short reason>
+$$;
+
+CREATE FUNCTION sanity_check_chain(problem TEXT, trace TEXT)
+RETURNS TEXT AS $$
+A student asked the following question: "{problem}"
+
+A symbolic math engine computed this chain of EXACT steps, in order:
+{trace}
+
+Your ONLY job is to check whether this chain answers the question that
+was actually asked. Do NOT re-verify the arithmetic — every step above
+is already machine-verified. Check ONLY for plan-level mismatches:
+
+- Wrong starting expression: step 1 does not operate on the expression
+  stated in the problem (changed coefficient, sign, exponent, function)
+- Wrong operation: the problem asks for one operation (e.g. integrate)
+  but the chain performs another (e.g. differentiate)
+- Missing final step: the problem asks for a final result (e.g. "solve
+  for x") that the chain never reaches
+- Extra steps that change what the final result means
+
+Reply with EXACTLY one line and nothing else:
+  pass
+or
+  fail | <one short reason>
+$$;

@@ -1,0 +1,138 @@
+version: 1.0-graph
+workflow:
+  name: report
+  inputs:
+  - name: badge
+    type: TEXT
+  - name: problem
+    type: TEXT
+  - name: log_dir
+    type: TEXT
+  - name: lean_stmt
+    type: TEXT
+  - name: faithful
+    type: TEXT
+  - name: proof
+    type: TEXT
+  - name: lean_report_badge
+    type: TEXT
+  - name: citation
+    type: TEXT
+  - name: lean_report_faithful
+    type: TEXT
+  - name: lean_report_badge2
+    type: TEXT
+  - name: lean_report_citation
+    type: TEXT
+  - name: lean_report_citation2
+    type: TEXT
+  - name: lean_report_proof
+    type: TEXT
+  - name: lean_report_proof2
+    type: TEXT
+  - name: lean_report_badge3
+    type: TEXT
+  outputs:
+  - name: result
+    type: TEXT
+steps:
+- lean_report:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      lean_stmt: $in.lean_stmt
+      faithful:
+      - $in.faithful
+      - $in.lean_report_faithful
+      proof:
+      - $in.proof
+      - $in.lean_report_proof
+      - $in.lean_report_proof2
+      badge:
+      - $in.badge
+      - $in.lean_report_badge
+      - $in.lean_report_badge2
+      - $in.lean_report_badge3
+      citation:
+      - $in.citation
+      - $in.lean_report_citation
+      - $in.lean_report_citation2
+    tool: lean_report
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@lean_stmt'
+    - '@faithful'
+    - '@proof'
+    - '@badge'
+    - '@citation'
+    code: |
+      def lean_report(claim: str, stmt: str, faithful: str,
+                      proof: str, badge: str, citation: str) -> str:
+          lines = [
+              f"# Lean verification report (mathlib)",
+              f"",
+              f"**Claim (prose):** {claim}",
+              f"",
+              f"**Formalization:** `{stmt or '—'}`",
+              f"",
+              f"**Faithfulness (LLM judge):** {faithful.strip()}",
+              f"",
+              f"**Badge:** `{badge}`",
+          ]
+          if citation.strip() and citation.strip().lower() != "none":
+              lines += ["", f"**Library citation (kernel-checked):** `{citation.strip()}`"]
+          if proof.strip():
+              lines += ["", "**Kernel-checked proof:**", "```lean", proof, "```"]
+          return "\n".join(lines)
+      _spl_result = lean_report(problem, lean_stmt, faithful, proof, badge, citation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - claim
+    - stmt
+    - faithful
+    - proof
+    - badge
+    - citation
+    tool_returns: TEXT
+- write_file_3:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      result: lean_report
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - '@result'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', result)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output: lean_report

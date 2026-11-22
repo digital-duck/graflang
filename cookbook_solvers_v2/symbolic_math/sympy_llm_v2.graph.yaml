@@ -1,0 +1,72 @@
+version: 1.0-graph
+workflow:
+  name: math_solver_ab_v2
+  inputs:
+  - name: problem
+    type: TEXT
+    default: differentiate 3*x**3 - x, then factor if needed, finally solve for x
+  - name: log_dir
+    type: TEXT
+    default: cookbook/67_symbolic_math/logs-spl
+  - name: enable_solver
+    type: TEXT
+    default: 'true'
+  outputs:
+  - name: explanation
+    type: TEXT
+resources:
+  parts:
+    sympy_llm_v2_prepare: ./sympy_llm_v2_prepare/sympy_llm_v2_prepare.graph.yaml
+    sympy_llm_v2_solver_arm: ./sympy_llm_v2_solver_arm/sympy_llm_v2_solver_arm.graph.yaml
+    sympy_llm_v2_llm_only: ./sympy_llm_v2_llm_only/sympy_llm_v2_llm_only.graph.yaml
+steps:
+- sympy_llm_v2_prepare:
+    use: parts.sympy_llm_v2_prepare
+    in:
+      enable_solver: $in.enable_solver
+    out:
+    - use_solver
+    - set_use_solver_2_use_solver
+- gate:
+    evaluate: |-
+      @in_use_solver == 'yes'
+    in:
+      use_solver:
+      - sympy_llm_v2_prepare
+      - sympy_llm_v2_prepare.set_use_solver_2_use_solver
+    out: []
+    branch: 1
+- sympy_llm_v2_solver_arm:
+    use: parts.sympy_llm_v2_solver_arm
+    in:
+      problem: $in.problem
+      log_dir: $in.log_dir
+    out:
+    - explanation
+    - set_explanation_2_explanation
+    - set_explanation_3_explanation
+    - set_set_12_explanation
+    - set_set_13_explanation
+    - trim_3_explanation
+- sympy_llm_v2_llm_only:
+    use: parts.sympy_llm_v2_llm_only
+    in:
+      log_dir: $in.log_dir
+      problem: $in.problem
+    out:
+    - explanation
+    - trim_2_explanation
+    'on': gate.fail
+- wf_exit:
+    output:
+    - sympy_llm_v2_solver_arm
+    - sympy_llm_v2_solver_arm.set_explanation_2_explanation
+    - sympy_llm_v2_solver_arm.set_explanation_3_explanation
+    - sympy_llm_v2_solver_arm.set_set_12_explanation
+    - sympy_llm_v2_solver_arm.set_set_13_explanation
+    - sympy_llm_v2_solver_arm.trim_3_explanation
+    - sympy_llm_v2_llm_only
+    - sympy_llm_v2_llm_only.trim_2_explanation
+    'on':
+    - sympy_llm_v2_solver_arm
+    - sympy_llm_v2_llm_only

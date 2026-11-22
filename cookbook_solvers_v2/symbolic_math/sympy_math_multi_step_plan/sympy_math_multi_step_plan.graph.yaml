@@ -1,0 +1,142 @@
+version: 1.0-graph
+workflow:
+  name: sympy_math_multi_step_plan
+  inputs:
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: steps_text
+    type: TEXT
+  - name: n_steps
+    type: TEXT
+steps:
+- decompose_problem:
+    generate: |-
+      Translate this math problem into an ordered list of symbolic operations.
+
+      Output format — one step per line, NOTHING ELSE:
+        <expression>|<operation>
+
+      STRICT OUTPUT RULES (violating any of these causes the pipeline to fail):
+      - Plain text output ONLY — no code fences, no backticks, no markdown, no numbering
+      - No Python code (no import statements, no variable assignments, no function calls)
+      - No prose, no explanations, no blank lines
+      - The FIRST step's <expression> is the starting expression in Python/SymPy syntax:
+          ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+      - Every step AFTER the first must use the literal word PREV as the expression —
+          it means "the result of the previous step". NEVER write a new expression
+          after the first line.
+      - <operation> must be exactly one token from this list:
+          solve, diff, integrate, simplify, expand, factor,
+          series, apart, limit(x,0), laplace, inverse_laplace,
+          trigsimp, summation(n,1,oo), eigenvalues, solve_system,
+          dsolve, dsolve_ic
+      - dsolve   — general ODE solution (no initial conditions)
+      - dsolve_ic — IVP: expression MUST be [Eq(ODE), {y(0): val, ...}]
+      - If the problem needs only ONE operation, output exactly one line
+      - The expressions in the examples below (exp(x), x**2 - 4, sin(x)/x, ...)
+          illustrate the FORMAT only. Your first <expression> must be transcribed
+          from the Problem at the bottom — copying an expression from an example
+          is a failure.
+
+      CORRECT examples:
+        "differentiate e to the x and then simplify the result"
+          exp(x)|diff
+          PREV|simplify
+
+        "integrate 5*x**4 + 2, then expand the result, then solve for x"
+          5*x**4 + 2|integrate
+          PREV|expand
+          PREV|solve
+
+        "expand (x+1) squared, then factor the expanded form"
+          (x + 1)**2|expand
+          PREV|factor
+
+        "find the roots of x squared minus 4"
+          x**2 - 4|solve
+
+        "find the limit of sin(x)/x as x approaches 0"
+          sin(x)/x|limit(x,0)
+
+        "expand sin(x) as a Taylor series around x=0 up to degree 5"
+          sin(x)|series
+
+        "find the partial fraction decomposition of 1/(x**2-1)"
+          1/(x**2 - 1)|apart
+
+        "find the Laplace transform of exp(-2*t)"
+          exp(-2*t)|laplace
+
+        "compute the sum of 1/n**2 from n=1 to infinity"
+          1/n**2|summation(n,1,oo)
+
+        "find the eigenvalues of the matrix [[1,2],[3,4]]"
+          [[1,2],[3,4]]|eigenvalues
+
+        "solve the system x + y = 5 and x - y = 1"
+          [x + y - 5, x - y - 1]|solve_system
+
+        "compute the inverse Laplace transform of s/(s**2+4), then verify"
+          s/(s**2 + 4)|inverse_laplace
+          PREV|laplace
+
+        "find the general solution to y'(x) = y(x)"
+          Eq(y(x).diff(x), y(x))|dsolve
+
+        "solve the ODE y'(x) = y(x) with initial condition y(0) = 1"
+          [Eq(y(x).diff(x), y(x)), {y(0): 1}]|dsolve_ic
+
+        "solve the second-order ODE y''(x) - 3*y'(x) + 2*y(x) = 0"
+          Eq(y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x), 0)|dsolve
+
+      INCORRECT examples (DO NOT produce output like this):
+        \boxed{sin(x)*cos(x)}|integrate  ← NO: LaTeX wrappers in expressions are forbidden
+        ```plaintext              ← NO: code fences are forbidden
+        exp(x)|diff
+        ```
+        x = sp.symbols('x')      ← NO: Python variable assignments are forbidden
+        from sympy import diff    ← NO: Python import statements are forbidden
+        Step 1: exp(x)|diff       ← NO: labels and numbering are forbidden
+        1. exp(x)|diff             ← NO: numbered lists are forbidden
+        x**2 - 4|solve             ← NO (as a later line): every line after the
+                                      first must be PREV|<operation>
+        exp(x)|diff                ← NO (when the problem says something else):
+                                      this copies an example instead of the Problem
+
+      Now translate ONLY the problem below. Transcribe its expression EXACTLY —
+      same digits, signs, exponents — and use PREV for every step after the first.
+
+      Problem: {{in_problem}}
+    in:
+      problem: $in.problem
+    out: steps_text
+    function: decompose_problem
+    params:
+    - problem
+    arguments:
+    - '@problem'
+- step_count:
+    node: SOLVE
+    in:
+      steps_text: decompose_problem
+    out: n_steps
+    tool: step_count
+    backend: kernel
+    arguments:
+    - '@steps_text'
+    code: |
+      def step_count(steps_text: str) -> str:
+          """Deterministic, 0-token: counts non-blank lines in the
+          decomposed step list (mirrors chunk_plan in recipe 13)."""
+          return str(len([line for line in steps_text.splitlines() if line.strip()]))
+      _spl_result = step_count(steps_text)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - steps_text
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      steps_text: decompose_problem
+      n_steps: step_count

@@ -1,0 +1,45 @@
+version: 1.0-graph
+workflow:
+  name: judge
+  inputs:
+  - name: claim
+    type: TEXT
+  - name: lean_stmt
+    type: TEXT
+  outputs:
+  - name: faithful
+    type: TEXT
+  - name: badge
+    type: TEXT
+steps:
+- set_badge_2:
+    node: CONTEXT
+    out: badge
+    action: set
+    expression: "'statement_checked'"
+- judge_faithfulness:
+    generate: |-
+      A prose mathematical claim was formalized in Lean 4 (mathlib).
+
+      Prose claim: {{in_claim}}
+      Lean proposition: {{in_lean_stmt}}
+
+      Does the Lean proposition say exactly what the prose claims — same
+      quantifiers, no vacuous hypotheses, no degenerate specialization?
+      Reply with exactly one line: FAITHFUL or UNFAITHFUL, then a dash and
+      one short reason.
+    in:
+      claim: $in.claim
+      lean_stmt: $in.lean_stmt
+    out: faithful
+    function: judge_faithfulness
+    params:
+    - claim
+    - lean_stmt
+    arguments:
+    - '@problem'
+    - '@lean_stmt'
+- wf_exit:
+    output:
+      faithful: judge_faithfulness
+      badge: set_badge_2

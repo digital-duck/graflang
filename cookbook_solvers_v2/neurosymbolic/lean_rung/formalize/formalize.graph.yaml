@@ -1,0 +1,615 @@
+version: 1.0-graph
+workflow:
+  name: formalize
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: max_tries
+    type: INT
+  - name: stmt_ok_lc
+    type: TEXT
+  - name: tries
+    type: TEXT
+  - name: lean_stmt
+    type: TEXT
+  outputs:
+  - name: stmt_ok_lc
+    type: TEXT
+  - name: lean_stmt
+    type: TEXT
+  - name: tactics
+    type: TEXT
+  - name: lean_feedback
+    type: TEXT
+  - name: proof
+    type: TEXT
+  - name: check_code
+    type: TEXT
+  - name: faithful
+    type: TEXT
+  - name: badge
+    type: TEXT
+  - name: citation
+    type: TEXT
+steps:
+- set_faithful:
+    node: CONTEXT
+    out: faithful
+    on: []
+    action: set
+    expression: |-
+      'not judged (formalization failed)'
+- set_badge:
+    node: CONTEXT
+    out: badge
+    action: set
+    expression: "'unverified'"
+- set_proof:
+    node: CONTEXT
+    out: proof
+    action: set
+    expression: "''"
+- set_tactics:
+    node: CONTEXT
+    out: tactics
+    action: set
+    expression: "''"
+- set_citation:
+    node: CONTEXT
+    out: citation
+    action: set
+    expression: "''"
+nodes:
+- id: formalize_loop
+  type: LOOP
+  config:
+    condition: latest(@in_tries, @tries) < @in_max_tries
+    state:
+      tries:
+        from:
+        - set_7.out_tries
+        - set_9.out_tries
+        - set_11.out_tries
+      stmt_raw:
+        from:
+        - gen_2.out_stmt_raw
+        - gen_3.out_stmt_raw
+      lean_stmt:
+        from:
+        - tool_7.out_lean_stmt
+        - tool_11.out_lean_stmt
+      check_code:
+        from:
+        - set_8.out_check_code
+        - set_10.out_check_code
+      stmt_ok:
+        from:
+        - tool_8.out_stmt_ok
+        - tool_12.out_stmt_ok
+      lean_feedback:
+        from:
+        - tool_9.out_lean_feedback
+        - tool_13.out_lean_feedback
+      stmt_ok_lc:
+        from:
+        - tool_10.out_stmt_ok_lc
+        - tool_14.out_stmt_ok_lc
+    subgraph:
+      nodes:
+      - id: eval_5
+        type: EVALUATE
+        config:
+          condition: "@in_stmt_ok_lc == 'true'"
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_stmt_ok_lc
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      - id: eval_6
+        type: EVALUATE
+        config:
+          condition: "@in_stmt_ok_lc == 'init'"
+          branch: 2
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_stmt_ok_lc
+      - id: gen_2
+        type: GENERATE
+        config:
+          function: formalize_claim
+          params:
+          - claim
+          prompt_inline: |-
+            Translate this mathematical claim into a single Lean 4 proposition.
+            Mathlib IS imported — use mathlib vocabulary and notation.
+
+            Rules:
+            - Output ONLY the proposition — what goes after `example :`. No proof,
+              no `example`, no markdown fences, no commentary.
+            - Bind every variable and every typeclass instance explicitly
+              (autoImplicit is off): universes, [Field ...], [AddCommGroup ...],
+              [Module ...], [FiniteDimensional ...] as needed.
+            - Prefer the formulation closest to mathlib's own (Real, Nat.Prime,
+              abs, Even, Module.finrank, ...).
+            - Example output for "the square of any real number is nonnegative":
+              ∀ a : ℝ, 0 ≤ a ^ 2
+
+            Claim: {{in_problem}}
+          arguments:
+          - '@problem'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - out_stmt_raw
+      - id: tool_7
+        type: SOLVE
+        config:
+          tool: strip_fences
+          backend: kernel
+          arguments:
+          - '@stmt_raw'
+          code: |
+            def strip_fences(text: str) -> str:
+                """Remove markdown code fences and surrounding noise from LLM output."""
+                import re
+                s = text.strip()
+                # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+                m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+                if m:
+                    s = m.group(1)
+                else:
+                    # Case 2: stray fence lines scattered through otherwise plain output
+                    s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+                    s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+                return s.strip().replace("'''", "")
+            _spl_result = strip_fences(stmt_raw)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_stmt_raw
+        - out_lean_stmt
+      - id: set_8
+        type: CONTEXT
+        config:
+          action: set
+          expression: f"print(_spl_lean.statement_ok(r'''{@in_lean_stmt}'''))"
+        ports:
+        - trigger
+        - complete
+        - in_lean_stmt
+        - out_check_code
+      - id: tool_8
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - '@check_code'
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python(check_code)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_check_code
+        - out_stmt_ok
+      - id: tool_9
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - "'print(_spl_lean.feedback)'"
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python('print(_spl_lean.feedback)')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - out_lean_feedback
+      - id: tool_10
+        type: SOLVE
+        config:
+          tool: lower
+          backend: kernel
+          arguments:
+          - '@stmt_ok'
+          code: |
+            def lower(value: str) -> str:
+                """LOWER(value) — convert to lowercase."""
+                return str(value).lower()
+            _spl_result = lower(stmt_ok)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_stmt_ok
+        - out_stmt_ok_lc
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      - id: gen_3
+        type: GENERATE
+        config:
+          function: fix_formalization
+          params:
+          - claim
+          - lean_stmt
+          - feedback
+          prompt_inline: |-
+            This Lean 4 proposition failed to typecheck. Mathlib IS imported.
+
+            Claim (prose): {{in_problem}}
+            Attempted proposition: {{in_lean_stmt}}
+            Lean's diagnostics:
+            {{in_lean_feedback}}
+
+            Output ONLY the corrected proposition (what goes after `example :`).
+            No proof, no fences, no commentary. Bind every variable and typeclass
+            instance explicitly (autoImplicit is off).
+          arguments:
+          - '@problem'
+          - '@lean_stmt'
+          - '@lean_feedback'
+        ports:
+        - trigger
+        - complete
+        - in_problem
+        - in_lean_stmt
+        - in_lean_feedback
+        - out_stmt_raw
+      - id: tool_11
+        type: SOLVE
+        config:
+          tool: strip_fences
+          backend: kernel
+          arguments:
+          - '@stmt_raw'
+          code: |
+            def strip_fences(text: str) -> str:
+                """Remove markdown code fences and surrounding noise from LLM output."""
+                import re
+                s = text.strip()
+                # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+                m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+                if m:
+                    s = m.group(1)
+                else:
+                    # Case 2: stray fence lines scattered through otherwise plain output
+                    s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+                    s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+                return s.strip().replace("'''", "")
+            _spl_result = strip_fences(stmt_raw)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_stmt_raw
+        - out_lean_stmt
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: f"print(_spl_lean.statement_ok(r'''{@in_lean_stmt}'''))"
+        ports:
+        - trigger
+        - complete
+        - in_lean_stmt
+        - out_check_code
+      - id: tool_12
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - '@check_code'
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python(check_code)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_check_code
+        - out_stmt_ok
+      - id: tool_13
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - "'print(_spl_lean.feedback)'"
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python('print(_spl_lean.feedback)')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - out_lean_feedback
+      - id: tool_14
+        type: SOLVE
+        config:
+          tool: lower
+          backend: kernel
+          arguments:
+          - '@stmt_ok'
+          code: |
+            def lower(value: str) -> str:
+                """LOWER(value) — convert to lowercase."""
+                return str(value).lower()
+            _spl_result = lower(stmt_ok)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_stmt_ok
+        - out_stmt_ok_lc
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      edges:
+      - source: eval_5.pass
+        target: set_7.trigger
+        type: triggers
+      - source: eval_5.fail
+        target: eval_6.trigger
+        type: triggers
+      - source: eval_6.pass
+        target: gen_2.trigger
+        type: triggers
+      - source: gen_2.complete
+        target: tool_7.trigger
+        type: triggers
+      - source: gen_2.out_stmt_raw
+        target: tool_7.in_stmt_raw
+        type: binds
+      - source: tool_7.complete
+        target: set_8.trigger
+        type: triggers
+      - source: tool_7.out_lean_stmt
+        target: set_8.in_lean_stmt
+        type: binds
+      - source: set_8.complete
+        target: tool_8.trigger
+        type: triggers
+      - source: set_8.out_check_code
+        target: tool_8.in_check_code
+        type: binds
+      - source: tool_8.complete
+        target: tool_9.trigger
+        type: triggers
+      - source: tool_9.complete
+        target: tool_10.trigger
+        type: triggers
+      - source: tool_8.out_stmt_ok
+        target: tool_10.in_stmt_ok
+        type: binds
+      - source: tool_10.complete
+        target: set_9.trigger
+        type: triggers
+      - source: eval_6.fail
+        target: gen_3.trigger
+        type: triggers
+      - source: gen_3.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: gen_3.out_stmt_raw
+        target: tool_11.in_stmt_raw
+        type: binds
+      - source: tool_11.complete
+        target: set_10.trigger
+        type: triggers
+      - source: tool_11.out_lean_stmt
+        target: set_10.in_lean_stmt
+        type: binds
+      - source: set_10.complete
+        target: tool_12.trigger
+        type: triggers
+      - source: set_10.out_check_code
+        target: tool_12.in_check_code
+        type: binds
+      - source: tool_12.complete
+        target: tool_13.trigger
+        type: triggers
+      - source: tool_13.complete
+        target: tool_14.trigger
+        type: triggers
+      - source: tool_12.out_stmt_ok
+        target: tool_14.in_stmt_ok
+        type: binds
+      - source: tool_14.complete
+        target: set_11.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_stmt_ok_lc
+  - in_tries
+  - in_problem
+  - in_lean_stmt
+  - in_lean_feedback
+  - in_max_tries
+  - out_tries
+  - out_stmt_raw
+  - out_lean_stmt
+  - out_check_code
+  - out_stmt_ok
+  - out_lean_feedback
+  - out_stmt_ok_lc
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_stmt_ok_lc
+  - in_lean_stmt
+  - in_tactics
+  - in_lean_feedback
+  - in_proof
+  - in_check_code
+  - in_faithful
+  - in_badge
+  - in_citation
+edges:
+- source: formalize_loop.exit
+  target: set_faithful.trigger
+  type: triggers
+- source: wf_entry.entry
+  target: formalize_loop.trigger
+  type: triggers
+- source: set_citation.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: wf_entry.out_problem
+  target: formalize_loop.in_problem
+  type: binds
+- source: wf_entry.out_max_tries
+  target: formalize_loop.in_max_tries
+  type: binds
+- source: wf_entry.out_stmt_ok_lc
+  target: formalize_loop.in_stmt_ok_lc
+  type: binds
+- source: wf_entry.out_tries
+  target: formalize_loop.in_tries
+  type: binds
+- source: wf_entry.out_lean_stmt
+  target: formalize_loop.in_lean_stmt
+  type: binds
+- source: formalize_loop.out_stmt_ok_lc
+  target: wf_exit.in_stmt_ok_lc
+  type: binds
+- source: formalize_loop.out_lean_stmt
+  target: wf_exit.in_lean_stmt
+  type: binds
+- source: set_tactics.out_tactics
+  target: wf_exit.in_tactics
+  type: binds
+- source: formalize_loop.out_lean_feedback
+  target: wf_exit.in_lean_feedback
+  type: binds
+- source: set_proof.out_proof
+  target: wf_exit.in_proof
+  type: binds
+- source: formalize_loop.out_check_code
+  target: wf_exit.in_check_code
+  type: binds
+- source: set_faithful.out_faithful
+  target: wf_exit.in_faithful
+  type: binds
+- source: set_badge.out_badge
+  target: wf_exit.in_badge
+  type: binds
+- source: set_citation.out_citation
+  target: wf_exit.in_citation
+  type: binds

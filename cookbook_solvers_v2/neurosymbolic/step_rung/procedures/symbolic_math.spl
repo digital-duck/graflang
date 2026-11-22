@@ -1,0 +1,326 @@
+-- ============================================================
+-- Recipe 77: symbolic_math — one declarative workflow, the whole
+-- verifier ladder behind it. Backend is a --param flip, not a rewrite:
+--
+--   @backend = 'sympy'  — exact symbolic instances          (recipe 67)
+--   @backend = 'sage'   — instances SymPy can't reach        (recipe 75)
+--   @backend = 'lean'   — statements kernel-checked vs mathlib (recipe 76)
+--
+-- @enable_solver = false is the unaided-LLM baseline arm (recipe 67c).
+--
+-- Fail-fast policy (chain backends) inherited from recipe 67c: any
+-- failure in the verified chain exits with an explicit status, no LLM
+-- fallback. Lean differs by design (§B.2): a failed proof never blocks
+-- delivery, it only withholds the badge — the badge IS the status
+-- (machine_proved / statement_checked / unfaithful / unverified).
+--
+-- Requires: pip install sympy
+--           pip install 'spl-llm[sage]'                      (sage)
+--           bash cookbook/tools/lean/setup_lean.sh --with-mathlib  (lean)
+-- Run:      spl3 run cookbook/77_neurosymbolic/symbolic_math.spl \
+--               --kernel --llm claude_cli \
+--               --param problem="..." --param backend=sage
+-- ============================================================
+
+IMPORT "sympolic_tools"
+
+-- ── One chain step, CALLed once per item; backend-agnostic protocol ──
+
+WORKFLOW solve_chain_step
+  INPUT @step TEXT
+  INPUT @running_expression TEXT := ""
+  INPUT @backend TEXT := "sympy"
+  OUTPUT @step_summary TEXT
+DO
+  CALL split_part(@step, "|", "1") INTO @raw_expression;
+  CALL split_part(@step, "|", "2") INTO @operation;
+
+  -- Resolve PREV deterministically. Exact "PREV" → running expression;
+  -- compound "PREV - y - 1" → substitute_prev replaces the token in-place.
+  CALL lower(@raw_expression) INTO @raw_expression_lc;
+  EVALUATE @raw_expression_lc
+    WHEN = "prev" THEN
+      @expression := @running_expression
+    WHEN contains("prev") THEN
+      CALL substitute_prev(@raw_expression, @running_expression) INTO @expression
+    ELSE
+      @expression := @raw_expression
+  END
+
+  -- The declarative backend dispatch: same '<bare>|<readable>' protocol,
+  -- same 'solver_error' sentinel — different exact engine.
+  EVALUATE @backend
+    WHEN = "sage" THEN
+      CALL solve_step_with_sage(@expression, @operation) INTO @step_summary
+    ELSE
+      CALL solve_step_with_sympy(@expression, @operation) INTO @step_summary
+  END
+
+  RETURN @step_summary
+END;
+
+-- ── WORKFLOW ─────────────────────────────────────────────────
+
+WORKFLOW neurosymbolic_solver
+  INPUT @problem TEXT := "find the Galois group of x**5 - x - 1 over the rationals"
+  INPUT @backend TEXT := "sage"
+  INPUT @enable_solver TEXT := "true"
+  INPUT @max_tries INT := 3
+  INPUT @log_dir TEXT := "cookbook/77_neurosymbolic/logs-spl"
+  INPUT @hostname TEXT := ""
+  INPUT @pid TEXT := ""
+  INPUT @thinking_note TEXT := ""
+  OUTPUT @result TEXT
+DO
+  CALL lower(@enable_solver) INTO @solver_mode;
+  CALL lower(@backend) INTO @backend_lc;
+  CALL trim(@backend_lc) INTO @backend_lc;
+
+  LOGGING f"[neurosymbolic_solver] host={@hostname} backend={@backend_lc} solver={@solver_mode}" LEVEL INFO
+
+  EVALUATE @solver_mode
+    WHEN IN ("true", "1", "yes") THEN
+      @use_solver := "yes"
+    ELSE
+      @use_solver := "no"
+  END
+
+  EVALUATE @use_solver
+    WHEN = "no" THEN
+      DO
+        -- ── ARM B: unaided LLM, one shot — for lean-type problems an
+        -- UNCHECKED prose "proof"; exactly the contrast measured ──
+        LOGGING f"[arm=llm_only] Problem '{@problem}' — solving with NO verifier" LEVEL INFO
+
+        CALL write_file(f"{@log_dir}/chain_trace.md",
+          "(solver disabled for this run — no verified chain; the LLM solved it unaided)\n") INTO NONE;
+
+        GENERATE solve_directly(@problem, @thinking_note) INTO @result;
+        CALL trim(@result) INTO @result;
+
+        EVALUATE @result
+          WHEN = "" THEN
+            LOGGING f"[arm=llm_only] FAILURE — solve_directly returned empty content" LEVEL ERROR
+            RETURN "[FAILURE] The unaided LLM returned nothing for this problem."
+              WITH status = "llm_error", arm = "llm_only", backend = @backend_lc, steps = 0
+        END
+
+        RETURN @result WITH status = "complete", arm = "llm_only", backend = @backend_lc, steps = 0
+      END
+
+    ELSE
+      EVALUATE @backend_lc
+        WHEN = "lean" THEN
+          DO
+            -- ── ARM C: proof grade — the problem is a CLAIM, verified by
+            -- the Lean kernel over mathlib, citation-first (recipes 76/71) ──
+            CALL run_python('from spl3.lean_bridge import LeanREPL; _spl_lean = LeanREPL.mathlib().start(); print("ready")') INTO @lean_status;
+            LOGGING f"[arm=lean] Lean REPL (mathlib): {@lean_status}" LEVEL INFO
+
+            -- ── Stage 1: formalize, capped typecheck-repair loop ──
+            @lean_stmt := "";
+            @stmt_ok_lc := "init";
+            @tries := 0;
+            WHILE @tries < @max_tries DO
+              EVALUATE @stmt_ok_lc
+                WHEN = "true" THEN
+                  @tries := @tries + 1
+                WHEN = "init" THEN
+                  GENERATE formalize_claim(@problem) INTO @stmt_raw;
+                  CALL strip_fences(@stmt_raw) INTO @lean_stmt;
+                  @check_code := f"print(_spl_lean.statement_ok(r'''{@lean_stmt}'''))";
+                  CALL run_python(@check_code) INTO @stmt_ok;
+                  CALL run_python("print(_spl_lean.feedback)") INTO @lean_feedback;
+                  CALL lower(@stmt_ok) INTO @stmt_ok_lc;
+                  @tries := @tries + 1;
+                  LOGGING f"[arm=lean] formalize attempt {@tries}: '{@lean_stmt}' → {@stmt_ok}" LEVEL INFO
+                ELSE
+                  GENERATE fix_formalization(@problem, @lean_stmt, @lean_feedback) INTO @stmt_raw;
+                  CALL strip_fences(@stmt_raw) INTO @lean_stmt;
+                  @check_code := f"print(_spl_lean.statement_ok(r'''{@lean_stmt}'''))";
+                  CALL run_python(@check_code) INTO @stmt_ok;
+                  CALL run_python("print(_spl_lean.feedback)") INTO @lean_feedback;
+                  CALL lower(@stmt_ok) INTO @stmt_ok_lc;
+                  @tries := @tries + 1;
+                  LOGGING f"[arm=lean] repair attempt {@tries}: '{@lean_stmt}' → {@stmt_ok}" LEVEL INFO
+              END
+            END
+
+            -- ── Stage 2 + 3: faithfulness gate, citation-first proof ──
+            @faithful := "not judged (formalization failed)";
+            @badge := "unverified";
+            @proof := "";
+            @tactics := "";
+            @citation := "";
+            EVALUATE @stmt_ok_lc
+              WHEN = "true" THEN
+                @badge := "statement_checked";
+                GENERATE judge_faithfulness(@problem, @lean_stmt) INTO @faithful;
+                EVALUATE @faithful
+                  WHEN contains("UNFAITHFUL") THEN
+                    -- The §B.4 gate: an unfaithful formalization never
+                    -- earns a proof attempt — surfaced as its own status
+                    -- so the harness can count it.
+                    @badge := "unfaithful";
+                    LOGGING f"[arm=lean] UNFAITHFUL formalization — proof gated" LEVEL INFO
+                  ELSE
+                    -- Stage 3a (citation first, B-5): exact? locally,
+                    -- Loogle fallback over HTTP, every candidate
+                    -- kernel-checked inside find_citation.
+                    @proof_ok_lc := "init";
+                    @find_code := f"print(_spl_lean.find_citation(r'''{@lean_stmt}'''))";
+                    CALL run_python(@find_code) INTO @citation;
+                    CALL lower(@citation) INTO @citation_lc;
+                    EVALUATE @citation_lc
+                      WHEN = "none" THEN
+                        @citation := ""
+                      ELSE
+                        -- Re-check the assembled theorem: the verified
+                        -- statement is spliced in verbatim, the citation
+                        -- is the proof. On the (rare) re-check failure the
+                        -- citation seeds the repair loop as @tactics.
+                        @tactics := @citation;
+                        CALL make_theorem(@lean_stmt, @citation) INTO @proof;
+                        @check_code := f"print(_spl_lean.check(r'''{@proof}''')['ok'])";
+                        CALL run_python(@check_code) INTO @proof_ok;
+                        CALL run_python("print(_spl_lean.feedback)") INTO @lean_feedback;
+                        CALL lower(@proof_ok) INTO @proof_ok_lc;
+                        LOGGING f"[arm=lean] citation path: by {@citation} → {@proof_ok}" LEVEL INFO
+                    END
+
+                    -- Stage 3b: LLM tactic proof, capped kernel-check
+                    -- repair loop — runs only when the library missed.
+                    -- The LLM writes ONLY the tactic block; make_theorem
+                    -- splices the verified statement in verbatim.
+                    @tries := 0;
+                    WHILE @tries < @max_tries DO
+                      EVALUATE @proof_ok_lc
+                        WHEN = "true" THEN
+                          @tries := @tries + 1
+                        WHEN = "init" THEN
+                          GENERATE write_tactics(@lean_stmt) INTO @tactics_raw;
+                          CALL strip_fences(@tactics_raw) INTO @tactics;
+                          CALL make_theorem(@lean_stmt, @tactics) INTO @proof;
+                          @check_code := f"print(_spl_lean.check(r'''{@proof}''')['ok'])";
+                          CALL run_python(@check_code) INTO @proof_ok;
+                          CALL run_python("print(_spl_lean.feedback)") INTO @lean_feedback;
+                          CALL lower(@proof_ok) INTO @proof_ok_lc;
+                          @tries := @tries + 1;
+                          LOGGING f"[arm=lean] proof attempt {@tries}: by {@tactics} → {@proof_ok}" LEVEL INFO
+                        ELSE
+                          GENERATE repair_tactics(@lean_stmt, @tactics, @lean_feedback) INTO @tactics_raw;
+                          CALL strip_fences(@tactics_raw) INTO @tactics;
+                          CALL make_theorem(@lean_stmt, @tactics) INTO @proof;
+                          @check_code := f"print(_spl_lean.check(r'''{@proof}''')['ok'])";
+                          CALL run_python(@check_code) INTO @proof_ok;
+                          CALL run_python("print(_spl_lean.feedback)") INTO @lean_feedback;
+                          CALL lower(@proof_ok) INTO @proof_ok_lc;
+                          @tries := @tries + 1;
+                          LOGGING f"[arm=lean] proof repair {@tries}: by {@tactics} → {@proof_ok}" LEVEL INFO
+                      END
+                    END
+
+                    EVALUATE @proof_ok_lc
+                      WHEN = "true" THEN
+                        @badge := "machine_proved"
+                      ELSE
+                        -- Lean failure never blocks delivery (§B.2): the
+                        -- claim keeps its statement-checked grade, the
+                        -- higher badge is withheld.
+                        @proof := ""
+                    END
+                END
+            END
+
+            LOGGING f"[arm=lean] badge: {@badge}" LEVEL INFO
+
+            CALL lean_report(@problem, @lean_stmt, @faithful, @proof, @badge, @citation) INTO @result;
+            CALL write_file(f"{@log_dir}/chain_trace.md", @result) INTO NONE;
+
+            -- The badge IS the status — the harness scores
+            -- machine_proved as the only verified pass.
+            RETURN @result WITH status = @badge, arm = "lean", backend = "lean", steps = @tries
+          END
+
+        ELSE
+          DO
+            -- ── ARM A: instance grade — plan → verified chain → explain;
+            -- the chain engine (SymPy or Sage) is @backend ──
+            LOGGING f"[arm=solver] Problem '{@problem}' — planning the chain (backend={@backend_lc}) ..." LEVEL INFO
+
+            GENERATE decompose_problem(@problem, @thinking_note) WITH OUTPUT BUDGET 2500 TOKENS INTO @steps_text;
+            CALL strip_fences(@steps_text) INTO @steps_text;
+            CALL step_count(@steps_text) INTO @n_steps;
+
+            LOGGING f"[arm=solver] decomposed into {@n_steps} step(s):\n\n\n{@steps_text}\n\n" LEVEL INFO
+
+            -- ── Fail-fast checkpoint 1: the plan itself is unusable ──
+            EVALUATE @n_steps
+              WHEN = "0" THEN
+                LOGGING f"[arm=solver] PLAN FAILURE — decompose_problem produced no usable steps" LEVEL ERROR
+                CALL write_file(f"{@log_dir}/chain_trace.md",
+                  f"(planning failed — raw decomposition output below)\n{@steps_text}") INTO NONE;
+                RETURN f"[PLAN FAILURE] The planning step could not decompose \"{@problem}\" into usable operations.\nRaw decomposition output: {@steps_text}"
+                  WITH status = "plan_error", arm = "solver", backend = @backend_lc, steps = 0
+            END
+
+            @i := 0
+            @running_expression := ""
+            @trace := ""
+
+            WHILE @i < @n_steps DO
+              CALL extract_step(@steps_text, @i) INTO @step;
+              CALL solve_chain_step(@step, @running_expression, @backend_lc) INTO @step_summary;
+              CALL split_part(@step_summary, "|", "1") INTO @running_expression;
+              CALL split_part(@step_summary, "|", "2") INTO @trace_line;
+
+              @step_no := @i + 1
+
+              -- ── Fail-fast checkpoint 2: the kernel rejected this step ──
+              EVALUATE @running_expression
+                WHEN = "solver_error" THEN
+                  LOGGING f"[arm=solver] SOLVER FAILURE at step {@step_no}/{@n_steps}: {@trace_line}" LEVEL ERROR
+                  CALL write_file(f"{@log_dir}/chain_trace.md",
+                    f"{@trace}{@step_no}. SOLVER ERROR — {@trace_line}\n") INTO NONE;
+                  RETURN f"[SOLVER FAILURE] Step {@step_no}/{@n_steps} could not be computed: {@trace_line}\nVerified chain up to this point:\n{@trace}"
+                    WITH status = "solver_error", arm = "solver", backend = @backend_lc, steps = @step_no
+              END
+
+              @trace := @trace + f"{@step_no}. {@trace_line}\n"
+              LOGGING f"[arm=solver][step {@step_no}/{@n_steps}] {@trace_line}" LEVEL INFO
+              @i := @i + 1
+            END
+
+            CALL write_file(f"{@log_dir}/chain_trace.md", @trace) INTO NONE;
+
+            GENERATE explain_chain(@problem, @trace, @thinking_note) INTO @result;
+            CALL trim(@result) INTO @result;
+
+            -- ── Native round-trip verification (Pattern 2, §Appendix I):
+            -- substitute @running_expression back into the problem's own
+            -- defining relation, deterministically, in-line -- no post-hoc
+            -- re-check needed. Only meaningful for the 20 T0-T5 problems
+            -- this recipe's checks cover; round_trip_check reports
+            -- NO_CHECK for anything else (e.g. an unrecognised @pid). Runs
+            -- after explain_chain (not right after the WHILE loop) so
+            -- @result is available as p015's narration-text fallback,
+            -- matching verify_roundtrip.py's post-hoc classify() ──
+            CALL round_trip_check(@pid, @running_expression, @result) INTO @roundtrip;
+            LOGGING f"[arm=solver] round-trip verification ({@pid}): {@roundtrip}" LEVEL INFO
+
+            -- ── Fail-fast checkpoint 3: the narration came back empty ──
+            EVALUATE @result
+              WHEN = "" THEN
+                LOGGING f"[arm=solver] NARRATION FAILURE — explain_chain returned empty content" LEVEL ERROR
+                RETURN f"[NARRATION FAILURE] The chain verified correctly but the explanation step returned nothing.\nVerified chain:\n{@trace}"
+                  WITH status = "narration_error", arm = "solver", backend = @backend_lc, steps = @n_steps, roundtrip = @roundtrip
+            END
+
+            RETURN @result WITH status = "complete", arm = "solver", backend = @backend_lc, steps = @n_steps, roundtrip = @roundtrip
+          END
+      END
+  END
+EXCEPTION
+  WHEN BudgetExceeded THEN
+    RETURN @result WITH status = "budget_limit"
+END;

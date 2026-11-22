@@ -68,6 +68,16 @@ def _reanchor(node: Dict) -> None:
                 _reanchor(b)
 
 
+def _configs(nodes: List[Dict]):
+    """The config of each node and of every node in a loop body inside them: a prompt, procedure or policy a body node uses must travel with the loop."""
+    for n in nodes:
+        cfg = n.get("config") or {}
+        yield cfg
+        body = cfg.get("subgraph")
+        if isinstance(body, dict):
+            yield from _configs(body.get("nodes", []))
+
+
 def _uses(nodes: List[Dict]) -> Set[str]:
     """The names (`parts.X` -> X) of the parts the nodes use, nested bodies included."""
     out: Set[str] = set()
@@ -192,8 +202,7 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
     files: List[Tuple[str, str, str]] = []
     res = data.get("resources", {}) or {}
     part_res: Dict[str, Dict[str, str]] = {}
-    for i in sel:
-        cfg = nodes[i].get("config") or {}
+    for cfg in _configs([nodes[i] for i in sel]):
         for key, kind in REF_KEYS:
             if isinstance(cfg.get(key), str):
                 rname = cfg[key].partition(".")[2]
@@ -236,7 +245,7 @@ def group(data: Dict[str, Any], ids: List[str], name: str, description: str = ""
         add(f"{name}.out_{out_names[e['source']]}", e["target"], "binds")
     parent_res = parent.setdefault("resources", {})
     parent_res.setdefault("parts", {})[name] = f"./{name}/{name}.graph.yaml"
-    still_used = {(kind, str(c.get(key)).partition(".")[2]) for n in parent_nodes for c in [n.get("config") or {}]
+    still_used = {(kind, str(c.get(key)).partition(".")[2]) for c in _configs(parent_nodes)
                   for key, kind in REF_KEYS if isinstance(c.get(key), str)}
     for kind, rname, _ in files:                             # a resource only the selection used leaves with it
         if (kind, rname) not in still_used and rname in (parent_res.get(kind) or {}):

@@ -1,0 +1,107 @@
+version: 1.0-graph
+workflow:
+  name: sympy_llm_solver_arm
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: log_dir
+    type: TEXT
+  outputs:
+  - name: explanation
+    type: TEXT
+  - name: set_set_10_explanation
+    type: TEXT
+  - name: trim_3_explanation
+    type: TEXT
+resources:
+  parts:
+    plan: ./plan/plan.graph.yaml
+    run_steps: ./run_steps/run_steps.graph.yaml
+    narrate: ./narrate/narrate.graph.yaml
+steps:
+- plan:
+    use: parts.plan
+    in:
+      problem: $in.problem
+    out:
+    - n_steps
+    - steps_text
+- gate_2:
+    evaluate: "@in_n_steps == '0'"
+    in:
+      n_steps: plan
+    out: []
+    branch: 1
+- write_file:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+      steps_text: plan.steps_text
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - f'(planning failed — raw decomposition output below)\n{@steps_text}'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', f'(planning failed — raw decomposition output below)\n{steps_text}')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- set_explanation:
+    node: CONTEXT
+    in:
+      problem: $in.problem
+      steps_text: plan.steps_text
+    out: explanation
+    action: set
+    expression: >-
+      f'[PLAN FAILURE] The planning step could not decompose "{@in_problem}"
+      into usable operations.\nRaw decomposition output: {@in_steps_text}'
+- run_steps:
+    use: parts.run_steps
+    in:
+      log_dir: $in.log_dir
+      steps_text: plan.steps_text
+      n_steps: plan
+    out: trace
+    on: gate_2.fail
+- narrate:
+    use: parts.narrate
+    in:
+      log_dir: $in.log_dir
+      problem: $in.problem
+      trace: run_steps
+    out:
+    - explanation
+    - trim_3_explanation
+- wf_exit:
+    output:
+      explanation: set_explanation
+      set_set_10_explanation: narrate
+      trim_3_explanation: narrate.trim_3_explanation
+    on:
+    - set_explanation
+    - narrate

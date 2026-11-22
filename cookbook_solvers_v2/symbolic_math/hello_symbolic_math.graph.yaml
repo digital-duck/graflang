@@ -1,0 +1,37 @@
+version: 1.0-graph
+workflow:
+  name: math_solver
+  inputs:
+  - name: problem
+    type: TEXT
+    default: find the roots of x squared minus 5x plus 6
+  - name: log_dir
+    type: TEXT
+    default: cookbook/67_symbolic_math/logs-spl
+  outputs:
+  - name: explanation
+    type: TEXT
+resources:
+  parts:
+    hello_symbolic_math_parse: ./hello_symbolic_math_parse/hello_symbolic_math_parse.graph.yaml
+    hello_symbolic_math_solve: ./hello_symbolic_math_solve/hello_symbolic_math_solve.graph.yaml
+    hello_symbolic_math_explain: ./hello_symbolic_math_explain/hello_symbolic_math_explain.graph.yaml
+steps:
+- hello_symbolic_math_parse:
+    use: parts.hello_symbolic_math_parse
+    in:
+      problem: $in.problem
+    out: parsed
+- hello_symbolic_math_solve:
+    use: parts.hello_symbolic_math_solve
+    in:
+      parsed: hello_symbolic_math_parse
+    out: sympy_result
+- hello_symbolic_math_explain:
+    use: parts.hello_symbolic_math_explain
+    in:
+      problem: $in.problem
+      sympy_result: hello_symbolic_math_solve
+    out: explanation
+- wf_exit:
+    output: hello_symbolic_math_explain

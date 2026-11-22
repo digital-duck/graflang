@@ -1,0 +1,116 @@
+version: 1.0-graph
+workflow:
+  name: lean_proof
+  inputs:
+  - name: claim
+    type: TEXT
+    default: addition of natural numbers is commutative
+  - name: max_tries
+    type: INT
+    default: 3
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    setup: ./setup/setup.graph.yaml
+    formalize: ./formalize/formalize.graph.yaml
+    judge: ./judge/judge.graph.yaml
+    cite: ./cite/cite.graph.yaml
+    prove: ./prove/prove.graph.yaml
+    report: ./report/report.graph.yaml
+steps:
+- setup:
+    use: parts.setup
+    out:
+    - stmt_ok_lc
+    - tries
+- formalize:
+    use: parts.formalize
+    in:
+      claim: $in.claim
+      max_tries: $in.max_tries
+      stmt_ok_lc: setup
+      tries: setup.tries
+    out:
+    - badge
+    - stmt_ok_lc
+    - lean_stmt
+    - lean_feedback
+    - proof
+    - check_code
+    - faithful
+    - citation
+- judge:
+    use: parts.judge
+    in:
+      claim: $in.claim
+      lean_stmt: formalize.lean_stmt
+    out:
+    - badge
+    - faithful
+    'on': []
+- cite:
+    use: parts.cite
+    in:
+      lean_stmt: formalize.lean_stmt
+    out:
+    - citation
+    - find_citation_citation
+    - proof_ok_lc
+    - lower_proof_ok_proof_ok_lc
+    - proof
+    - check_code
+    - proof_ok
+- prove:
+    use: parts.prove
+    in:
+      max_tries: $in.max_tries
+      lean_stmt: formalize.lean_stmt
+      lean_feedback: formalize.lean_feedback
+      proof: formalize.proof
+      check_code: formalize.check_code
+      proof_ok_lc: cite.proof_ok_lc
+      prove_loop_proof_ok_lc: cite.lower_proof_ok_proof_ok_lc
+      prove_loop_proof: cite.proof
+      prove_loop_check_code: cite.check_code
+      proof_ok: cite.proof_ok
+    out:
+    - badge
+    - proof
+    - prove_loop_proof
+- report:
+    use: parts.report
+    in:
+      badge: formalize
+      cacheable_badge: judge
+      cacheable_badge2: prove
+      claim: $in.claim
+      lean_stmt: formalize.lean_stmt
+      faithful: formalize.faithful
+      make_report_faithful: judge.faithful
+      proof: formalize.proof
+      make_report_proof: prove.proof
+      make_report_proof2: prove.prove_loop_proof
+      citation: formalize.citation
+      make_report_citation: cite
+      make_report_citation2: cite.find_citation_citation
+    out: report
+- statement_ok:
+    evaluate: |-
+      @in_stmt_ok_lc == 'true'
+    in:
+      stmt_ok_lc: formalize.stmt_ok_lc
+    out: []
+    'on': formalize
+    branch: 1
+- wf_exit:
+    output: report
+    'on': report
+edges:
+- source: statement_ok.pass
+  target: judge.trigger
+  type: triggers
+- source: statement_ok.fail
+  target: report.trigger
+  type: triggers

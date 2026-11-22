@@ -1,0 +1,279 @@
+version: 1.0-graph
+workflow:
+  name: staff_scheduling_llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: lang
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: llm_calls
+    type: TEXT
+  - name: stage1_s
+    type: TEXT
+  - name: narrative
+    type: TEXT
+steps:
+- time_monotonic_4:
+    node: SOLVE
+    out: t_s1
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- solve_directly_staff:
+    generate: |-
+      You are an HR operations analyst. Solve this staff scheduling problem using
+      mathematical reasoning only — no solver software.
+
+      Problem: {{in_problem}}
+
+      Your response must have two sections:
+
+      ## Solution
+      Work through the assignment step by step:
+      1. List all nurses, shifts, wages, and coverage requirements.
+      2. Calculate the minimum number of nurse-shifts needed and verify feasibility
+         (total nurse capacity ≥ total minimum coverage).
+      3. Assign nurses to shifts to minimize total wage cost: start by filling the
+         cheapest shifts first up to minimum coverage, then check if all constraints
+         are satisfied. Enumerate alternatives if the greedy choice is ambiguous.
+      4. State the optimal assignment (which nurse goes to which shift) and the
+         total minimum wage cost.
+
+      ## Verification
+      Confirm the assignment is correct:
+      - For each shift, count the assigned nurses and confirm coverage ≥ minimum (show arithmetic).
+      - For each nurse, confirm they work at most the allowed number of shifts.
+      - Compute total wage cost step by step (nurses per shift × wage, then sum).
+
+      Write in {{in_lang}}. Show all arithmetic explicitly.
+    in:
+      problem: $in.problem
+      lang: $in.lang
+    out: narrative
+    function: solve_directly_staff
+    params:
+    - problem
+    - lang
+    arguments:
+    - '@problem'
+    - '@lang'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- time_elapsed_3:
+    node: SOLVE
+    in:
+      t_s1: time_monotonic_4
+    out: stage1_s
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - '@t_s1'
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_s1)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+- extract_solution_json_staff:
+    generate: |-
+      Extract the staff scheduling solution from the narrative as structured JSON.
+
+      Problem:
+      {{in_problem}}
+
+      Solution narrative:
+      {{in_narrative}}
+
+      Return ONLY a valid JSON object — no prose, no fences:
+      {{
+        "objective": <total wage cost as a number>,
+        "assignment": {{"<NurseN>": "<ShiftName>", ...}},
+        "coverage_min": {{"<ShiftName>": <minimum nurses required>, ...}},
+        "wage": {{"<ShiftName>": <cost per nurse>, ...}}
+      }}
+
+      Instructions:
+      - List every nurse's assigned shift (or omit if unassigned).
+      - Extract coverage minimums and wage rates from the problem statement.
+      - Use the total wage cost the narrative claims as "objective".
+    in:
+      problem: $in.problem
+      narrative: solve_directly_staff
+    out: claimed_json
+    function: extract_solution_json_staff
+    params:
+    - problem
+    - narrative
+    arguments:
+    - '@problem'
+    - '@narrative'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- verify_off_staff:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      claimed_json: extract_solution_json_staff
+    out: verify_result
+    tool: verify_off_staff
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@claimed_json'
+    code: |
+      def verify_off_staff(problem: str, claimed_json: str) -> str:
+          import json, re
+          raw = claimed_json.strip()
+          raw = re.sub(r'^```(?:json)?\s*\n?', '', raw, flags=re.IGNORECASE)
+          raw = re.sub(r'\n?```\s*$', '', raw)
+          try:
+              claimed = json.loads(raw)
+          except Exception as e:
+              return json.dumps({"verdict": "UNPARSEABLE", "notes": f"JSON error: {e}",
+                                 "raw_prefix": claimed_json[:120]})
+
+          obj_claimed  = claimed.get("objective")
+          assignment   = claimed.get("assignment", {})
+          coverage_min = claimed.get("coverage_min", {})
+          wage         = claimed.get("wage", {})
+
+          violations = []
+
+          # Normalize: nurse→shift or shift→[nurses]
+          shift_nurses: dict = {}
+          for k, v in assignment.items():
+              if isinstance(v, str):
+                  shift_nurses.setdefault(v, []).append(k)
+              elif isinstance(v, list):
+                  shift_nurses[k] = v
+
+          # Coverage
+          for shift, min_n in coverage_min.items():
+              count = len(shift_nurses.get(shift, []))
+              if count < int(min_n):
+                  violations.append(f"{shift}: {count} nurses < required {min_n}")
+
+          # Each nurse at most 1 shift
+          nurse_counts: dict = {}
+          for shift, nurses in shift_nurses.items():
+              for n in nurses:
+                  nurse_counts[n] = nurse_counts.get(n, 0) + 1
+          for nurse, cnt in nurse_counts.items():
+              if cnt > 1:
+                  violations.append(f"{nurse} assigned to {cnt} shifts (max 1)")
+
+          # Recompute cost
+          if wage and shift_nurses:
+              try:
+                  recomputed = sum(float(wage.get(s, 0)) * len(ns)
+                                  for s, ns in shift_nurses.items())
+                  if obj_claimed is not None and abs(recomputed - float(obj_claimed)) > 0.5:
+                      violations.append(f"cost mismatch: claimed {obj_claimed} vs computed {recomputed:.2f}")
+              except Exception as e:
+                  violations.append(f"cost recompute error: {e}")
+
+          if violations:
+              return json.dumps({"verdict": "FAIL", "claimed_obj": obj_claimed,
+                                 "notes": "; ".join(violations)})
+          if not assignment:
+              return json.dumps({"verdict": "UNPARSEABLE", "claimed_obj": obj_claimed,
+                                 "notes": "no assignment in JSON"})
+          return json.dumps({"verdict": "PASS", "claimed_obj": obj_claimed,
+                             "notes": "coverage and workload constraints verified"})
+      _spl_result = verify_off_staff(problem, claimed_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - claimed_json
+    tool_returns: TEXT
+- json_get_field:
+    node: SOLVE
+    in:
+      verify_result: verify_off_staff
+    out: verify_status
+    tool: json_get_field
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      def json_get_field(result_json: str, field: str) -> str:
+          import json
+          try:
+              v = json.loads(result_json).get(field)
+              return str(v) if v is not None else ""
+          except Exception:
+              return ""
+      _spl_result = json_get_field(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - field
+    tool_returns: TEXT
+- json_get_field_2:
+    node: SOLVE
+    in:
+      verify_result: verify_off_staff
+    out: obj_str
+    tool: json_get_field
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'claimed_obj'"
+    code: |
+      def json_get_field(result_json: str, field: str) -> str:
+          import json
+          try:
+              v = json.loads(result_json).get(field)
+              return str(v) if v is not None else ""
+          except Exception:
+              return ""
+      _spl_result = json_get_field(verify_result, 'claimed_obj')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - field
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      llm_calls: set_llm_calls_3
+      stage1_s: time_elapsed_3
+      narrative: solve_directly_staff

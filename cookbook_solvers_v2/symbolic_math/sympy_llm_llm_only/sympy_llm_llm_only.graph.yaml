@@ -1,0 +1,113 @@
+version: 1.0-graph
+workflow:
+  name: sympy_llm_llm_only
+  inputs:
+  - name: log_dir
+    type: TEXT
+  - name: problem
+    type: TEXT
+  outputs:
+  - name: explanation
+    type: TEXT
+  - name: trim_2_explanation
+    type: TEXT
+steps:
+- write_file_2:
+    node: SOLVE
+    in:
+      log_dir: $in.log_dir
+    out: write_file
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@log_dir}/chain_trace.md'
+    - "'(solver disabled for this run — no verified chain; the LLM solved it unaided)\\n'"
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{log_dir}/chain_trace.md', '(solver disabled for this run — no verified chain; the LLM solved it unaided)\n')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+- solve_directly:
+    generate: |-
+      A student asked: "{{in_problem}}"
+
+      There is NO symbolic math engine backing you up this time — every
+      computation must be done correctly by you, from scratch.
+
+      Write a clear, friendly walkthrough in less than {number_of_sentences} sentences that:
+      1. Restates what the problem is asking in plain English
+      2. Shows your own working, step by step, in order — state the exact
+         result of each step as you derive it (do not skip steps)
+      3. Gives the final answer plainly at the end
+
+      Show your work. Do not state any result you have not derived above.
+    in:
+      problem: $in.problem
+    out: explanation
+    function: solve_directly
+    params:
+    - problem
+    - number_of_sentences
+    arguments:
+    - '@problem'
+- trim_2:
+    node: SOLVE
+    in:
+      explanation: solve_directly
+    out: explanation
+    tool: trim
+    backend: kernel
+    arguments:
+    - '@explanation'
+    code: |
+      def trim(value: str) -> str:
+          """TRIM(value) — remove leading and trailing whitespace."""
+          return str(value).strip()
+      _spl_result = trim(explanation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- gate_3:
+    evaluate: "@in_explanation == ''"
+    in:
+      explanation: trim_2
+    out: []
+    branch: 1
+- set_explanation_2:
+    node: CONTEXT
+    out: explanation
+    action: set
+    expression: |-
+      '[FAILURE] The unaided LLM returned nothing for this problem.'
+- wf_exit:
+    output:
+      explanation: set_explanation_2
+      trim_2_explanation: trim_2
+    on:
+    - gate_3.fail
+    - set_explanation_2

@@ -1,0 +1,378 @@
+version: 1.0-graph
+workflow:
+  name: run_steps
+  inputs:
+  - name: log_dir
+    type: TEXT
+  - name: steps_text
+    type: TEXT
+  - name: n_steps
+    type: TEXT
+  outputs:
+  - name: trace
+    type: TEXT
+resources:
+  procedures:
+    solve_chain_step_v2: ./procedures/sympy_llm_v2.spl
+steps:
+- set_i:
+    node: CONTEXT
+    out: i
+    action: set
+    expression: '0'
+- set_running_expression:
+    node: CONTEXT
+    out: running_expression
+    action: set
+    expression: "''"
+- set_trace:
+    node: CONTEXT
+    out: trace
+    action: set
+    expression: "''"
+nodes:
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < int(@in_n_steps)
+    state:
+      step:
+        from: tool_10.out_step
+      step_summary:
+        from: call_1.out_step_summary
+      running_expression:
+        from: tool_11.out_running_expression
+      trace_line:
+        from: tool_12.out_trace_line
+      step_no:
+        from: set_9.out_step_no
+      write_file:
+        from: tool_13.out_write_file
+      trace:
+        from: set_10.out_trace
+      i:
+        from: set_11.out_i
+    subgraph:
+      nodes:
+      - id: tool_10
+        type: SOLVE
+        config:
+          tool: extract_step
+          backend: kernel
+          arguments:
+          - '@steps_text'
+          - '@i'
+          code: |
+            def extract_step(steps_text: str, index: str) -> str:
+                """Deterministic, 0-token: returns the i-th non-blank line of
+                the decomposed step list (mirrors extract_chunk in recipe 13)."""
+                lines = [line.strip() for line in steps_text.splitlines() if line.strip()]
+                i = int(index)
+                return lines[i] if 0 <= i < len(lines) else ""
+            _spl_result = extract_step(steps_text, i)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - steps_text
+          - index
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_steps_text
+        - in_i
+        - out_step
+      - id: call_1
+        type: GENERATE
+        config:
+          procedure_ref: procedures.solve_chain_step_v2
+          arguments:
+          - '@step'
+          - '@running_expression'
+        ports:
+        - trigger
+        - complete
+        - in_step
+        - in_running_expression
+        - out_step_summary
+      - id: tool_11
+        type: SOLVE
+        config:
+          tool: split_part
+          backend: kernel
+          arguments:
+          - '@step_summary'
+          - "'|'"
+          - "'1'"
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+
+            def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                The part comes back whitespace-trimmed by default: delimited protocol
+                lines ('a | b') are padded for readability and virtually every caller
+                wants the bare field (list_get behaves the same way). Pass trim='false'
+                to keep the raw part, padding included.
+                """
+                parts = str(value).split(str(delimiter))
+                idx = int(part) - 1
+                if not 0 <= idx < len(parts):
+                    return ''
+                raw = parts[idx]
+                if str(trim).strip().lower() in {'false', '0', 'no'}:
+                    return raw
+                return raw.strip()
+            _spl_result = split_part(step_summary, '|', '1')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - delimiter
+          - part
+          - trim
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_step_summary
+        - out_running_expression
+      - id: tool_12
+        type: SOLVE
+        config:
+          tool: split_part
+          backend: kernel
+          arguments:
+          - '@step_summary'
+          - "'|'"
+          - "'2'"
+          code: |
+            def trim(value: str) -> str:
+                """TRIM(value) — remove leading and trailing whitespace."""
+                return str(value).strip()
+
+            def split_part(value: str, delimiter: str, part: str, trim: str='true') -> str:
+                """SPLIT_PART(value, delimiter, part [, trim]) — 1-based part after splitting on delimiter.
+
+                The part comes back whitespace-trimmed by default: delimited protocol
+                lines ('a | b') are padded for readability and virtually every caller
+                wants the bare field (list_get behaves the same way). Pass trim='false'
+                to keep the raw part, padding included.
+                """
+                parts = str(value).split(str(delimiter))
+                idx = int(part) - 1
+                if not 0 <= idx < len(parts):
+                    return ''
+                raw = parts[idx]
+                if str(trim).strip().lower() in {'false', '0', 'no'}:
+                    return raw
+                return raw.strip()
+            _spl_result = split_part(step_summary, '|', '2')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          - delimiter
+          - part
+          - trim
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_step_summary
+        - out_trace_line
+      - id: set_9
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_step_no
+      - id: eval_6
+        type: EVALUATE
+        config:
+          condition: |-
+            @in_running_expression == 'sympy_error'
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_running_expression
+      - id: tool_13
+        type: SOLVE
+        config:
+          tool: write_file
+          backend: kernel
+          arguments:
+          - f'{@log_dir}/chain_trace.md'
+          - f'{@trace}{@step_no}. SOLVER ERROR — {@trace_line}\n'
+          code: |
+            import pathlib
+
+            def write_file(file_path: str, content: str, mode: str='w') -> str:
+                """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+                mode: 'w' (overwrite, default) or 'a' (append).
+                Creates parent directories automatically.
+                Returns the absolute path written.
+                """
+                p = pathlib.Path(str(file_path).strip())
+                p.parent.mkdir(parents=True, exist_ok=True)
+                m = str(mode).strip().lower()
+                if m not in ('w', 'a'):
+                    m = 'w'
+                with p.open(m, encoding='utf-8') as fh:
+                    fh.write(str(content))
+                return str(p.resolve())
+            _spl_result = write_file(f'{log_dir}/chain_trace.md', f'{trace}{step_no}. SOLVER ERROR — {trace_line}\n')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - file_path
+          - content
+          - mode
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_log_dir
+        - in_trace
+        - in_step_no
+        - in_trace_line
+        - out_write_file
+      - id: set_10
+        type: CONTEXT
+        config:
+          action: set
+          expression: |-
+            @in_trace + f'{@in_step_no}. {@in_trace_line}\n'
+        ports:
+        - trigger
+        - complete
+        - in_trace
+        - in_step_no
+        - in_trace_line
+        - out_trace
+      - id: set_11
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_10.complete
+        target: call_1.trigger
+        type: triggers
+      - source: tool_10.out_step
+        target: call_1.in_step
+        type: binds
+      - source: call_1.complete
+        target: tool_11.trigger
+        type: triggers
+      - source: call_1.out_step_summary
+        target: tool_11.in_step_summary
+        type: binds
+      - source: tool_11.complete
+        target: tool_12.trigger
+        type: triggers
+      - source: call_1.out_step_summary
+        target: tool_12.in_step_summary
+        type: binds
+      - source: tool_12.complete
+        target: set_9.trigger
+        type: triggers
+      - source: set_9.complete
+        target: eval_6.trigger
+        type: triggers
+      - source: tool_11.out_running_expression
+        target: eval_6.in_running_expression
+        type: binds
+      - source: eval_6.pass
+        target: tool_13.trigger
+        type: triggers
+      - source: set_9.out_step_no
+        target: tool_13.in_step_no
+        type: binds
+      - source: tool_12.out_trace_line
+        target: tool_13.in_trace_line
+        type: binds
+      - source: tool_13.complete
+        target: set_10.trigger
+        type: triggers
+      - source: eval_6.fail
+        target: set_10.trigger
+        type: triggers
+      - source: set_9.out_step_no
+        target: set_10.in_step_no
+        type: binds
+      - source: tool_12.out_trace_line
+        target: set_10.in_trace_line
+        type: binds
+      - source: set_10.complete
+        target: set_11.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_steps_text
+  - in_i
+  - in_running_expression
+  - in_log_dir
+  - in_trace
+  - in_n_steps
+  - out_step
+  - out_step_summary
+  - out_running_expression
+  - out_trace_line
+  - out_step_no
+  - out_write_file
+  - out_trace
+  - out_i
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_trace
+edges:
+- source: set_trace.complete
+  target: loop_1.trigger
+  type: triggers
+- source: set_i.out_i
+  target: loop_1.in_i
+  type: binds
+- source: set_running_expression.out_running_expression
+  target: loop_1.in_running_expression
+  type: binds
+- source: set_trace.out_trace
+  target: loop_1.in_trace
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers
+- source: wf_entry.out_log_dir
+  target: loop_1.in_log_dir
+  type: binds
+- source: wf_entry.out_steps_text
+  target: loop_1.in_steps_text
+  type: binds
+- source: wf_entry.out_n_steps
+  target: loop_1.in_n_steps
+  type: binds
+- source: loop_1.out_trace
+  target: wf_exit.in_trace
+  type: binds

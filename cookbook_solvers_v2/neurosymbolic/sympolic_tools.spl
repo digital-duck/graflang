@@ -1,0 +1,731 @@
+-- ============================================================
+-- sympolic_tools.spl — shared TOOL_API + FUNCTION definitions
+-- for Recipe-77 neurosymbolic scripts.
+--
+-- Cloned from cookbook/67_symbolic_math/sympy_tools.spl and widened
+-- to the full verifier ladder: the SAME declarative chain protocol
+-- ('<expression>|<operation>' steps, '<bare_result>|<readable_line>'
+-- results) now dispatches to THREE deterministic backends:
+--
+--   SymPy        — exact symbolic instances        (rung 2)
+--   SageMath     — instances SymPy can't reach:     (rung 2+)
+--                  Galois groups (PARI), rational
+--                  points on conics, elliptic-curve
+--                  rank, exact algebraic eigenvalues
+--   Lean 4 +     — universally quantified STATEMENTS (top rung)
+--   mathlib        formalize → typecheck → faithfulness
+--                  judge → kernel-checked citation/proof
+--
+-- Imported by symbolic_math.spl via:
+--   IMPORT 'sympolic_tools'
+--
+-- Contains:
+--   TOOL_API  solve_step_with_sympy  — exact SymPy kernel (one step)
+--   TOOL_API  solve_step_with_sage   — exact Sage kernel  (one step)
+--   TOOL_API  step_count             — count non-blank lines in plan
+--   TOOL_API  extract_step           — get i-th line from plan
+--   TOOL_API  strip_fences           — clean LLM output (Lean path)
+--   TOOL_API  make_theorem           — splice verified stmt + tactics
+--   TOOL_API  lean_report            — render the proof-grade report
+--   FUNCTION  decompose_problem      — LLM → structured DSL plan
+--   FUNCTION  explain_chain          — LLM narration of verified chain
+--   FUNCTION  solve_directly         — LLM-only baseline (no kernel)
+--   FUNCTION  formalize_claim        — LLM → mathlib proposition
+--   FUNCTION  fix_formalization      — repair loop (statement)
+--   FUNCTION  judge_faithfulness     — prose ↔ formal gate (§B.4)
+--   FUNCTION  write_tactics          — LLM → tactic script (mathlib)
+--   FUNCTION  repair_tactics         — repair loop (proof)
+-- ============================================================
+
+-- ── Deterministic regime 1: SymPy + step bookkeeping ──────────
+
+CREATE TOOL_API solve_step_with_sympy(expression TEXT, operation TEXT)
+RETURNS TEXT AS PYTHON $$
+def solve_step_with_sympy(expression: str, operation: str) -> str:
+    """Exact symbolic computation for ONE step in a chain.
+
+    Returns '<bare_result>|<human_readable_line>' so the caller can
+    both (a) feed <bare_result> into the next step verbatim and
+    (b) keep a readable trace — never asking the LLM to parse
+    SymPy's own output back into an expression. On failure, returns
+    'solver_error|<expression>: <exception>' — a sentinel the caller
+    checks for explicitly (see the fail-fast WHILE loop in the
+    importing workflow)."""
+    import re as _re
+    from sympy import (symbols, sympify, solve, diff, integrate, simplify, expand, factor,
+                       series, apart, limit, laplace_transform, inverse_laplace_transform,
+                       trigsimp, summation, oo, Symbol, Function, dsolve, Eq)
+
+    try:
+        x, y, z, n, t, s = symbols('x y z n t s')
+        op = operation.strip().lower()
+        if not op:
+            return f"{expression.strip()}|{expression.strip()} (pass-through)"
+        src = expression.strip()
+        _UNICODE_MAP = {'√': 'sqrt', '∛': 'cbrt', '∞': 'oo', 'π': 'pi',
+                        '²': '**2', '³': '**3', '⁴': '**4', '×': '*', '÷': '/'}
+        for sym, rep in _UNICODE_MAP.items():
+            src = src.replace(sym, rep)
+
+        # Auto-detect ODE expressions (y(x).diff(...) notation) regardless of op
+        import re as _re
+        if _re.search(r'\w+\(x\)\.diff\s*\(', src):
+            op = 'ode_solve'
+        # Normalise "lhs = rhs" → "(lhs) - (rhs)" so sympify can parse equations
+        if '=' in src and '==' not in src and not _re.search(r'[<>!]=', src):
+            _lhs, _, _rhs = src.partition('=')
+            src = f"({_lhs.strip()}) - ({_rhs.strip()})"
+
+        if op not in ('ode_solve', 'dsolve', 'ode'):
+            expr = sympify(src)
+
+        if op in ('solve', 'roots', 'zeros'):
+            result = solve(expr, x)
+            # Unpack single-element lists so chained steps receive a bare expression
+            if isinstance(result, list) and len(result) == 1:
+                result = result[0]
+            return f"{result}|solve({expression} = 0) -> x = {result}"
+        elif op in ('diff', 'differentiate', 'derivative', 'gradient'):
+            result = diff(expr, x)
+            return f"{result}|d/dx({expression}) = {result}"
+        elif op in ('integrate', 'integral', 'antiderivative'):
+            result = integrate(expr, x)
+            return f"{result}|integral of {expression} dx = {result} + C"
+        elif op == 'simplify':
+            if isinstance(expr, (list, tuple)):
+                result = [simplify(e) for e in expr]
+            else:
+                result = simplify(expr)
+            return f"{result}|simplify({expression}) = {result}"
+        elif op == 'expand':
+            result = expand(expr)
+            return f"{result}|expand({expression}) = {result}"
+        elif op == 'factor':
+            result = factor(expr)
+            return f"{result}|factor({expression}) = {result}"
+        elif op in ('series', 'taylor', 'maclaurin'):
+            result = series(expr, x, 0, 6).removeO()
+            return f"{result}|series({expression}, x=0, deg≤5) = {result}"
+        elif op in ('apart', 'partial_fractions', 'partial_fraction'):
+            result = apart(expr, x)
+            return f"{result}|apart({expression}) = {result}"
+        elif op.startswith('limit'):
+            m = _re.match(r'limit\((\w+),\s*(.+)\)', op)
+            if m:
+                var = Symbol(m.group(1))
+                point = sympify(m.group(2))
+            else:
+                var, point = x, sympify('0')
+            result = limit(expr, var, point)
+            return f"{result}|limit({expression}, {var}->{point}) = {result}"
+        elif op in ('laplace', 'laplace_transform'):
+            result = laplace_transform(expr, t, s)[0]
+            return f"{result}|laplace_transform({expression}) = {result}"
+        elif op in ('inverse_laplace', 'inverse_laplace_transform'):
+            result = inverse_laplace_transform(expr, s, t)
+            return f"{result}|inverse_laplace_transform({expression}) = {result}"
+        elif op in ('trigsimp', 'trig_simplify'):
+            result = trigsimp(expr)
+            return f"{result}|trigsimp({expression}) = {result}"
+        elif op.startswith('summation') or op.startswith('sum('):
+            m = _re.match(r'(?:summation|sum)\((\w+),\s*(.+),\s*(.+)\)', op)
+            if m:
+                var = Symbol(m.group(1))
+                start = sympify(m.group(2))
+                end = sympify(m.group(3))
+            else:
+                var, start, end = n, sympify('1'), oo
+            result = summation(expr, (var, start, end))
+            return f"{result}|sum({expression}, {var}={start}..{end}) = {result}"
+        elif op in ('eigenvalues', 'eig'):
+            from sympy import Matrix
+            m = sympify(expression.strip())
+            result = Matrix(m).eigenvals()
+            return f"{result}|eigenvalues({expression}) = {result}"
+        elif op in ('solve_system', 'system'):
+            # expression: Python list "[x+y-5, x-y-1]" OR equations "x+y=5, x-y=1"
+            from sympy import solve as sym_solve
+            import re as _re2
+            # Normalise "lhs = rhs" → "lhs - (rhs)" so sympify can parse it
+            def _eq_to_expr(s):
+                if '=' in s and '==' not in s:
+                    lhs, rhs = s.split('=', 1)
+                    return f"({lhs.strip()}) - ({rhs.strip()})"
+                return s
+            norm = src
+            if not norm.strip().startswith('['):
+                parts = [_eq_to_expr(p) for p in norm.split(',')]
+                norm = '[' + ', '.join(parts) + ']'
+            else:
+                norm = _re2.sub(r'([^=!<>])=([^=])', lambda m: m.group(1) + '-(' + m.group(2), norm)
+            eqs = sympify(norm)
+            result = sym_solve(eqs, [x, y, z])
+            return f"{result}|solve_system({expression}) = {result}"
+        elif op in ('ode_solve', 'dsolve', 'ode'):
+            # If the expression contains no derivative notation it's already a
+            # solved result (e.g. a spurious PREV|ode_solve after a real solve step).
+            if not _re.search(r'\w+\(x\)\.diff\s*\(', src):
+                return f"{src}|{src} (already solved — pass-through)"
+            # expression uses y(x).diff(x, n) Python/SymPy method syntax
+            from sympy import Function, dsolve, Eq, Derivative
+            yf = Function('y')
+            local_ns = {'x': x, 'y': yf, 'Derivative': Derivative}
+            ode_expr = eval(src, {"__builtins__": {}}, local_ns)
+            result = dsolve(Eq(ode_expr, 0), yf(x))
+            # Return RHS as bare result so it chains cleanly into subsequent steps
+            bare = result.rhs if hasattr(result, 'rhs') else result
+            return f"{bare}|dsolve({expression} = 0) -> {result}"
+        else:
+            return f"solver_error|unknown operation '{op}' — not in SymPy kernel"
+    except Exception as e:
+        return f"solver_error|{expression}: {e}"
+$$;
+
+-- ── Deterministic regime 2: SageMath — same protocol, wider reach ──
+-- Sage runs in-process via the passagemath wheels (pip install
+-- 'spl-llm[sage]'): same interpreter, same env — the A-1 spike's
+-- "gap closed by construction" property. Every shared operation is
+-- exact; the four ops at the bottom (galois / conic / rank / exact
+-- factorization over ℚ) are ones SymPy cannot do or does weakly —
+-- they reach PARI through Sage's umbrella.
+
+CREATE TOOL_API solve_step_with_sage(expression TEXT, operation TEXT)
+RETURNS TEXT AS PYTHON $$
+def solve_step_with_sage(expression: str, operation: str) -> str:
+    """Exact Sage computation for ONE step in a chain — drop-in swap
+    for solve_step_with_sympy ('<bare_result>|<readable_line>' protocol,
+    'solver_error|...' sentinel). sage_eval parses both ** and ^, so
+    PREV-chained Sage output (which prints ^) feeds back in cleanly."""
+    import re as _re
+    from sage.all import (sage_eval, var, SR, QQ, oo, matrix,
+                          EllipticCurve, Conic, solve, diff, integrate,
+                          expand, factor, limit, laplace, inverse_laplace)
+
+    try:
+        x, y, z, n, t, s = var('x y z n t s')
+        L = dict(x=x, y=y, z=z, n=n, t=t, s=s)
+        op = operation.strip().lower()
+        src = expression.strip()
+        if not op:
+            return f"{src}|{src} (pass-through)"
+
+        # Normalize Unicode math symbols to Python/Sage-compatible names
+        _UNICODE_MAP = {'√': 'sqrt', '∛': 'cbrt', '∞': 'oo', 'π': 'pi',
+                        '²': '**2', '³': '**3', '⁴': '**4', '×': '*', '÷': '/'}
+        for sym, rep in _UNICODE_MAP.items():
+            src = src.replace(sym, rep)
+
+        # Auto-detect ODE expressions (y(x).diff(...) notation) regardless of op
+        if _re.search(r'\w+\(x\)\.diff\s*\(', src):
+            op = 'ode_solve'
+        # Normalise "lhs = rhs" → "(lhs) - (rhs)" before sage_eval
+        if '=' in src and '==' not in src and not _re.search(r'[<>!]=', src):
+            _lhs, _, _rhs = src.partition('=')
+            src = f"({_lhs.strip()}) - ({_rhs.strip()})"
+
+        # ── Sage-only operations (PARI under the umbrella) ──
+        if op in ('galois', 'galois_group'):
+            R = QQ['x']
+            poly = sage_eval(src, locals={'x': R.gen()})
+            result = poly.galois_group()
+            return f"{result}|galois_group({expression} over QQ) = {result}"
+        elif op == 'conic':
+            # src is the homogeneous quadratic moved to '= 0' form
+            R = QQ['x, y, z']
+            gx, gy, gz = R.gens()
+            poly = sage_eval(src, locals={'x': gx, 'y': gy, 'z': gz})
+            result = Conic(poly).has_rational_point(point=True)
+            return f"{result}|rational point on {expression} = 0: {result}"
+        elif op == 'rank':
+            # src is the Weierstrass coefficient list [a1, a2, a3, a4, a6]
+            curve = EllipticCurve(sage_eval(src))
+            result = curve.rank()
+            return f"{result}|rank of EllipticCurve({expression}) = {result}"
+        elif op in ('factor_qq', 'factor_rational'):
+            R = QQ['x']
+            poly = sage_eval(src, locals={'x': R.gen()})
+            result = poly.factor()
+            return f"{result}|factor({expression} over QQ) = {result}"
+
+        if op not in ('ode_solve', 'dsolve', 'ode'):
+            expr = sage_eval(src, locals=L)
+
+        # ── Shared operations (parity with the SymPy kernel) ──
+        if op in ('solve', 'roots', 'zeros'):
+            result = [r.rhs() for r in solve(expr == 0, x)]
+            # Unpack single-element lists so chained steps receive a bare expression
+            if isinstance(result, list) and len(result) == 1:
+                result = result[0]
+            return f"{result}|solve({expression} = 0) -> x = {result}"
+        elif op in ('diff', 'differentiate', 'derivative', 'gradient'):
+            result = diff(expr, x)
+            return f"{result}|d/dx({expression}) = {result}"
+        elif op in ('integrate', 'integral', 'antiderivative'):
+            result = integrate(expr, x)
+            return f"{result}|integral of {expression} dx = {result} + C"
+        elif op == 'simplify':
+            if isinstance(expr, list):
+                result = [e.simplify_full() if hasattr(e, 'simplify_full') else e for e in expr]
+            elif hasattr(expr, 'simplify_full'):
+                result = expr.simplify_full()
+            else:
+                result = expr
+            return f"{result}|simplify({expression}) = {result}"
+        elif op == 'expand':
+            result = expand(expr)
+            return f"{result}|expand({expression}) = {result}"
+        elif op == 'factor':
+            result = factor(expr)
+            return f"{result}|factor({expression}) = {result}"
+        elif op in ('series', 'taylor', 'maclaurin'):
+            if hasattr(expr, 'taylor'):
+                result = expr.taylor(x, 0, 5)
+            else:
+                result = expr
+            return f"{result}|series({expression}, x=0, deg≤5) = {result}"
+        elif op in ('apart', 'partial_fractions', 'partial_fraction'):
+            result = expr.partial_fraction(x)
+            return f"{result}|apart({expression}) = {result}"
+        elif op.startswith('limit'):
+            m = _re.match(r'limit\((\w+),\s*(.+)\)', op)
+            if m:
+                vname, point = m.group(1), sage_eval(m.group(2))
+            else:
+                vname, point = 'x', 0
+            result = limit(expr, **{vname: point})
+            return f"{result}|limit({expression}, {vname}->{point}) = {result}"
+        elif op in ('laplace', 'laplace_transform'):
+            result = laplace(expr, t, s)
+            return f"{result}|laplace_transform({expression}) = {result}"
+        elif op in ('inverse_laplace', 'inverse_laplace_transform'):
+            result = inverse_laplace(expr, s, t)
+            return f"{result}|inverse_laplace_transform({expression}) = {result}"
+        elif op in ('trigsimp', 'trig_simplify'):
+            if hasattr(expr, 'simplify_trig'):
+                result = expr.simplify_trig()
+            else:
+                result = expr
+            return f"{result}|trigsimp({expression}) = {result}"
+        elif op.startswith('summation') or op.startswith('sum('):
+            m = _re.match(r'(?:summation|sum)\((\w+),\s*(.+),\s*(.+)\)', op)
+            if m:
+                vv = var(m.group(1))
+                start, end = sage_eval(m.group(2)), sage_eval(m.group(3))
+            else:
+                vv, start, end = n, 1, oo
+            result = expr.sum(vv, start, end)
+            return f"{result}|sum({expression}, {vv}={start}..{end}) = {result}"
+        elif op in ('eigenvalues', 'eig'):
+            # SR keeps eigenvalues in exact radical form: 5/2 ± sqrt(33)/2,
+            # not floats — the exactness contract of the verifier ladder.
+            result = matrix(SR, sage_eval(src)).eigenvalues()
+            return f"{result}|eigenvalues({expression}) = {result}"
+        elif op in ('solve_system', 'system'):
+            # expression: Python list "[x+y-5, x-y-1]" OR equations "x+y=5, x-y=1"
+            def _eq_to_expr_sage(s):
+                if '=' in s and '==' not in s:
+                    lhs, rhs = s.split('=', 1)
+                    return f"({lhs.strip()}) - ({rhs.strip()})"
+                return s
+            norm = src
+            if not norm.strip().startswith('['):
+                parts = [_eq_to_expr_sage(p) for p in norm.split(',')]
+                norm = '[' + ', '.join(parts) + ']'
+            raw = sage_eval(norm, locals=L)
+            names = sorted({str(v) for e in raw for v in e.variables()})
+            unknowns = [L[name] for name in names if name in L]
+            if len(raw) == 1 and len(unknowns) > 1:
+                # Single equation, multiple unknowns: solve for first unknown as scalar
+                # so PREV can chain into the next step without a free-variable list.
+                sols = [r.rhs() for r in solve(raw[0] == 0, unknowns[0])]
+                result = sols[0] if len(sols) == 1 else sols
+            else:
+                result = solve([e == 0 for e in raw], unknowns)
+            return f"{result}|solve_system({expression}) = {result}"
+        elif op in ('ode_solve', 'dsolve', 'ode'):
+            # If the expression contains no derivative notation it's already a
+            # solved result (e.g. a spurious PREV|ode_solve after a real solve step).
+            if not _re.search(r'\w+\(x\)\.diff\s*\(', src):
+                return f"{src}|{src} (already solved — pass-through)"
+            # Use SymPy for ODE solving — y(x).diff(x, n) is SymPy/Python method
+            # syntax; Sage's newer versions reject unnamed function-call substitution.
+            from sympy import (symbols as sy_sym, Function as sy_func,
+                               dsolve as sy_dsolve, Eq as sy_Eq)
+            sx = sy_sym('x')
+            syf = sy_func('y')
+            local_ns = {'x': sx, 'y': syf}
+            ode_expr = eval(src, {"__builtins__": {}}, local_ns)
+            result = sy_dsolve(sy_Eq(ode_expr, 0), syf(sx))
+            bare = result.rhs if hasattr(result, 'rhs') else result
+            return f"{bare}|dsolve({expression} = 0) -> {result}"
+        else:
+            return f"solver_error|unknown operation '{op}' — not in Sage kernel"
+    except Exception as e:
+        return f"solver_error|{expression}: {e}"
+$$;
+
+-- ── Step bookkeeping (deterministic, 0-token) ─────────────────
+
+CREATE TOOL_API substitute_prev(raw_expression TEXT, running_expression TEXT)
+RETURNS TEXT AS PYTHON $$
+def substitute_prev(raw_expression: str, running_expression: str) -> str:
+    """Replace the token PREV (case-insensitive, whole-word) with running_expression.
+    Handles compound expressions like 'PREV - y - 1' → '(<running>) - y - 1'."""
+    import re
+    result = re.sub(r'\bPREV\b', f'({running_expression})', raw_expression, flags=re.IGNORECASE)
+    return result
+$$;
+
+CREATE TOOL_API step_count(steps_text TEXT)
+RETURNS TEXT AS PYTHON $$
+def step_count(steps_text: str) -> str:
+    """Deterministic, 0-token: counts non-blank lines in the
+    decomposed step list (mirrors chunk_plan in recipe 13)."""
+    return str(len([line for line in steps_text.splitlines() if line.strip()]))
+$$;
+
+CREATE TOOL_API extract_step(steps_text TEXT, index TEXT)
+RETURNS TEXT AS PYTHON $$
+def extract_step(steps_text: str, index: str) -> str:
+    """Deterministic, 0-token: returns the i-th non-blank line of
+    the decomposed step list (mirrors extract_chunk in recipe 13)."""
+    lines = [line.strip() for line in steps_text.splitlines() if line.strip()]
+    i = int(index)
+    return lines[i] if 0 <= i < len(lines) else ""
+$$;
+
+CREATE TOOL_API round_trip_check(pid TEXT, running_expression TEXT, output_text TEXT)
+RETURNS TEXT AS PYTHON $$
+def round_trip_check(pid: str, running_expression: str, output_text: str) -> str:
+    """Live round-trip / back-substitution verification of the solver arm's
+    final result, called once the chain of solve_chain_step calls has
+    produced @running_expression (and, since p015's check needs it as a
+    fallback -- see below -- after explain_chain has produced @result).
+    Substitutes the result back into the original problem's defining
+    relation (the same 20 per-pid checks used by the post-hoc
+    verify_roundtrip.py script, imported from roundtrip_checks.py so the
+    two paths can never silently diverge) rather than comparing against a
+    precomputed answer form -- this sidesteps ambiguities like free
+    constants in indefinite integrals/ODE solutions or root/eigenvalue
+    ordering.
+
+    output_text is the workflow's natural-language narration (@result):
+    unused by every check except p015, whose solve_system(...) result can
+    render as a multi-line SymPy repr that split_part(@step_summary, "|", ...)
+    and LOGGING can garble -- output_text gives check_p015 the same
+    narration-text fallback verify_roundtrip.py's post-hoc classify() uses.
+
+    Returns one of: ROUNDTRIP_PASS, ROUNDTRIP_FAIL, UNPARSEABLE, NO_CHECK
+    (pid not in the registered 20 T0-T5 problems, e.g. the Lean/T6 arms
+    this check does not apply to) -- the same verdict vocabulary
+    verify_roundtrip.py's classify() uses, so a live verdict and a
+    post-hoc re-check of the same row are directly comparable."""
+    import sys, os
+    for _cand in (os.path.join(os.getcwd(), "cookbook", "77_neurosymbolic"), os.getcwd()):
+        if _cand not in sys.path:
+            sys.path.insert(0, _cand)
+    from roundtrip_checks import classify_from_value
+    verdict, _detail = classify_from_value(pid, running_expression, output_text)
+    return verdict
+$$;
+
+-- ── Lean helpers (deterministic, 0-token) ─────────────────────
+
+CREATE TOOL_API strip_fences(text TEXT)
+RETURNS TEXT AS PYTHON $$
+def strip_fences(text: str) -> str:
+    """Remove markdown code fences and surrounding noise from LLM output."""
+    import re
+    s = text.strip()
+    # Case 1: entire output wrapped in a single fence block (``` or ~~~, any lang tag)
+    m = re.match(r'^(?:```|~~~)[^\n]*\n(.*?)\n?(?:```|~~~)\s*$', s, re.DOTALL)
+    if m:
+        s = m.group(1)
+    else:
+        # Case 2: stray fence lines scattered through otherwise plain output
+        s = re.sub(r'^(?:```|~~~)[^\n]*$', '', s, flags=re.MULTILINE)
+        s = re.sub(r'\n{2,}', '\n', s)  # collapse blank lines left by removed fences
+    return s.strip().replace("'''", "")
+$$;
+
+CREATE TOOL_API make_theorem(stmt TEXT, tactics TEXT)
+RETURNS TEXT AS PYTHON $$
+def make_theorem(stmt: str, tactics: str) -> str:
+    """Assemble the final theorem deterministically: the verified statement
+    is spliced in verbatim — the LLM only ever contributes the tactic block,
+    so it can never prove a subtly different statement (recipe 67's lesson)."""
+    body = tactics.strip()
+    if body.startswith(":="):
+        body = body[2:].strip()
+    if body == "by" or body.startswith(("by\n", "by ")):
+        body = body[2:].strip()
+    return f"theorem spl_claim : {stmt} := by\n  {body}"
+$$;
+
+CREATE TOOL_API lean_report(claim TEXT, stmt TEXT, faithful TEXT,
+                            proof TEXT, badge TEXT, citation TEXT)
+RETURNS TEXT AS PYTHON $$
+def lean_report(claim: str, stmt: str, faithful: str,
+                proof: str, badge: str, citation: str) -> str:
+    lines = [
+        f"# Lean verification report (mathlib)",
+        f"",
+        f"**Claim (prose):** {claim}",
+        f"",
+        f"**Formalization:** `{stmt or '—'}`",
+        f"",
+        f"**Faithfulness (LLM judge):** {faithful.strip()}",
+        f"",
+        f"**Badge:** `{badge}`",
+    ]
+    if citation.strip() and citation.strip().lower() != "none":
+        lines += ["", f"**Library citation (kernel-checked):** `{citation.strip()}`"]
+    if proof.strip():
+        lines += ["", "**Kernel-checked proof:**", "```lean", proof, "```"]
+    return "\n".join(lines)
+$$;
+
+-- ── Probabilistic regime: LLM prompt templates ───────────────
+
+CREATE FUNCTION decompose_problem(problem TEXT, thinking_note TEXT)
+RETURNS TEXT AS $$
+{thinking_note}Translate this math problem into an ordered list of symbolic operations.
+
+Output format — one step per line, NOTHING ELSE:
+  <expression>|<operation>
+
+The correct answer is always a short list of lines (rarely more than 5) — keep your
+entire response under 1000 tokens. A long response means you have gone wrong.
+
+STRICT OUTPUT RULES (violating any of these causes the pipeline to fail):
+- Plain text output ONLY — no code fences, no backticks, no markdown, no numbering
+- No Python code (no import statements, no variable assignments, no function calls)
+- No prose, no explanations, no blank lines
+- The FIRST step's <expression> is the starting expression in Python syntax:
+    ** for powers, * for multiplication, sqrt(x), sin(x), exp(x), log(x)
+- Every step AFTER the first must use the literal word PREV as the expression —
+    it means "the result of the previous step". NEVER write a new expression
+    after the first line.
+- <operation> must be exactly one token from this list:
+    solve, diff, integrate, simplify, expand, factor,
+    series, apart, limit(x,0), laplace, inverse_laplace,
+    trigsimp, summation(n,1,oo), eigenvalues, solve_system,
+    ode_solve, galois, conic, rank, factor_qq
+- solve_system: ALL equations must be combined into ONE step as a Python list
+    [eq1_lhs - eq1_rhs, eq2_lhs - eq2_rhs, ...]|solve_system
+    NEVER use PREV with solve_system — put every equation in the same list
+- ode_solve: <expression> is the ODE left-hand side in Python using y(x).diff(x,n)
+    notation, with the right-hand side assumed 0:
+    "y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)"  (not  y'', y', prime notation)
+    For ODE problems the plan is ALWAYS exactly ONE line — never add a second step
+- galois:    <expression> is a polynomial in x over the rationals
+- factor_qq: <expression> is a polynomial in x to factor over the rationals
+- conic:     <expression> is a homogeneous quadratic in x, y, z moved to
+    the "= 0" form (e.g. "x**2 + y**2 = 3*z**2" becomes "x**2 + y**2 - 3*z**2")
+- rank:      <expression> is the 5-element Weierstrass coefficient list
+    [a1, a2, a3, a4, a6] of the elliptic curve
+    y^2 + a1*x*y + a3*y = x^3 + a2*x^2 + a4*x + a6
+- If the problem needs only ONE operation, output exactly one line
+- The expressions in the examples below (exp(x), x**2 - 4, sin(x)/x, ...)
+    illustrate the FORMAT only. Your first <expression> must be transcribed
+    from the Problem at the bottom — copying an expression from an example
+    is a failure.
+
+CORRECT examples:
+  "differentiate e to the x and then simplify the result"
+    exp(x)|diff
+    PREV|simplify
+
+  "integrate 5*x**4 + 2, then expand the result, then solve for x"
+    5*x**4 + 2|integrate
+    PREV|expand
+    PREV|solve
+
+  "expand (x+1) squared, then factor the expanded form"
+    (x + 1)**2|expand
+    PREV|factor
+
+  "find the roots of x squared minus 4"
+    x**2 - 4|solve
+
+  "find the limit of sin(x)/x as x approaches 0"
+    sin(x)/x|limit(x,0)
+
+  "expand sin(x) as a Taylor series around x=0 up to degree 5"
+    sin(x)|series
+
+  "find the partial fraction decomposition of 1/(x**2-1)"
+    1/(x**2 - 1)|apart
+
+  "find the Laplace transform of exp(-2*t)"
+    exp(-2*t)|laplace
+
+  "compute the sum of 1/n**2 from n=1 to infinity"
+    1/n**2|summation(n,1,oo)
+
+  "find the eigenvalues of the matrix [[1,2],[3,4]]"
+    [[1,2],[3,4]]|eigenvalues
+
+  "solve the system x + y = 5 and x - y = 1"
+    [x + y - 5, x - y - 1]|solve_system
+
+  "compute the inverse Laplace transform of s/(s**2+4), then verify"
+    s/(s**2 + 4)|inverse_laplace
+    PREV|laplace
+
+  "solve the ODE y''(x) - 3*y'(x) + 2*y(x) = 0"
+    y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)|ode_solve
+
+  "solve y'(x) = y(x) with y(0) = 1"
+    y(x).diff(x) - y(x)|ode_solve
+
+  "find the Galois group of x to the fifth minus x minus 1"
+    x**5 - x - 1|galois
+
+  "does x**2 + y**2 = 3*z**2 have a rational solution?"
+    x**2 + y**2 - 3*z**2|conic
+
+  "rank of the curve y^2 + y = x^3 - x^2 - 10*x - 20"
+    [0, -1, 1, -10, -20]|rank
+
+  "factor x**12 - 1 into irreducibles over the rationals"
+    x**12 - 1|factor_qq
+
+INCORRECT examples (DO NOT produce output like this):
+  ```plaintext              ← NO: code fences are forbidden
+  exp(x)|diff
+  ```
+  x = sp.symbols('x')      ← NO: Python variable assignments are forbidden
+  from sympy import diff    ← NO: Python import statements are forbidden
+  Step 1: exp(x)|diff       ← NO: labels and numbering are forbidden
+  x + y - 5|solve_system
+  PREV - y - 1|solve_system ← NO: solve_system takes ALL equations at once in a list
+  y(x).diff(x,2) - 3*y(x).diff(x) + 2*y(x)|ode_solve
+  PREV|ode_solve            ← NO: ode_solve is always exactly one step
+  1. exp(x)|diff             ← NO: numbered lists are forbidden
+  x**2 - 4|solve             ← NO (as a later line): every line after the
+                                first must be PREV|<operation>
+  exp(x)|diff                ← NO (when the problem says something else):
+                                this copies an example instead of the Problem
+  y''(x) - 3*y'(x)|ode_solve ← NO: prime notation is forbidden; use y(x).diff(x,n)
+  √(4 - x**2)|integrate      ← NO: Unicode symbols are forbidden; use sqrt(4 - x**2)
+
+Now translate ONLY the problem below. Transcribe its expression EXACTLY —
+same digits, signs, exponents — and use PREV for every step after the first.
+
+Problem: {problem}
+$$;
+
+CREATE FUNCTION explain_chain(problem TEXT, trace TEXT, thinking_note TEXT)
+RETURNS TEXT AS $$
+{thinking_note}A student asked: "{problem}"
+
+The symbolic math engine computed this chain of EXACT steps, in order:
+{trace}
+
+Write a clear, friendly explanation in less than 6 sentences that:
+1. Restates what the problem is asking in plain English
+2. Walks through the chain step by step, in order, stating each exact result
+3. Gives the final answer plainly at the end
+Do not re-derive any step — trust the computed chain above as exact.
+$$;
+
+CREATE FUNCTION solve_directly(problem TEXT, thinking_note TEXT)
+RETURNS TEXT AS $$
+{thinking_note}A student asked: "{problem}"
+
+There is NO symbolic math engine or proof assistant backing you up this
+time — every computation and every proof step must be done correctly by
+you, from scratch.
+
+Write a clear, friendly walkthrough in less than 8 sentences that:
+1. Restates what the problem is asking in plain English
+2. Shows your own working, step by step, in order — state the exact
+   result of each step as you derive it (do not skip steps)
+3. Gives the final answer plainly at the end
+
+Show your work. Do not state any result you have not derived above.
+$$;
+
+-- ── Lean prompt templates (mathlib vocabulary) ────────────────
+
+CREATE FUNCTION formalize_claim(claim TEXT)
+RETURNS TEXT AS $$
+Translate this mathematical claim into a single Lean 4 proposition.
+Mathlib IS imported — use mathlib vocabulary and notation.
+
+Rules:
+- Output ONLY the proposition — what goes after `example :`. No proof,
+  no `example`, no markdown fences, no commentary.
+- Bind every variable and every typeclass instance explicitly
+  (autoImplicit is off): universes, [Field ...], [AddCommGroup ...],
+  [Module ...], [FiniteDimensional ...] as needed.
+- Prefer the formulation closest to mathlib's own (Real, Nat.Prime,
+  abs, Even, Module.finrank, ...).
+- Example output for "the square of any real number is nonnegative":
+  ∀ a : ℝ, 0 ≤ a ^ 2
+
+Claim: {claim}
+$$;
+
+CREATE FUNCTION fix_formalization(claim TEXT, lean_stmt TEXT, feedback TEXT)
+RETURNS TEXT AS $$
+This Lean 4 proposition failed to typecheck. Mathlib IS imported.
+
+Claim (prose): {claim}
+Attempted proposition: {lean_stmt}
+Lean's diagnostics:
+{feedback}
+
+Output ONLY the corrected proposition (what goes after `example :`).
+No proof, no fences, no commentary. Bind every variable and typeclass
+instance explicitly (autoImplicit is off).
+$$;
+
+CREATE FUNCTION judge_faithfulness(claim TEXT, lean_stmt TEXT)
+RETURNS TEXT AS $$
+A prose mathematical claim was formalized in Lean 4 (mathlib).
+
+Prose claim: {claim}
+Lean proposition: {lean_stmt}
+
+Does the Lean proposition say exactly what the prose claims — same
+quantifiers, no vacuous hypotheses, no degenerate specialization?
+Reply with exactly one line: FAITHFUL or UNFAITHFUL, then a dash and
+one short reason.
+$$;
+
+CREATE FUNCTION write_tactics(lean_stmt TEXT)
+RETURNS TEXT AS $$
+Write a Lean 4 tactic proof for this proposition. Mathlib IS imported.
+
+  {lean_stmt}
+
+Rules:
+- Output ONLY the tactic script — what goes after `:= by`. No fences,
+  no commentary, no restatement of the proposition, nothing after the
+  final tactic.
+- Mathlib tactics are available: simp, ring, linarith, nlinarith,
+  norm_num, positivity, omega, decide, aesop, field_simp, plus core
+  intro, induction, cases, calc, exact.
+- Prefer closing with a named mathlib lemma via `exact` when one fits
+  (e.g. `exact sq_nonneg a`, `exact abs_add a b`).
+- Example output for `∀ a : ℝ, 0 ≤ a ^ 2`:  intro a; positivity
+$$;
+
+CREATE FUNCTION repair_tactics(lean_stmt TEXT, tactics TEXT, feedback TEXT)
+RETURNS TEXT AS $$
+This Lean 4 tactic proof failed. Mathlib IS imported.
+
+Proposition: {lean_stmt}
+Failed tactic script: {tactics}
+Lean's diagnostics:
+{feedback}
+
+Output ONLY a corrected tactic script (what goes after `:= by`) — no
+fences, no explanation, nothing after the final tactic.
+Mathlib tactics are available: simp, ring, linarith, nlinarith,
+norm_num, positivity, omega, decide, aesop, field_simp, plus core
+intro, induction, cases, calc, exact. Prefer a named mathlib lemma
+via `exact` when one fits.
+$$;

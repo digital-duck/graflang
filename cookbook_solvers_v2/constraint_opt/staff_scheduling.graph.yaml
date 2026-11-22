@@ -1,0 +1,100 @@
+version: 1.0-graph
+workflow:
+  name: staff_scheduling
+  inputs:
+  - name: problem
+    type: TEXT
+    default: 'A clinic needs to staff one day with 3 shifts: Morning, Afternoon, and Night. Minimum nurse coverage required: Morning needs at least 2 nurses, Afternoon needs at least 2 nurses, Night needs at least 1 nurse. Five nurses are available (Nurse1 through Nurse5). Each nurse can work at most 1 shift today. Wage per nurse-shift: Morning costs $200, Afternoon costs $180, Night costs $320. Assign nurses to shifts to meet all minimum coverage requirements at minimum total wage cost.'
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INTEGER
+    default: 3
+  - name: lang
+    type: TEXT
+    default: English
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook/78_constraint_opt/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    staff_scheduling_setup: ./staff_scheduling_setup/staff_scheduling_setup.graph.yaml
+    staff_scheduling_solver_arm: ./staff_scheduling_solver_arm/staff_scheduling_solver_arm.graph.yaml
+    staff_scheduling_llm_only: ./staff_scheduling_llm_only/staff_scheduling_llm_only.graph.yaml
+    staff_scheduling_report: ./staff_scheduling_report/staff_scheduling_report.graph.yaml
+steps:
+- staff_scheduling_setup:
+    use: parts.staff_scheduling_setup
+    out:
+    - llm_calls
+    - t_start
+    - tries
+    - solution
+    - lp_code
+    - stage2_s
+    - ts_safe
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: $in.use_solver
+    out: []
+    branch: 1
+- staff_scheduling_solver_arm:
+    use: parts.staff_scheduling_solver_arm
+    in:
+      max_tries: $in.max_tries
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: staff_scheduling_setup
+      tries: staff_scheduling_setup.tries
+      solution: staff_scheduling_setup.solution
+      lp_code: staff_scheduling_setup.lp_code
+    out:
+    - llm_calls
+    - stage1_s
+    - stage2_s
+    - lp_code
+    - solution
+    - narrative
+- staff_scheduling_llm_only:
+    use: parts.staff_scheduling_llm_only
+    in:
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: staff_scheduling_setup
+    out:
+    - llm_calls
+    - stage1_s
+    - narrative
+    'on': solver_on.fail
+- staff_scheduling_report:
+    use: parts.staff_scheduling_report
+    in:
+      t_start: staff_scheduling_setup.t_start
+      use_solver: $in.use_solver
+      problem: $in.problem
+      out_dir: $in.out_dir
+      stage2_s: staff_scheduling_setup.stage2_s
+      lp_code: staff_scheduling_setup.lp_code
+      solution: staff_scheduling_setup.solution
+      ts_safe: staff_scheduling_setup.ts_safe
+      llm_calls: staff_scheduling_solver_arm
+      stage1_s: staff_scheduling_solver_arm.stage1_s
+      make_metrics_stage2_s: staff_scheduling_solver_arm.stage2_s
+      format_schedule_lp_code: staff_scheduling_solver_arm.lp_code
+      format_schedule_solution: staff_scheduling_solver_arm.solution
+      narrative: staff_scheduling_solver_arm.narrative
+      make_metrics_llm_calls: staff_scheduling_llm_only
+      make_metrics_stage1_s: staff_scheduling_llm_only.stage1_s
+      format_schedule_narrative: staff_scheduling_llm_only.narrative
+    out: report
+    'on':
+    - staff_scheduling_solver_arm
+    - staff_scheduling_llm_only
+- wf_exit:
+    output: staff_scheduling_report

@@ -1,0 +1,50 @@
+version: 1.0-graph
+workflow:
+  name: setup
+  inputs: []
+  outputs:
+  - name: stmt_ok_lc
+    type: TEXT
+  - name: tries
+    type: TEXT
+steps:
+- start_checker:
+    node: SOLVE
+    out: lean_status
+    tool: run_python
+    backend: kernel
+    arguments:
+    - "'from spl3.lean_bridge import LeanREPL; _spl_lean = LeanREPL().start(); print(\"ready\")'"
+    code: |
+      def run_python(code: str, timeout: str='30') -> str:
+          """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+          import contextlib, io
+          out = io.StringIO()
+          try:
+              with contextlib.redirect_stdout(out):
+                  exec(str(code), globals())
+              return out.getvalue().strip()
+          except Exception as e:
+              return f'Error: {type(e).__name__}: {e}'
+      _spl_result = run_python('from spl3.lean_bridge import LeanREPL; _spl_lean = LeanREPL().start(); print("ready")')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - code
+    - timeout
+    tool_returns: TEXT
+    tool_builtin: true
+- set_stmt_ok_lc:
+    node: CONTEXT
+    out: stmt_ok_lc
+    action: set
+    expression: "'init'"
+- set_tries:
+    node: CONTEXT
+    out: tries
+    action: set
+    expression: '0'
+- wf_exit:
+    output:
+      stmt_ok_lc: set_stmt_ok_lc
+      tries: set_tries

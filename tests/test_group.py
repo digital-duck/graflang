@@ -378,3 +378,26 @@ def test_editor_group_takes_a_description_and_exits(tmp_path):
     part = yaml.safe_load((tmp_path / "front" / "front.graph.yaml").read_text())
     assert part["workflow"]["description"] == "doubles a positive number" and [e["name"] for e in part["workflow"]["errors"]] == ["negative"]
     assert ed.problems()[0] == []
+
+
+def test_a_prompt_used_inside_a_loop_body_goes_with_the_loop(tmp_path):
+    """The resources a selected node uses travel with it, and a node inside a loop's body is used by the loop: grouping a loop whose body asks a model left
+    the prompt (or procedure) behind, and the part no longer validated."""
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts" / "say.md").write_text("Say {{in_n}}")
+    g = {"version": "1.0-graph", "workflow": {"name": "w", "inputs": [{"name": "n", "type": "TEXT"}], "outputs": [{"name": "r", "type": "TEXT"}]},
+         "resources": {"prompts": {"say": "./prompts/say.md"}},
+         "nodes": [{"id": "wf_entry", "type": "INPUT", "ports": ["entry", "out_n"]},
+                   {"id": "keep", "type": "SOLVE", "config": {"expression": "@in_n"}, "ports": ["trigger", "complete", "in_n", "out_v"]},
+                   {"id": "spin", "type": "LOOP", "ports": ["trigger", "exit", "in_n", "out_r"],
+                    "config": {"condition": "@cycle < 1", "outputs": {"r": {"from": "ask.out_r"}},
+                               "subgraph": {"nodes": [{"id": "ask", "type": "GENERATE", "config": {"prompt_ref": "prompts.say"}, "ports": ["trigger", "complete", "in_n", "out_r"]}],
+                                            "edges": []}}},
+                   {"id": "wf_exit", "type": "OUTPUT", "ports": ["trigger", "in_r"]}],
+         "edges": [{"source": "wf_entry.entry", "target": "keep.trigger", "type": "triggers"}, {"source": "wf_entry.out_n", "target": "keep.in_n", "type": "binds"},
+                   {"source": "keep.complete", "target": "spin.trigger", "type": "triggers"}, {"source": "keep.out_v", "target": "spin.in_n", "type": "binds"},
+                   {"source": "spin.exit", "target": "wf_exit.trigger", "type": "triggers"}, {"source": "spin.out_r", "target": "wf_exit.in_r", "type": "binds"}]}
+    parent, part, files = group(g, ["spin"], "spinner")
+    assert files == [("prompts", "say", "./prompts/say.md")]
+    assert part["resources"]["prompts"]["say"] == "./prompts/say.md"
+    assert "prompts" not in parent["resources"]

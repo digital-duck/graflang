@@ -1,0 +1,286 @@
+version: 1.0-graph
+workflow:
+  name: resource_allocation_llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: lang
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: llm_calls
+    type: TEXT
+  - name: stage1_s
+    type: TEXT
+  - name: narrative
+    type: TEXT
+steps:
+- time_monotonic_4:
+    node: SOLVE
+    out: t_s1
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- solve_directly_portfolio:
+    generate: |-
+      You are a strategic planning analyst. Solve this project portfolio selection problem
+      using mathematical reasoning only — no solver software.
+
+      Problem: {{in_problem}}
+
+      Your response must have two sections:
+
+      ## Solution
+      Work through the binary selection problem step by step:
+      1. List all projects with their cost, dev-months, and value.
+      2. Note the total search space (2^n subsets for n projects) and use structured
+         enumeration: start with high value-to-cost ratio projects, then check
+         feasibility and try swaps to improve total value.
+      3. Enumerate the top candidate subsets explicitly, checking budget and headcount
+         constraints for each.
+      4. State the optimal selection and its total value.
+
+      ## Verification
+      Confirm the selected portfolio is feasible and optimal:
+      - Sum the costs and confirm total ≤ budget (show arithmetic).
+      - Sum the dev-months and confirm total ≤ headcount limit (show arithmetic).
+      - Compute total value (show arithmetic).
+      - Show at least one alternative subset that was considered and explain why it
+        scores lower or is infeasible.
+
+      Write in {{in_lang}}. Show all arithmetic explicitly.
+    in:
+      problem: $in.problem
+      lang: $in.lang
+    out: narrative
+    function: solve_directly_portfolio
+    params:
+    - problem
+    - lang
+    arguments:
+    - '@problem'
+    - '@lang'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- time_elapsed_3:
+    node: SOLVE
+    in:
+      t_s1: time_monotonic_4
+    out: stage1_s
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - '@t_s1'
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_s1)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+- extract_solution_json_bilp:
+    generate: |-
+      Extract the project portfolio selection from the narrative as JSON.
+
+      IMPORTANT: Your entire response must be ONLY the JSON object below.
+      Do NOT write any text before or after. Do NOT use markdown code fences (no backticks).
+      Start your response with {{ and end with }}.
+
+      Problem:
+      {{in_problem}}
+
+      Solution narrative:
+      {{in_narrative}}
+
+      Required JSON format (fill in the actual values):
+      {{
+        "objective": <total portfolio value as a number>,
+        "selected_projects": ["P1", "P4", ...],
+        "project_data": [
+          {{"id": "P1", "cost_K": 120, "dev_months": 3, "value": 8}},
+          {{"id": "P2", "cost_K": 80,  "dev_months": 2, "value": 5}},
+          ...
+        ]
+      }}
+
+      Instructions:
+      - selected_projects: only the project IDs the narrative chooses
+      - project_data: ALL projects from the problem statement (not just selected ones)
+      - objective: the total strategic value the narrative claims for the selected portfolio
+    in:
+      problem: $in.problem
+      narrative: solve_directly_portfolio
+    out: claimed_json
+    function: extract_solution_json_bilp
+    params:
+    - problem
+    - narrative
+    arguments:
+    - '@problem'
+    - '@narrative'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- verify_off_bilp:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      claimed_json: extract_solution_json_bilp
+    out: verify_result
+    tool: verify_off_bilp
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@claimed_json'
+    code: |
+      def verify_off_bilp(problem: str, claimed_json: str) -> str:
+          import json, re
+          # Strip markdown fences gemma3 emits despite "no fences" instruction
+          raw = claimed_json.strip()
+          raw = re.sub(r'^```(?:json)?\s*\n?', '', raw, flags=re.IGNORECASE)
+          raw = re.sub(r'\n?```\s*$', '', raw)
+          try:
+              claimed = json.loads(raw)
+          except Exception as e:
+              return json.dumps({"verdict": "UNPARSEABLE", "notes": f"JSON error: {e}",
+                                 "raw_prefix": claimed_json[:120]})
+
+          obj_claimed  = claimed.get("objective")
+          selected     = claimed.get("selected_projects", [])
+          project_data = claimed.get("project_data", [])
+
+          projects = {p["id"]: p for p in project_data if "id" in p}
+
+          violations = []
+          total_cost = total_dev = total_val = 0.0
+
+          for pid in selected:
+              p = projects.get(pid, {})
+              total_cost += float(p.get("cost_K", 0))
+              total_dev  += float(p.get("dev_months", 0))
+              total_val  += float(p.get("value", 0))
+
+          budget_m = re.search(
+              r'(?:total )?budget (?:is )?\$(\d+(?:\.\d+)?)K', problem, re.IGNORECASE)
+          dev_m = re.search(
+              r'(\d+(?:\.\d+)?) developer-months available', problem, re.IGNORECASE)
+
+          if budget_m:
+              budget = float(budget_m.group(1))
+              if total_cost > budget + 0.001:
+                  violations.append(f"budget violated: ${total_cost:.0f}K > ${budget:.0f}K")
+
+          if dev_m:
+              headcount = float(dev_m.group(1))
+              if total_dev > headcount + 0.001:
+                  violations.append(f"headcount violated: {total_dev:.0f}mo > {headcount:.0f}mo")
+
+          if obj_claimed is not None and project_data:
+              if abs(total_val - float(obj_claimed)) > 0.5:
+                  violations.append(
+                      f"value mismatch: claimed {obj_claimed} vs computed {total_val:.0f}")
+
+          if violations:
+              return json.dumps({"verdict": "FAIL", "claimed_obj": obj_claimed,
+                                 "verified_obj": total_val, "notes": "; ".join(violations)})
+          if not selected:
+              return json.dumps({"verdict": "UNPARSEABLE", "claimed_obj": obj_claimed,
+                                 "notes": "no selected_projects in JSON"})
+          return json.dumps({
+              "verdict": "PASS", "claimed_obj": obj_claimed, "verified_obj": total_val,
+              "notes": (f"{len(selected)} projects: cost=${total_cost:.0f}K, "
+                        f"dev={total_dev:.0f}mo, value={total_val:.0f}")
+          })
+      _spl_result = verify_off_bilp(problem, claimed_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - claimed_json
+    tool_returns: TEXT
+- json_get_field:
+    node: SOLVE
+    in:
+      verify_result: verify_off_bilp
+    out: verify_status
+    tool: json_get_field
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      def json_get_field(result_json: str, field: str) -> str:
+          import json
+          try:
+              v = json.loads(result_json).get(field)
+              return str(v) if v is not None else ""
+          except Exception:
+              return ""
+      _spl_result = json_get_field(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - field
+    tool_returns: TEXT
+- json_get_field_2:
+    node: SOLVE
+    in:
+      verify_result: verify_off_bilp
+    out: obj_str
+    tool: json_get_field
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'claimed_obj'"
+    code: |
+      def json_get_field(result_json: str, field: str) -> str:
+          import json
+          try:
+              v = json.loads(result_json).get(field)
+              return str(v) if v is not None else ""
+          except Exception:
+              return ""
+      _spl_result = json_get_field(verify_result, 'claimed_obj')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - field
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      llm_calls: set_llm_calls_3
+      stage1_s: time_elapsed_3
+      narrative: solve_directly_portfolio

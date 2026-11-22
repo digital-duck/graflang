@@ -1,0 +1,41 @@
+version: 1.0-graph
+workflow:
+  name: math_solver_multi_step
+  inputs:
+  - name: problem
+    type: TEXT
+    default: differentiate e**x and then simplify the result
+  - name: log_dir
+    type: TEXT
+    default: cookbook/67_symbolic_math/logs-spl
+  outputs:
+  - name: explanation
+    type: TEXT
+resources:
+  parts:
+    sympy_math_multi_step_plan: ./sympy_math_multi_step_plan/sympy_math_multi_step_plan.graph.yaml
+    sympy_math_multi_step_run_steps: ./sympy_math_multi_step_run_steps/sympy_math_multi_step_run_steps.graph.yaml
+    sympy_math_multi_step_explain: ./sympy_math_multi_step_explain/sympy_math_multi_step_explain.graph.yaml
+steps:
+- sympy_math_multi_step_plan:
+    use: parts.sympy_math_multi_step_plan
+    in:
+      problem: $in.problem
+    out:
+    - steps_text
+    - n_steps
+- sympy_math_multi_step_run_steps:
+    use: parts.sympy_math_multi_step_run_steps
+    in:
+      steps_text: sympy_math_multi_step_plan
+      n_steps: sympy_math_multi_step_plan.n_steps
+    out: trace
+- sympy_math_multi_step_explain:
+    use: parts.sympy_math_multi_step_explain
+    in:
+      log_dir: $in.log_dir
+      trace: sympy_math_multi_step_run_steps
+      problem: $in.problem
+    out: explanation
+- wf_exit:
+    output: sympy_math_multi_step_explain

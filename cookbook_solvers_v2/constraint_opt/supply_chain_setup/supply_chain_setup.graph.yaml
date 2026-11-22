@@ -1,0 +1,116 @@
+version: 1.0-graph
+workflow:
+  name: supply_chain_setup
+  inputs: []
+  outputs:
+  - name: llm_calls
+    type: TEXT
+  - name: t_start
+    type: TEXT
+  - name: tries
+    type: TEXT
+  - name: solution
+    type: TEXT
+  - name: lp_code
+    type: TEXT
+  - name: stage2_s
+    type: TEXT
+  - name: ts_safe
+    type: TEXT
+steps:
+- time_monotonic:
+    node: SOLVE
+    out: t_start
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- time_now:
+    node: SOLVE
+    out: ts_safe
+    tool: time_now
+    backend: kernel
+    arguments: []
+    code: |
+      import datetime
+
+      def time_now() -> str:
+          """TIME_NOW() — current local time as a filesystem-safe string:
+          YYYY-MM-DD_HH-MM-SS."""
+          return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+      _spl_result = time_now()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- set_llm_calls:
+    node: CONTEXT
+    out: llm_calls
+    action: set
+    expression: '0'
+- set_tries:
+    node: CONTEXT
+    out: tries
+    action: set
+    expression: '0'
+- set_status:
+    node: CONTEXT
+    out: status
+    action: set
+    expression: "''"
+- set_lp_code:
+    node: CONTEXT
+    out: lp_code
+    action: set
+    expression: "''"
+- set_solution:
+    node: CONTEXT
+    out: solution
+    action: set
+    expression: "'{}'"
+- set_stage1_s:
+    node: CONTEXT
+    out: stage1_s
+    action: set
+    expression: "'0'"
+- set_stage2_s:
+    node: CONTEXT
+    out: stage2_s
+    action: set
+    expression: "'0'"
+- set_obj_str:
+    node: CONTEXT
+    out: obj_str
+    action: set
+    expression: "''"
+- set_verify_status:
+    node: CONTEXT
+    out: verify_status
+    action: set
+    expression: "'N/A'"
+- set_verify_result:
+    node: CONTEXT
+    out: verify_result
+    action: set
+    expression: "'{}'"
+- wf_exit:
+    output:
+      llm_calls: set_llm_calls
+      t_start: time_monotonic
+      tries: set_tries
+      solution: set_solution
+      lp_code: set_lp_code
+      stage2_s: set_stage2_s
+      ts_safe: time_now

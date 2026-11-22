@@ -1,0 +1,268 @@
+version: 1.0-graph
+workflow:
+  name: supply_chain_llm_only
+  inputs:
+  - name: problem
+    type: TEXT
+  - name: lang
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  outputs:
+  - name: llm_calls
+    type: TEXT
+  - name: stage1_s
+    type: TEXT
+  - name: narrative
+    type: TEXT
+steps:
+- time_monotonic_4:
+    node: SOLVE
+    out: t_s1
+    tool: time_monotonic
+    backend: kernel
+    arguments: []
+    code: |
+      def time_monotonic() -> str:
+          """TIME_MONOTONIC() — current value of a monotonic clock, as a string.
+          Pair with time_elapsed() to measure elapsed wall-clock time."""
+          import time as _time
+          return str(_time.monotonic())
+      _spl_result = time_monotonic()
+    result: _spl_result
+    out_type: TEXT
+    tool_params: []
+    tool_returns: TEXT
+    tool_builtin: true
+- solve_directly_supply_chain:
+    generate: |-
+      You are a supply chain analyst. Solve this transportation cost minimization problem
+      using mathematical reasoning only — no solver software.
+
+      Problem: {{in_problem}}
+
+      Your response must have two sections:
+
+      ## Solution
+      Work through the transportation problem step by step:
+      1. Set up the cost matrix and supply/demand table.
+      2. Apply the Minimum Cost Method (or Northwest Corner + MODI) to find an initial
+         feasible solution, then improve it until no further cost reduction is possible.
+      3. State the optimal shipping plan: which routes carry how many units, and the
+         total minimum cost.
+
+      ## Verification
+      Plug the optimal plan back in and confirm:
+      - Each supply constraint is satisfied (show arithmetic, label binding or slack).
+      - Each demand constraint is exactly met (show arithmetic).
+      - Compute total cost step by step (e.g. "50×$1 + 30×$2 + ... = $370").
+
+      Write in {{in_lang}}. Show all arithmetic explicitly.
+    in:
+      problem: $in.problem
+      lang: $in.lang
+    out: narrative
+    function: solve_directly_supply_chain
+    params:
+    - problem
+    - lang
+    arguments:
+    - '@problem'
+    - '@lang'
+- set_llm_calls_2:
+    node: CONTEXT
+    in:
+      llm_calls: $in.llm_calls
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- time_elapsed_3:
+    node: SOLVE
+    in:
+      t_s1: time_monotonic_4
+    out: stage1_s
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - '@t_s1'
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_s1)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+- extract_solution_json_transport:
+    generate: |-
+      Extract the transportation solution from the narrative as structured JSON.
+
+      Problem:
+      {{in_problem}}
+
+      Solution narrative:
+      {{in_narrative}}
+
+      Return ONLY a valid JSON object — no prose, no fences:
+      {{
+        "objective": <total shipping cost as a number>,
+        "routes": {{"<Wi_Sj>": <quantity shipped>, ...}},
+        "supply": {{"<Wi>": <capacity>, ...}},
+        "demand": {{"<Sj>": <requirement>, ...}},
+        "costs": {{"<Wi_Sj>": <cost per unit>, ...}}
+      }}
+
+      Instructions:
+      - Name routes using the format "W1_S1" (warehouse underscore store).
+      - Extract all warehouse supply capacities and store demand requirements from the problem.
+      - Extract all unit shipping costs from the cost matrix in the problem.
+      - Use the total shipping cost the narrative claims as "objective".
+    in:
+      problem: $in.problem
+      narrative: solve_directly_supply_chain
+    out: claimed_json
+    function: extract_solution_json_transport
+    params:
+    - problem
+    - narrative
+    arguments:
+    - '@problem'
+    - '@narrative'
+- set_llm_calls_3:
+    node: CONTEXT
+    in:
+      llm_calls: set_llm_calls_2
+    out: llm_calls
+    action: set
+    expression: '@in_llm_calls + 1'
+- verify_off_transport:
+    node: SOLVE
+    in:
+      problem: $in.problem
+      claimed_json: extract_solution_json_transport
+    out: verify_result
+    tool: verify_off_transport
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@claimed_json'
+    code: |
+      def verify_off_transport(problem: str, claimed_json: str) -> str:
+          import json, re
+          raw = claimed_json.strip()
+          raw = re.sub(r'^```(?:json)?\s*\n?', '', raw, flags=re.IGNORECASE)
+          raw = re.sub(r'\n?```\s*$', '', raw)
+          try:
+              claimed = json.loads(raw)
+          except Exception as e:
+              return json.dumps({"verdict": "UNPARSEABLE", "notes": f"JSON error: {e}",
+                                 "raw_prefix": claimed_json[:120]})
+
+          obj_claimed = claimed.get("objective")
+          routes      = claimed.get("routes", {})     # {"W1_S1": qty, ...}
+          supply      = claimed.get("supply", {})     # {"W1": cap, ...}
+          demand      = claimed.get("demand", {})     # {"S1": req, ...}
+          costs       = claimed.get("costs", {})      # {"W1_S1": cost_per_unit, ...}
+
+          violations = []
+
+          for wh, cap in supply.items():
+              shipped = sum(float(q) for r, q in routes.items() if r.startswith(wh + "_"))
+              if shipped > float(cap) + 0.001:
+                  violations.append(f"{wh} supply violated: {shipped:.2f} > {cap}")
+
+          for st, req in demand.items():
+              received = sum(float(q) for r, q in routes.items() if r.endswith("_" + st))
+              if abs(received - float(req)) > 0.001:
+                  violations.append(f"{st} demand unmet: {received:.2f} != {req}")
+
+          for route, qty in routes.items():
+              if float(qty) < -0.001:
+                  violations.append(f"{route} negative: {qty}")
+
+          if costs and routes:
+              try:
+                  recomputed = sum(float(costs.get(r, 0)) * float(q) for r, q in routes.items())
+                  if obj_claimed is not None and abs(recomputed - float(obj_claimed)) > 0.5:
+                      violations.append(f"cost mismatch: claimed {obj_claimed} vs computed {recomputed:.2f}")
+              except Exception as e:
+                  violations.append(f"cost recompute error: {e}")
+
+          if violations:
+              return json.dumps({"verdict": "FAIL", "claimed_obj": obj_claimed,
+                                 "notes": "; ".join(violations)})
+          if not routes:
+              return json.dumps({"verdict": "UNPARSEABLE", "claimed_obj": obj_claimed,
+                                 "notes": "no routes in JSON"})
+          return json.dumps({"verdict": "PASS", "claimed_obj": obj_claimed,
+                             "notes": f"{len(routes)} routes verified"})
+      _spl_result = verify_off_transport(problem, claimed_json)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - claimed_json
+    tool_returns: TEXT
+- json_get_field:
+    node: SOLVE
+    in:
+      verify_result: verify_off_transport
+    out: verify_status
+    tool: json_get_field
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'verdict'"
+    code: |
+      def json_get_field(result_json: str, field: str) -> str:
+          import json
+          try:
+              v = json.loads(result_json).get(field)
+              return str(v) if v is not None else ""
+          except Exception:
+              return ""
+      _spl_result = json_get_field(verify_result, 'verdict')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - field
+    tool_returns: TEXT
+- json_get_field_2:
+    node: SOLVE
+    in:
+      verify_result: verify_off_transport
+    out: obj_str
+    tool: json_get_field
+    backend: kernel
+    arguments:
+    - '@verify_result'
+    - "'claimed_obj'"
+    code: |
+      def json_get_field(result_json: str, field: str) -> str:
+          import json
+          try:
+              v = json.loads(result_json).get(field)
+              return str(v) if v is not None else ""
+          except Exception:
+              return ""
+      _spl_result = json_get_field(verify_result, 'claimed_obj')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - result_json
+    - field
+    tool_returns: TEXT
+- wf_exit:
+    output:
+      llm_calls: set_llm_calls_3
+      stage1_s: time_elapsed_3
+      narrative: solve_directly_supply_chain

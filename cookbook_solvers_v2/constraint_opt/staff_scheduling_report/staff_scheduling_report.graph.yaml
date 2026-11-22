@@ -1,0 +1,337 @@
+version: 1.0-graph
+workflow:
+  name: staff_scheduling_report
+  inputs:
+  - name: t_start
+    type: TEXT
+  - name: use_solver
+    type: TEXT
+  - name: problem
+    type: TEXT
+  - name: out_dir
+    type: TEXT
+  - name: stage2_s
+    type: TEXT
+  - name: lp_code
+    type: TEXT
+  - name: solution
+    type: TEXT
+  - name: ts_safe
+    type: TEXT
+  - name: llm_calls
+    type: TEXT
+  - name: stage1_s
+    type: TEXT
+  - name: make_metrics_stage2_s
+    type: TEXT
+  - name: format_schedule_lp_code
+    type: TEXT
+  - name: format_schedule_solution
+    type: TEXT
+  - name: narrative
+    type: TEXT
+  - name: make_metrics_llm_calls
+    type: TEXT
+  - name: make_metrics_stage1_s
+    type: TEXT
+  - name: format_schedule_narrative
+    type: TEXT
+  outputs:
+  - name: report
+    type: TEXT
+steps:
+- time_elapsed_4:
+    node: SOLVE
+    in:
+      t_start: $in.t_start
+    out: total_s
+    tool: time_elapsed
+    backend: kernel
+    arguments:
+    - '@t_start'
+    code: |
+      def time_elapsed(start_ts: str) -> str:
+          """TIME_ELAPSED(start_ts) — seconds elapsed since start_ts (a monotonic
+          float string from time_monotonic())."""
+          import time as _time
+          try:
+              return f'{_time.monotonic() - float(start_ts):.1f}'
+          except Exception:
+              return '?'
+      _spl_result = time_elapsed(t_start)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - start_ts
+    tool_returns: TEXT
+    tool_builtin: true
+nodes:
+- id: make_metrics
+  type: SOLVE
+  config:
+    tool: make_metrics
+    backend: kernel
+    arguments:
+    - '@use_solver'
+    - '@llm_calls'
+    - '@stage1_s'
+    - '@stage2_s'
+    - '@total_s'
+    - '@_total_input_tokens'
+    - '@_total_output_tokens'
+    code: |
+      def make_metrics(use_solver: str, llm_calls: str,
+                       stage1_s: str, stage2_s: str, total_s: str,
+                       input_tokens: str, output_tokens: str) -> str:
+          solver_on = use_solver.strip().lower() in ("true", "1", "yes")
+          mode      = "solver=ON  (PuLP/CBC + ASSERT gate)" if solver_on else "solver=OFF (LLM reasoning only)"
+          s1_label  = "Stage 1 — formulation + solve (s)" if solver_on else "Stage 1 — direct LLM solve (s)"
+
+          def fmt_f(v):
+              try:
+                  return f"{float(v):.2f}"
+              except Exception:
+                  return v or "—"
+
+          def fmt_i(v):
+              try:
+                  return f"{int(v):,}"
+              except Exception:
+                  return v or "—"
+
+          total_tok = "—"
+          try:
+              total_tok = f"{int(input_tokens) + int(output_tokens):,}"
+          except Exception:
+              pass
+
+          rows = [
+              ("Mode",                         mode),
+              ("LLM calls",                    llm_calls),
+              (s1_label,                       fmt_f(stage1_s)),
+              ("Stage 2 — interpretation (s)", fmt_f(stage2_s) if solver_on else "—"),
+              ("Total latency (s)",            fmt_f(total_s)),
+              ("Input tokens",                 fmt_i(input_tokens)),
+              ("Output tokens",                fmt_i(output_tokens)),
+              ("Total tokens",                 total_tok),
+          ]
+          header = "| Metric | Value |"
+          sep    = "|---|---|"
+          lines  = [header, sep] + [f"| {k} | {v} |" for k, v in rows]
+          return "\n".join(lines)
+      _spl_result = make_metrics(use_solver, llm_calls, stage1_s, stage2_s, total_s, globals().get('_total_input_tokens', 0), globals().get('_total_output_tokens', 0))
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - use_solver
+    - llm_calls
+    - stage1_s
+    - stage2_s
+    - total_s
+    - input_tokens
+    - output_tokens
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_use_solver
+  - in_llm_calls
+  - in_stage1_s
+  - in_stage2_s
+  - in_total_s
+  - in__total_input_tokens
+  - in__total_output_tokens
+  - out_metrics
+- id: format_schedule
+  type: SOLVE
+  config:
+    tool: format_schedule
+    backend: kernel
+    arguments:
+    - '@problem'
+    - '@use_solver'
+    - '@lp_code'
+    - '@solution'
+    - '@narrative'
+    - '@metrics'
+    code: |
+      def format_schedule(problem: str, use_solver: str, lp_code: str,
+                          solution_json: str, narrative: str, metrics: str) -> str:
+          import json
+          solver_on = use_solver.strip().lower() in ("true", "1", "yes")
+          try:
+              sol = json.loads(solution_json)
+          except Exception:
+              sol = {}
+          status    = sol.get("status")
+          objective = sol.get("objective")
+          variables = sol.get("variables", {})
+
+          lines = [
+              "# Staff Scheduling Report",
+              "",
+              f"**Problem:** {problem.strip()}",
+          ]
+          if solver_on and status:
+              lines += ["", f"**Solver status:** `{status}`"]
+          if solver_on and objective is not None:
+              lines.append(f"**Minimum total wage cost:** ${objective:.2f}")
+          if solver_on and variables:
+              lines += ["", "**Schedule (assigned shifts):**"]
+              for var_name, val in variables.items():
+                  v = float(val) if not isinstance(val, (int, float)) else val
+                  if v > 0.5:
+                      lines.append(f"  - {var_name}: assigned")
+
+          lines += ["", narrative.strip()]
+
+          if solver_on and lp_code.strip():
+              lines += ["", "## Solver Code (LLM-generated, PuLP)", "", "```python", lp_code.strip(), "```"]
+
+          lines += ["", "## Run Metrics", "", metrics]
+          return "\n".join(lines)
+      _spl_result = format_schedule(problem, use_solver, lp_code, solution, narrative, metrics)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - problem
+    - use_solver
+    - lp_code
+    - solution_json
+    - narrative
+    - metrics
+    tool_returns: TEXT
+  ports:
+  - trigger
+  - complete
+  - in_problem
+  - in_use_solver
+  - in_lp_code
+  - in_solution
+  - in_narrative
+  - in_metrics
+  - out_report
+- id: write_file
+  type: SOLVE
+  config:
+    tool: write_file
+    backend: kernel
+    arguments:
+    - f'{@out_dir}/staff_scheduling_{@ts_safe}.md'
+    - '@report'
+    code: |
+      import pathlib
+
+      def write_file(file_path: str, content: str, mode: str='w') -> str:
+          """WRITE_FILE(file_path, content [, mode]) — write text to a file.
+
+          mode: 'w' (overwrite, default) or 'a' (append).
+          Creates parent directories automatically.
+          Returns the absolute path written.
+          """
+          p = pathlib.Path(str(file_path).strip())
+          p.parent.mkdir(parents=True, exist_ok=True)
+          m = str(mode).strip().lower()
+          if m not in ('w', 'a'):
+              m = 'w'
+          with p.open(m, encoding='utf-8') as fh:
+              fh.write(str(content))
+          return str(p.resolve())
+      _spl_result = write_file(f'{out_dir}/staff_scheduling_{ts_safe}.md', report)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    - content
+    - mode
+    tool_returns: TEXT
+    tool_builtin: true
+  ports:
+  - trigger
+  - complete
+  - in_out_dir
+  - in_ts_safe
+  - in_report
+  - out_out_path
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_report
+edges:
+- source: time_elapsed_4.complete
+  target: make_metrics.trigger
+  type: triggers
+- source: time_elapsed_4.out_total_s
+  target: make_metrics.in_total_s
+  type: binds
+- source: make_metrics.complete
+  target: format_schedule.trigger
+  type: triggers
+- source: make_metrics.out_metrics
+  target: format_schedule.in_metrics
+  type: binds
+- source: format_schedule.complete
+  target: write_file.trigger
+  type: triggers
+- source: format_schedule.out_report
+  target: write_file.in_report
+  type: binds
+- source: write_file.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: wf_entry.out_use_solver
+  target: make_metrics.in_use_solver
+  type: binds
+- source: wf_entry.out_problem
+  target: format_schedule.in_problem
+  type: binds
+- source: wf_entry.out_use_solver
+  target: format_schedule.in_use_solver
+  type: binds
+- source: wf_entry.out_out_dir
+  target: write_file.in_out_dir
+  type: binds
+- source: wf_entry.out_stage2_s
+  target: make_metrics.in_stage2_s
+  type: binds
+- source: wf_entry.out_lp_code
+  target: format_schedule.in_lp_code
+  type: binds
+- source: wf_entry.out_solution
+  target: format_schedule.in_solution
+  type: binds
+- source: wf_entry.out_ts_safe
+  target: write_file.in_ts_safe
+  type: binds
+- source: wf_entry.out_llm_calls
+  target: make_metrics.in_llm_calls
+  type: binds
+- source: wf_entry.out_stage1_s
+  target: make_metrics.in_stage1_s
+  type: binds
+- source: wf_entry.out_make_metrics_stage2_s
+  target: make_metrics.in_stage2_s
+  type: binds
+- source: wf_entry.out_format_schedule_lp_code
+  target: format_schedule.in_lp_code
+  type: binds
+- source: wf_entry.out_format_schedule_solution
+  target: format_schedule.in_solution
+  type: binds
+- source: wf_entry.out_narrative
+  target: format_schedule.in_narrative
+  type: binds
+- source: wf_entry.out_make_metrics_llm_calls
+  target: make_metrics.in_llm_calls
+  type: binds
+- source: wf_entry.out_make_metrics_stage1_s
+  target: make_metrics.in_stage1_s
+  type: binds
+- source: wf_entry.out_format_schedule_narrative
+  target: format_schedule.in_narrative
+  type: binds
+- source: format_schedule.out_report
+  target: wf_exit.in_report
+  type: binds

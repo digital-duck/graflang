@@ -1,0 +1,100 @@
+version: 1.0-graph
+workflow:
+  name: resource_allocation
+  inputs:
+  - name: problem
+    type: TEXT
+    default: An IT department must select a portfolio of projects for next quarter. Six candidate projects are available. Project P1 costs $120K and requires 3 developer-months, delivering strategic value 8. Project P2 costs $80K and requires 2 developer-months, delivering value 5. Project P3 costs $200K and requires 5 developer-months, delivering value 10. Project P4 costs $150K and requires 3 developer-months, delivering value 9. Project P5 costs $60K and requires 2 developer-months, delivering value 4. Project P6 costs $90K and requires 2 developer-months, delivering value 6. The total budget is $500K and the team has 10 developer-months available. Each project is either fully funded or not funded — no partial investment. Select which projects to fund to maximize total strategic value.
+  - name: use_solver
+    type: TEXT
+    default: 'true'
+  - name: max_tries
+    type: INTEGER
+    default: 3
+  - name: lang
+    type: TEXT
+    default: English
+  - name: out_dir
+    type: TEXT
+    default: ./cookbook/78_constraint_opt/output
+  outputs:
+  - name: report
+    type: TEXT
+resources:
+  parts:
+    resource_allocation_setup: ./resource_allocation_setup/resource_allocation_setup.graph.yaml
+    resource_allocation_solver_arm: ./resource_allocation_solver_arm/resource_allocation_solver_arm.graph.yaml
+    resource_allocation_llm_only: ./resource_allocation_llm_only/resource_allocation_llm_only.graph.yaml
+    resource_allocation_report: ./resource_allocation_report/resource_allocation_report.graph.yaml
+steps:
+- resource_allocation_setup:
+    use: parts.resource_allocation_setup
+    out:
+    - llm_calls
+    - t_start
+    - tries
+    - solution
+    - lp_code
+    - stage2_s
+    - ts_safe
+- solver_on:
+    evaluate: |-
+      @in_use_solver == 'true'
+    in:
+      use_solver: $in.use_solver
+    out: []
+    branch: 1
+- resource_allocation_solver_arm:
+    use: parts.resource_allocation_solver_arm
+    in:
+      max_tries: $in.max_tries
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: resource_allocation_setup
+      tries: resource_allocation_setup.tries
+      solution: resource_allocation_setup.solution
+      lp_code: resource_allocation_setup.lp_code
+    out:
+    - llm_calls
+    - stage1_s
+    - stage2_s
+    - lp_code
+    - solution
+    - narrative
+- resource_allocation_llm_only:
+    use: parts.resource_allocation_llm_only
+    in:
+      problem: $in.problem
+      lang: $in.lang
+      llm_calls: resource_allocation_setup
+    out:
+    - llm_calls
+    - stage1_s
+    - narrative
+    'on': solver_on.fail
+- resource_allocation_report:
+    use: parts.resource_allocation_report
+    in:
+      t_start: resource_allocation_setup.t_start
+      use_solver: $in.use_solver
+      problem: $in.problem
+      out_dir: $in.out_dir
+      stage2_s: resource_allocation_setup.stage2_s
+      lp_code: resource_allocation_setup.lp_code
+      solution: resource_allocation_setup.solution
+      ts_safe: resource_allocation_setup.ts_safe
+      llm_calls: resource_allocation_solver_arm
+      stage1_s: resource_allocation_solver_arm.stage1_s
+      make_metrics_stage2_s: resource_allocation_solver_arm.stage2_s
+      format_portfolio_lp_code: resource_allocation_solver_arm.lp_code
+      format_portfolio_solution: resource_allocation_solver_arm.solution
+      narrative: resource_allocation_solver_arm.narrative
+      make_metrics_llm_calls: resource_allocation_llm_only
+      make_metrics_stage1_s: resource_allocation_llm_only.stage1_s
+      format_portfolio_narrative: resource_allocation_llm_only.narrative
+    out: report
+    'on':
+    - resource_allocation_solver_arm
+    - resource_allocation_llm_only
+- wf_exit:
+    output: resource_allocation_report

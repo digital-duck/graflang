@@ -20,7 +20,9 @@ from ruamel.yaml import YAML
 ROOT = Path(__file__).resolve().parents[1]
 FAMILIES = {"solvers": (ROOT / "cookbook_solvers", ROOT / "cookbook_solvers_v2"), "pocketflow": (ROOT / "cookbook_pocketflow", ROOT / "cookbook_pocketflow_v2")}
 SRC = DST = None
-SKIP = shutil.ignore_patterns("output", ".graf", "__pycache__", "prettify_recipes.sh")
+BY_IDS = False         # group members are the original (lifted) ids, whatever the steps are called now
+MOVES = {}            # auto name -> the name chosen by hand (mv:old=new on the command line)
+SKIP = shutil.ignore_patterns("output", ".graf", ".grafr", "logs-spl", "cookbook", "__pycache__", "prettify_recipes.sh")    # run results and logs are not part of a recipe
 yaml = YAML()
 yaml.width = 10 ** 9           # never wrap a long quoted string: a wrapped one can lose its line ends
 yaml.preserve_quotes = True
@@ -69,7 +71,8 @@ def new_names(steps):
             names[name] = unique("set_" + str(step.get("out") or step.get("target_key") or name))
         elif k == "evaluate":
             expr = str(step["evaluate"])
-            names[name] = unique("solver_on" if "'true'" in expr else "solver_off" if "'false'" in expr else "gate")
+            solver = "solver" in expr
+            names[name] = unique("solver_on" if solver and "'true'" in expr else "solver_off" if solver and "'false'" in expr else "gate")
         elif k == "generate":
             names[name] = unique(str(step.get("function", name)).replace("_prompt", "").lstrip("_"))
         elif k == "assert":
@@ -112,12 +115,32 @@ def rename_all(data, names):
             edge[end] = rename_refs(edge[end], names)
 
 
+def pseudo_step(node):
+    """A long-form node as the compact form would spell it, for naming."""
+    cfg = node.get("config") or {}
+    t = node["type"]
+    if t == "EVALUATE":
+        return {"evaluate": str(cfg.get("condition") or cfg.get("expression") or "")}
+    if t == "GENERATE":
+        return {"generate": "", "function": cfg.get("function") or node["id"]}
+    if t == "ASSERT":
+        return {"assert": "", "in": {}}
+    if t == "OUTPUT":
+        return {"output": []}
+    if t == "SOLVE":
+        return {"node": "SOLVE", "tool": cfg.get("tool") or node["id"]}
+    if t == "CONTEXT":
+        return {"node": "CONTEXT", "out": cfg.get("target_key") or node["id"]}
+    return {"node": t}
+
+
 def prepare_graph(path):
     """Compact one graph file in place and name its steps; returns (the data, the steps, the new names)."""
     graf("compact", path, "-o", path)
     data = yaml.load(path.read_text())
     steps = [(list(s)[0], list(s.values())[0]) for s in data["steps"]]
-    names = new_names(steps)
+    names = new_names(steps + [(n["id"], pseudo_step(n)) for n in data.get("nodes", []) or []])     # the long-form nodes are named the same way
+    names = {old: MOVES.get(new, new) for old, new in names.items()}
     rename_all(data, names)
     with path.open("w") as f:
         yaml.dump(data, f)
@@ -192,9 +215,16 @@ def port(family, name, groups=None):
                     raise
                 print(f"  {stem}: left flat ({e})")
                 chosen = []
+        if BY_IDS:                                                    # the groups name the original ids: the same spec serves graphs of one shape
+            chosen = [(part, [names.get(n, n) for n in nodes]) for part, nodes in chosen]
         for part, nodes in chosen:
-            graf("group", path, "--nodes", ",".join(nodes), "--name", f"{stem}_{part}" if many else part)
-    for f in [*graphs, *dst.glob("*/*.graph.yaml")]:
+            if "/" in part:                                       # grouping inside a part: `rung/stage`
+                inner, new = part.split("/", 1)
+                inner = f"{stem}_{inner}" if many else inner
+                graf("group", dst / inner / f"{inner}.graph.yaml", "--nodes", ",".join(nodes), "--name", new)
+            else:
+                graf("group", path, "--nodes", ",".join(nodes), "--name", f"{stem}_{part}" if many else part)
+    for f in [*graphs, *sorted(dst.glob("*/*.graph.yaml")), *sorted(dst.glob("*/*/*.graph.yaml"))]:
         if f not in graphs:
             try:
                 graf("compact", f, "-o", f)
@@ -222,7 +252,7 @@ def listing(family, name):
         print(f"##### {path.name}")
         for old, step in steps:
             extra = {k: step[k] for k in ("in", "on", "evaluate", "fork", "join", "loop") if k in step}
-            print(f"{names[old]:28} {kind(step):9} {str(extra)[:150]}")
+            print(f"{names[old]:28} {kind(step):9} (was {old}) {str(extra)[:120]}")
         for n in data.get("nodes", []) or []:
             print(f"  [long form] {n['id']:22} {n['type']}")
     shutil.rmtree(scratch.parent, ignore_errors=True)
@@ -235,6 +265,13 @@ if __name__ == "__main__":
     if "--list" in rest:
         listing(family, rest[0])
         sys.exit()
+    if "--ids" in rest:
+        BY_IDS = True
+        rest = [a for a in rest if a != "--ids"]
+    for a in [a for a in rest if a.startswith("mv:")]:
+        old, _, new = a[3:].partition("=")
+        MOVES[old] = new
+    rest = [a for a in rest if not a.startswith("mv:")]
     explicit = [a for a in rest if "=" in a]
     for n in [a for a in rest if "=" not in a]:
         groups = None

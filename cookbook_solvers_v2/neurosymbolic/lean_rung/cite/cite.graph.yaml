@@ -1,0 +1,229 @@
+version: 1.0-graph
+workflow:
+  name: cite
+  inputs:
+  - name: lean_stmt
+    type: TEXT
+  outputs:
+  - name: proof_ok_lc
+    type: TEXT
+  - name: lower_proof_ok_proof_ok_lc
+    type: TEXT
+  - name: tactics
+    type: TEXT
+  - name: lean_feedback
+    type: TEXT
+  - name: proof
+    type: TEXT
+  - name: check_code
+    type: TEXT
+  - name: proof_ok
+    type: TEXT
+  - name: citation
+    type: TEXT
+  - name: find_citation_citation
+    type: TEXT
+steps:
+- set_proof_ok_lc:
+    node: CONTEXT
+    out: proof_ok_lc
+    action: set
+    expression: "'init'"
+- set_find_code:
+    node: CONTEXT
+    in:
+      lean_stmt: $in.lean_stmt
+    out: find_code
+    action: set
+    expression: f"print(_spl_lean.find_citation(r'''{@in_lean_stmt}'''))"
+- find_citation:
+    node: SOLVE
+    in:
+      find_code: set_find_code
+    out: citation
+    tool: run_python
+    backend: kernel
+    arguments:
+    - '@find_code'
+    code: |
+      def run_python(code: str, timeout: str='30') -> str:
+          """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+          import contextlib, io
+          out = io.StringIO()
+          try:
+              with contextlib.redirect_stdout(out):
+                  exec(str(code), globals())
+              return out.getvalue().strip()
+          except Exception as e:
+              return f'Error: {type(e).__name__}: {e}'
+      _spl_result = run_python(find_code)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - code
+    - timeout
+    tool_returns: TEXT
+    tool_builtin: true
+- lower_citation:
+    node: SOLVE
+    in:
+      citation: find_citation
+    out: citation_lc
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@citation'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(citation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- no_citation:
+    evaluate: "@in_citation_lc == 'none'"
+    in:
+      citation_lc: lower_citation
+    out: []
+    branch: 1
+- set_citation_2:
+    node: CONTEXT
+    out: citation
+    action: set
+    expression: "''"
+- set_citation_text:
+    node: CONTEXT
+    in:
+      citation: find_citation
+    out: tactics
+    on: no_citation.fail
+    action: set
+    expression: '@in_citation'
+- make_theorem:
+    node: SOLVE
+    in:
+      lean_stmt: $in.lean_stmt
+      citation: find_citation
+    out: proof
+    tool: make_theorem
+    backend: kernel
+    arguments:
+    - '@lean_stmt'
+    - '@citation'
+    code: |
+      def make_theorem(stmt: str, tactics: str) -> str:
+          """Assemble the final theorem deterministically: the verified statement
+          is spliced in verbatim — the LLM only ever contributes the tactic block,
+          so it can never prove a subtly different statement (recipe 67's lesson)."""
+          body = tactics.strip()
+          if body.startswith(":="):
+              body = body[2:].strip()
+          if body == "by" or body.startswith(("by\n", "by ")):
+              body = body[2:].strip()
+          return f"theorem spl_claim : {stmt} := by\n  {body}"
+      _spl_result = make_theorem(lean_stmt, citation)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - stmt
+    - tactics
+    tool_returns: TEXT
+- set_check_code:
+    node: CONTEXT
+    in:
+      proof: make_theorem
+    out: check_code
+    action: set
+    expression: f"print(_spl_lean.check(r'''{@in_proof}''')['ok'])"
+- check_proof:
+    node: SOLVE
+    in:
+      check_code: set_check_code
+    out: proof_ok
+    tool: run_python
+    backend: kernel
+    arguments:
+    - '@check_code'
+    code: |
+      def run_python(code: str, timeout: str='30') -> str:
+          """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+          import contextlib, io
+          out = io.StringIO()
+          try:
+              with contextlib.redirect_stdout(out):
+                  exec(str(code), globals())
+              return out.getvalue().strip()
+          except Exception as e:
+              return f'Error: {type(e).__name__}: {e}'
+      _spl_result = run_python(check_code)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - code
+    - timeout
+    tool_returns: TEXT
+    tool_builtin: true
+- read_proof_result:
+    node: SOLVE
+    out: lean_feedback
+    tool: run_python
+    backend: kernel
+    arguments:
+    - "'print(_spl_lean.feedback)'"
+    code: |
+      def run_python(code: str, timeout: str='30') -> str:
+          """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+          import contextlib, io
+          out = io.StringIO()
+          try:
+              with contextlib.redirect_stdout(out):
+                  exec(str(code), globals())
+              return out.getvalue().strip()
+          except Exception as e:
+              return f'Error: {type(e).__name__}: {e}'
+      _spl_result = run_python('print(_spl_lean.feedback)')
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - code
+    - timeout
+    tool_returns: TEXT
+    tool_builtin: true
+- lower_proof_ok:
+    node: SOLVE
+    in:
+      proof_ok: check_proof
+    out: proof_ok_lc
+    tool: lower
+    backend: kernel
+    arguments:
+    - '@proof_ok'
+    code: |
+      def lower(value: str) -> str:
+          """LOWER(value) — convert to lowercase."""
+          return str(value).lower()
+      _spl_result = lower(proof_ok)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - value
+    tool_returns: TEXT
+    tool_builtin: true
+- wf_exit:
+    output:
+      proof_ok_lc: set_proof_ok_lc
+      lower_proof_ok_proof_ok_lc: lower_proof_ok
+      tactics: set_citation_text
+      lean_feedback: read_proof_result
+      proof: make_theorem
+      check_code: set_check_code
+      proof_ok: check_proof
+      citation: set_citation_2
+      find_citation_citation: find_citation
+    on:
+    - lower_proof_ok
+    - set_citation_2

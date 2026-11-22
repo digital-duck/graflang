@@ -1,0 +1,693 @@
+version: 1.0-graph
+workflow:
+  name: prove
+  inputs:
+  - name: max_tries
+    type: INT
+  - name: lean_stmt
+    type: TEXT
+  - name: lean_feedback
+    type: TEXT
+  - name: proof
+    type: TEXT
+  - name: check_code
+    type: TEXT
+  - name: proof_ok_lc
+    type: TEXT
+  - name: prove_loop_proof_ok_lc
+    type: TEXT
+  - name: prove_loop_proof
+    type: TEXT
+  - name: prove_loop_check_code
+    type: TEXT
+  - name: proof_ok
+    type: TEXT
+  outputs:
+  - name: badge
+    type: TEXT
+  - name: proof
+    type: TEXT
+  - name: prove_loop_proof
+    type: TEXT
+steps:
+- set_tries_2:
+    node: CONTEXT
+    out: tries
+    action: set
+    expression: '0'
+- set_badge_3:
+    node: CONTEXT
+    out: badge
+    on: []
+    action: set
+    expression: "'machine_proved'"
+- set_proof_2:
+    node: CONTEXT
+    out: proof
+    on: []
+    action: set
+    expression: "''"
+nodes:
+- id: prove_loop
+  type: LOOP
+  config:
+    condition: latest(@in_tries, @tries) < @in_max_tries
+    state:
+      tries:
+        from:
+        - set_18.out_tries
+        - set_20.out_tries
+        - set_22.out_tries
+      tactics_raw:
+        from:
+        - gen_4.out_tactics_raw
+        - gen_5.out_tactics_raw
+      tactics:
+        from:
+        - tool_15.out_tactics
+        - tool_20.out_tactics
+      proof:
+        from:
+        - tool_16.out_proof
+        - tool_21.out_proof
+      check_code:
+        from:
+        - set_19.out_check_code
+        - set_21.out_check_code
+      proof_ok:
+        from:
+        - tool_17.out_proof_ok
+        - tool_22.out_proof_ok
+      lean_feedback:
+        from:
+        - tool_18.out_lean_feedback
+        - tool_23.out_lean_feedback
+      proof_ok_lc:
+        from:
+        - tool_19.out_proof_ok_lc
+        - tool_24.out_proof_ok_lc
+    subgraph:
+      nodes:
+      - id: eval_5
+        type: EVALUATE
+        config:
+          condition: "@in_proof_ok_lc == 'true'"
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_proof_ok_lc
+      - id: set_18
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      - id: eval_6
+        type: EVALUATE
+        config:
+          condition: "@in_proof_ok_lc == 'init'"
+          branch: 2
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_proof_ok_lc
+      - id: gen_4
+        type: GENERATE
+        config:
+          function: write_tactics
+          params:
+          - lean_stmt
+          prompt_inline: |-
+            Write a Lean 4 tactic proof for this proposition:
+
+              {{in_lean_stmt}}
+
+            Rules:
+            - Output ONLY the tactic script — what goes after `:= by`. No fences,
+              no commentary, no restatement of the proposition.
+            - CORE Lean 4 only — mathlib is NOT imported: ring, linarith, nlinarith,
+              norm_num, positivity, aesop will all fail with "unknown tactic".
+            - Stick to: intro, rfl, simp, omega, decide, induction, cases, calc,
+              exact, and core Nat/Int/List lemmas (e.g. Nat.add_comm, Nat.le_self_pow).
+            - Example output for `∀ n : Nat, n + 0 = n`:  intro n; rfl
+          arguments:
+          - '@lean_stmt'
+        ports:
+        - trigger
+        - complete
+        - in_lean_stmt
+        - out_tactics_raw
+      - id: tool_15
+        type: SOLVE
+        config:
+          tool: strip_fences
+          backend: kernel
+          arguments:
+          - '@tactics_raw'
+          code: |
+            def strip_fences(text: str) -> str:
+                """Remove markdown code fences and surrounding noise from LLM output."""
+                s = text.strip()
+                if s.startswith("```"):
+                    lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]
+                    s = "\n".join(lines).strip()
+                # one-line statements sometimes arrive with a trailing period
+                return s.rstrip(".").strip().replace("'''", "")
+            _spl_result = strip_fences(tactics_raw)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_tactics_raw
+        - out_tactics
+      - id: tool_16
+        type: SOLVE
+        config:
+          tool: make_theorem
+          backend: kernel
+          arguments:
+          - '@lean_stmt'
+          - '@tactics'
+          code: |
+            def make_theorem(stmt: str, tactics: str) -> str:
+                """Assemble the final theorem deterministically: the verified statement
+                is spliced in verbatim — the LLM only ever contributes the tactic block,
+                so it can never prove a subtly different statement."""
+                body = tactics.strip()
+                if body.startswith(":="):
+                    body = body[2:].strip()
+                if body == "by" or body.startswith(("by\n", "by ")):
+                    body = body[2:].strip()
+                return f"theorem spl_claim : {stmt} := by\n  {body}"
+            _spl_result = make_theorem(lean_stmt, tactics)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - stmt
+          - tactics
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_lean_stmt
+        - in_tactics
+        - out_proof
+      - id: set_19
+        type: CONTEXT
+        config:
+          action: set
+          expression: f"print(_spl_lean.check(r'''{@in_proof}''')['ok'])"
+        ports:
+        - trigger
+        - complete
+        - in_proof
+        - out_check_code
+      - id: tool_17
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - '@check_code'
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python(check_code)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_check_code
+        - out_proof_ok
+      - id: tool_18
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - "'print(_spl_lean.feedback)'"
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python('print(_spl_lean.feedback)')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - out_lean_feedback
+      - id: tool_19
+        type: SOLVE
+        config:
+          tool: lower
+          backend: kernel
+          arguments:
+          - '@proof_ok'
+          code: |
+            def lower(value: str) -> str:
+                """LOWER(value) — convert to lowercase."""
+                return str(value).lower()
+            _spl_result = lower(proof_ok)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_proof_ok
+        - out_proof_ok_lc
+      - id: set_20
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      - id: gen_5
+        type: GENERATE
+        config:
+          function: repair_tactics
+          params:
+          - lean_stmt
+          - tactics
+          - feedback
+          prompt_inline: |-
+            This Lean 4 tactic proof failed.
+
+            Proposition: {{in_lean_stmt}}
+            Failed tactic script: {{in_tactics}}
+            Lean's diagnostics:
+            {{in_lean_feedback}}
+
+            Output ONLY a corrected tactic script (what goes after `:= by`) — no
+            fences, no explanation, nothing after the final tactic.
+            CORE Lean 4 only — mathlib is NOT imported: ring, linarith, nlinarith,
+            norm_num, positivity, aesop will all fail with "unknown tactic".
+            Stick to: intro, rfl, simp, omega, decide, induction, cases, calc,
+            exact, and core Nat/Int/List lemmas (e.g. Nat.add_comm, Nat.le_self_pow).
+          arguments:
+          - '@lean_stmt'
+          - '@tactics'
+          - '@lean_feedback'
+        ports:
+        - trigger
+        - complete
+        - in_lean_stmt
+        - in_tactics
+        - in_lean_feedback
+        - out_tactics_raw
+      - id: tool_20
+        type: SOLVE
+        config:
+          tool: strip_fences
+          backend: kernel
+          arguments:
+          - '@tactics_raw'
+          code: |
+            def strip_fences(text: str) -> str:
+                """Remove markdown code fences and surrounding noise from LLM output."""
+                s = text.strip()
+                if s.startswith("```"):
+                    lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]
+                    s = "\n".join(lines).strip()
+                # one-line statements sometimes arrive with a trailing period
+                return s.rstrip(".").strip().replace("'''", "")
+            _spl_result = strip_fences(tactics_raw)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - text
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_tactics_raw
+        - out_tactics
+      - id: tool_21
+        type: SOLVE
+        config:
+          tool: make_theorem
+          backend: kernel
+          arguments:
+          - '@lean_stmt'
+          - '@tactics'
+          code: |
+            def make_theorem(stmt: str, tactics: str) -> str:
+                """Assemble the final theorem deterministically: the verified statement
+                is spliced in verbatim — the LLM only ever contributes the tactic block,
+                so it can never prove a subtly different statement."""
+                body = tactics.strip()
+                if body.startswith(":="):
+                    body = body[2:].strip()
+                if body == "by" or body.startswith(("by\n", "by ")):
+                    body = body[2:].strip()
+                return f"theorem spl_claim : {stmt} := by\n  {body}"
+            _spl_result = make_theorem(lean_stmt, tactics)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - stmt
+          - tactics
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_lean_stmt
+        - in_tactics
+        - out_proof
+      - id: set_21
+        type: CONTEXT
+        config:
+          action: set
+          expression: f"print(_spl_lean.check(r'''{@in_proof}''')['ok'])"
+        ports:
+        - trigger
+        - complete
+        - in_proof
+        - out_check_code
+      - id: tool_22
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - '@check_code'
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python(check_code)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_check_code
+        - out_proof_ok
+      - id: tool_23
+        type: SOLVE
+        config:
+          tool: run_python
+          backend: kernel
+          arguments:
+          - "'print(_spl_lean.feedback)'"
+          code: |
+            def run_python(code: str, timeout: str='30') -> str:
+                """Run Python code in this kernel session (state is shared with the other kernel nodes of the run) and return what it prints."""
+                import contextlib, io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        exec(str(code), globals())
+                    return out.getvalue().strip()
+                except Exception as e:
+                    return f'Error: {type(e).__name__}: {e}'
+            _spl_result = run_python('print(_spl_lean.feedback)')
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - code
+          - timeout
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - out_lean_feedback
+      - id: tool_24
+        type: SOLVE
+        config:
+          tool: lower
+          backend: kernel
+          arguments:
+          - '@proof_ok'
+          code: |
+            def lower(value: str) -> str:
+                """LOWER(value) — convert to lowercase."""
+                return str(value).lower()
+            _spl_result = lower(proof_ok)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - value
+          tool_returns: TEXT
+          tool_builtin: true
+        ports:
+        - trigger
+        - complete
+        - in_proof_ok
+        - out_proof_ok_lc
+      - id: set_22
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_tries + 1'
+        ports:
+        - trigger
+        - complete
+        - in_tries
+        - out_tries
+      edges:
+      - source: eval_5.pass
+        target: set_18.trigger
+        type: triggers
+      - source: eval_5.fail
+        target: eval_6.trigger
+        type: triggers
+      - source: eval_6.pass
+        target: gen_4.trigger
+        type: triggers
+      - source: gen_4.complete
+        target: tool_15.trigger
+        type: triggers
+      - source: gen_4.out_tactics_raw
+        target: tool_15.in_tactics_raw
+        type: binds
+      - source: tool_15.complete
+        target: tool_16.trigger
+        type: triggers
+      - source: tool_15.out_tactics
+        target: tool_16.in_tactics
+        type: binds
+      - source: tool_16.complete
+        target: set_19.trigger
+        type: triggers
+      - source: tool_16.out_proof
+        target: set_19.in_proof
+        type: binds
+      - source: set_19.complete
+        target: tool_17.trigger
+        type: triggers
+      - source: set_19.out_check_code
+        target: tool_17.in_check_code
+        type: binds
+      - source: tool_17.complete
+        target: tool_18.trigger
+        type: triggers
+      - source: tool_18.complete
+        target: tool_19.trigger
+        type: triggers
+      - source: tool_17.out_proof_ok
+        target: tool_19.in_proof_ok
+        type: binds
+      - source: tool_19.complete
+        target: set_20.trigger
+        type: triggers
+      - source: eval_6.fail
+        target: gen_5.trigger
+        type: triggers
+      - source: gen_5.complete
+        target: tool_20.trigger
+        type: triggers
+      - source: gen_5.out_tactics_raw
+        target: tool_20.in_tactics_raw
+        type: binds
+      - source: tool_20.complete
+        target: tool_21.trigger
+        type: triggers
+      - source: tool_20.out_tactics
+        target: tool_21.in_tactics
+        type: binds
+      - source: tool_21.complete
+        target: set_21.trigger
+        type: triggers
+      - source: tool_21.out_proof
+        target: set_21.in_proof
+        type: binds
+      - source: set_21.complete
+        target: tool_22.trigger
+        type: triggers
+      - source: set_21.out_check_code
+        target: tool_22.in_check_code
+        type: binds
+      - source: tool_22.complete
+        target: tool_23.trigger
+        type: triggers
+      - source: tool_23.complete
+        target: tool_24.trigger
+        type: triggers
+      - source: tool_22.out_proof_ok
+        target: tool_24.in_proof_ok
+        type: binds
+      - source: tool_24.complete
+        target: set_22.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_proof_ok_lc
+  - in_tries
+  - in_lean_stmt
+  - in_tactics
+  - in_lean_feedback
+  - in_proof
+  - in_check_code
+  - in_proof_ok
+  - in_max_tries
+  - out_tries
+  - out_tactics_raw
+  - out_tactics
+  - out_proof
+  - out_check_code
+  - out_proof_ok
+  - out_lean_feedback
+  - out_proof_ok_lc
+- id: proof_ok
+  type: EVALUATE
+  config:
+    condition: "@in_proof_ok_lc == 'true'"
+    branch: 1
+  ports:
+  - trigger
+  - pass
+  - fail
+  - in_proof_ok_lc
+- id: wf_exit
+  type: OUTPUT
+  ports:
+  - trigger
+  - exit
+  - in_badge
+  - in_proof
+  - in_prove_loop_proof
+edges:
+- source: set_tries_2.complete
+  target: prove_loop.trigger
+  type: triggers
+- source: set_tries_2.out_tries
+  target: prove_loop.in_tries
+  type: binds
+- source: prove_loop.exit
+  target: proof_ok.trigger
+  type: triggers
+- source: prove_loop.out_proof_ok_lc
+  target: proof_ok.in_proof_ok_lc
+  type: binds
+- source: proof_ok.pass
+  target: set_badge_3.trigger
+  type: triggers
+- source: proof_ok.fail
+  target: set_proof_2.trigger
+  type: triggers
+- source: set_badge_3.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: set_proof_2.complete
+  target: wf_exit.trigger
+  type: triggers
+- source: wf_entry.out_max_tries
+  target: prove_loop.in_max_tries
+  type: binds
+- source: wf_entry.out_lean_stmt
+  target: prove_loop.in_lean_stmt
+  type: binds
+- source: wf_entry.out_lean_feedback
+  target: prove_loop.in_lean_feedback
+  type: binds
+- source: wf_entry.out_proof
+  target: prove_loop.in_proof
+  type: binds
+- source: wf_entry.out_check_code
+  target: prove_loop.in_check_code
+  type: binds
+- source: wf_entry.out_proof_ok_lc
+  target: prove_loop.in_proof_ok_lc
+  type: binds
+- source: wf_entry.out_prove_loop_proof_ok_lc
+  target: prove_loop.in_proof_ok_lc
+  type: binds
+- source: wf_entry.out_prove_loop_proof
+  target: prove_loop.in_proof
+  type: binds
+- source: wf_entry.out_prove_loop_check_code
+  target: prove_loop.in_check_code
+  type: binds
+- source: wf_entry.out_proof_ok
+  target: prove_loop.in_proof_ok
+  type: binds
+- source: set_badge_3.out_badge
+  target: wf_exit.in_badge
+  type: binds
+- source: set_proof_2.out_proof
+  target: wf_exit.in_proof
+  type: binds
+- source: prove_loop.out_proof
+  target: wf_exit.in_prove_loop_proof
+  type: binds
