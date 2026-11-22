@@ -20,10 +20,9 @@ From the repo root:
 
 ```bash
 # three LLMs, as the graph names them: draft on ollama:gemma3, critique on haiku, refine on sonnet (needs a running Ollama with gemma3)
-graf run cookbook/self_refine/self_refine.graph.yaml --param topic="why ducks float"
-
-# the same, with a default topic and a budget of 5 LLM calls (self_refine.bind.yaml)
-graf run cookbook/self_refine/self_refine.graph.yaml --bind cookbook/self_refine/self_refine.bind.yaml
+graf run cookbook/self_refine/self_refine.graph.yaml \
+    --param topic="why ducks float" \
+    --bind cookbook/self_refine/self_refine.bind.yaml
 ```
 
 Each node's `llm:` (`adapter[:model]`, the same spec as `--llm`) beats `--llm`, so `--llm` only matters for a node that names none. To run all three on one model, delete the `llm:` lines from the graph, then `graf run ... --llm claude_cli:claude-haiku-5-5` (or `--llm ollama:gemma3`).

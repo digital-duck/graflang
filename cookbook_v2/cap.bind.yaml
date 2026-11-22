@@ -1,3 +1,0 @@
-# The call cap for a real run of any recipe in this folder (the model calls are billed): graf run <recipe> --bind cookbook_v2/cap.bind.yaml --llm claude_cli:claude-haiku-5-5 ...
-# Raise it for a bigger job (see "Model calls" in each recipe's readme, or `graf validate`).
-limits: {max_llm_calls: 20}
