@@ -1,0 +1,20 @@
+# self_refine: draft an essay, critique it, rewrite it using the critique. The smallest recipe: three model calls in a line, each on its own model.
+#   graf run cookbook_v2/self_refine/self_refine.graph.yaml --param topic="why ducks float" --bind cookbook_v2/self_refine/self_refine.bind.yaml
+version: "1.0-graph"
+workflow:
+  name: self_refine
+  description: Drafts an essay on a topic, has a second model critique it, and has a third rewrite it using the critique.
+  inputs:
+    - {name: topic, type: TEXT}
+  outputs:
+    - {name: essay, type: TEXT}
+resources:
+  prompts:
+    draft: ./prompts/draft.md
+    critique: ./prompts/critique.md
+    refine: ./prompts/refine.md
+steps:
+  - draft: {generate: prompts.draft, in: {topic: $in.topic}, out: essay, llm: "ollama:gemma3", label: Draft the essay}
+  - critique: {generate: prompts.critique, in: {essay: draft.essay}, out: feedback, llm: "claude_cli:claude-haiku-5-5", label: Critique it}
+  - refine: {generate: prompts.refine, in: {essay: draft.essay, feedback: critique.feedback}, out: essay, llm: "claude_cli:claude-sonnet-5-5", label: Rewrite it using the critique}
+  - done: {output: refine.essay}
