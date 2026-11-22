@@ -558,6 +558,32 @@ edges:
   <aside class="notes">Counts come from the catalog: 28 core, 42 PocketFlow, 55 solvers. "Validated" means the owner ran it and read the output; "ran" means it completed, nothing more. The PocketFlow and solver sets are lifted from SPL.py with spl3 util spl2graph, no model involved. Six PocketFlow recipes still do not complete: two wait for keyboard input, one needs a real Node project, and two (tao, thinking) are stopped by the model's safeguards.</aside>
 </section>
 
+<!-- Demo-3 ------------------------------------------------------------------------------------------------------- -->
+<section class="slide">
+  <h2>Demo-3: problem-solver</h2>
+  <div class="demo"><b>Live</b> &nbsp;Submit problem in plain-text; Get answer via cataloged-solver or LLM model</div>
+  <div class="cols">
+    <div class="stack">
+<pre>problem
+  <span class="c">&darr; model</span>   understand &rarr; choose one of 5 solvers, or none
+  <span class="c">&darr; model + program check</span>   bind the inputs (one repair)
+  <span class="c">&darr; MUTATE (policy)</span>   add the solver to the graph
+  <span class="c">&darr; exact</span>   SymPy &middot; Z3 &middot; OR-Tools &middot; cvxpy &middot; SQLite
+report: SOLVED BY &lt;solver&gt;  <span class="c">or</span>  UNVERIFIED</pre>
+<pre><span class="k">graf</span> run problem_solver.graph.yaml \
+     --bind problem_solver.bind.yaml \
+     --param problem=<span class="s">"..."</span></pre>
+      <div class="card" style="font-size:.62em"><b>Real run (haiku, capped):</b> an employees question chose <code>sql_verifier</code>, wrote the SQL and an independent reference query; the rows matched (6 calls). A poem chose <code>none</code>, so a model answered alone: UNVERIFIED.</div>
+    </div>
+    <ul style="font-size:.82em">
+      <li><b>Recipes as parts</b>: a whole recipe is one node of another graph, with named parts, interfaces, error exits and cost limits. Here each solver is a recipe picked from a catalogue.</li>
+      <li><b>Deterministic</b>: a catalogue solver computes and checks. A program validates what the model proposed and writes the graph change, so the model never writes wiring.</li>
+      <li><b>Probabilistic</b>: the model reads, chooses and extracts the inputs. As fallback and error handling it answers alone (a refused input goes back once; no solver, no binding, or a refusal ends in an answer marked <b>UNVERIFIED</b>).</li>
+    </ul>
+  </div>
+  <aside class="notes">cookbook_v2/problem_solver. The same mechanism as the assembler recipe, scaled to the solver catalogue: choose, bind, MUTATE add_part under parts_policy, report. The five solvers are recipes of cookbook_solvers_v2; some are demos on a fixed model (sql_verifier knows one sample table). Honest limits: the model can still pick the wrong solver, so the report shows the reason; the fallback is labelled UNVERIFIED, never presented as checked. Cap the run (16 calls in the bind file).</aside>
+</section>
+
 <!-- 18 ----------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
   <h2>Compile to target language</h2>
@@ -636,7 +662,7 @@ edges:
 
 <!-- 21 ----------------------------------------------------------------------------------------------------------- -->
 <section class="slide">
-  <h2>What next: ideas and plan</h2>
+  <h2>What next: planned features</h2>
   <div class="cols">
     <ul>
       <li><b>Safer self-editing agents:</b> a model reshapes its own workflow while the guard, budget and policy stay out of its reach (the experiment is not done).</li>
@@ -652,9 +678,9 @@ edges:
   <div class="card" style="font-size:.78em;margin-top:.3em">
     <b>Next:</b>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3%;margin-top:.2em">
-      <div><b>DECISION</b>: a person as a node; the graph waits for an answer and keeps going.</div>
-      <div><b>Recipes as parts</b>: use a whole recipe as one node of another graph (built: named parts, interfaces, error exits, cost limits).</div>
-      <div><b>Model-assembled graphs</b>: a model picks parts from a catalogue, under the same guards.</div>
+      <div><b>Decision</b>: the graph waits for review /approval by human and keeps going.</div>
+      <div><b>Benchmark solvers</b>: a test set of problems with known right solvers, to measure how often the model picks and binds correctly.</div>
+      <div><b>Solver catalogue at scale</b>: shortlist the few right solvers out of 47 by meaning (recipe search), then choose and bind under the same checks.</div>
     </div>
   </div>
   <aside class="notes">Label this as speculation out loud. The one piece of evidence that points the right way: migrating 47 solver recipes, the new check found prompts that went to the model unfilled in four recipes that a placeholder-model run had passed.</aside>

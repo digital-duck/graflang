@@ -1,11 +1,12 @@
-# Layers: a logical graph that compiles to a flat one (DRAFT, nothing here is implemented)
+# Layers: a logical graph that compiles to a flat one (built; section 9 says what and where)
 
-Date: 2026-11-21
+Date: 2026-11-21, updated 2026-11-22
 Related: `graflang-semantics.md`
 
-Status: proposal for discussion. Where it says "today" it describes the code as it is; where it says "proposed" it is open for change. When a
-part of this is accepted, its rules move to `graflang-semantics.md` (with tests in `tests/test_semantics.py`) and the gap table in
-`readme-design.md` gets a numbered item.
+Status: built, except recursion (section 7). Sections 1 to 6 are implemented and the cookbook is rewritten (section 10); section 9 lists each
+item and the commit. The rules that were accepted live in `graflang-semantics.md` (3a named subgraphs, 3d the interface of a composite, R10a state,
+R15 input map; tests in `tests/test_semantics.py`). Read the sentences below that say "proposed" or "today" as the design record: where the code and
+this text differ, the code and `graflang-semantics.md` win. The gap table in `readme-design.md` is updated once the refactoring is tested and finished.
 
 ## 1. Problem
 
@@ -81,32 +82,18 @@ learn about levels. Do it after sections 3 to 6 are in, and keep `LOOP` (iterati
 
 ## 8. Open questions
 
-1. (Decided: the neighbour rule is an error, no compatibility mode.) Scan of `cookbook/` (36 graphs, 566 top-level edges, 3 graphs using
-   parts with 8 uses, 11 LOOP bodies): no edge reaches into a part, and no LOOP-body edge names a node outside its body. The real
-   cross-level coupling is implicit: 77 `in_*` ports in LOOP bodies are unbound and read the loop's input or state by name (R7, R10),
-   e.g. `code_pipeline`, `code_parts`, `agent_notes`, `pocketflow/debate`. The redesign drops that behaviour: a body gets a key only
-   through its interface or `inherits`. GraphLang has no user base yet, so there is no migration path and no compatibility flag; the
-   cookbook is rewritten (section 10).
-2. (Decided: subfolder, no inline body.) Left to settle: the folder layout (`<recipe>/<name>/<name>.graph.yaml` plus its own prompts).
-3. (Decided 2026-11-21: build it.) `inherits` is a convenience, not needed for isolation; the part's input declaration owns the type and default (row 13a).
-4. (Answered by the code.) Every node the part's INPUT node triggers starts when the use is triggered (`parts._expand_use`, `starts`); a part's way out is `complete` plus its declared error exits.
-5. (Decided 2026-11-21: no.) A MUTATE edits its own level; a delta naming a node of the level above is refused (pinned by `test_a_mutate_in_a_loop_body_cannot_touch_a_node_of_the_level_above`).
-
-6. **Loop-carried state (corrected after measuring).** An earlier version of this note counted 77 "implicit cross-level reads" in LOOP
-   bodies. Classified by what each unbound body `in_X` resolves to, they are: 52 the LOOP's own `in_X` port (already an explicit
-   interface: the loop declares the port and an edge feeds it), 19 a loop-state variable (an `outputs: {X: {from: ...}}` entry), 2 the
-   iteration counter, and 4 in BATCH (3 its `item_var`, 1 its own `in_`). And `graf validate` already refuses a body `in_X` that is
-   none of these (`topology.py` ~181-184, `_check_scope`: boundary ports, loop vars). So the neighbour/scope rule already holds for
-   loops, statically checked; the cookbook does not need a rewrite for it.
-   What is still loose: (a) loop state is declared as a side effect of `outputs: {from}`, not as state, so a reader of the body cannot
-   see which names carry over; (b) `collect` and `fired` outputs are also readable by name inside the body, which nobody intends; (c) the
-   runtime fallback (`_inputs_for`, ~line 470) resolves by name in three places at once. Options: keep `outputs.from` and fix (b) only;
-   or add `state:` (name -> initial, type) as the explicit declaration, with `outputs: {from}` reduced to reading a state variable out
-   of the loop. Decision pending; the owner chose `state:` before these numbers were known.
+| Q-Id | Status | Question | Description |
+|---|---|---|---|
+| Q1 | Decided | Is a reference across levels an error, or is a compatibility mode kept? | The neighbour rule is an error, with no compatibility mode. Scan of `cookbook/` (36 graphs, 566 top-level edges, 3 graphs using parts with 8 uses, 11 LOOP bodies): no edge reaches into a part, and no LOOP-body edge names a node outside its body. The real cross-level coupling is implicit: 77 `in_*` ports in LOOP bodies are unbound and read the loop's input or state by name (R7, R10), e.g. `code_pipeline`, `code_parts`, `agent_notes`, `pocketflow/debate`. The redesign drops that behaviour: a body gets a key only through its interface or `inherits`. GraphLang has no user base yet, so there is no migration path and no compatibility flag; the cookbook is rewritten (section 10). (Q6 corrects the count.) |
+| Q2 | Decided | Is a composite's body inline or a subfolder, and what is the folder layout? | A subfolder, no inline body. The layout is `<recipe>/<name>/<name>.graph.yaml` plus its own prompts, which is what `graf group` writes and the `_v2` cookbooks use. |
+| Q3 | Decided 2026-11-21 | Build `inherits`? | Yes, build it. `inherits` is a convenience, not needed for isolation; the part's input declaration owns the type and default (section 9, row 13a). |
+| Q4 | Answered by the code | When does a part's body start, and how does it end? | Every node the part's INPUT node triggers starts when the use is triggered (`parts._expand_use`, `starts`); a part's way out is `complete` plus its declared error exits. |
+| Q5 | Decided 2026-11-21 | May a MUTATE edit a level other than its own? | No. A MUTATE edits its own level; a delta naming a node of the level above is refused (pinned by `test_a_mutate_in_a_loop_body_cannot_touch_a_node_of_the_level_above`). |
+| Q6 | Decided, built | How is loop-carried state declared, and how do we keep a body from reading names it should not? | Corrected after measuring: an earlier version of this note counted 77 "implicit cross-level reads" in LOOP bodies. Classified by what each unbound body `in_X` resolves to, they are: 52 the LOOP's own `in_X` port (already an explicit interface: the loop declares the port and an edge feeds it), 19 a loop-state variable (an `outputs: {X: {from: ...}}` entry), 2 the iteration counter, and 4 in BATCH (3 its `item_var`, 1 its own `in_`). And `graf validate` already refuses a body `in_X` that is none of these (`topology.py` ~181-184, `_check_scope`: boundary ports, loop vars). So the neighbour/scope rule already holds for loops, statically checked; the cookbook does not need a rewrite for it. What was still loose: (a) loop state was declared as a side effect of `outputs: {from}`, not as state, so a reader of the body could not see which names carry over; (b) `collect` and `fired` outputs were also readable by name inside the body, which nobody intends; (c) the runtime fallback (`_inputs_for`, ~line 470) resolves by name in three places at once. Options were: keep `outputs.from` and fix (b) only, or add `state:` (name -> initial, type) as the explicit declaration, with `outputs: {from}` reduced to reading a state variable out of the loop. Decided: `state:`, built (R10a; section 9, row 1). |
 
 ## 9. Build status
 
-This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-21 (last: `inherits`, `cookbook_v2/code_pipeline`). Statuses: done (committed,
+This section tracks the build (the rules live in `graflang-semantics.md`, which stays a spec). Updated 2026-11-22 (last: every recipe ported to a `_v2` cookbook). Statuses: done (committed,
 tests pass), partial, open. The gap table in `zinets/docs/graph-vision/claude/readme-design.md` is updated once the whole refactoring is
 tested and finished, not before.
 
@@ -132,11 +119,14 @@ tested and finished, not before.
 | 13a | `inherits: [name]` on a `use` (compact; `config.inherits`): passes the level's same-named input without writing the binding; the part's declaration owns the type and default, the level's value must be assignable | done | this commit |
 | 13 | Scoped context (section 4), reassessed: a part sees only its declared inputs (it cannot read the level above, as `code_parts` notes), a loop body only its `in_*` ports, `state:` and the counter (validate refuses the rest). So isolation already holds. What is left is `inherits`, shorthand for passing one key down several levels | reassessed; `inherits` built as 13a after the owner's go-ahead | |
 | 14a | The 54 recipes in `cookbook_pocketflow/` and `cookbook_solvers/` that warned on `outputs.from` now use `state:` (only that key line changed in each; all validate, no warnings) | done | this commit |
-| 14 | Cookbook rewrite as layered folders (section 10): ported recipes live in `cookbook_v2/`, tracked in `graflang-recipes.md` | in progress: `code_pipeline` ported (offline-equivalent, not run with a real model) | this commit |
+| 14 | Cookbook rewrite as layered folders (section 10): ported recipes live in `cookbook_v2/` (13 staged, `self_refine` in compact form, and 15 copied because they were already compact), `cookbook_solvers_v2/` (all 47) and `cookbook_pocketflow_v2/` (all 42: 8 with composites, 34 flat); tracked in `graflang-recipes.md`. Each is equal to its original on the mock adapter; nothing run with a real model except what the owner tried by hand (`ts_verify`, `stock_report`, `notes_digest`, `code_gen`, `code_pipeline`, `your_book`) | done offline; the originals are to be archived once the owner has tested the `_v2` recipes | `451add1`, `9d87c1f`, `2d4b0e5` |
+| 14b | `scripts/port_recipe.py`: compact, name every step after its tool or prompt, infer or take groups (`--ids`, `mv:`, `part/sub`), `graf group`, prettify, validate | done | `451add1`, `9d87c1f` |
+| 14c | `graf group` moves a prompt or procedure used by a node inside a loop body with the loop (found porting the loop-heavy solver recipes; before, the part did not validate) | done | `9d87c1f` |
+| 14d | YAML written by `graf compact`/`prettier`/the editor never wraps a long line (a fold inside an escape had turned `\n` into `\ n` in a tool's code); `graf compact` reads its output back | done | `978461e` |
 | 15 | Recursion (section 7) | open, later | |
 | 16 | Update the gap table in zinets `readme-design.md` | after the refactoring is tested and done | |
 
-Section 8's questions 3 and 5 are decided and 4 is answered by the code (the owner replied "no" to 4, which I read as no change; to be confirmed).
+Section 8's Q3 and Q5 are decided and Q4 is answered by the code (the owner replied "no" to Q4, which I read as no change; to be confirmed).
 
 ## 10. Cookbook rewrite
 
@@ -150,3 +140,11 @@ test of the layered form:
   read of a key the interface did not pass.
 - Order: rewrite one recipe with a LOOP body that reads its parent implicitly (`code_pipeline`) first; whatever is awkward there decides the
   interface and `inherits` rules before the others are done.
+
+What the rewrite showed (2026-11-22):
+
+- Most recipes are a chain of stages, each with one entry and one normal way out, and `graf group` finds them. A staged recipe reads as 3 to 7 boxes at depth 0. The solver recipes share one shape (prepare, a solver arm, an LLM-only arm).
+- A retry loop is already one box (a `LOOP`); what is left around it is bookkeeping (`set_*` steps) that is not worth a composite. 34 PocketFlow recipes are ported flat for that reason, and the recipe says so.
+- The loop-heavy solver recipes (`lean_proof`, `neurosymbolic`, `constraint_opt`, `symbolic_math`) keep their loops in long form, so grouping them was done by hand, by reading the trigger edges; it found the `graf group` bug of row 14c.
+- A top graph needs the error codes of every part it uses beside it (`recipe_chain` has its own `graflang.errors.yaml`).
+- The unbound-port fallback was not removed (section 8, Q6): `graf validate` already refused the unintended reads, so the cookbook needed no change for it; the few lifted loops that read an input from the loop's state keep the checker's warning, and the tests allow no more warnings than the original had.
