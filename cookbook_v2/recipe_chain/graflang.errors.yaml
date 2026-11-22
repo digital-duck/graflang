@@ -1,0 +1,10 @@
+# The codes of the parts this recipe chains (each part's own file is beside it; the top graph needs every code its parts can raise).
+errors:
+  - code: E_NO_ANSWER
+    description: the agent used all its steps without answering
+    cause: every round the model asked to read another note
+    remedy: raise max_steps, or make the question narrower
+  - code: E_NOT_APPROVED
+    description: the supervisor did not approve the answer within the allowed rounds
+    cause: every review asked for another revision
+    remedy: raise max_rounds, or read the last attempt and the supervisor's notes in the log

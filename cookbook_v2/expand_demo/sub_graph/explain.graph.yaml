@@ -1,0 +1,32 @@
+version: "1.0-graph"
+
+# The template: explain one concept to an audience, given what its prerequisites already said.
+
+workflow:
+  name: "explain"
+  inputs:
+    - {name: "concept", type: "TEXT"}
+    - {name: "audience", type: "TEXT"}
+    - {name: "context", type: "JSON", default: {}}
+  outputs:
+    - {name: "text", type: "TEXT"}
+
+resources:
+  prompts:
+    explain: "./prompts/explain.md"
+
+nodes:
+  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_concept", "out_audience", "out_context"]}
+  - id: "write"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.explain"}
+    ports: ["trigger", "complete", "in_concept", "in_audience", "in_context", "out_text"]
+  - {id: "wf_exit", type: "OUTPUT", ports: ["trigger", "exit", "in_text"]}
+
+edges:
+  - {source: "wf_entry.entry", target: "write.trigger", type: "triggers"}
+  - {source: "write.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "wf_entry.out_concept", target: "write.in_concept", type: "binds"}
+  - {source: "wf_entry.out_audience", target: "write.in_audience", type: "binds"}
+  - {source: "wf_entry.out_context", target: "write.in_context", type: "binds"}
+  - {source: "write.out_text", target: "wf_exit.in_text", type: "binds"}

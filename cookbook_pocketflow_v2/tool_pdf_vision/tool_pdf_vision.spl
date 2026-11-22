@@ -1,0 +1,83 @@
+CREATE TOOL_API scan_pdfs(input_dir TEXT) RETURNS TEXT AS PYTHON $$
+import os, glob
+def scan_pdfs(input_dir: str) -> str:
+    try:
+        pattern = os.path.join(input_dir, "**", "*.pdf")
+        pdf_files = sorted(glob.glob(pattern, recursive=True))
+        return ",".join(pdf_files) if pdf_files else ""
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API pdf_to_images(pdf_path TEXT, work_dir TEXT) RETURNS TEXT AS PYTHON $$
+import os
+from pdf2image import convert_from_path
+def pdf_to_images(pdf_path: str, work_dir: str) -> str:
+    try:
+        pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        out_dir = os.path.join(work_dir, pdf_name)
+        os.makedirs(out_dir, exist_ok=True)
+        pages = convert_from_path(pdf_path, dpi=200)
+        image_paths = []
+        for i, page in enumerate(pages):
+            img_path = os.path.join(out_dir, f"page_{i+1:04d}.png")
+            page.save(img_path, "PNG")
+            image_paths.append(img_path)
+        return ",".join(image_paths) if image_paths else ""
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION ocr_page_to_markdown(image_path TEXT)
+RETURNS TEXT AS $$
+  You are an expert OCR assistant. Analyze the document page image at {image_path}.
+  Extract all visible text and format it as clean Markdown, preserving headings,
+  paragraphs, bullet points, numbered lists, and tables exactly as they appear on the page.
+  Return only the extracted Markdown text with no additional commentary or explanation.
+$$;
+
+WORKFLOW pdf_ocr_pipeline
+  INPUT @input_dir TEXT := "cookbook-pocketflow/061_tool_pdf_vision/data"
+  INPUT @output_file TEXT := "cookbook-pocketflow/061_tool_pdf_vision/output/pocket-flow.md"
+  INPUT @work_dir TEXT := "/tmp/pdf_ocr_work"
+  INPUT @max_pdfs INTEGER := 100
+  INPUT @max_pages INTEGER := 1000
+  OUTPUT @combined_markdown TEXT
+DO
+  CALL scan_pdfs(@input_dir) INTO @pdf_list;
+  CALL isblank(@pdf_list) INTO @no_pdfs;
+  @combined_markdown := "";
+
+  EVALUATE @no_pdfs WHEN contains("true") THEN
+    @combined_markdown := "";
+  ELSE
+    @pdf_idx := 0;
+    WHILE @pdf_idx < @max_pdfs DO
+      CALL list_get(@pdf_list, @pdf_idx, ",") INTO @pdf_path;
+      CALL isblank(@pdf_path) INTO @pdf_done;
+      EVALUATE @pdf_done WHEN contains("true") THEN
+        @pdf_idx := @max_pdfs;
+      ELSE
+        CALL pdf_to_images(@pdf_path, @work_dir) INTO @page_images;
+        @page_idx := 0;
+        @pdf_text := "";
+        WHILE @page_idx < @max_pages DO
+          CALL list_get(@page_images, @page_idx, ",") INTO @image_path;
+          CALL isblank(@image_path) INTO @page_done;
+          EVALUATE @page_done WHEN contains("true") THEN
+            @page_idx := @max_pages;
+          ELSE
+            GENERATE ocr_page_to_markdown(@image_path) INTO @page_text_part;
+            @pdf_text := @pdf_text + @page_text_part + "\n\n";
+            @page_idx := @page_idx + 1;
+          END;
+        END;
+        @combined_markdown := @combined_markdown + "## " + @pdf_path + "\n\n" + @pdf_text;
+        @pdf_idx := @pdf_idx + 1;
+      END;
+    END;
+    CALL write_file(@output_file, @combined_markdown, "w") INTO @write_result;
+  END;
+
+  RETURN @combined_markdown WITH status = "complete";
+END;

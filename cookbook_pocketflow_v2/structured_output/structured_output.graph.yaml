@@ -1,0 +1,417 @@
+version: 1.0-graph
+workflow:
+  name: resume_parser
+  inputs:
+  - name: resume_path
+    type: TEXT
+    default: data/resume.txt
+  - name: skill_list_path
+    type: TEXT
+    default: data/skills.txt
+  - name: max_yaml_retries
+    type: INTEGER
+    default: 3
+  outputs:
+  - name: output_record
+    type: TEXT
+steps:
+- read_file:
+    node: SOLVE
+    in:
+      resume_path: $in.resume_path
+    out: resume_text
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@resume_path'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip()).expanduser()
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(resume_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+- read_file_2:
+    node: SOLVE
+    in:
+      skill_list_path: $in.skill_list_path
+    out: skill_list_text
+    tool: read_file
+    backend: kernel
+    arguments:
+    - '@skill_list_path'
+    code: |
+      import pathlib
+
+      def read_file(file_path: str) -> str:
+          """READ_FILE(file_path) — read entire text file and return its content.
+
+          Raises FileNotFoundError (propagated as SPL FileNotFound) if path missing.
+          """
+          p = pathlib.Path(str(file_path).strip()).expanduser()
+          return p.read_text(encoding='utf-8')
+      _spl_result = read_file(skill_list_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - file_path
+    tool_returns: TEXT
+    tool_builtin: true
+- extract_candidate_info:
+    generate: |-
+      Extract the candidate''s full name and email address from the plain-text resume below.
+        Return a JSON object with exactly two keys: "name" (string) and "email" (string).
+        If a field cannot be found, use null for its value.
+        Resume:
+        {{in_resume_text}}
+    in:
+      resume_text: read_file
+    out: candidate_info
+    function: extract_candidate_info
+    params:
+    - resume_text
+    arguments:
+    - '@resume_text'
+- parse_work_experience:
+    generate: |-
+      Parse all work experience entries from the plain-text resume below.
+        For each position extract: company name, job title, start date, end date (or "present"), and a brief description of responsibilities.
+        Return a JSON array of objects, each with keys: "company", "title", "start_date", "end_date", "description".
+        Resume:
+        {{in_resume_text}}
+    in:
+      resume_text: read_file
+    out: work_experience
+    function: parse_work_experience
+    params:
+    - resume_text
+    arguments:
+    - '@resume_text'
+- match_skills:
+    generate: |-
+      Identify which skills from the predefined skill list the candidate possesses, based on their resume and parsed work experience.
+        Match by direct mention, clear synonym, or strong implication from job duties.
+        Return a JSON object with two keys:
+          "matched": list of skills from the skill list that the candidate demonstrably has,
+          "unmatched": list of skills from the skill list that were not found.
+        Resume:
+        {{in_resume_text}}
+        Work Experience:
+        {{in_work_experience}}
+        Predefined Skill List:
+        {{in_skill_list_text}}
+    in:
+      resume_text: read_file
+      work_experience: parse_work_experience
+      skill_list_text: read_file_2
+    out: matched_skills
+    function: match_skills
+    params:
+    - resume_text
+    - work_experience
+    - skill_list_text
+    arguments:
+    - '@resume_text'
+    - '@work_experience'
+    - '@skill_list_text'
+- check_required_fields:
+    node: SOLVE
+    in:
+      candidate_info: extract_candidate_info
+      work_experience: parse_work_experience
+      matched_skills: match_skills
+    out: fields_check
+    tool: check_required_fields
+    backend: kernel
+    arguments:
+    - '@candidate_info'
+    - '@work_experience'
+    - '@matched_skills'
+    code: |
+      import json
+      def check_required_fields(candidate_info: str, work_experience: str, matched_skills: str) -> str:
+          try:
+              missing = []
+              try:
+                  info = json.loads(candidate_info)
+                  if not info.get("name"):
+                      missing.append("name")
+                  if not info.get("email"):
+                      missing.append("email")
+              except (json.JSONDecodeError, AttributeError):
+                  info_lower = candidate_info.lower()
+                  if "name" not in info_lower:
+                      missing.append("name")
+                  if "@" not in candidate_info:
+                      missing.append("email")
+              if not work_experience.strip() or work_experience.strip() in ("[]", "null"):
+                  missing.append("work_experience")
+              if not matched_skills.strip() or matched_skills.strip() in ("{}", "null"):
+                  missing.append("matched_skills")
+              return "missing: " + ", ".join(missing) if missing else "complete"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = check_required_fields(candidate_info, work_experience, matched_skills)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - candidate_info
+    - work_experience
+    - matched_skills
+    tool_returns: TEXT
+- set_output_record:
+    node: CONTEXT
+    out: output_record
+    action: set
+    expression: "''"
+- set_final_status:
+    node: CONTEXT
+    out: final_status
+    action: set
+    expression: "'incomplete'"
+- gate:
+    evaluate: contains(@in_subject, 'complete')
+    in:
+      subject: check_required_fields
+    out: []
+    branch: 1
+- build_yaml_document:
+    generate: |-
+      Construct a normalized YAML document representing a structured candidate record using the extracted data below.
+        Use these top-level keys: "candidate" (sub-keys: "name", "email"), "work_experience" (list of job entries each with "company", "title", "start_date", "end_date", "description"), and "skills" (sub-keys: "matched" list, "unmatched" list).
+        Output only syntactically valid, well-formatted YAML — no markdown fences, no extra commentary.
+        Candidate Info:
+        {{in_candidate_info}}
+        Work Experience:
+        {{in_work_experience}}
+        Skills:
+        {{in_matched_skills}}
+    in:
+      candidate_info: extract_candidate_info
+      work_experience: parse_work_experience
+      matched_skills: match_skills
+    out: yaml_doc
+    function: build_yaml_document
+    params:
+    - candidate_info
+    - work_experience
+    - matched_skills
+    arguments:
+    - '@candidate_info'
+    - '@work_experience'
+    - '@matched_skills'
+- set_i:
+    node: CONTEXT
+    out: i
+    action: set
+    expression: '0'
+- flag_missing_fields:
+    generate: |-
+      The following required fields could not be extracted from the candidate''s resume: {{in_fields_check}}.
+        Write a clear, professional message explaining which fields are missing and requesting the candidate or recruiter provide the missing information to complete the record.
+    in:
+      fields_check: check_required_fields
+    out: output_record
+    on: gate.fail
+    function: flag_missing_fields
+    params:
+    - fields_check
+    arguments:
+    - '@fields_check'
+- wf_exit:
+    output: flag_missing_fields
+nodes:
+- id: loop_1
+  type: LOOP
+  config:
+    condition: latest(@in_i, @i) < @in_max_yaml_retries
+    state:
+      yaml_result:
+        from: tool_4.out_yaml_result
+      output_record:
+        from: set_4.out_output_record
+      final_status:
+        from: set_5.out_final_status
+      i:
+        from:
+        - set_6.out_i
+        - set_7.out_i
+      yaml_doc:
+        from: gen_5.out_yaml_doc
+    subgraph:
+      nodes:
+      - id: tool_4
+        type: SOLVE
+        config:
+          tool: validate_yaml
+          backend: kernel
+          arguments:
+          - '@yaml_doc'
+          code: |
+            import yaml
+            def validate_yaml(yaml_doc: str) -> str:
+                try:
+                    yaml.safe_load(yaml_doc)
+                    return "valid"
+                except yaml.YAMLError as e:
+                    return f"invalid: {e}"
+                except Exception as e:
+                    return f"error: {e}"
+            _spl_result = validate_yaml(yaml_doc)
+          result: _spl_result
+          out_type: TEXT
+          tool_params:
+          - yaml_doc
+          tool_returns: TEXT
+        ports:
+        - trigger
+        - complete
+        - in_yaml_doc
+        - out_yaml_result
+      - id: eval_2
+        type: EVALUATE
+        config:
+          condition: contains(@in_subject, 'valid')
+          branch: 1
+        ports:
+        - trigger
+        - pass
+        - fail
+        - in_subject
+      - id: set_4
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_yaml_doc'
+        ports:
+        - trigger
+        - complete
+        - in_yaml_doc
+        - out_output_record
+      - id: set_5
+        type: CONTEXT
+        config:
+          action: set
+          expression: "'complete'"
+        ports:
+        - trigger
+        - complete
+        - out_final_status
+      - id: set_6
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_max_yaml_retries'
+        ports:
+        - trigger
+        - complete
+        - in_max_yaml_retries
+        - out_i
+      - id: gen_5
+        type: GENERATE
+        config:
+          function: fix_yaml_errors
+          params:
+          - yaml_doc
+          - yaml_result
+          prompt_inline: |-
+            The YAML document below contains syntax errors. Fix all errors to produce syntactically valid YAML.
+              Preserve the original data and structure — correct only syntax issues.
+              Return only the corrected YAML with no markdown fences and no explanation.
+              Validation Errors:
+              {{in_yaml_result}}
+              YAML Document:
+              {{in_yaml_doc}}
+          arguments:
+          - '@yaml_doc'
+          - '@yaml_result'
+        ports:
+        - trigger
+        - complete
+        - in_yaml_doc
+        - in_yaml_result
+        - out_yaml_doc
+      - id: set_7
+        type: CONTEXT
+        config:
+          action: set
+          expression: '@in_i + 1'
+        ports:
+        - trigger
+        - complete
+        - in_i
+        - out_i
+      edges:
+      - source: tool_4.complete
+        target: eval_2.trigger
+        type: triggers
+      - source: tool_4.out_yaml_result
+        target: eval_2.in_subject
+        type: binds
+      - source: eval_2.pass
+        target: set_4.trigger
+        type: triggers
+      - source: set_4.complete
+        target: set_5.trigger
+        type: triggers
+      - source: set_5.complete
+        target: set_6.trigger
+        type: triggers
+      - source: eval_2.fail
+        target: gen_5.trigger
+        type: triggers
+      - source: tool_4.out_yaml_result
+        target: gen_5.in_yaml_result
+        type: binds
+      - source: gen_5.complete
+        target: set_7.trigger
+        type: triggers
+  ports:
+  - trigger
+  - loop
+  - exit
+  - in_yaml_doc
+  - in_max_yaml_retries
+  - in_i
+  - in_output_record
+  - in_final_status
+  - out_yaml_result
+  - out_output_record
+  - out_final_status
+  - out_i
+  - out_yaml_doc
+edges:
+- source: set_i.complete
+  target: loop_1.trigger
+  type: triggers
+- source: build_yaml_document.out_yaml_doc
+  target: loop_1.in_yaml_doc
+  type: binds
+- source: wf_entry.out_max_yaml_retries
+  target: loop_1.in_max_yaml_retries
+  type: binds
+- source: set_i.out_i
+  target: loop_1.in_i
+  type: binds
+- source: set_output_record.out_output_record
+  target: loop_1.in_output_record
+  type: binds
+- source: set_final_status.out_final_status
+  target: loop_1.in_final_status
+  type: binds
+- source: loop_1.out_output_record
+  target: wf_exit.in_output_record
+  type: binds
+- source: loop_1.exit
+  target: wf_exit.trigger
+  type: triggers

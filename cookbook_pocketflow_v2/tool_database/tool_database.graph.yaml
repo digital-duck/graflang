@@ -1,0 +1,123 @@
+version: 1.0-graph
+workflow:
+  name: task_manager
+  inputs:
+  - name: title
+    type: TEXT
+    default: web_search
+  - name: description
+    type: TEXT
+    default: Search the web for current information on a given query
+  - name: db_path
+    type: TEXT
+    default: tasks.db
+  outputs:
+  - name: task_list
+    type: TEXT
+steps:
+- init_db_schema:
+    node: SOLVE
+    in:
+      db_path: $in.db_path
+    out: schema_status
+    tool: init_db_schema
+    backend: kernel
+    arguments:
+    - '@db_path'
+    code: |
+      import sqlite3
+      def init_db_schema(db_path: str) -> str:
+          try:
+              conn = sqlite3.connect(db_path)
+              cursor = conn.cursor()
+              cursor.execute("""
+                  CREATE TABLE IF NOT EXISTS tasks (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      title TEXT NOT NULL,
+                      description TEXT,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                  )
+              """)
+              conn.commit()
+              conn.close()
+              return "schema initialized"
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = init_db_schema(db_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - db_path
+    tool_returns: TEXT
+- insert_task:
+    node: SOLVE
+    in:
+      db_path: $in.db_path
+      title: $in.title
+      description: $in.description
+    out: task_id
+    tool: insert_task
+    backend: kernel
+    arguments:
+    - '@db_path'
+    - '@title'
+    - '@description'
+    code: |
+      import sqlite3
+      def insert_task(db_path: str, title: str, description: str) -> str:
+          try:
+              conn = sqlite3.connect(db_path)
+              cursor = conn.cursor()
+              cursor.execute(
+                  "INSERT INTO tasks (title, description) VALUES (?, ?)",
+                  (title, description)
+              )
+              conn.commit()
+              task_id = cursor.lastrowid
+              conn.close()
+              return str(task_id)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = insert_task(db_path, title, description)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - db_path
+    - title
+    - description
+    tool_returns: TEXT
+- retrieve_all_tasks:
+    node: SOLVE
+    in:
+      db_path: $in.db_path
+    out: task_list
+    tool: retrieve_all_tasks
+    backend: kernel
+    arguments:
+    - '@db_path'
+    code: |
+      import sqlite3, json
+      def retrieve_all_tasks(db_path: str) -> str:
+          try:
+              conn = sqlite3.connect(db_path)
+              cursor = conn.cursor()
+              cursor.execute(
+                  "SELECT id, title, description, created_at FROM tasks ORDER BY id"
+              )
+              rows = cursor.fetchall()
+              conn.close()
+              tasks = [
+                  {"id": r[0], "title": r[1], "description": r[2], "created_at": r[3]}
+                  for r in rows
+              ]
+              return json.dumps(tasks, indent=2)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = retrieve_all_tasks(db_path)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - db_path
+    tool_returns: TEXT
+- wf_exit:
+    output: retrieve_all_tasks

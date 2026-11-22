@@ -1,6 +1,6 @@
 # cookbook_pocketflow_v2: PocketFlow recipes in the layered form
 
-8 of the 41 recipes of `cookbook_pocketflow/` (SPL.py's `cookbook-pocketflow`, lifted with `spl2graph`) rewritten with composites. The originals stay as they are. These recipes differ in shape (a fork
+All 42 recipes: 8 with composites (below) and 34 flat. The 8 are of `cookbook_pocketflow/` (SPL.py's `cookbook-pocketflow`, lifted with `spl2graph`) rewritten with composites. The originals stay as they are. These recipes differ in shape (a fork
 and a join, a tool chain, a retry loop), so each one's groups were chosen by hand with `scripts/port_recipe.py`; every step is named after the tool or prompt it runs.
 
 | Recipe | Original | Composites |
@@ -16,9 +16,10 @@ and a join, a tool chain, a retry loop), so each one's groups were chosen by han
 
 Each recipe's `readme.md` is the original's with a layered-port note on top; the `.spl` source is kept beside the graph. A retry loop is still one box at the top level (open it with `graf vis --depth 1`).
 
-**Not ported (33):** most of the rest are a retry loop (an agent, a debate round, a crawler, a thinking loop) around a few set-up steps: the loop is already one box at the top level, and what is left
-to group is bookkeeping (`set_*` steps), so layering them adds no meaning. Others are very small (`tool_database`, `tool_embeddings`, `tool_search`, `visualization`: 3 to 6 steps), have two steps that both start from
-the input so no group has a single entry (`structured_output`), or wait for keyboard input (`chat`, `cli_hitl`).
+**Flat (34):** the other recipes are ported with every step named after its tool or prompt but no composite: most are a retry loop (an agent, a debate round, a crawler, a thinking loop) around a few set-up steps, so
+the loop is already one box at the top level and what is left to group is bookkeeping (`set_*` steps); others are very small (`tool_database`, `tool_embeddings`, `tool_search`, `visualization`: 3 to 6 steps), have two steps
+that both start from the input so no group has a single entry (`structured_output`), or wait for keyboard input (`chat`, `cli_hitl`). Each readme says "kept flat". They are here so that `cookbook_pocketflow_v2/` is complete
+when the originals are archived; group one later with `scripts/port_recipe.py` if a recipe grows.
 
 ## Port one
 

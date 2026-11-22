@@ -1,0 +1,233 @@
+CREATE TOOL_API list_project_files(directory TEXT) RETURNS TEXT AS PYTHON $$
+import os
+
+def list_project_files(directory: str) -> str:
+    try:
+        if not directory or directory.lower() in ('none', ''):
+            directory = '.'
+        result = []
+        for root, dirs, files in os.walk(directory):
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            level = root.replace(directory, '').count(os.sep)
+            indent = '  ' * level
+            result.append(f"{indent}{os.path.basename(root)}/")
+            subindent = '  ' * (level + 1)
+            for fname in files:
+                result.append(f"{subindent}{os.path.join(root, fname)}")
+        return '\n'.join(result) or "empty directory"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API run_test_suite(test_dir TEXT) RETURNS TEXT AS PYTHON $$
+import subprocess
+
+def run_test_suite(test_dir: str) -> str:
+    try:
+        result = subprocess.run(
+            ['python', '-m', 'pytest', test_dir, '-v', '--tb=short'],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        output = result.stdout + result.stderr
+        return output.strip() or "no output"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API check_tests_pass(test_output TEXT) RETURNS TEXT AS PYTHON $$
+import re
+
+def check_tests_pass(test_output: str) -> str:
+    try:
+        if re.search(r'\d+ failed', test_output):
+            return "fail"
+        if re.search(r'\d+ error', test_output):
+            return "fail"
+        if re.search(r'\d+ passed', test_output):
+            return "pass"
+        return "fail"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API append_history(history TEXT, action TEXT, result TEXT) RETURNS TEXT AS PYTHON $$
+def append_history(history: str, action: str, result: str) -> str:
+    try:
+        snippet = result[:600] + ('...' if len(result) > 600 else '')
+        entry = f"\n[{action}]\n{snippet}\n"
+        return history + entry
+    except Exception as e:
+        return history + f"\n[error appending history: {e}]\n"
+$$;
+
+CREATE TOOL_API parse_field(text TEXT, field TEXT) RETURNS TEXT AS PYTHON $$
+def parse_field(text: str, field: str) -> str:
+    try:
+        for line in text.split('\n'):
+            stripped = line.strip()
+            if stripped.upper().startswith(field.upper() + ':'):
+                return stripped.split(':', 1)[1].strip()
+        return ""
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION select_action(action_history TEXT, codebase_structure TEXT, skeleton_functions TEXT, test_suite TEXT)
+RETURNS TEXT AS $$
+You are an autonomous coding agent implementing missing functions so a failing test suite passes.
+
+Codebase structure:
+{codebase_structure}
+
+Skeleton functions (stubs to implement):
+{skeleton_functions}
+
+Test suite (must all pass):
+{test_suite}
+
+Action history so far:
+{action_history}
+
+Select the single most useful next action. Available actions:
+  inspect   — list files in a directory to explore the codebase
+  read      — read a specific file''s contents
+  patch     — write a corrected implementation to a file
+  run_tests — execute the test suite to check progress
+
+Respond in exactly this format:
+ACTION: <inspect|read|patch|run_tests>
+FILE: <file path, or none>
+ARGS: <directory path for inspect, or none>
+REASON: <one-line justification>
+$$;
+
+CREATE FUNCTION generate_patch(file_path TEXT, current_content TEXT, test_suite TEXT, action_history TEXT)
+RETURNS TEXT AS $$
+You are implementing missing or stub functions in a Python source file so that a test suite passes.
+
+File: {file_path}
+
+Current file content:
+{current_content}
+
+Test suite that must pass:
+{test_suite}
+
+Prior action history (what you''ve tried):
+{action_history}
+
+Write the complete, corrected content for {file_path}.
+Implement every stub or missing function. Do not truncate the file.
+Return ONLY the raw file content — no markdown fences, no explanation.
+$$;
+
+CREATE FUNCTION report_success(action_history TEXT, test_output TEXT)
+RETURNS TEXT AS $$
+The coding agent successfully made all tests pass.
+
+Action history:
+{action_history}
+
+Final test output:
+{test_output}
+
+Write a concise success report covering: what was implemented, how many steps it took, and the final test result.
+$$;
+
+CREATE FUNCTION report_failure(action_history TEXT, max_iterations TEXT)
+RETURNS TEXT AS $$
+The coding agent exhausted all {max_iterations} iterations without making all tests pass.
+
+Action history:
+{action_history}
+
+Write a concise failure report covering: what was attempted, what remains unimplemented, and recommended next steps for a human developer.
+$$;
+
+WORKFLOW coding_agent
+  INPUT @project_dir TEXT := "cookbook-pocketflow/040_coding_agent"
+  INPUT @test_dir TEXT := "cookbook-pocketflow/040_coding_agent/tests"
+  INPUT @test_suite TEXT := "def test_basic():
+    from src.solution import two_sum
+    assert two_sum([2, 7, 11, 15], 9) == [0, 1]
+
+def test_middle():
+    from src.solution import two_sum
+    assert two_sum([3, 2, 4], 6) == [1, 2]
+
+def test_duplicate():
+    from src.solution import two_sum
+    assert two_sum([3, 3], 6) == [0, 1]"
+  INPUT @skeleton_file TEXT := "cookbook-pocketflow/040_coding_agent/src/solution.py"
+  INPUT @max_iterations INTEGER := 10
+  OUTPUT @final_report TEXT
+DO
+  -- Nodes C and D: one-time initial inspection before the agent loop
+  CALL list_project_files(@project_dir) INTO @codebase_structure;
+  CALL read_file(@skeleton_file) INTO @skeleton_functions;
+
+  @action_history := "";
+  @i := 0;
+  @status := "incomplete";
+  @last_test_output := "";
+
+  -- Agent loop: E → F → G → action branch → back to E
+  WHILE @i < @max_iterations DO
+    -- Node E: LLM analyzes full history; Node F: selects next action
+    GENERATE select_action(@action_history, @codebase_structure, @skeleton_functions, @test_suite) INTO @action_decision;
+
+    CALL parse_field(@action_decision, "ACTION") INTO @action_type;
+    CALL parse_field(@action_decision, "FILE") INTO @action_file;
+    CALL parse_field(@action_decision, "ARGS") INTO @action_args;
+
+    @ran_tests := "false";
+
+    -- Node G: dispatch on action type (H, I, J, K)
+    EVALUATE @action_type
+      WHEN contains("inspect") THEN
+        CALL list_project_files(@action_args) INTO @action_result;
+      WHEN contains("read") THEN
+        CALL read_file(@action_file) INTO @action_result;
+      WHEN contains("patch") THEN
+        CALL read_file(@action_file) INTO @current_content;
+        GENERATE generate_patch(@action_file, @current_content, @test_suite, @action_history) INTO @patched_content;
+        CALL write_file(@action_file, @patched_content, "w") INTO @action_result;
+      WHEN contains("run_tests") THEN
+        CALL run_test_suite(@test_dir) INTO @action_result;
+        @last_test_output := @action_result;
+        @ran_tests := "true";
+      ELSE
+        @action_result := "unknown action: " + @action_type;
+    END;
+
+    CALL append_history(@action_history, @action_type, @action_result) INTO @action_history;
+
+    -- Node L: all tests pass? — Node M: max iterations guard
+    EVALUATE @ran_tests
+      WHEN contains("true") THEN
+        CALL check_tests_pass(@last_test_output) INTO @tests_gate;
+        EVALUATE @tests_gate
+          WHEN contains("pass") THEN
+            @status := "success";
+            @i := @max_iterations;
+          ELSE
+            @i := @i + 1;
+        END;
+      ELSE
+        @i := @i + 1;
+    END;
+  END;
+
+  -- Nodes O and N: report success or failure
+  EVALUATE @status
+    WHEN contains("success") THEN
+      GENERATE report_success(@action_history, @last_test_output) INTO @final_report;
+    ELSE
+      CALL to_text(@max_iterations) INTO @max_iter_str;
+      GENERATE report_failure(@action_history, @max_iter_str) INTO @final_report;
+  END;
+
+  RETURN @final_report WITH status = "complete";
+END;

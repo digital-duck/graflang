@@ -1,0 +1,105 @@
+-- === TOOL_API: A2A layer + deterministic observe step ===
+
+CREATE TOOL_API parse_jsonrpc_request(request_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def parse_jsonrpc_request(request_json: str) -> str:
+    try:
+        obj = json.loads(request_json)
+        params = obj.get("params", {})
+        if isinstance(params, dict):
+            return params.get("question", params.get("query", json.dumps(params)))
+        elif isinstance(params, list) and params:
+            return str(params[0])
+        return str(params)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API parse_search_results(raw_results TEXT) RETURNS TEXT AS PYTHON $$
+def parse_search_results(raw_results: str) -> str:
+    try:
+        lines = [ln.strip() for ln in raw_results.split("\n") if ln.strip()]
+        return "\n".join(lines[:20])
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API extract_search_query(reasoning TEXT) RETURNS TEXT AS PYTHON $$
+def extract_search_query(reasoning: str) -> str:
+    try:
+        for line in reasoning.split("\n"):
+            if "NEED_MORE_INFO:" in line:
+                return line.split("NEED_MORE_INFO:", 1)[1].strip()
+        return reasoning
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API build_jsonrpc_response(request_json TEXT, answer TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def build_jsonrpc_response(request_json: str, answer: str) -> str:
+    try:
+        obj = json.loads(request_json)
+        rid = obj.get("id", 1)
+        return json.dumps({"jsonrpc": "2.0", "id": rid, "result": {"answer": answer}})
+    except Exception as e:
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"answer": answer}})
+$$;
+
+-- === CREATE FUNCTION: probabilistic ReAct reasoning + synthesis ===
+
+CREATE FUNCTION reason(question TEXT, context TEXT)
+RETURNS TEXT AS $$
+  You are a ReAct agent. Analyze the question and all gathered context, then reason step by step.
+
+  Question: {question}
+  Context so far: {context}
+
+  Think through what you already know and what gaps remain.
+  End your response with exactly one of these two lines:
+    NEED_MORE_INFO: <specific search query to run next>
+    HAVE_ENOUGH: <brief summary of key facts you have>
+$$;
+
+CREATE FUNCTION synthesize_answer(question TEXT, context TEXT)
+RETURNS TEXT AS $$
+  You are a helpful assistant. Using the question and all gathered evidence,
+  write a comprehensive, accurate, and well-structured final answer.
+
+  Question: {question}
+  Evidence: {context}
+$$;
+
+-- === WORKFLOW: ReAct agent exposed via A2A JSON-RPC service layer ===
+
+WORKFLOW react_a2a_agent
+  INPUT @request_json TEXT := "{\"jsonrpc\":\"2.0\",\"method\":\"tasks/send\",\"id\":\"1\",\"params\":{\"question\":\"What is the capital of France?\"}}"
+  INPUT @max_iterations INTEGER := 5
+  OUTPUT @response_json TEXT
+DO
+  -- A2A layer: route incoming request → extract question
+  CALL parse_jsonrpc_request(@request_json) INTO @question;
+
+  -- ReAct loop: Reason → (Act + Observe)* → exit when sufficient context
+  @context := "";
+  @i := 0;
+  WHILE @i < @max_iterations DO
+    GENERATE reason(@question, @context) INTO @reasoning;
+    EVALUATE @reasoning WHEN contains("NEED_MORE_INFO") THEN
+      CALL extract_search_query(@reasoning) INTO @query;
+      CALL web_search(@query) INTO @raw_results;
+      CALL parse_search_results(@raw_results) INTO @observation;
+      @context := @context + "\n[Search: " + @query + "]\n" + @observation;
+      @i := @i + 1;
+    ELSE
+      @i := @max_iterations;
+    END;
+  END;
+
+  -- Synthesize final answer
+  GENERATE synthesize_answer(@question, @context) INTO @answer;
+
+  -- A2A layer: return response to caller
+  CALL build_jsonrpc_response(@request_json, @answer) INTO @response_json;
+  RETURN @response_json WITH status = "complete";
+END;

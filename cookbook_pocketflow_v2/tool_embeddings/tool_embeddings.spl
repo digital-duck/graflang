@@ -1,0 +1,43 @@
+CREATE TOOL_API call_openai_embeddings(text TEXT, api_key TEXT) RETURNS TEXT AS PYTHON $$
+import json, urllib.request, os
+def call_openai_embeddings(text: str, api_key: str) -> str:
+    try:
+        key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        if not key:
+            return "error: no API key provided"
+        payload = json.dumps({"input": text, "model": "text-embedding-3-small"}).encode()
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/embeddings",
+            data=payload,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read().decode()
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API extract_embedding(response_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def extract_embedding(response_json: str) -> str:
+    try:
+        data = json.loads(response_json)
+        embedding = data["data"][0]["embedding"]
+        return json.dumps(embedding)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+WORKFLOW text_to_embedding
+  INPUT @text TEXT := "Machine learning is a branch of artificial intelligence that enables computers to learn from data without being explicitly programmed."
+  INPUT @api_key TEXT := ""
+  OUTPUT @result TEXT
+DO
+  CALL call_openai_embeddings(@text, @api_key) INTO @api_response;
+  EVALUATE @api_response WHEN contains("error:") THEN
+    @result := @api_response;
+  ELSE
+    CALL extract_embedding(@api_response) INTO @result;
+  END;
+  RETURN @result WITH status = "complete";
+END;

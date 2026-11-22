@@ -1,0 +1,113 @@
+version: 1.0-graph
+workflow:
+  name: serpapi_briefer
+  inputs:
+  - name: query
+    type: TEXT
+    default: latest breakthroughs in large language models 2025
+  outputs:
+  - name: briefing
+    type: TEXT
+steps:
+- call_serpapi:
+    node: SOLVE
+    in:
+      query: $in.query
+    out: raw_results
+    tool: call_serpapi
+    backend: kernel
+    arguments:
+    - '@query'
+    code: |
+      import os, json, urllib.request, urllib.parse
+
+      def call_serpapi(query: str) -> str:
+          try:
+              api_key = os.environ.get("SERPAPI_KEY", "")
+              if not api_key:
+                  return "ERROR: SERPAPI_KEY environment variable not set"
+              params = urllib.parse.urlencode({
+                  "q": query,
+                  "api_key": api_key,
+                  "engine": "google"
+              })
+              url = f"https://serpapi.com/search?{params}"
+              with urllib.request.urlopen(url, timeout=15) as resp:
+                  data = json.loads(resp.read().decode())
+              results = data.get("organic_results", [])
+              if not results:
+                  return "NO_RESULTS"
+              return json.dumps(results[:10])
+          except Exception as e:
+              return f"ERROR: {e}"
+      _spl_result = call_serpapi(query)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - query
+    tool_returns: TEXT
+- gate:
+    evaluate: contains(@in_subject, 'NO_RESULTS')
+    in:
+      subject: call_serpapi
+    out: []
+    branch: 1
+- set_briefing:
+    node: CONTEXT
+    in:
+      query: $in.query
+    out: briefing
+    action: set
+    expression: |-
+      'No results returned for query: ' + @in_query
+- gate_2:
+    evaluate: contains(@in_subject, 'ERROR:')
+    in:
+      subject: call_serpapi
+    out: []
+    on: gate.fail
+    branch: 2
+- set_briefing_2:
+    node: CONTEXT
+    in:
+      raw_results: call_serpapi
+    out: briefing
+    action: set
+    expression: '@in_raw_results'
+- synthesize_briefing:
+    generate: |-
+      You are a research analyst. Given the user''s search query and the raw search results below,
+      produce a structured briefing with exactly these three sections:
+
+      **Summary**
+      A concise 2-3 sentence overview of what the results reveal about "{{in_query}}".
+
+      **Key Facts**
+      3-5 bullet points of the most important factual findings extracted from the results.
+
+      **Follow-up Queries**
+      3 suggested follow-up search queries that would deepen research on this topic.
+
+      Search results:
+      {{in_raw_results}}
+    in:
+      query: $in.query
+      raw_results: call_serpapi
+    out: briefing
+    on: gate_2.fail
+    function: synthesize_briefing
+    params:
+    - query
+    - raw_results
+    arguments:
+    - '@query'
+    - '@raw_results'
+- wf_exit:
+    output:
+    - set_briefing
+    - set_briefing_2
+    - synthesize_briefing
+    on:
+    - set_briefing
+    - set_briefing_2
+    - synthesize_briefing

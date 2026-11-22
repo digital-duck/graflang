@@ -1,0 +1,22 @@
+version: "1.0-graph"
+
+# One part, used twice: the same `polish` workflow runs on the draft in a formal tone, then again with its default tone.
+#   graf run cookbook_v2/parts_demo/parts_demo.graph.yaml --param topic=tides
+#   graf expand cookbook_v2/parts_demo/parts_demo.graph.yaml     # the flat graph: first__rewrite, second__rewrite
+
+workflow:
+  name: "parts_demo"
+  inputs:
+    - {name: "topic", type: "TEXT"}
+  outputs:
+    - {name: "essay", type: "TEXT"}
+
+resources:
+  parts:
+    polish: "./sub_graph/polish.graph.yaml"
+
+steps:
+  - draft:  {generate: "Write 5 sentences about {{in_topic}}.", in: {topic: $in.topic}, out: essay, llm: "ollama:gemma3"}
+  - first:  {use: parts.polish, in: {essay: draft, tone: formal}, out: [essay], llm: "claude_cli:claude-haiku-5-5"}
+  - second: {use: parts.polish, in: {essay: first.essay}, out: [essay], llm: "claude_cli:claude-sonnet-5-5"}
+  - done:   {output: second.essay}

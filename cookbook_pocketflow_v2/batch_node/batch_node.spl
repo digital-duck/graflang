@@ -1,0 +1,109 @@
+CREATE TOOL_API read_csv_chunk(csv_path TEXT, chunk_size TEXT, offset TEXT) RETURNS TEXT AS PYTHON $$
+import csv, io
+def read_csv_chunk(csv_path: str, chunk_size: str, offset: str) -> str:
+    try:
+        n = int(chunk_size)
+        off = int(offset)
+        with open(csv_path, newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header is None:
+                return ""
+            rows = list(reader)
+        chunk = rows[off:off + n]
+        if not chunk:
+            return ""
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(header)
+        writer.writerows(chunk)
+        return buf.getvalue()
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API compute_chunk_stats(chunk_csv TEXT, column TEXT) RETURNS TEXT AS PYTHON $$
+import csv, io, json
+def compute_chunk_stats(chunk_csv: str, column: str) -> str:
+    try:
+        reader = csv.DictReader(io.StringIO(chunk_csv))
+        total = 0.0
+        count = 0
+        for row in reader:
+            raw = row.get(column, "").strip()
+            if raw:
+                total += float(raw)
+                count += 1
+        avg = total / count if count > 0 else 0.0
+        return json.dumps({"sum": round(total, 4), "count": count, "avg": round(avg, 4)})
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API accumulate_totals(running_total TEXT, running_count TEXT, chunk_sum TEXT, chunk_count TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def accumulate_totals(running_total: str, running_count: str, chunk_sum: str, chunk_count: str) -> str:
+    try:
+        new_total = float(running_total) + float(chunk_sum)
+        new_count = int(running_count) + int(chunk_count)
+        return json.dumps({"total": round(new_total, 4), "count": new_count})
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API advance_offset(offset TEXT, chunk_size TEXT) RETURNS TEXT AS PYTHON $$
+def advance_offset(offset: str, chunk_size: str) -> str:
+    try:
+        return str(int(offset) + int(chunk_size))
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API format_results(total TEXT, count TEXT) RETURNS TEXT AS PYTHON $$
+def format_results(total: str, count: str) -> str:
+    try:
+        t = float(total)
+        c = int(count)
+        avg = t / c if c > 0 else 0.0
+        return (
+            "=== CSV Aggregation Results ===\n"
+            f"Total Sales : {t:,.2f}\n"
+            f"Row Count   : {c:,}\n"
+            f"Average     : {avg:,.2f}"
+        )
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+WORKFLOW csv_batch_stats
+  INPUT @csv_path TEXT := "cookbook-pocketflow/012_batch_node/data/sales.csv"
+  INPUT @chunk_size TEXT := "500"
+  INPUT @column TEXT := "amount"
+  INPUT @max_iterations INTEGER := 10000
+  OUTPUT @result TEXT
+DO
+  @offset := "0";
+  @running_total := "0";
+  @running_count := "0";
+  @i := 0;
+
+  WHILE @i < @max_iterations DO
+    CALL read_csv_chunk(@csv_path, @chunk_size, @offset) INTO @chunk;
+    CALL isblank(@chunk) INTO @chunk_empty;
+    EVALUATE @chunk_empty WHEN contains("true") THEN
+      @i := @max_iterations;
+    ELSE
+      CALL compute_chunk_stats(@chunk, @column) INTO @chunk_stats;
+      CALL json_get(@chunk_stats, "sum") INTO @chunk_sum;
+      CALL json_get(@chunk_stats, "count") INTO @chunk_count;
+      CALL accumulate_totals(@running_total, @running_count, @chunk_sum, @chunk_count) INTO @acc;
+      CALL json_get(@acc, "total") INTO @running_total;
+      CALL json_get(@acc, "count") INTO @running_count;
+      CALL advance_offset(@offset, @chunk_size) INTO @offset;
+      @i := @i + 1;
+    END;
+  END;
+
+  CALL format_results(@running_total, @running_count) INTO @result;
+  RETURN @result WITH status = "complete";
+END;

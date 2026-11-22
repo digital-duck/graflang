@@ -1,0 +1,99 @@
+-- Tools for Recipe 014: Chain-of-Thought Thinking
+
+CREATE TOOL_API format_thoughts_to_text(thoughts TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def format_thoughts_to_text(thoughts):
+    """Convert JSON list of thought dicts to a readable numbered text block."""
+    try:
+        items = json.loads(thoughts)
+    except (json.JSONDecodeError, TypeError):
+        return str(thoughts)
+    if not items:
+        return ""
+    lines = []
+    for i, t in enumerate(items, 1):
+        if isinstance(t, dict):
+            thinking = t.get("current_thinking", "")
+            plan = t.get("next_action_plan", "")
+            lines.append(f"Thought {i}: {thinking}")
+            if plan:
+                lines.append(f"  Plan: {plan}")
+        else:
+            lines.append(f"Thought {i}: {t}")
+    return "\n".join(lines)
+$$;
+
+CREATE TOOL_API extract_last_plan(thoughts TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def extract_last_plan(thoughts):
+    """Return the next_action_plan from the last entry in the thoughts list."""
+    try:
+        items = json.loads(thoughts)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not items:
+        return ""
+    last = items[-1]
+    if isinstance(last, dict):
+        return last.get("next_action_plan", "")
+    return ""
+$$;
+
+CREATE TOOL_API validate_yaml_fields(thought_data TEXT) RETURNS TEXT AS PYTHON $$
+import re, yaml
+
+_REQUIRED = {"current_thinking", "next_action_plan", "next_thought_needed"}
+
+def validate_yaml_fields(thought_data):
+    """Return 'true' if all required fields present and parseable, else 'false'."""
+    try:
+        data = yaml.safe_load(thought_data)
+        if not isinstance(data, dict):
+            return "false"
+        missing = _REQUIRED - set(data.keys())
+        return "false" if missing else "true"
+    except yaml.YAMLError:
+        return "false"
+$$;
+
+CREATE TOOL_API append_thought(thoughts TEXT, thought_data TEXT) RETURNS TEXT AS PYTHON $$
+import json, yaml
+
+def append_thought(thoughts, thought_data):
+    """Append a YAML thought record to the JSON thought list; return updated list."""
+    try:
+        items = json.loads(thoughts)
+    except (json.JSONDecodeError, TypeError):
+        items = []
+    try:
+        record = yaml.safe_load(thought_data)
+    except yaml.YAMLError:
+        record = {"raw": thought_data}
+    items.append(record)
+    return json.dumps(items)
+$$;
+
+CREATE TOOL_API extract_yaml_field(thought_data TEXT, field TEXT) RETURNS TEXT AS PYTHON $$
+import yaml
+
+def extract_yaml_field(thought_data, field):
+    """Parse YAML and return the value of the given field as a string."""
+    try:
+        data = yaml.safe_load(thought_data)
+        if isinstance(data, dict):
+            val = data.get(field, "")
+            return str(val).lower() if isinstance(val, bool) else str(val)
+    except yaml.YAMLError:
+        pass
+    return ""
+$$;
+
+CREATE TOOL_API print_thought_progress(thinking TEXT, plan TEXT) RETURNS TEXT AS PYTHON $$
+def print_thought_progress(thinking, plan):
+    """Print current thinking and plan to stdout; returns empty string."""
+    print(f"[thinking] {thinking[:200]}{'...' if len(thinking) > 200 else ''}")
+    print(f"[plan]     {plan[:200]}{'...' if len(plan) > 200 else ''}")
+    return ""
+$$;

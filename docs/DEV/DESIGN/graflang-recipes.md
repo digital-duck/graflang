@@ -115,13 +115,13 @@ passes the checker is used and the objections are an output, `plan_review`); onl
 
 ## Next candidates (not committed to; say which)
 
-`code_parts` (already uses parts, but the top level is flat), `stock_analysis`, `doc_it`, `recipe_chain`, `pocketflow/*`, `hello_world`, `release_approval` (waits for a person), `guardrail`, `assembler`.
+None left to port. The 15 core recipes that were still in `cookbook/` and already written in the compact form (`assembler`, `chain_of_thought`, `code_parts`, `container_demo`, `doc_it`, `expand_demo`, `guardrail`, `hello_world`, `lifted_tool`, `parts_demo`, `recipe_chain`, `release_approval`, `solver_check`, `stock_analysis`, and `pocketflow`, the three R1 acceptance graphs replayed from cassettes) were copied into `cookbook_v2/` with their paths fixed (`recipe_chain` needs the error codes of the parts it chains beside it: its own `graflang.errors.yaml`); each is offline-equivalent to its original (`tests/test_cookbook_core_v2.py`). Left out: `stock_copy` (became `stock_report`).
 
 
 ## Solver and PocketFlow recipes (`cookbook_solvers_v2/`, `cookbook_pocketflow_v2/`)
 
 Updated 2026-11-21. The lifted recipes of `cookbook_solvers/` and `cookbook_pocketflow/` are ported with `scripts/port_recipe.py` (compact, name every step after its tool or prompt, `graf group` into
-composites, prettify, validate). Status: **all 47 solver recipes** (the four loop-heavy ones, `constraint_opt`, `symbolic_math`, `lean_proof`, `neurosymbolic`, by hand) and **8 of 41 PocketFlow recipes** (the staged ones; the retry-loop recipes are already one box at the top level). Every graph is offline-equivalent to its original on the mock adapter
+composites, prettify, validate). Status: **all 47 solver recipes** (the four loop-heavy ones, `constraint_opt`, `symbolic_math`, `lean_proof`, `neurosymbolic`, by hand) and **all 42 PocketFlow recipes** (8 with composites, the staged ones; the other 34 flat with named steps: the retry-loop recipes are already one box at the top level). Every graph is offline-equivalent to its original on the mock adapter
 (`tests/test_cookbook_solvers_v2.py`, `tests/test_cookbook_pocketflow_v2.py`). Not run with a real model.
 
 The loop-heavy solver recipes: their retry loops are kept in long form, so no group could be inferred, but the trigger edges are a plain chain of stages, each with one entry and one way out. Porting them by hand found a second

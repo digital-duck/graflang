@@ -1,0 +1,50 @@
+CREATE TOOL_API ask_topic() RETURNS TEXT AS PYTHON $$
+def ask_topic() -> str:
+    try:
+        topic = input("Enter a topic for the joke: ").strip()
+        return topic if topic else "general humor"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API ask_user_approval(joke TEXT) RETURNS TEXT AS PYTHON $$
+def ask_user_approval(joke: str) -> str:
+    try:
+        print(f"\nJoke:\n{joke}\n")
+        response = input("Approve this joke? (yes/no): ").strip().lower()
+        return "yes" if response.startswith("y") else "no"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION generate_joke(topic TEXT, rejected_jokes TEXT)
+RETURNS TEXT AS $$
+Generate a funny, original joke about: {topic}.
+
+Previously rejected jokes — do NOT repeat or resemble these:
+{rejected_jokes}
+
+Output only the joke text, no preamble or explanation.
+$$;
+
+WORKFLOW joke_approver
+  INPUT @max_iterations INTEGER := 10
+  OUTPUT @joke TEXT
+DO
+  CALL ask_topic() INTO @topic;
+  @rejected_jokes := "";
+  @joke := "";
+  @i := 0;
+  WHILE @i < @max_iterations DO
+    GENERATE generate_joke(@topic, @rejected_jokes) INTO @joke;
+    CALL ask_user_approval(@joke) INTO @approval;
+    EVALUATE @approval WHEN contains("yes") THEN
+      @i := @max_iterations;
+    ELSE
+      @rejected_jokes := @rejected_jokes + "- " + @joke + "
+";
+      @i := @i + 1;
+    END;
+  END;
+  RETURN @joke WITH status = "complete";
+END;

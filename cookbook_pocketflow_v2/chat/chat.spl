@@ -1,0 +1,60 @@
+CREATE TOOL_API read_user_input() RETURNS TEXT AS PYTHON $$
+def read_user_input() -> str:
+    try:
+        return input("You: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return "exit"
+$$;
+
+CREATE TOOL_API is_exit_command(user_input TEXT) RETURNS TEXT AS PYTHON $$
+def is_exit_command(user_input: str) -> str:
+    keywords = {"exit", "quit", "bye", "goodbye"}
+    return "true" if user_input.strip().lower() in keywords else "false"
+$$;
+
+CREATE TOOL_API append_turn(history TEXT, role TEXT, content TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def append_turn(history: str, role: str, content: str) -> str:
+    try:
+        turns = json.loads(history) if history.strip() else []
+        turns.append({"role": role, "content": content})
+        return json.dumps(turns)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION chat_reply(history TEXT)
+RETURNS TEXT AS $$
+  You are a helpful assistant engaged in a multi-turn conversation.
+  The conversation history is a JSON array of {"role", "content"} pairs:
+  {history}
+  Reply to the most recent user message concisely and helpfully.
+$$;
+
+WORKFLOW multi_turn_chat
+  INPUT @max_turns INTEGER := 50
+  INPUT @last_n TEXT := "10"
+  OUTPUT @history TEXT
+DO
+  @history := "[]";
+  @i := 0;
+
+  WHILE @i < @max_turns DO
+    CALL read_user_input() INTO @user_input;
+    CALL is_exit_command(@user_input) INTO @is_exit;
+
+    EVALUATE @is_exit
+      WHEN contains("true") THEN
+        @i := @max_turns;
+      ELSE
+        CALL append_turn(@history, "user", @user_input) INTO @history;
+        CALL trim_turns(@history, @last_n) INTO @trimmed;
+        GENERATE chat_reply(@trimmed) INTO @reply;
+        LOGGING f'Assistant: {@reply}';
+        CALL append_turn(@history, "assistant", @reply) INTO @history;
+        @i := @i + 1;
+    END;
+  END;
+
+  RETURN @history WITH status = "complete";
+END;

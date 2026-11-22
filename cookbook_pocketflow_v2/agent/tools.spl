@@ -1,0 +1,43 @@
+-- Tools for Recipe 004: Web Search Agent
+-- web_search is provided by stdlib
+
+CREATE TOOL_API parse_yaml(text TEXT) RETURNS TEXT AS PYTHON $$
+import re, json, yaml
+
+def parse_yaml(text):
+    # Extract fenced yaml block if present
+    m = re.search(r'```ya?ml\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
+    raw = m.group(1).strip() if m else text.strip()
+    try:
+        data = yaml.safe_load(raw)
+        return json.dumps(data)
+    except yaml.YAMLError as e:
+        return json.dumps({"parse_error": str(e), "raw": raw})
+$$;
+
+CREATE TOOL_API force_block_scalars(text TEXT) RETURNS TEXT AS PYTHON $$
+import re
+
+def force_block_scalars(text):
+    # Replace inline string values with block scalar style to survive multi-line content
+    def _fix(m):
+        key = m.group(1)
+        val = m.group(2).strip()
+        if '\n' in val or ':' in val:
+            indented = '\n'.join('  ' + l for l in val.splitlines())
+            return f'{key}: |\n{indented}'
+        return m.group(0)
+
+    return re.sub(r'(\w+):\s+"((?:[^"\\]|\\.)+)"', _fix, text)
+$$;
+
+CREATE TOOL_API extract_field(yaml_json TEXT, field TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def extract_field(yaml_json, field):
+    try:
+        data = json.loads(yaml_json)
+        return str(data.get(field, ""))
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+$$;

@@ -1,0 +1,202 @@
+CREATE TOOL_API run_tests(solution TEXT, tests TEXT) RETURNS TEXT AS PYTHON $$
+import json
+import concurrent.futures
+import traceback
+
+def run_tests(solution: str, tests: str) -> str:
+    try:
+        namespace = {}
+        try:
+            exec(compile(solution + "\n\n" + tests, "<combined>", "exec"), namespace)
+        except Exception as e:
+            return json.dumps({
+                "all_passed": "false",
+                "passed": 0,
+                "failed": 1,
+                "details": [{"test": "setup", "status": "error", "message": str(e)}]
+            })
+
+        test_fns = {name: fn for name, fn in namespace.items()
+                    if callable(fn) and name.startswith("test_")}
+
+        if not test_fns:
+            return json.dumps({
+                "all_passed": "false",
+                "passed": 0,
+                "failed": 1,
+                "details": [{"test": "discovery", "status": "error",
+                             "message": "No test_ functions found in test code"}]
+            })
+
+        def run_one(item):
+            name, fn = item
+            try:
+                fn()
+                return {"test": name, "status": "passed", "message": ""}
+            except AssertionError as e:
+                return {"test": name, "status": "failed", "message": str(e)}
+            except Exception as e:
+                return {"test": name, "status": "error", "message": traceback.format_exc()}
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = list(executor.map(run_one, test_fns.items()))
+
+        passed = sum(1 for r in results if r["status"] == "passed")
+        failed = len(results) - passed
+        return json.dumps({
+            "all_passed": "true" if failed == 0 else "false",
+            "passed": passed,
+            "failed": failed,
+            "details": results
+        })
+    except Exception as e:
+        return json.dumps({
+            "all_passed": "false",
+            "passed": 0,
+            "failed": 1,
+            "details": [{"test": "runner", "status": "error", "message": str(e)}]
+        })
+$$;
+
+CREATE FUNCTION generate_tests(problem TEXT, failure_analysis TEXT)
+RETURNS TEXT AS $$
+You are a Python test engineer. Write comprehensive test functions for the following coding problem.
+
+Problem:
+{problem}
+
+Previous failure analysis (if any):
+{failure_analysis}
+
+Requirements:
+- Name every test function starting with test_ (e.g. test_basic, test_edge_empty)
+- Use only plain assert statements — no pytest, unittest, or external imports
+- Cover normal cases, edge cases, and boundary conditions
+- Each test must call the function under test with specific inputs and assert the expected output
+
+Return ONLY the Python test function definitions, no other text.
+$$;
+
+CREATE FUNCTION implement_solution(problem TEXT, tests TEXT, failure_analysis TEXT)
+RETURNS TEXT AS $$
+You are a Python software engineer. Implement a Python function that solves the coding problem below.
+
+Problem:
+{problem}
+
+Test cases to satisfy:
+{tests}
+
+Previous failure analysis (if any):
+{failure_analysis}
+
+Requirements:
+- Match the function signature expected by the test code above
+- Include only the implementation (function definitions and any helpers)
+- Do not include test code or example usage
+
+Return ONLY the Python function implementation, no other text.
+$$;
+
+CREATE FUNCTION analyze_failures(solution TEXT, tests TEXT, test_results TEXT)
+RETURNS TEXT AS $$
+Diagnose the root cause of the test failures below.
+
+Solution code:
+{solution}
+
+Test code:
+{tests}
+
+Test results (JSON):
+{test_results}
+
+Provide a structured analysis:
+1. Which tests failed and the specific error or wrong output
+2. Whether the issue lies in the solution logic, the test expectations, or both
+3. Concrete suggestions for what to fix
+
+Keep the analysis concise (3-5 sentences).
+$$;
+
+CREATE FUNCTION decide_revision(problem TEXT, failure_analysis TEXT)
+RETURNS TEXT AS $$
+Based on the failure analysis below, decide which artifact needs revision.
+
+Problem: {problem}
+
+Failure analysis:
+{failure_analysis}
+
+Choose exactly one:
+- "code"  — the implementation has bugs; the tests correctly specify the expected behavior
+- "tests" — the test expectations are wrong or overly strict; the code logic is sound
+- "both"  — both the implementation and the tests need revision
+
+Respond with ONLY one word: code, tests, or both.
+$$;
+
+CREATE FUNCTION build_failure_report(solution TEXT, test_results TEXT)
+RETURNS TEXT AS $$
+Write a concise failure report for the best attempt at a coding problem.
+
+Final solution code:
+{solution}
+
+Final test results (JSON):
+{test_results}
+
+Summarize: how many tests passed vs failed, what the remaining failures reveal, and a brief suggestion for next steps. Keep the report to 3-5 sentences.
+$$;
+
+WORKFLOW coding_agent
+  INPUT @problem TEXT := "Write a Python function that finds the two numbers in a list that sum to a target value, returning their indices"
+  INPUT @max_iterations INTEGER := 5
+  OUTPUT @result TEXT
+DO
+  @i := 0;
+  @failure_analysis := "";
+  @revision_decision := "";
+  @tests := "";
+  @solution := "";
+  @test_results := "";
+  @best_solution := "";
+  @best_test_results := "";
+  @all_passed := "";
+  @status := "in_progress";
+
+  GENERATE generate_tests(@problem, @failure_analysis) INTO @tests;
+  GENERATE implement_solution(@problem, @tests, @failure_analysis) INTO @solution;
+
+  WHILE @i < @max_iterations DO
+    CALL run_tests(@solution, @tests) INTO @test_results;
+    CALL json_get(@test_results, "all_passed") INTO @all_passed;
+
+    EVALUATE @all_passed WHEN contains("true") THEN
+      @status := "complete";
+      @i := @max_iterations;
+    ELSE
+      @best_solution := @solution;
+      @best_test_results := @test_results;
+      @i := @i + 1;
+      GENERATE analyze_failures(@solution, @tests, @test_results) INTO @failure_analysis;
+      GENERATE decide_revision(@problem, @failure_analysis) INTO @revision_decision;
+
+      EVALUATE @revision_decision WHEN contains("code") THEN
+        GENERATE implement_solution(@problem, @tests, @failure_analysis) INTO @solution;
+      ELSE
+        GENERATE generate_tests(@problem, @failure_analysis) INTO @tests;
+        GENERATE implement_solution(@problem, @tests, @failure_analysis) INTO @solution;
+      END;
+    END;
+  END;
+
+  EVALUATE @status WHEN contains("complete") THEN
+    @result := @solution;
+  ELSE
+    GENERATE build_failure_report(@best_solution, @best_test_results) INTO @failure_report;
+    @result := @best_solution + "\n\n" + @failure_report;
+  END;
+
+  RETURN @result WITH status = "complete";
+END;

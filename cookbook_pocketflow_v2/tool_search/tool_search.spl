@@ -1,0 +1,57 @@
+CREATE TOOL_API call_serpapi(query TEXT) RETURNS TEXT AS PYTHON $$
+import os, json, urllib.request, urllib.parse
+
+def call_serpapi(query: str) -> str:
+    try:
+        api_key = os.environ.get("SERPAPI_KEY", "")
+        if not api_key:
+            return "ERROR: SERPAPI_KEY environment variable not set"
+        params = urllib.parse.urlencode({
+            "q": query,
+            "api_key": api_key,
+            "engine": "google"
+        })
+        url = f"https://serpapi.com/search?{params}"
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+        results = data.get("organic_results", [])
+        if not results:
+            return "NO_RESULTS"
+        return json.dumps(results[:10])
+    except Exception as e:
+        return f"ERROR: {e}"
+$$;
+
+CREATE FUNCTION synthesize_briefing(query TEXT, search_results TEXT)
+RETURNS TEXT AS $$
+You are a research analyst. Given the user''s search query and the raw search results below,
+produce a structured briefing with exactly these three sections:
+
+**Summary**
+A concise 2-3 sentence overview of what the results reveal about "{query}".
+
+**Key Facts**
+3-5 bullet points of the most important factual findings extracted from the results.
+
+**Follow-up Queries**
+3 suggested follow-up search queries that would deepen research on this topic.
+
+Search results:
+{search_results}
+$$;
+
+WORKFLOW serpapi_briefer
+  INPUT @query TEXT := "latest breakthroughs in large language models 2025"
+  OUTPUT @briefing TEXT
+DO
+  CALL call_serpapi(@query) INTO @raw_results;
+  EVALUATE @raw_results
+    WHEN contains("NO_RESULTS") THEN
+      @briefing := "No results returned for query: " + @query;
+    WHEN contains("ERROR:") THEN
+      @briefing := @raw_results;
+    ELSE
+      GENERATE synthesize_briefing(@query, @raw_results) INTO @briefing;
+  END;
+  RETURN @briefing WITH status = "complete";
+END;

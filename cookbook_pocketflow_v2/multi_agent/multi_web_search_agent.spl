@@ -1,0 +1,73 @@
+-- Deterministic: normalize and exact-match guess vs target
+CREATE TOOL_API is_correct_guess(guess TEXT, target TEXT) 
+RETURNS TEXT AS PYTHON $$
+def is_correct_guess(guess: str, target: str) -> str:
+    try:
+        return "correct" if guess.strip().lower() == target.strip().lower() else "wrong"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+-- Probabilistic: Hinter knows the target, must avoid forbidden words and steer away from prior wrong guesses
+CREATE FUNCTION hinter_agent(target_word TEXT, forbidden_words TEXT, wrong_guesses TEXT)
+RETURNS TEXT AS $$
+You are the Hinter in a Taboo-style word-guessing game.
+The Guesser must identify this secret target word: {target_word}
+
+Hard rules:
+- NEVER say the target word
+- NEVER use any word in the forbidden list: {forbidden_words}
+- The Guesser''s previous wrong guesses were: {wrong_guesses} — avoid reinforcing those misdirections
+
+Respond with exactly one creative, concise hint sentence. No preamble, no explanation.
+$$;
+
+-- Probabilistic: Guesser reads hint + wrong-guess history and produces a single-word answer
+CREATE FUNCTION guesser_agent(hint TEXT, wrong_guesses TEXT)
+RETURNS TEXT AS $$
+You are the Guesser in a word-guessing game.
+A Hinter has given you the following clue about a secret target word: {hint}
+
+Your previous wrong guesses (do not repeat any of these): {wrong_guesses}
+
+Respond with exactly one word — your best guess for the secret target word.
+$$;
+
+WORKFLOW taboo_game
+  INPUT @target_word TEXT := "ocean"
+  INPUT @forbidden_words TEXT := "sea,water,wave,fish,blue"
+  INPUT @max_turns INTEGER := 5
+  OUTPUT @result TEXT
+DO
+  -- Initialize game state (node B)
+  @turn := 0;
+  @wrong_guesses := "";
+  @result := "Game Over: the target word was not guessed.";
+
+  -- Main game loop: covers nodes C → K; WHILE condition covers node I
+  WHILE @turn < @max_turns DO
+
+    -- Hinter Agent: generate hint without forbidden words (nodes C + D)
+    GENERATE hinter_agent(@target_word, @forbidden_words, @wrong_guesses) INTO @hint;
+
+    -- Guesser Agent: read hint + prior wrong guesses, produce guess (node E)
+    GENERATE guesser_agent(@hint, @wrong_guesses) INTO @guess;
+
+    -- Correct guess? (node F): deterministic exact-match check
+    CALL is_correct_guess(@guess, @target_word) INTO @check;
+
+    EVALUATE @check WHEN contains("correct") THEN
+      -- Game Won (node G): announce target word, force-exit loop
+      @result := "Game Won! The target word was: " + @target_word;
+      @turn := @max_turns;
+    ELSE
+      -- Log wrong guess, turn += 1 (node H); @wrong_guesses feeds node K implicitly
+      CALL list_append(@wrong_guesses, @guess) INTO @wrong_guesses;
+      @turn := @turn + 1;
+    END;
+
+  END;
+
+  -- After loop: @result holds either Game Won (node G) or Game Over (node J)
+  RETURN @result WITH status = "complete";
+END;

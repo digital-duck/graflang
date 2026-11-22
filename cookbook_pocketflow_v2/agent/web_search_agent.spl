@@ -1,0 +1,67 @@
+IMPORT 'tools.spl';
+
+CREATE FUNCTION decide_action(question TEXT, context TEXT)
+RETURNS TEXT AS $$
+You are a research agent. Given the question and accumulated search context, decide the next action.
+
+Question: {question}
+Context: {context}
+
+Respond with a fenced YAML block:
+```yaml
+action: search
+search_query: <your search query here>
+```
+or, if you have sufficient information to answer:
+```yaml
+action: answer
+```
+$$;
+
+CREATE FUNCTION answer_question(question TEXT, context TEXT) 
+RETURNS TEXT AS $$
+Using the search context provided, synthesize a comprehensive prose answer to the question.
+
+Question: {question}
+Context: {context}
+$$;
+
+WORKFLOW web_search_agent
+  INPUT @question TEXT := "What are the latest breakthroughs in fusion energy research?"
+  OUTPUT @answer TEXT
+DO
+  @context := 'No previous search';
+  @iteration := 0;
+  @done := 'false';
+
+  WHILE @done != 'true' AND @iteration < 10 DO
+    @iteration := @iteration + 1;
+
+    GENERATE decide_action(@question, @context) INTO @raw_response;
+
+    CALL parse_yaml(@raw_response) INTO @parse_result;
+
+    EVALUATE @parse_result WHEN contains('parse_error') THEN
+      CALL force_block_scalars(@raw_response) INTO @fixed_response;
+      CALL parse_yaml(@fixed_response) INTO @retry_result;
+      EVALUATE @retry_result WHEN contains('parse_error') THEN
+        RETURN @retry_result WITH status = 'error';
+      ELSE
+        @decision := @retry_result;
+      END;
+    ELSE
+      @decision := @parse_result;
+    END;
+
+    EVALUATE @decision WHEN contains('action: search') THEN
+      CALL extract_field(@decision, 'search_query') INTO @search_query;
+      CALL web_search(@search_query) INTO @search_results;
+      @context := @context + '\nSEARCH: ' + @search_query + '\nRESULTS: ' + @search_results;
+    ELSE
+      GENERATE answer_question(@question, @context) INTO @answer;
+      @done := 'true';
+    END;
+  END;
+
+  RETURN @answer WITH status = 'complete';
+END;

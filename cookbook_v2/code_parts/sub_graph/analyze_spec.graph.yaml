@@ -1,0 +1,28 @@
+version: "1.0-graph"
+
+# A part (named subgraph): one GENERATE, with the prompt of ../../code_pipeline/00_analyze_spec.spl. See ../code_parts.graph.yaml.
+
+workflow:
+  name: "analyze_spec"
+  inputs:
+    - {name: "spec", type: "TEXT"}
+  outputs:
+    - {name: "analysis", type: "TEXT"}
+
+resources:
+  prompts:
+    analyze_spec: "./prompts/analyze_spec.md"
+
+nodes:
+  - {id: "wf_entry", type: "INPUT", ports: ["entry", "out_spec"]}
+  - id: "gen"
+    type: "GENERATE"
+    config: {prompt_ref: "prompts.analyze_spec"}
+    ports: ["trigger", "complete", "in_spec", "out_analysis"]
+  - {id: "wf_exit", type: "OUTPUT", ports: ["trigger", "exit", "in_analysis"]}
+
+edges:
+  - {source: "wf_entry.entry", target: "gen.trigger", type: "triggers"}
+  - {source: "gen.complete", target: "wf_exit.trigger", type: "triggers"}
+  - {source: "wf_entry.out_spec", target: "gen.in_spec", type: "binds"}
+  - {source: "gen.out_analysis", target: "wf_exit.in_analysis", type: "binds"}

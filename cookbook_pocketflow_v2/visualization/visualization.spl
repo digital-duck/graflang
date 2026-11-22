@@ -1,0 +1,170 @@
+CREATE TOOL_API validate_payment(order_data TEXT) RETURNS TEXT AS PYTHON $$
+import json, re
+def validate_payment(order_data: str) -> str:
+    try:
+        data = json.loads(order_data)
+        p = data.get("payment", data)
+        card = re.sub(r'[\s-]', '', p.get("card_number", ""))
+        if not re.match(r'^\d{13,19}$', card):
+            return "invalid: bad card number"
+        if not re.match(r'^\d{2}/\d{2,4}$', p.get("expiry", "")):
+            return "invalid: bad expiry"
+        if not re.match(r'^\d{3,4}$', p.get("cvv", "")):
+            return "invalid: bad cvv"
+        if float(p.get("amount", 0)) <= 0:
+            return "invalid: bad amount"
+        return "valid"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API process_payment(order_data TEXT) RETURNS TEXT AS PYTHON $$
+import json, uuid
+def process_payment(order_data: str) -> str:
+    try:
+        data = json.loads(order_data)
+        p = data.get("payment", data)
+        amount = float(p.get("amount", 0))
+        if amount <= 0:
+            return json.dumps({"status": "failed", "reason": "invalid amount"})
+        txn_id = "TXN-" + uuid.uuid4().hex[:8].upper()
+        return json.dumps({"status": "success", "transaction_id": txn_id, "amount": amount})
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API check_stock(order_data TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def check_stock(order_data: str) -> str:
+    try:
+        data = json.loads(order_data)
+        items = data.get("items", [])
+        out_of_stock = [i for i in items if not i.get("available", True)]
+        if out_of_stock:
+            return json.dumps({"status": "out_of_stock", "unavailable": out_of_stock})
+        return json.dumps({"status": "in_stock", "items": items})
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API reserve_items(order_data TEXT) RETURNS TEXT AS PYTHON $$
+import json, uuid
+def reserve_items(order_data: str) -> str:
+    try:
+        data = json.loads(order_data)
+        reservation_id = "RES-" + uuid.uuid4().hex[:8].upper()
+        return json.dumps({
+            "status": "reserved",
+            "reservation_id": reservation_id,
+            "items": data.get("items", [])
+        })
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API create_shipment(order_data TEXT, reservation_id TEXT) RETURNS TEXT AS PYTHON $$
+import json, uuid
+def create_shipment(order_data: str, reservation_id: str) -> str:
+    try:
+        data = json.loads(order_data)
+        shipment_id = "SHIP-" + uuid.uuid4().hex[:8].upper()
+        return json.dumps({
+            "status": "created",
+            "shipment_id": shipment_id,
+            "reservation_id": reservation_id,
+            "destination": data.get("shipping_address", "unknown")
+        })
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API assign_carrier(shipment_data TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def assign_carrier(shipment_data: str) -> str:
+    try:
+        data = json.loads(shipment_data)
+        dest = data.get("destination", "")
+        carriers = ["FedEx", "UPS", "USPS", "DHL"]
+        carrier = carriers[abs(hash(dest)) % 4]
+        data["carrier"] = carrier
+        data["tracking_number"] = carrier[:3].upper() + "-" + str(abs(hash(dest + carrier)) % 1000000).zfill(6)
+        return json.dumps(data)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API build_order_status(payment_result TEXT, inventory_result TEXT, shipping_result TEXT) RETURNS TEXT AS PYTHON $$
+import json
+def build_order_status(payment_result: str, inventory_result: str, shipping_result: str) -> str:
+    def safe_parse(s):
+        try:
+            return json.loads(s)
+        except Exception:
+            return {"raw": s}
+    try:
+        return json.dumps({
+            "payment": safe_parse(payment_result),
+            "inventory": safe_parse(inventory_result),
+            "shipping": safe_parse(shipping_result),
+            "order_status": "complete"
+        }, indent=2)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+WORKFLOW payment_workflow
+  INPUT @order_data TEXT := "{\"payment\":{\"card_number\":\"4111111111111111\",\"expiry\":\"12/26\",\"cvv\":\"123\",\"amount\":99.99},\"items\":[{\"name\":\"SPL Book\",\"sku\":\"SPL-001\",\"qty\":1,\"available\":true}],\"shipping_address\":\"123 Main St, San Francisco, CA 94105\"}"
+  INPUT @max_retries INTEGER := 3
+  OUTPUT @payment_status TEXT
+DO
+  @i := 0;
+  @payment_status := "failed: max retries exceeded";
+  WHILE @i < @max_retries DO
+    CALL validate_payment(@order_data) INTO @validation;
+    CALL process_payment(@order_data) INTO @payment_result;
+    EVALUATE @payment_result WHEN contains("success") THEN
+      @payment_status := @payment_result;
+      CALL write_file("payment_status.json", @payment_status, "w") INTO @write_ok;
+      @i := @max_retries;
+    ELSE
+      @i := @i + 1;
+    END;
+  END;
+  RETURN @payment_status WITH status = "complete";
+END;
+
+WORKFLOW inventory_workflow
+  INPUT @order_data TEXT := "{\"payment\":{\"card_number\":\"4111111111111111\",\"expiry\":\"12/26\",\"cvv\":\"123\",\"amount\":99.99},\"items\":[{\"name\":\"SPL Book\",\"sku\":\"SPL-001\",\"qty\":1,\"available\":true}],\"shipping_address\":\"123 Main St, San Francisco, CA 94105\"}"
+  OUTPUT @inventory_status TEXT
+DO
+  CALL check_stock(@order_data) INTO @stock_result;
+  CALL reserve_items(@order_data) INTO @reservation;
+  @inventory_status := @reservation;
+  CALL write_file("inventory_status.json", @inventory_status, "w") INTO @write_ok;
+  RETURN @inventory_status WITH status = "complete";
+END;
+
+WORKFLOW shipping_workflow
+  INPUT @order_data TEXT := "{\"payment\":{\"card_number\":\"4111111111111111\",\"expiry\":\"12/26\",\"cvv\":\"123\",\"amount\":99.99},\"items\":[{\"name\":\"SPL Book\",\"sku\":\"SPL-001\",\"qty\":1,\"available\":true}],\"shipping_address\":\"123 Main St, San Francisco, CA 94105\"}"
+  INPUT @reservation_id TEXT := "RES-00000001"
+  OUTPUT @shipping_status TEXT
+DO
+  CALL create_shipment(@order_data, @reservation_id) INTO @shipment;
+  CALL assign_carrier(@shipment) INTO @carrier_result;
+  @shipping_status := @carrier_result;
+  CALL write_file("shipping_status.json", @shipping_status, "w") INTO @write_ok;
+  RETURN @shipping_status WITH status = "complete";
+END;
+
+WORKFLOW order_fulfillment
+  INPUT @order_data TEXT := "{\"payment\":{\"card_number\":\"4111111111111111\",\"expiry\":\"12/26\",\"cvv\":\"123\",\"amount\":99.99},\"items\":[{\"name\":\"SPL Book\",\"sku\":\"SPL-001\",\"qty\":1,\"available\":true}],\"shipping_address\":\"123 Main St, San Francisco, CA 94105\"}"
+  INPUT @max_payment_retries INTEGER := 3
+  OUTPUT @order_status TEXT
+DO
+  CALL payment_workflow(@order_data, @max_payment_retries) INTO @payment_result;
+  CALL inventory_workflow(@order_data) INTO @inventory_result;
+  CALL json_get(@inventory_result, "reservation_id") INTO @reservation_id;
+  CALL shipping_workflow(@order_data, @reservation_id) INTO @shipping_result;
+  CALL build_order_status(@payment_result, @inventory_result, @shipping_result) INTO @order_status;
+  RETURN @order_status WITH status = "complete";
+END;

@@ -1,0 +1,25 @@
+version: "1.0-graph"
+
+# A guardrail in front of a model: a cheap check decides whether the question is on topic before the answering prompt sees it.
+# A branch starts with `on: <evaluate step>.pass` or `.fail`; each branch ends in its own `output`.
+
+workflow:
+  name: "guardrail"
+  inputs:
+    - {name: "question", type: "TEXT", description: "what the user asks"}
+  outputs:
+    - {name: "reply", type: "TEXT", description: "the answer, or a polite refusal when the question is off topic"}
+
+resources:
+  prompts:
+    check: "./prompts/check.md"
+    answer: "./prompts/answer.md"
+    refuse: "./prompts/refuse.md"
+
+steps:
+  - check:    {generate: prompts.check, in: {question: $in.question}, out: verdict}
+  - on_topic: {evaluate: "contains(upper(@in_verdict), 'YES')", in: {verdict: check.verdict}}
+  - advise:   {generate: prompts.answer, on: on_topic.pass, in: {question: $in.question}, out: reply}
+  - advised:  {output: advise.reply}
+  - decline:  {generate: prompts.refuse, on: on_topic.fail, in: {question: $in.question}, out: reply}
+  - declined: {output: decline.reply, on: decline}

@@ -236,12 +236,10 @@ def port(family, name, groups=None):
     original = (src / "readme.md").read_text() if (src / "readme.md").exists() else f"# {name}\n"
     original = original.replace(f"{src_root.name}/{name}", f"{dst_root.name}/{name}")
     parts = [p.name for p in sorted(dst.iterdir()) if p.is_dir() and list(p.glob("*.graph.yaml"))]
-    head = (f"> **Layered port** of `{src_root.name}/{name}`: the same tools, prompts and gates, grouped into composites "
-            f"({', '.join(f'`{p}/`' for p in parts)}), each step named after the tool or prompt it runs. "
+    how = (f"grouped into composites ({', '.join(f'`{p}/`' for p in parts)})" if parts else
+           "kept flat (no group has one entry and one way out, or it is too small to be worth one)")
+    head = (f"> **Layered port** of `{src_root.name}/{name}`: the same tools, prompts and gates, {how}, each step named after the tool or prompt it runs. "
             f"Checked against the original by `tests/test_{dst_root.name}.py`. Open it with `graf vis {dst_root.name}/{name}/{graphs[0].name} --depth 0`.\n\n")
-    first, _, rest = original.partition("\n")
-    (dst / "readme.md").write_text(first + "\n\n" + head + rest.lstrip("\n"))
-    return parts
 
 
 def listing(family, name):

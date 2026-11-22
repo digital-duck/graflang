@@ -1,0 +1,247 @@
+CREATE TOOL_API list_resume_files(directory TEXT) 
+RETURNS TEXT AS PYTHON $$
+import os
+def list_resume_files(directory: str) -> str:
+    try:
+        if not os.path.isdir(directory):
+            return f"error: directory not found: {directory}"
+        exts = {".txt", ".pdf", ".docx", ".md", ".rtf"}
+        files = sorted(
+            os.path.join(directory, f)
+            for f in os.listdir(directory)
+            if os.path.splitext(f)[1].lower() in exts
+        )
+        return "\n".join(files) if files else "error: no resume files found"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API aggregate_scores(all_evaluations TEXT)
+RETURNS TEXT AS PYTHON $$
+import re
+
+def _parse_records(text):
+    records = []
+    cur_path, cur_eval = None, []
+    for line in text.split("\n"):
+        if "|||" in line:
+            if cur_path is not None:
+                records.append((cur_path, "\n".join(cur_eval)))
+            p, e = line.split("|||", 1)
+            cur_path, cur_eval = p.strip(), [e]
+        elif cur_path is not None:
+            cur_eval.append(line)
+    if cur_path is not None:
+        records.append((cur_path, "\n".join(cur_eval)))
+    return records
+
+def aggregate_scores(all_evaluations: str) -> str:
+    try:
+        scores = []
+        for _, evaluation in _parse_records(all_evaluations):
+            if not evaluation.strip():
+                continue
+            m = re.search(r"score[:\s]+(\d+(?:\.\d+)?)", evaluation, re.IGNORECASE)
+            if not m:
+                m = re.search(r"(\d+(?:\.\d+)?)\s*/\s*10", evaluation)
+            if m:
+                scores.append(float(m.group(1)))
+        if not scores:
+            return "total: 0, average: N/A, min: N/A, max: N/A"
+        avg = sum(scores) / len(scores)
+        return f"total: {len(scores)}, average: {avg:.2f}, min: {min(scores):.2f}, max: {max(scores):.2f}"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API rank_candidates(all_evaluations TEXT)
+RETURNS TEXT AS PYTHON $$
+import re, os
+
+def _parse_records(text):
+    records = []
+    cur_path, cur_eval = None, []
+    for line in text.split("\n"):
+        if "|||" in line:
+            if cur_path is not None:
+                records.append((cur_path, "\n".join(cur_eval)))
+            p, e = line.split("|||", 1)
+            cur_path, cur_eval = p.strip(), [e]
+        elif cur_path is not None:
+            cur_eval.append(line)
+    if cur_path is not None:
+        records.append((cur_path, "\n".join(cur_eval)))
+    return records
+
+def rank_candidates(all_evaluations: str) -> str:
+    try:
+        entries = []
+        for path, evaluation in _parse_records(all_evaluations):
+            if not evaluation.strip():
+                continue
+            m = re.search(r"score[:\s]+(\d+(?:\.\d+)?)", evaluation, re.IGNORECASE)
+            if not m:
+                m = re.search(r"(\d+(?:\.\d+)?)\s*/\s*10", evaluation)
+            score = float(m.group(1)) if m else 0.0
+            entries.append((score, os.path.basename(path), evaluation))
+        entries.sort(key=lambda x: x[0], reverse=True)
+        ranked = []
+        for rank, (score, name, evaluation) in enumerate(entries, 1):
+            ranked.append(f"rank={rank}|score={score}|name={name}|{evaluation}")
+        return "\n".join(ranked) if ranked else "error: no candidates to rank"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API filter_candidates(ranked_candidates TEXT, threshold TEXT, filter_type TEXT) 
+RETURNS TEXT AS PYTHON $$
+import re
+def filter_candidates(ranked_candidates: str, threshold: str, filter_type: str) -> str:
+    try:
+        thresh = float(threshold)
+        result = []
+        for line in ranked_candidates.strip().split("\n"):
+            if not line.strip():
+                continue
+            m = re.search(r"score=(\d+(?:\.\d+)?)", line)
+            if not m:
+                continue
+            score = float(m.group(1))
+            is_qualified = score >= thresh
+            if filter_type.lower() == "qualified" and is_qualified:
+                result.append(line)
+            elif filter_type.lower() == "rejected" and not is_qualified:
+                result.append(line)
+        return "\n".join(result) if result else ""
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API merge_evaluation_lists(qualified TEXT, rejected TEXT) 
+RETURNS TEXT AS PYTHON $$
+def merge_evaluation_lists(qualified: str, rejected: str) -> str:
+    try:
+        q_lines = [l for l in qualified.strip().split("\n") if l.strip()]
+        r_lines = [l for l in rejected.strip().split("\n") if l.strip()]
+        sections = []
+        if q_lines:
+            sections.append(f"=== QUALIFIED ({len(q_lines)} candidates) ===")
+            sections.extend(q_lines)
+        if r_lines:
+            sections.append(f"=== REJECTED ({len(r_lines)} candidates) ===")
+            sections.extend(r_lines)
+        return "\n".join(sections) if sections else "no candidates"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION judge_resume(resume_text TEXT, criteria TEXT)
+RETURNS TEXT AS $$
+You are an expert HR recruiter performing objective resume screening.
+
+Resume Content:
+{resume_text}
+
+Evaluation Criteria:
+{criteria}
+
+Evaluate this resume and provide:
+1. Score: X/10 (10 = perfect match across all criteria)
+2. Criteria assessment: for each criterion, note whether it is met, partially met, or not met
+3. Key strengths: 2-3 specific bullet points grounded in the resume content
+4. Key gaps: 2-3 specific bullet points
+5. Recommendation: one-sentence hiring recommendation
+
+Be precise and objective. Ground every point in the actual resume content.
+$$;
+
+CREATE FUNCTION generate_summary_report(ranked_candidates TEXT, merged_list TEXT, scores_summary TEXT)
+RETURNS TEXT AS $$
+You are an HR analytics specialist preparing an executive candidate screening report.
+
+Score Statistics:
+{scores_summary}
+
+Ranked Candidates (highest score first):
+{ranked_candidates}
+
+Candidate Classification:
+{merged_list}
+
+Write a professional executive summary report with these sections:
+1. Overview: total candidates screened, qualified vs rejected counts, and qualification rate
+2. Top 3 candidates: name, score, and one-sentence differentiator for each
+3. Qualification patterns: common strengths among qualified candidates; common gaps among rejected
+4. Recommended next steps: interview shortlist recommendation and suggested timeline
+5. Methodology: brief note on the LLM-based evaluation approach and score threshold applied
+
+Format the report for executive review. Be concise and action-oriented.
+$$;
+
+WORKFLOW evaluate_single_resume
+  INPUT @resume_path TEXT
+  INPUT @criteria TEXT
+  OUTPUT @evaluation TEXT
+DO
+  CALL isblank(@resume_path) INTO @path_blank;
+  EVALUATE @path_blank
+    WHEN contains("true") THEN
+      @evaluation := "";
+    ELSE
+      CALL read_file(@resume_path) INTO @resume_text;
+      GENERATE judge_resume(@resume_text, @criteria) INTO @evaluation;
+  END;
+  RETURN @evaluation WITH status = "complete";
+END;
+
+WORKFLOW resume_screener
+  INPUT @resume_dir TEXT := "./cookbook-pocketflow/006_map_reduce/data"
+  INPUT @criteria TEXT := "relevant work experience, technical skills, educational background, communication clarity"
+  INPUT @threshold TEXT := "7"
+  INPUT @max_iterations INTEGER := 10
+  INPUT @out_dir TEXT := "cookbook-pocketflow/006_map_reduce/output"
+  OUTPUT @report TEXT
+DO
+  -- read directory and list all resume files (newline-delimited paths)
+  CALL list_resume_files(@resume_dir) INTO @resume_files;
+
+  -- evaluate resumes in parallel batches of 3; each batch = one loop iteration
+  @i := 0;
+  @all_evaluations := "";
+  WHILE @i < @max_iterations DO
+    @i2 := @i + 1;
+    @i3 := @i + 2;
+    CALL list_get(@resume_files, @i, "\n") INTO @path1;
+    CALL list_get(@resume_files, @i2, "\n") INTO @path2;
+    CALL list_get(@resume_files, @i3, "\n") INTO @path3;
+
+    CALL PARALLEL
+      evaluate_single_resume(@path1, @criteria) INTO @eval1,
+      evaluate_single_resume(@path2, @criteria) INTO @eval2,
+      evaluate_single_resume(@path3, @criteria) INTO @eval3
+    END;
+
+    @all_evaluations := @all_evaluations + @path1 + "|||" + @eval1 + "\n";
+    @all_evaluations := @all_evaluations + @path2 + "|||" + @eval2 + "\n";
+    @all_evaluations := @all_evaluations + @path3 + "|||" + @eval3 + "\n";
+    @i := @i + 3;
+  END;
+
+  -- aggregate scores and rank all evaluated candidates by score descending
+  CALL aggregate_scores(@all_evaluations) INTO @scores_summary;
+  CALL rank_candidates(@all_evaluations) INTO @ranked_candidates;
+
+  -- partition ranked candidates into qualified and rejected lists
+  CALL filter_candidates(@ranked_candidates, @threshold, "qualified") INTO @qualified_list;
+  CALL filter_candidates(@ranked_candidates, @threshold, "rejected") INTO @rejected_list;
+
+  -- merge partitions into unified list and generate executive summary report
+  CALL merge_evaluation_lists(@qualified_list, @rejected_list) INTO @merged_list;
+  GENERATE generate_summary_report(@ranked_candidates, @merged_list, @scores_summary) INTO @report;
+
+  CALL make_dir(@out_dir) INTO @_;
+  CALL path_join(@out_dir, "screening_report.md") INTO @report_path;
+  CALL write_file(@report_path, @report) INTO @_;
+
+  RETURN @report WITH status = "complete";
+END;

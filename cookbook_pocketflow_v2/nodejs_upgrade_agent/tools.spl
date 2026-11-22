@@ -1,0 +1,171 @@
+-- Tools for Recipe 042: Node.js Upgrade Agent
+
+CREATE TOOL_API strings_equal(a TEXT, b TEXT) RETURNS TEXT AS PYTHON $$
+def strings_equal(a, b):
+    return "true" if a == b else "false"
+$$;
+
+CREATE TOOL_API detect_project_type(pkg_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+_FRAMEWORK_SIGNALS = [
+    # (dep_key_substring, project_type)
+    ("next",            "nextjs"),
+    ("nuxt",            "nuxtjs"),
+    ("@angular/core",   "angular"),
+    ("react-scripts",   "react-cra"),
+    ("react",           "react"),
+    ("vue",             "vue"),
+    ("svelte",          "svelte"),
+    ("@nestjs/core",    "nestjs"),
+    ("express",         "express"),
+    ("fastify",         "fastify"),
+    ("koa",             "koa"),
+    ("electron",        "electron"),
+]
+
+def detect_project_type(pkg_json):
+    try:
+        pkg = json.loads(pkg_json)
+    except json.JSONDecodeError:
+        return "unknown"
+    all_deps = {
+        **pkg.get("dependencies", {}),
+        **pkg.get("devDependencies", {}),
+    }
+    for signal, ptype in _FRAMEWORK_SIGNALS:
+        if any(signal in k for k in all_deps):
+            return ptype
+    # check scripts for clues
+    scripts = pkg.get("scripts", {})
+    if any("angular" in v for v in scripts.values()):
+        return "angular"
+    if any("react" in v for v in scripts.values()):
+        return "react"
+    return "node"   # generic Node.js backend
+$$;
+
+CREATE TOOL_API load_upgrade_template(template_path TEXT, project_type TEXT) RETURNS TEXT AS PYTHON $$
+from pathlib import Path
+
+_DEFAULTS = {
+    "react":     "Focus on: React API changes, hooks deprecations, JSX transform, peer dep conflicts.",
+    "react-cra": "Focus on: react-scripts version, webpack config changes, polyfill removals.",
+    "nextjs":    "Focus on: App Router migration, getServerSideProps deprecations, Image/Link API changes.",
+    "angular":   "Focus on: ng update path, RxJS version alignment, standalone component migration, strict mode.",
+    "vue":       "Focus on: Options API vs Composition API, vue-router & vuex/pinia alignment.",
+    "nuxtjs":    "Focus on: Nuxt 3 migration, auto-imports, nitro engine changes.",
+    "svelte":    "Focus on: Svelte 4/5 syntax changes, SvelteKit routing changes.",
+    "nestjs":    "Focus on: module/decorator API changes, platform-express/fastify alignment.",
+    "express":   "Focus on: middleware signature changes, error handler arity, router API.",
+    "electron":  "Focus on: contextBridge, preload script isolation, Node.js version alignment.",
+    "node":      "Focus on: Node.js built-in API changes, ESM/CJS interop, crypto/buffer deprecations.",
+}
+
+def load_upgrade_template(template_path, project_type):
+    p = Path(template_path)
+    if template_path and p.exists():
+        return p.read_text(encoding="utf-8")
+    return _DEFAULTS.get(project_type, _DEFAULTS["node"])
+$$;
+
+CREATE TOOL_API scan_source_files(project_dir TEXT) RETURNS TEXT AS PYTHON $$
+import json, os
+from pathlib import Path
+
+_EXTS = {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"}
+_SKIP = {"node_modules", ".git", "dist", "build", ".next", "coverage"}
+
+def scan_source_files(project_dir):
+    root = Path(project_dir)
+    files = []
+    for p in root.rglob("*"):
+        if p.suffix in _EXTS and not any(s in p.parts for s in _SKIP):
+            files.append(str(p))
+    return json.dumps(sorted(files))
+$$;
+
+CREATE TOOL_API read_package_json(project_dir TEXT) RETURNS TEXT AS PYTHON $$
+import json
+from pathlib import Path
+
+def read_package_json(project_dir):
+    pkg = Path(project_dir) / "package.json"
+    if not pkg.exists():
+        return json.dumps({"error": f"package.json not found in {project_dir}"})
+    return pkg.read_text(encoding="utf-8")
+$$;
+
+CREATE TOOL_API list_outdated(project_dir TEXT) RETURNS TEXT AS PYTHON $$
+import subprocess, json
+
+def list_outdated(project_dir):
+    result = subprocess.run(
+        ["npm", "outdated", "--json"],
+        cwd=project_dir, capture_output=True, text=True
+    )
+    # npm outdated exits non-zero when packages are outdated — that's expected
+    try:
+        data = json.loads(result.stdout) if result.stdout.strip() else {}
+    except json.JSONDecodeError:
+        data = {"raw": result.stdout}
+    return json.dumps(data)
+$$;
+
+CREATE TOOL_API run_npm(project_dir TEXT, cmd TEXT) RETURNS TEXT AS PYTHON $$
+import subprocess, json
+
+def run_npm(project_dir, cmd):
+    args = ["npm"] + cmd.split()
+    result = subprocess.run(
+        args, cwd=project_dir, capture_output=True, text=True, timeout=300
+    )
+    return json.dumps({
+        "exit_code": result.returncode,
+        "stdout": result.stdout[-4000:],   # cap to avoid token explosion
+        "stderr": result.stderr[-2000:],
+        "ok": result.returncode == 0
+    })
+$$;
+
+CREATE TOOL_API backup_file(file_path TEXT) RETURNS TEXT AS PYTHON $$
+import shutil
+from pathlib import Path
+
+def backup_file(file_path):
+    src = Path(file_path)
+    dst = src.with_suffix(src.suffix + ".bak")
+    shutil.copy2(src, dst)
+    return str(dst)
+$$;
+
+CREATE TOOL_API get_item(json_list TEXT, idx TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def get_item(json_list, idx):
+    items = json.loads(json_list)
+    i = int(idx)
+    return items[i] if 0 <= i < len(items) else ""
+$$;
+
+CREATE TOOL_API list_count(json_list TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def list_count(json_list):
+    return str(len(json.loads(json_list)))
+$$;
+
+CREATE TOOL_API npm_result_ok(npm_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def npm_result_ok(npm_json):
+    return "true" if json.loads(npm_json).get("ok") else "false"
+$$;
+
+CREATE TOOL_API npm_errors(npm_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def npm_errors(npm_json):
+    d = json.loads(npm_json)
+    return (d.get("stderr") or d.get("stdout") or "unknown error")[:2000]
+$$;

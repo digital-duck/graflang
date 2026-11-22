@@ -1,0 +1,86 @@
+version: 1.0-graph
+workflow:
+  name: chat_turn
+  inputs:
+  - name: history
+    type: TEXT
+    default: '[]'
+    description: the conversation so far, a JSON array of {"role", "content"} messages
+  - name: question
+    type: TEXT
+    description: the new user message
+  - name: last_n
+    type: INTEGER
+    default: 10
+    description: how many recent turns (a question and its reply) the model sees
+  outputs:
+  - name: reply
+    type: TEXT
+  - name: history
+    type: TEXT
+steps:
+- append_turn:
+    node: SOLVE
+    in:
+      history: $in.history
+      question: $in.question
+    out: history
+    tool: append_turn
+    backend: kernel
+    code: |
+      import json
+      def append_turn(history: str, role: str, content: str) -> str:
+          turns = json.loads(history) if str(history).strip() else []
+          turns.append({"role": role, "content": content})
+          return json.dumps(turns)
+      _result = append_turn(history, 'user', question)
+    result: _result
+    out_type: TEXT
+- trim_turns:
+    node: SOLVE
+    in:
+      history: append_turn
+      last_n: $in.last_n
+    out: trimmed
+    tool: trim_turns
+    backend: kernel
+    code: |
+      import json
+      def trim_turns(history: str, last_n: int) -> str:
+          """Keep the last N turns (a question and its reply) and the new question, so a long chat stays within the model's context."""
+          turns = json.loads(history) if str(history).strip() else []
+          return json.dumps(turns[-(2 * max(1, int(last_n)) + 1):])
+      _result = trim_turns(history, last_n)
+    result: _result
+    out_type: TEXT
+- chat_reply:
+    generate: |-
+      You are a helpful assistant engaged in a multi-turn conversation.
+      The conversation so far is a JSON array of {"role", "content"} messages:
+      {{in_trimmed}}
+      Reply to the most recent user message concisely and helpfully. Write the reply only, in Markdown.
+    in:
+      trimmed: trim_turns
+    out: reply
+    function: chat_reply
+- append_turn_2:
+    node: SOLVE
+    in:
+      history: append_turn
+      reply: chat_reply
+    out: history
+    tool: append_turn
+    backend: kernel
+    code: |
+      import json
+      def append_turn(history: str, role: str, content: str) -> str:
+          turns = json.loads(history) if str(history).strip() else []
+          turns.append({"role": role, "content": content})
+          return json.dumps(turns)
+      _result = append_turn(history, 'assistant', reply)
+    result: _result
+    out_type: TEXT
+- wf_exit:
+    output:
+      reply: chat_reply
+      history: append_turn_2

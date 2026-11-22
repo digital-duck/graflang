@@ -1,0 +1,92 @@
+version: 1.0-graph
+workflow:
+  name: text_to_embedding
+  inputs:
+  - name: text
+    type: TEXT
+    default: Machine learning is a branch of artificial intelligence that enables computers to learn from data without being explicitly programmed.
+  - name: api_key
+    type: TEXT
+    default: ''
+  outputs:
+  - name: result
+    type: TEXT
+steps:
+- call_openai_embeddings:
+    node: SOLVE
+    in:
+      text: $in.text
+      api_key: $in.api_key
+    out: api_response
+    tool: call_openai_embeddings
+    backend: kernel
+    arguments:
+    - '@text'
+    - '@api_key'
+    code: |
+      import json, urllib.request, os
+      def call_openai_embeddings(text: str, api_key: str) -> str:
+          try:
+              key = api_key or os.environ.get("OPENAI_API_KEY", "")
+              if not key:
+                  return "error: no API key provided"
+              payload = json.dumps({"input": text, "model": "text-embedding-3-small"}).encode()
+              req = urllib.request.Request(
+                  "https://api.openai.com/v1/embeddings",
+                  data=payload,
+                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return resp.read().decode()
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = call_openai_embeddings(text, api_key)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - text
+    - api_key
+    tool_returns: TEXT
+- gate:
+    evaluate: contains(@in_subject, 'error:')
+    in:
+      subject: call_openai_embeddings
+    out: []
+    branch: 1
+- set_set_1:
+    node: CONTEXT
+    in:
+      api_response: call_openai_embeddings
+    action: set
+    expression: '@in_api_response'
+- extract_embedding:
+    node: SOLVE
+    in:
+      api_response: call_openai_embeddings
+    on: gate.fail
+    tool: extract_embedding
+    backend: kernel
+    arguments:
+    - '@api_response'
+    code: |
+      import json
+      def extract_embedding(response_json: str) -> str:
+          try:
+              data = json.loads(response_json)
+              embedding = data["data"][0]["embedding"]
+              return json.dumps(embedding)
+          except Exception as e:
+              return f"error: {e}"
+      _spl_result = extract_embedding(api_response)
+    result: _spl_result
+    out_type: TEXT
+    tool_params:
+    - response_json
+    tool_returns: TEXT
+- wf_exit:
+    output:
+    - set_set_1
+    - extract_embedding
+    on:
+    - set_set_1
+    - extract_embedding

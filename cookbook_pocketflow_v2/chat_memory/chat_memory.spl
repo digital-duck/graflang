@@ -1,0 +1,208 @@
+CREATE TOOL_API embed_text(text TEXT) RETURNS TEXT AS PYTHON $$
+import json, re
+from collections import Counter
+
+def embed_text(text: str) -> str:
+    try:
+        words = re.findall(r"\w+", text.lower())
+        if not words:
+            return json.dumps({})
+        counts = Counter(words)
+        total = sum(counts.values())
+        vec = {w: round(c / total, 6) for w, c in counts.items()}
+        return json.dumps(vec)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API archive_search(archive_json TEXT, query_embedding TEXT) RETURNS TEXT AS PYTHON $$
+import json, math
+
+def cosine_sim(a: dict, b: dict) -> float:
+    if not a or not b:
+        return 0.0
+    keys = set(a) | set(b)
+    dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
+    mag_a = math.sqrt(sum(v * v for v in a.values()))
+    mag_b = math.sqrt(sum(v * v for v in b.values()))
+    return dot / (mag_a * mag_b + 1e-10)
+
+def archive_search(archive_json: str, query_embedding: str) -> str:
+    try:
+        archive = json.loads(archive_json) if archive_json.strip() else []
+        if not archive:
+            return ""
+        q_vec = json.loads(query_embedding) if query_embedding.strip() else {}
+        best_text, best_score = "", -1.0
+        for entry in archive:
+            e_vec = json.loads(entry.get("embedding", "{}"))
+            sim = cosine_sim(q_vec, e_vec)
+            if sim > best_score:
+                best_score = sim
+                best_text = entry.get("text", "")
+        return best_text
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API window_load(window_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def window_load(window_json: str) -> str:
+    try:
+        window = json.loads(window_json) if window_json.strip() else []
+        lines = []
+        for ex in window:
+            lines.append("User: " + ex.get("user", ""))
+            lines.append("Assistant: " + ex.get("assistant", ""))
+        return "\n".join(lines)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API build_context(window_text TEXT, archive_hit TEXT) RETURNS TEXT AS PYTHON $$
+def build_context(window_text: str, archive_hit: str) -> str:
+    try:
+        parts = []
+        if archive_hit.strip():
+            parts.append("[Relevant past exchange]\n" + archive_hit)
+        if window_text.strip():
+            parts.append("[Recent conversation]\n" + window_text)
+        return "\n\n".join(parts)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API window_append(window_json TEXT, user_msg TEXT, assistant_msg TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def window_append(window_json: str, user_msg: str, assistant_msg: str) -> str:
+    try:
+        window = json.loads(window_json) if window_json.strip() else []
+        window.append({"user": user_msg, "assistant": assistant_msg})
+        return json.dumps(window)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API window_is_full(window_json TEXT, max_size TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def window_is_full(window_json: str, max_size: str) -> str:
+    try:
+        window = json.loads(window_json) if window_json.strip() else []
+        return "yes" if len(window) > int(max_size) else "no"
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API window_evict_oldest(window_json TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def window_evict_oldest(window_json: str) -> str:
+    try:
+        window = json.loads(window_json) if window_json.strip() else []
+        if not window:
+            return json.dumps({"window": "[]", "evicted": ""})
+        evicted = window.pop(0)
+        evicted_text = ("User: " + evicted.get("user", "") +
+                        "\nAssistant: " + evicted.get("assistant", ""))
+        return json.dumps({"window": json.dumps(window), "evicted": evicted_text})
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API archive_add(archive_json TEXT, exchange_text TEXT, embedding TEXT) RETURNS TEXT AS PYTHON $$
+import json
+
+def archive_add(archive_json: str, exchange_text: str, embedding: str) -> str:
+    try:
+        archive = json.loads(archive_json) if archive_json.strip() else []
+        archive.append({"text": exchange_text, "embedding": embedding})
+        return json.dumps(archive)
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE TOOL_API get_query(queries TEXT, idx TEXT) RETURNS TEXT AS PYTHON $$
+def get_query(queries: str, idx: str) -> str:
+    try:
+        lines = [q.strip() for q in queries.split("\n") if q.strip()]
+        i = int(idx)
+        return lines[i] if 0 <= i < len(lines) else ""
+    except Exception as e:
+        return f"error: {e}"
+$$;
+
+CREATE FUNCTION generate_response(context TEXT, user_query TEXT)
+RETURNS TEXT AS $$
+You are a helpful conversational assistant with access to both recent and archived memory.
+
+{context}
+
+Current user message: {user_query}
+
+Generate a concise, helpful response that directly addresses the user''s message.
+Draw on the relevant past exchange and recent conversation shown above (if any)
+to maintain continuity and contextual awareness across the conversation.
+$$;
+
+WORKFLOW chat_memory
+  INPUT @user_queries TEXT := "What is machine learning?
+How does gradient descent work?
+What is overfitting and how do you prevent it?"
+  INPUT @window_max_size TEXT := "3"
+  INPUT @max_turns INTEGER := 10
+  OUTPUT @conversation TEXT
+DO
+  @window_json := "[]";
+  @archive_json := "[]";
+  @conversation := "";
+  @turn_idx := 0;
+
+  WHILE @turn_idx < @max_turns DO
+    -- Receive User Input
+    CALL get_query(@user_queries, @turn_idx) INTO @user_input;
+
+    -- Embed User Query via Vector Model
+    CALL embed_text(@user_input) INTO @query_embedding;
+
+    -- Search Archive — Top-1 Semantic Match
+    CALL archive_search(@archive_json, @query_embedding) INTO @archive_hit;
+
+    -- Load Short-Term Window (last 3 exchanges)
+    CALL window_load(@window_json) INTO @window_text;
+
+    -- Build LLM Context = Window + Archive Hit
+    CALL build_context(@window_text, @archive_hit) INTO @llm_context;
+
+    -- Call LLM → Generate Response
+    GENERATE generate_response(@llm_context, @user_input) INTO @response;
+
+    -- Display Response to User (accumulated in output)
+    @conversation := @conversation + "User: " + @user_input + "\nAssistant: " + @response + "\n\n";
+
+    -- Append Exchange to Short-Term Window
+    CALL window_append(@window_json, @user_input, @response) INTO @window_json;
+
+    -- Window Full?
+    CALL window_is_full(@window_json, @window_max_size) INTO @win_full;
+    EVALUATE @win_full
+      WHEN contains("yes") THEN
+        -- Evict Oldest Exchange, Embed + Archive It
+        CALL window_evict_oldest(@window_json) INTO @evict_result;
+        CALL json_get(@evict_result, "window") INTO @window_json;
+        CALL json_get(@evict_result, "evicted") INTO @evicted_text;
+        CALL embed_text(@evicted_text) INTO @evicted_embedding;
+        CALL archive_add(@archive_json, @evicted_text, @evicted_embedding) INTO @archive_json;
+      ELSE
+        -- Keep Window As-Is
+        @win_full := "no";
+      END;
+
+    -- Continue Chat? → loop increments; exits when turn_idx reaches max_turns
+    @turn_idx := @turn_idx + 1;
+  END;
+
+  RETURN @conversation WITH status = "complete";
+END;

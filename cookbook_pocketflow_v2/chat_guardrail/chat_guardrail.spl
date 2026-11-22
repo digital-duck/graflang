@@ -1,0 +1,92 @@
+CREATE TOOL_API heuristic_travel_check(message TEXT) 
+RETURNS TEXT AS PYTHON $$
+def heuristic_travel_check(message: str) -> str:
+    travel_keywords = [
+        "travel", "trip", "vacation", "flight", "hotel", "destination",
+        "tour", "visit", "passport", "visa", "itinerary", "booking",
+        "airline", "resort", "cruise", "hostel", "airport", "luggage",
+        "tourist", "sightseeing", "adventure", "backpack", "journey",
+        "road trip", "beach", "mountain", "abroad", "country", "city"
+    ]
+    text = message.lower()
+    for kw in travel_keywords:
+        if kw in text:
+            return "travel"
+    return "not_travel"
+$$;
+
+CREATE FUNCTION validate_travel_topic(message TEXT)
+RETURNS TEXT AS $$
+You are a strict topic classifier for a travel advisory service.
+Determine whether the following user message is travel-related.
+
+Travel-related topics include: destinations, flights, hotels, car rentals, visas,
+passports, itineraries, packing, transportation, tourism, travel safety, cultural tips,
+local cuisine recommendations, and any question about visiting or exploring places.
+
+User message: {message}
+
+Reply with exactly one token: "travel" if travel-related, or "not_travel" if not.
+$$;
+
+CREATE FUNCTION reject_off_topic(message TEXT)
+RETURNS TEXT AS $$
+You are a friendly travel advisor assistant. The user has sent a message outside your
+area of expertise. Politely decline and guide them back to travel-related questions.
+Keep your response to 2-3 sentences.
+
+Off-topic user message: {message}
+$$;
+
+CREATE FUNCTION generate_travel_advice(message TEXT)
+RETURNS TEXT AS $$
+You are an expert travel advisor with comprehensive knowledge of world destinations,
+logistics, culture, safety, and trip planning. Provide helpful, accurate, and practical
+travel advice. Include relevant tips about safety, local customs, logistics, or
+destination highlights as appropriate.
+
+User question: {message}
+$$;
+
+-- Each line of @user_messages is one conversation turn.
+-- The WHILE loop models "Continue Conversation?" — exits when messages are exhausted
+-- or @max_turns is reached. Early exit uses the @i := @max_turns force-exit pattern.
+WORKFLOW travel_chat_guardrail
+  INPUT @user_messages TEXT := "What are the best beaches to visit in Thailand?
+How do I book a hotel in Paris for two weeks?
+What is the weather like in Tokyo in spring?"
+  INPUT @max_turns INTEGER := 10
+  INPUT @out_dir TEXT := "cookbook-pocketflow/008_chat_guardrail/output"
+  OUTPUT @conversation_log TEXT
+DO
+  @i := 1;
+  @conversation_log := "";
+  WHILE @i < @max_turns DO
+    CALL list_get(@user_messages, @i, "\n") INTO @current_message;
+    CALL isblank(@current_message) INTO @is_blank;
+    EVALUATE @is_blank WHEN contains("true") THEN
+      @i := @max_turns;
+    ELSE
+      CALL heuristic_travel_check(@current_message) INTO @heuristic_result;
+      EVALUATE @heuristic_result WHEN contains("not_travel") THEN
+        -- ambiguous (greetings, unclear intent): let LLM decide
+        GENERATE validate_travel_topic(@current_message) INTO @llm_verdict;
+        EVALUATE @llm_verdict WHEN contains("not_travel") THEN
+          GENERATE reject_off_topic(@current_message) INTO @response;
+        ELSE
+          GENERATE generate_travel_advice(@current_message) INTO @response;
+        END;
+      ELSE
+        -- fast path: keyword match confirms travel topic, skip LLM validation
+        GENERATE generate_travel_advice(@current_message) INTO @response;
+      END;
+      @conversation_log := @conversation_log + "User: " + @current_message + "\nAssistant: " + @response + "\n\n";
+      @i := @i + 1;
+    END;
+  END;
+
+  CALL path_join(@out_dir, "chat_log.md") INTO @chat_path;
+  CALL write_file(@chat_path, @conversation_log) INTO @_;
+
+  RETURN @conversation_log WITH status = "complete";
+END;

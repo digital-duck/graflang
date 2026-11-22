@@ -1,0 +1,10 @@
+# A small knowledge graph: an edge `a -> b` means a is a prerequisite of b.
+nodes:
+  - {id: probability, title: probability}
+  - {id: counting,    title: counting outcomes}
+  - {id: entropy,     title: Shannon entropy}
+  - {id: coding,      title: optimal coding}
+edges:
+  - {source: probability, target: entropy}
+  - {source: counting,    target: entropy}
+  - {source: entropy,     target: coding}

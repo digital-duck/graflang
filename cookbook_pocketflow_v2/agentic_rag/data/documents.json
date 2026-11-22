@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Introduction to RAG",
+    "summary": "Overview of retrieval-augmented generation: what it is, how it works, and why it matters",
+    "content": "Retrieval-Augmented Generation (RAG) is a technique that enhances large language model outputs by retrieving relevant documents from a knowledge base and providing them as context during generation. Unlike purely parametric models that rely on information encoded in weights, RAG systems can access up-to-date, domain-specific, or proprietary information at inference time without retraining. The typical RAG pipeline: (1) index documents as vector embeddings; (2) embed the user query; (3) retrieve top-k semantically similar chunks; (4) prepend retrieved chunks to the prompt; (5) generate the final answer."
+  },
+  {
+    "title": "When to Use RAG",
+    "summary": "Guidelines for choosing RAG over fine-tuning or pure prompting based on use-case characteristics",
+    "content": "RAG is most appropriate when: (a) the knowledge base changes frequently and retraining would be too costly; (b) the information is proprietary and cannot be sent to an external model for fine-tuning; (c) you need citability — retrieved passages can be surfaced alongside answers to support verification; (d) the knowledge domain is too large to fit in a single prompt window. RAG is less appropriate for tasks requiring deep reasoning over internalized knowledge, or when sub-100ms latency is required and retrieval overhead is unacceptable. Fine-tuning is preferred when the task requires a style or tone shift rather than factual grounding."
+  },
+  {
+    "title": "Vector Databases for RAG",
+    "summary": "Comparison of FAISS, Chroma, Pinecone, and other vector stores used in RAG systems",
+    "content": "Vector databases store document embeddings and support fast approximate nearest-neighbor search. FAISS is a free, open-source library from Meta optimized for billion-vector scale; it runs in-process and requires no server. Chroma is an open-source embedded vector store designed for Python RAG applications with a simple API. Pinecone and Weaviate are managed cloud services offering automatic scaling, metadata filtering, and hybrid search (BM25 + vector). Qdrant is self-hostable and supports filtered vector search with low memory overhead. Choice depends on deployment model (local vs. cloud), scale, and latency requirements."
+  },
+  {
+    "title": "Advanced RAG Patterns",
+    "summary": "Hybrid search, re-ranking, agentic RAG, and other techniques that improve retrieval quality",
+    "content": "Advanced RAG patterns improve over naive top-k retrieval: (1) Hybrid search combines BM25 keyword matching with vector similarity for better precision on rare terms. (2) Re-ranking uses a cross-encoder model to re-score the top-k retrieved candidates before passing them to the LLM — substantially improves answer accuracy. (3) Query expansion generates multiple query variants and merges their retrieved sets. (4) Agentic RAG lets the LLM decide at each step whether it has sufficient context, issuing additional retrieval calls as needed. (5) Hierarchical indexing stores both fine-grained chunks and document-level summaries, retrieving at the appropriate granularity."
+  }
+]
