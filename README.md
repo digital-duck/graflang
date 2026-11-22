@@ -66,11 +66,21 @@ The LLM can propose mutations, but only those that pass the Cedar policy check a
 # Install (development)
 pip install -e ".[dev]"        # `claude_cli`, `ollama`, `openai`, `openrouter` work as is; `.[anthropic]`, `.[gemini]` add SDKs
 
+# Look first, no model needed: check a workflow, read it in words, draw it
+graf validate cookbook_v2/code_pipeline/code_pipeline.graph.yaml
+graf describe cookbook_v2/code_pipeline          # writes RECIPE.spec.md: inputs, steps, data flow, cost
+graf vis cookbook_v2/code_pipeline/code_pipeline.graph.yaml --depth 1
+
 # Run a workflow (the default is `--adapter claude_cli --model claude-sonnet-5-5`)
 graf run cookbook/code_pipeline/code_pipeline.graph.yaml \
     --adapter ollama \
     --param spec="Write a binary search function"
+
+# Or describe an app in a sentence and let a model draft the graph (checked, then dry-run on the mock adapter)
+graf create --name notes --spec "Summarise each file in a folder, then write one index"
 ```
+
+`graf run` calls a real model and bills it unless the adapter is `mock` or local: give a `--bind` file with `limits.max_llm_calls` when you try a loop.
 
 ---
 
@@ -136,11 +146,21 @@ edges:
   # ... (full file in cookbook/code_pipeline/)
 ```
 
+This is the long form, one file with every node. `cookbook_v2/code_pipeline/` is the same recipe **layered**: a short top graph whose steps are composites in subfolders (see below).
+
 **What makes this revolutionary:**
 - The `LOOP` node is a **Tier 3 composite** — click it in the UI to see the internal 4-step topology
 - The `GUARD` node enforces Cedar policies before allowing a retry
 - The closure check (spec → code → spec' → judge) is a clean topological branch, not buried in `if/else`
 - The LLM can propose mutations via `MUTATE` nodes, but only those passing Cedar are applied
+
+---
+
+## Layers: a short top graph, composites underneath
+
+A real workflow has too many nodes for one picture. GraphLang lets a step be a **composite** (a *part*: a graph in its own folder, with named inputs, outputs and error exits), so the top graph stays about a page long and each part can be read, checked, reused and tested alone. `graf expand` opens the composites into the flat graph that runs, `graf compact` goes back, `graf group` / `ungroup` turn a selection of steps into a part and back, `graf vis --depth N` and `graf info --depth N` show the workflow N levels deep, and `graf errors` lists the error codes a part may exit with. All 100+ recipes of `cookbook/`, `cookbook_solvers/` and `cookbook_pocketflow/` have a layered twin in the matching `*_v2/` folder, checked against the original on the mock adapter. Design: [graflang-layers.md](docs/DEV/DESIGN/graflang-layers.md), rules: [graflang-semantics.md](docs/DEV/DESIGN/graflang-semantics.md), recipe status: [graflang-recipes.md](docs/DEV/DESIGN/graflang-recipes.md).
+
+**A model that assembles part of its own workflow.** [`cookbook_v2/problem_solver`](cookbook_v2/problem_solver/readme.md): given a problem in words, a model picks one of five deterministic solvers (SymPy, Z3, OR-Tools, portfolio optimisation, SQL) from a catalogue, proposes the inputs, a program checks them, and a `MUTATE` adds the chosen solver to the running graph under a Cedar policy. When no solver fits, or the inputs cannot be bound, a model answers alone and the report says **UNVERIFIED**. The model never writes wiring: it names a part and gives values.
 
 ---
 
@@ -151,6 +171,8 @@ edges:
 - **Do more at once.** `--workers` runs parallel branches concurrently, `BATCH` maps a subgraph over a list, `RUN` calls a subprocess, a Python kernel or an http service.
 - **Keep it affordable and repeatable.** A run summary with calls, tokens and time; budgets; `--record` / `--replay` of model calls so tests need no model; `--checkpoint` / `--resume` after a failure.
 - **Stay in control.** Cedar guards at run time, a workflow policy for which nodes are allowed at all, and a `MUTATE` that can never touch the safety layer or what runs.
+- **Build from a sentence, document what exists.** `graf create` drafts an app from a description (or a diagram); `graf describe` writes a recipe as a specification that `graf create --spec` can read back; `graf docs` writes a demo, tutorial or user guide for a folder or repo.
+- **Embed it.** The runtime is a library: load a recipe once, run it per input with your own model function and call cap (this is how [work-graph](https://github.com/digital-duck/work-graph) runs its extraction and `ask` recipes, and how app-graph's build pipeline is being moved onto GraphLang). A program inside a recipe can be any language, run as a subprocess, optionally in a Docker container.
 - **Come from and go to SPL.** SPL.py's `spl2graph` lifts SPL workflows into graphs (265 of its 274 cookbook workflows validate); `graf compile --lang spl` writes a graph back as SPL.
 
 ---
@@ -180,6 +202,10 @@ GraphLang takes SPL's proven semantics and gives them a **topological execution 
 - [ ] Drag-to-connect on the canvas in the app
 - [x] SPL recipes as graphs: `spl2graph` (in SPL.py) lifts 265 of 274 cookbook workflows; `graf compile --lang spl` goes back
 - [x] The 47 solver recipes of SPL.py migrated and run with a real model (`cookbook_solvers/`)
+- [x] Layered form: composites in subfolders, `inherits`, error exits with codes, `graf group` / `expand` / `compact`, `vis --depth`; every cookbook recipe has a `*_v2/` twin
+- [x] `problem_solver`: a model chooses and adds a catalogue solver at run time, with an UNVERIFIED fallback
+- [ ] Benchmark solvers: a pick-accuracy test set for `problem_solver`
+- [ ] `graphlang.run_recipe`: one helper for running a shipped recipe from library code (work-graph and app-graph each have their own today)
 - [ ] Paper submission (NeurIPS / ICLR)
 
 ---
