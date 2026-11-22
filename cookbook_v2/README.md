@@ -17,6 +17,7 @@ policies it uses; the small ones that were already in the compact `steps:` form 
 | heartbeat | guard, news, announce | `news` (exit `quiet`), `announce`; one extra input `state_file` |
 | stock_report | gather, report | `gather` (the per-ticker loop), `report` |
 | ts_verify | repair, finalize | `repair` (the loop); needs Node 22.18+ and `npm install` in `cookbook_v2/ts_verify` (once, after a clone) |
+| problem_solver | understand, choose, bind, fields, pick, fallback, report | a model picks a solver from the catalogue of five (`cookbook_solvers_v2`), a program checks the bound inputs, `MUTATE` adds the solver; error exits `no_solver`, `unbound`; a model answers alone, marked UNVERIFIED, when no solver runs; needs SPL.py for the SymPy solver, the network for portfolio |
 | notes_digest | guard, read, digest, publish | `read`, `digest`, `publish` |
 | chat_memory | guard, recall, reply, remember | `recall`, `reply`, `remember` |
 
@@ -51,7 +52,7 @@ pytest tests/test_cookbook_v2.py tests/test_cookbook_core_v2.py -q
 
 Every top graph validates with no errors or warnings, and each port runs next to its original (each in a copy of its folder) with a scripted model
 that forces the retry, revision, approval, give-up, redaction and escalation paths. Outputs and the number of model calls must be equal.
-heartbeat runs three beats; the ts_verify check needs Node and skips without it. The copied recipes (second table) are checked by `test_cookbook_core_v2.py`: each validates and, on the mock adapter, gives its original's output.
+`test_problem_solver.py` runs problem_solver with a scripted model (the SQLite solver really runs). heartbeat runs three beats; the ts_verify check needs Node and skips without it. The copied recipes (second table) are checked by `test_cookbook_core_v2.py`: each validates and, on the mock adapter, gives its original's output.
 
 ## 2. Look at the levels, one recipe at a time
 

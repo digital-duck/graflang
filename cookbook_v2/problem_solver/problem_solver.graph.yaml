@@ -1,0 +1,64 @@
+# problem_solver: a problem in words -> analyse -> choose a solver from the catalogue -> bind the problem to its inputs -> run it -> report.
+# The model assembles part of its own workflow: it names a solver (a recipe from cookbook_solvers_v2) and gives values; a program checks the values and writes the
+# delta; MUTATE adds the solver under the policy and parts_policy; the solver runs; the report says which solver answered and whether it was verified.
+# When no solver fits, the inputs cannot be bound in two tries, or the graph refuses the delta, a model answers alone and the report says UNVERIFIED.
+#   graf run cookbook_v2/problem_solver/problem_solver.graph.yaml --bind cookbook_v2/problem_solver/problem_solver.bind.yaml --param problem="differentiate 3*x**3 - x"
+version: "1.0-graph"
+workflow:
+  name: problem_solver
+  description: Analyses a problem, picks a deterministic solver from a catalogue of five (SymPy, Z3, OR-Tools, portfolio optimisation, SQL), binds the problem to its inputs, runs it and reports. A model answers alone, labelled UNVERIFIED, when no solver fits or the inputs cannot be bound.
+  inputs:
+    - {name: problem, type: TEXT, default: "Differentiate 3*x**3 - x, then factor the result and solve it for x."}
+  outputs:
+    - {name: report, type: TEXT}
+  parts_policy:
+    forbid: [email, webhook, write]
+    max_llm_calls: 8
+resources:
+  prompts:
+    understand: ./prompts/understand.md
+    fallback: ./prompts/fallback.md
+  policies:
+    solve: ./policies/solve.cedar
+  parts:
+    choose: ./choose/choose.graph.yaml
+    bind: ./bind/bind.graph.yaml
+    fields: ./fields/fields.graph.yaml
+steps:
+  - understand: {generate: prompts.understand, in: {problem: $in.problem}, out: analysis, label: Analyse the problem}
+  - clean: {solve: "''", out: why}
+  - choose: {use: parts.choose, in: {problem: $in.problem, analysis: understand.analysis}, out: [solver, reason], ports: [no_solver]}
+  - bind: {use: parts.bind, on: choose, in: {problem: $in.problem, solver: choose.solver}, out: [delta, values, error], ports: [unbound]}
+  - fields: {use: parts.fields, in: {values: bind.values}, out: [done]}
+  - pick:
+      node: MUTATE
+      in: {delta: bind.delta}
+      ports: [trigger, applied, rejected, in_delta, out_reason]
+      out: reason
+      config:
+        policy_ref: policies.solve
+        max_mutations: 1
+        catalogue:
+          z3_compliance: ../../cookbook_solvers_v2/z3_compliance/z3_compliance.graph.yaml
+          portfolio_opt: ../../cookbook_solvers_v2/portfolio_opt/portfolio_optimization.graph.yaml
+          symbolic_math: ../../cookbook_solvers_v2/symbolic_math/sympy_llm.graph.yaml
+          route_optimization: ../../cookbook_solvers_v2/route_optimization/route_optimization.graph.yaml
+          sql_verifier: ../../cookbook_solvers_v2/sql_verifier/sql_verifier.graph.yaml
+      label: Add the chosen solver to the graph (checked by policy)
+  - why_none: {solve: "'No catalogue solver fits this problem: ' + @in_r", on: choose.no_solver, in: {r: choose.reason}, out: why}
+  - why_unbound: {solve: "'The problem could not be bound to the inputs of ' + @in_s + ': ' + @in_e", on: bind.unbound, in: {s: choose.solver, e: bind.error}, out: why}
+  - why_refused: {solve: "'The graph refused to add the solver: ' + @in_r", on: pick.rejected, in: {r: pick.reason}, out: why}
+  - fallback: {generate: prompts.fallback, on: [why_none, why_unbound, why_refused], in: {problem: $in.problem, analysis: understand.analysis}, out: answer, label: Answer with the model alone}
+  - report:
+      node: SOLVE
+      on: fallback
+      in: {mode: {value: report}, answer: fallback.answer, solver: choose.solver, reason: choose.reason, why: [clean.why, why_none.why, why_unbound.why, why_refused.why], values: bind.values}
+      ports: [trigger, complete, in_mode, in_answer, in_solver, in_reason, in_why, in_values, out_report]
+      out: report
+      backend: subprocess
+      command: ["python3", "-I", "tools/solver_tool.py"]
+      out_type: JSON
+      timeout: 30
+      label: Write the report (the delta feeds the solver's answer here)
+  - text: {solve: "json_get(@in_r, 'text')", in: {r: report.report}, out: text}
+  - done: {output: {report: text.text}}

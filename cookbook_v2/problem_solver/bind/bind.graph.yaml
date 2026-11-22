@@ -1,0 +1,60 @@
+version: "1.0-graph"
+workflow:
+  name: bind
+  description: Turns the problem into the inputs of the chosen solver. A model proposes them, a program checks them against the solver's declared inputs; when the check refuses, the model is told why and tries once more. Ends in the error exit `unbound` when the second try fails too.
+  inputs:
+    - {name: problem, type: TEXT}
+    - {name: solver, type: TEXT}
+  outputs:
+    - {name: delta, type: TEXT}
+    - {name: values, type: TEXT}
+    - {name: error, type: TEXT}
+  errors:
+    - {name: unbound, code: E_UNBOUND, description: the inputs could not be made to fit the solver in two tries}
+resources:
+  prompts:
+    bind: ./prompts/bind.md
+    repair: ./prompts/repair.md
+steps:
+  - face:
+      node: SOLVE
+      in: {mode: {value: interface}, solver: $in.solver}
+      ports: [trigger, complete, in_mode, in_solver, out_info]
+      out: info
+      backend: subprocess
+      command: ["python3", "-I", "tools/solver_tool.py"]
+      out_type: JSON
+      timeout: 30
+      label: Read the solver's declared inputs
+  - interface: {solve: "json_get(@in_info, 'text')", in: {info: face.info}, out: text}
+  - extract: {generate: prompts.bind, in: {interface: interface.text, problem: $in.problem}, out: reply, label: Propose the inputs}
+  - check:
+      node: SOLVE
+      in: {mode: {value: check}, solver: $in.solver, reply: extract.reply}
+      ports: [trigger, complete, in_mode, in_solver, in_reply, out_result]
+      out: result
+      backend: subprocess
+      command: ["python3", "-I", "tools/solver_tool.py"]
+      out_type: JSON
+      timeout: 30
+      label: Check them against the solver's inputs
+  - first_ok: {evaluate: "json_get(@in_r, 'ok') == TRUE", in: {r: check.result}}
+  - why: {solve: "json_get(@in_r, 'error')", on: first_ok.fail, in: {r: check.result}, out: error}
+  - repair: {generate: prompts.repair, in: {interface: interface.text, problem: $in.problem, reply: extract.reply, error: why.error}, out: reply, label: Tell the model what was wrong and ask again}
+  - check_again:
+      node: SOLVE
+      in: {mode: {value: check}, solver: $in.solver, reply: repair.reply}
+      ports: [trigger, complete, in_mode, in_solver, in_reply, out_result]
+      out: result
+      backend: subprocess
+      command: ["python3", "-I", "tools/solver_tool.py"]
+      out_type: JSON
+      timeout: 30
+      label: Check the second try
+  - final: {solve: "@in_r", on: [first_ok.pass, check_again], in: {r: [check.result, check_again.result]}, out: result}
+  - delta: {solve: "json_get(@in_r, 'delta')", in: {r: final.result}, out: delta}
+  - values: {solve: "json_get(@in_r, 'values')", in: {r: final.result}, out: values}
+  - error: {solve: "json_get(@in_r, 'error')", in: {r: final.result}, out: error}
+  - ok: {evaluate: "json_get(@in_r, 'ok') == TRUE", in: {r: final.result}}
+  - bound: {output: {delta: delta.delta, values: values.values, error: error.error}, on: ok.pass}
+  - unbound: {output: {delta: delta.delta, values: values.values, error: error.error}, on: ok.fail, exit: unbound}

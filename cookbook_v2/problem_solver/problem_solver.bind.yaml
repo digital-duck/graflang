@@ -1,0 +1,7 @@
+# Bindings for problem_solver: a call cap (always cap a run) and the model.
+#   graf run cookbook_v2/problem_solver/problem_solver.graph.yaml --bind cookbook_v2/problem_solver/problem_solver.bind.yaml --param problem="..."
+llm: claude_cli:claude-sonnet-5-5
+limits:
+  max_llm_calls: 16        # about 5 of its own (analyse, choose, bind, one repair, the fallback) + the solver's own (up to 5)
+  max_steps: 400
+  wall_time_s: 900

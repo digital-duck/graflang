@@ -1,0 +1,43 @@
+version: "1.0-graph"
+workflow:
+  name: choose
+  description: Shows the model the solver catalogue and asks for ONE solver for the problem, or "none". Ends in the error exit `no_solver` when none fits.
+  inputs:
+    - {name: problem, type: TEXT}
+    - {name: analysis, type: TEXT}
+  outputs:
+    - {name: solver, type: TEXT}
+    - {name: reason, type: TEXT}
+  errors:
+    - {name: no_solver, code: E_NO_SOLVER, description: no catalogue solver fits the problem}
+resources:
+  prompts:
+    choose: ./prompts/choose.md
+steps:
+  - catalogue:
+      node: SOLVE
+      in: {mode: {value: catalogue}}
+      ports: [trigger, complete, in_mode, out_info]
+      out: info
+      backend: subprocess
+      command: ["python3", "-I", "tools/solver_tool.py"]
+      out_type: JSON
+      timeout: 30
+      label: Read the solver catalogue
+  - text: {solve: "json_get(@in_info, 'text')", in: {info: catalogue.info}, out: text}
+  - ask: {generate: prompts.choose, in: {catalogue: text.text, problem: $in.problem, analysis: $in.analysis}, out: reply, label: Choose a solver}
+  - parse:
+      node: SOLVE
+      in: {mode: {value: choice}, reply: ask.reply}
+      ports: [trigger, complete, in_mode, in_reply, out_choice]
+      out: choice
+      backend: subprocess
+      command: ["python3", "-I", "tools/solver_tool.py"]
+      out_type: JSON
+      timeout: 30
+      label: Read the choice (an unknown name counts as none)
+  - solver: {solve: "json_get(@in_c, 'solver')", in: {c: parse.choice}, out: solver}
+  - reason: {solve: "json_get(@in_c, 'reason')", in: {c: parse.choice}, out: reason}
+  - fits: {evaluate: "@in_solver != 'none'", in: {solver: solver.solver}}
+  - chosen: {output: {solver: solver.solver, reason: reason.reason}, on: fits.pass}
+  - none: {output: {solver: solver.solver, reason: reason.reason}, on: fits.fail, exit: no_solver}

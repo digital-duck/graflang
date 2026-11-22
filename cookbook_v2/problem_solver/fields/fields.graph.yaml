@@ -1,0 +1,22 @@
+# One node per input name any catalogue solver takes: the node `fields__<name>` holds that value, and the delta that adds a solver wires the ones the solver
+# needs from `fields__<name>.out_value` (a delta can only wire ports of nodes that exist). A name the solver is not given stays unused.
+version: "1.0-graph"
+workflow:
+  name: fields
+  description: Splits the checked inputs (JSON text) into one value per input name, so the solver the model chose can be wired to them.
+  inputs:
+    - {name: values, type: TEXT}
+  outputs:
+    - {name: done, type: TEXT}
+steps:
+  - policy_text: {solve: "json_get(@in_v, 'policy_text')", in: {v: $in.values}, out: value}
+  - tickers: {solve: "json_get(@in_v, 'tickers')", in: {v: $in.values}, out: value}
+  - capital: {solve: "json_get(@in_v, 'capital')", in: {v: $in.values}, out: value}
+  - period: {solve: "json_get(@in_v, 'period')", in: {v: $in.values}, out: value}
+  - target_return: {solve: "json_get(@in_v, 'target_return')", in: {v: $in.values}, out: value}
+  - max_weight: {solve: "json_get(@in_v, 'max_weight')", in: {v: $in.values}, out: value}
+  - algorithm: {solve: "json_get(@in_v, 'algorithm')", in: {v: $in.values}, out: value}
+  - problem: {solve: "json_get(@in_v, 'problem')", in: {v: $in.values}, out: value}
+  - question: {solve: "json_get(@in_v, 'question')", in: {v: $in.values}, out: value}
+  - ground_truth_sql: {solve: "json_get(@in_v, 'ground_truth_sql')", in: {v: $in.values}, out: value}
+  - done: {output: {done: question.value}}

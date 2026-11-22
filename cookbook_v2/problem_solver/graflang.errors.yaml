@@ -1,0 +1,9 @@
+errors:
+  - code: E_NO_SOLVER
+    description: no catalogue solver fits the problem
+    cause: the model chose "none" (or named something not in the catalogue)
+    remedy: nothing to fix; a model answers alone and the report says UNVERIFIED. Add a solver to tools/solvers.json and the MUTATE catalogue if the problem type is common
+  - code: E_UNBOUND
+    description: the problem could not be bound to the inputs of the chosen solver in two tries
+    cause: the model's inputs were refused twice (a missing required input, a name the solver does not take, a value that is not plain text)
+    remedy: read the refusal in the report; make the problem state the required value, or make that input optional

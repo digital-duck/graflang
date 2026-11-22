@@ -1,0 +1,86 @@
+{
+  "z3_compliance": {
+    "part": "../../cookbook_solvers_v2/z3_compliance/z3_compliance.graph.yaml",
+    "summary": "Checks business rules for logical conflicts with the Z3 theorem prover (the demo: loan-eligibility rules whose interaction hides a trap for one applicant profile) and explains what Z3 found.",
+    "use_for": "rule sets, policies, eligibility or compliance rules: are they consistent, can they contradict each other, who falls through the cracks",
+    "output": "report",
+    "inputs": {
+      "policy_text": {
+        "required": true,
+        "description": "the rules or policy to check, as written in the problem"
+      }
+    }
+  },
+  "portfolio_opt": {
+    "part": "../../cookbook_solvers_v2/portfolio_opt/portfolio_optimization.graph.yaml",
+    "summary": "Builds an optimal stock portfolio from live prices (Markowitz mean-variance and other optimisers, cvxpy) and has a model explain the allocation. Needs network access for prices.",
+    "use_for": "how to split an amount of money over stocks, minimum-variance or target-return portfolios, weight limits",
+    "output": "report",
+    "inputs": {
+      "tickers": {
+        "required": false,
+        "description": "comma-separated tickers, e.g. AAPL,MSFT,GOOGL"
+      },
+      "capital": {
+        "required": false,
+        "description": "money to invest, a number, e.g. 10000"
+      },
+      "period": {
+        "required": false,
+        "description": "price history to use: 6mo, 1y, 2y, 5y"
+      },
+      "target_return": {
+        "required": false,
+        "description": "required annual return as a fraction, e.g. 0.08"
+      },
+      "max_weight": {
+        "required": false,
+        "description": "largest share of the money in one stock, a fraction, e.g. 0.25"
+      },
+      "algorithm": {
+        "required": false,
+        "description": "markowitz (default), cvar or risk_parity"
+      }
+    }
+  },
+  "symbolic_math": {
+    "part": "../../cookbook_solvers_v2/symbolic_math/sympy_llm.graph.yaml",
+    "summary": "Solves an algebra or calculus problem exactly with SymPy (differentiate, integrate, factor, simplify, solve), step by step, and has a model narrate the chain. Needs SPL.py importable.",
+    "use_for": "exact symbolic mathematics: derivatives, integrals, factoring, equations, simplification",
+    "output": "explanation",
+    "inputs": {
+      "problem": {
+        "required": true,
+        "description": "the maths problem in plain words, e.g. differentiate 3*x**3 - x, then factor"
+      }
+    }
+  },
+  "route_optimization": {
+    "part": "../../cookbook_solvers_v2/route_optimization/route_optimization.graph.yaml",
+    "summary": "Finds the shortest tour for a vehicle-routing / travelling-salesman problem with Google OR-Tools and checks the total distance.",
+    "use_for": "visiting a set of places in the shortest order, delivery routes, a distance matrix is given",
+    "output": "report",
+    "inputs": {
+      "problem": {
+        "required": true,
+        "description": "the routing problem including the distance matrix, copied as written"
+      }
+    }
+  },
+  "sql_verifier": {
+    "part": "../../cookbook_solvers_v2/sql_verifier/sql_verifier.graph.yaml",
+    "summary": "Answers a question about the sample company database (an employees table: name, department, salary ...) by having a model write SQL, running it for real on SQLite and diffing the rows against a reference query.",
+    "use_for": "questions about the employees / departments / salaries data that need a database query",
+    "output": "report",
+    "inputs": {
+      "question": {
+        "required": true,
+        "description": "the question about the employees data, in plain words"
+      },
+      "ground_truth_sql": {
+        "required": true,
+        "description": "a SQLite query that answers the question, written independently of the answer you would give (it is the reference the answer is checked against); table employees(name, department, salary, ...)"
+      }
+    }
+  }
+}
