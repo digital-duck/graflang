@@ -446,6 +446,28 @@ For every node (LOOP and BATCH bodies too) Cedar is asked whether `Workflow::"re
 - `limits.max_llm_calls` and `limits.max_cost_usd` in a bindings file stop a run that reaches them. `max_cost_usd` needs an adapter that reports cost; with one that does not (`claude_cli` reports tokens only), the run stops at the second call and says so, so use `max_llm_calls` there.
 - `graf run flow.graph.yaml --record calls.jsonl` saves every GENERATE call; `--replay calls.jsonl` answers them from the file with no model, so tests and CI cost nothing. A call is found by its model, prompt and temperature, and a call that was not recorded fails loudly. `procedure_ref` nodes run SPL.py's own executor and are not recorded.
 
+## From Python: `graphlang.recipes`
+
+A package that ships recipes and calls them as functions (app-graph, work-graph) uses `graphlang.recipes` instead of `graf run`:
+
+```python
+from graphlang.recipes import Recipe, RecipeError, run_recipe
+
+run = run_recipe("recipes/build/build.graph.yaml", {"spec": spec}, llm="claude_cli:claude-sonnet-5-5",
+                 max_llm_calls=40, llm_options={"timeout": 900}, max_tokens=16000, log_dir=Path("~/my-app/logs").expanduser())
+run.outputs, run.exit, run.error_code, run.llm_calls, run.log_path
+
+recipe = Recipe(path)                       # loads once: YAML, schema, parts, the workflow policy
+recipe.run(inputs, llm=my_llm)              # each run works on its own copy; run as often as you like
+recipe.with_bindings({"resources": {"prompts": {"extract": "/abs/mine.md"}}})    # another prompt, without loading again
+recipe.fingerprint()                        # a hash of the recipe's files, to key a cache of replies on
+```
+
+- **Nothing is written beside the recipe** (no output folder, no `.graf/`), so it may sit in a read-only site-packages.
+- **`llm`** is an `ADAPTER[:MODEL]` string (dd-llm, as `--llm`; default `mock`) or any object with `name` and `generate(prompt, model=None, **opts)`. It is metered: `max_llm_calls`, `max_cost_usd`. `llm_options` go to the dd-llm adapter; `max_tokens` is the default for every call that sets none. `record=` / `replay=` work as `--record` / `--replay`, `checkpoint=` / `resume=` as `--checkpoint` / `--resume`.
+- **Errors.** A run that stops early (a limit, a failed node, a refused graph) raises `RecipeError` (a `RuntimeError`) with the run's `summary`. Exception types in `passthrough=(...)` are raised as they are (a package's own "quota reached"). A run that ends at an error exit (`output: ..., exit: refused`) is not an exception: `run.exit` is `"refused"` and `run.error_code` its code in `workflow.errors`. `GraphLangRuntime.summary()` reports the same as `exit` and `error_code`.
+- **Logging** is set up only when `log_dir` is given.
+
 ## Checkpoint and resume
 
 `graf run flow.graph.yaml --checkpoint run.ckpt.json` saves the run's state to that file before every step. If the run fails (a model was down, a budget was hit), `graf run flow.graph.yaml --resume run.ckpt.json` continues from the step that failed instead of starting over, with the values, JOIN progress and any `MUTATE` changes as they were. The checkpoint belongs to one graph: a changed graph is refused. A `LOOP` or `BATCH` counts as one step, so a failure inside one re-runs that node; kernel variables are not saved, so a graph whose later `python` nodes rely on variables set by earlier ones cannot be resumed after those ran. A value that is not JSON turns checkpointing off for that run with a warning in the log.
@@ -614,6 +636,7 @@ the graph was copied and wherever `graf run` or the editor was started. `cookboo
 
 - **Inputs are data, never code.** Values are passed as JSON (stdin for a subprocess, a string literal bound to variables for the kernel), so a value that looks like Python is still just a value.
 - **`parse` (subprocess)** reads the solver's stdout; nothing is guessed. Built in: `last_json` (default; the last JSON object or fenced block), `first_line` (optionally `{first_line: [sat, unsat]}`), `{regex: "result: (?P<value>\\d+)"}` (text only), or `{tool: "file.py:function"}`, a function you write next to the graph that returns the value. A value of the wrong type, or no match, fails the node with the raw stdout and stderr in the log.
+- **`python3` / `python`** as a command's first word runs the Python that runs the graph (`sys.executable`), not the first `python3` on `PATH`, so a program can import what the run's environment has installed. Inside a `container:` the image's own Python runs.
 - **Environment (subprocess).** The program sees only `PATH` and the variables named in `env_passthrough`; the rest of your environment (API keys, `HOME`, proxies) does not reach it. The value is taken from the environment the run started in, so the graph file holds names, never secrets, and the run log records names, never values. A named variable that is not set fails the node (it is a declaration of need); `graf validate` only warns, because the machine that validates may not be the one that runs. It cannot be used with `backend: kernel`, which inherits the runtime's whole environment.
 - **The kernel** starts on the first kernel node and is shut down when the run ends, Ctrl-C included. A timeout restarts it (its variables are gone). `seed` seeds `random` (and numpy, if installed) when the kernel starts. It talks over a Unix socket, not TCP.
 - **Not a sandbox.** Code runs with your privileges. It may come only from the graph file: a MUTATE delta that adds or changes `backend`, `code`, `result`, `command`, `parse` or `env_passthrough` (a variable such as `NODE_OPTIONS` changes what runs), at any depth, is refused before any policy is consulted.
@@ -630,7 +653,8 @@ the graph was copied and wherever `graf run` or the editor was started. `cookboo
 - `triggers` passes a control token. A node fires when a token reaches `trigger` and may fire again if another arrives, so a retry is a wire back to an earlier node. Execution is token-passing dataflow, not interaction-net rewriting.
 - `binds` copies an `out_*` value to an `in_*` port. If several `binds` edges feed one port, the most recently written source wins.
 - Edges to nodes or ports that do not exist are rejected.
-- In a prompt file, `{{in_topic}}` is replaced by the value on the node's `in_topic` port. Text goes in as it is; a list of texts (a loop's `collect`) goes in one after another with a blank line between; any other list or mapping goes in as JSON.
+- In a prompt file, `{{in_topic}}` is replaced by the value on the node's `in_topic` port. Text goes in as it is; a list of texts (a loop's `collect`) goes in one after another with a blank line between; any other list or mapping goes in as JSON. All placeholders are filled in one pass, so a value that itself contains `{{in_x}}` (a document about prompts, code with a template) goes in unchanged and is not expanded again; a placeholder with no such port stays as it is.
+- A GENERATE may set its output budget with `max_tokens: 16000` (passed to the adapter as `max_tokens`); without it the adapter's default applies, or a run-wide default given by the caller (`graphlang.recipes`, `max_tokens=`).
 
 ## Conditions
 
@@ -755,7 +779,7 @@ Names with a meaning in a workflow file. Choosing one of these as a node id, ste
 | Top-level keys | `version` `workflow` `resources` `nodes` `edges` `steps` `expand` |
 | `workflow:` keys | `name` `inputs` `outputs` `policy` |
 | `resources:` kinds | `prompts` `procedures` `policies` `parts` |
-| Node `config` keys | `prompt_ref` `prompt_inline` `procedure_ref` `llm` `temperature` `condition` `expression` `backend` `code` `command` `parse` `subgraph` `max_iterations` `persist_mutations` `part` `policy_ref` `principal` `phases` `container` `timeout` (the full list is in the sections on each node) |
+| Node `config` keys | `prompt_ref` `prompt_inline` `procedure_ref` `llm` `temperature` `max_tokens` `condition` `expression` `backend` `code` `command` `parse` `subgraph` `max_iterations` `persist_mutations` `part` `policy_ref` `principal` `phases` `container` `timeout` (the full list is in the sections on each node) |
 | Compact step kinds | `generate` `solve` `assert` `evaluate` `guard` `fork` `join` `output` `node` `use` `loop` |
 | Compact step keys | `in` `out` `on` `ports` `config`, and for a `loop` step `steps` `while` `index`; every other key goes into the node's `config` |
 | Compact references | `$in.<input>` (a workflow input), `$loop.<name>` (inside a loop body), `<step>` and `<step>.<out name>` |

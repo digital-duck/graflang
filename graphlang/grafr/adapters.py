@@ -93,7 +93,9 @@ def _with_image_files(prompt: str, images, folder: str) -> str:
 class DDLLM:
     """A dd-llm adapter behind the `generate` GraphLang nodes use."""
 
-    def __init__(self, name: str, model: Optional[str] = None, default: Optional[str] = None):
+    def __init__(self, name: str, model: Optional[str] = None, default: Optional[str] = None, options: Optional[Dict[str, Any]] = None):
+        """`options` go to every dd-llm adapter this object makes (`get_adapter(name, **options)`), e.g. `{"timeout": 900}`."""
+        self._options: Dict[str, Any] = dict(options or {})
         try:
             import dd_llm
         except ImportError as e:
@@ -109,10 +111,15 @@ class DDLLM:
         self._local = threading.local()
 
     def _get_adapter(self, name: str, **options: Any):
+        options = {**self._options, **options}
         try:
             return self._dd_llm.get_adapter(name, **options)
         except ValueError as e:                      # unknown adapter, or a required key / setting is missing
             raise LLMUnavailable(str(e)) from e
+        except TypeError as e:                       # this adapter takes none of these options
+            if not self._options:
+                raise
+            raise LLMUnavailable(f"adapter {name!r} does not accept the option(s) {sorted(self._options)}: {e}") from e
 
     def last_usage(self) -> Optional[dict]:
         """Tokens and cost the adapter reported for this thread's latest call, if it did."""
@@ -155,8 +162,26 @@ class DDLLM:
         return result.content
 
 
-def make_llm(adapter: str = "mock", model: Optional[str] = None):
-    """The LLM object for `--adapter` / `--model`."""
+def make_llm(adapter: str = "mock", model: Optional[str] = None, **options: Any):
+    """The LLM object for `--adapter` / `--model`. `options` are given to the dd-llm adapter (`timeout=900`, ...); the mock ignores them."""
     if adapter == "mock":
         return MockLLM(model)
-    return DDLLM(adapter, model, default_model(adapter))
+    return DDLLM(adapter, model, default_model(adapter), options) if options else DDLLM(adapter, model, default_model(adapter))
+
+
+class DefaultsLLM:
+    """Gives every call options it does not set itself, e.g. a run-wide `max_tokens`. A node's own `max_tokens:` wins."""
+
+    def __init__(self, inner, **defaults: Any):
+        self.inner, self.defaults = inner, {k: v for k, v in defaults.items() if v is not None}
+
+    def __getattr__(self, attr):
+        if attr == "inner":
+            raise AttributeError(attr)
+        return getattr(self.inner, attr)
+
+    def generate(self, prompt: str, model: Optional[str] = None, **opts: Any) -> str:
+        for k, v in self.defaults.items():
+            if opts.get(k) is None:
+                opts[k] = v
+        return self.inner.generate(prompt, model=model, **opts)

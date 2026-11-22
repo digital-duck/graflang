@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graflang"                     # pip install graflang; the Python package is `graphlang`
-version = "0.2.1"
+version = "0.3.0"
 description = "GraphLang: a physics-inspired, topologically grounded language for self-revising agentic workflows (one command line: `graf`)"
 readme = "README.md"
 license = {text = "Apache-2.0"}

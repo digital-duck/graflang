@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.3.0 (unreleased)
+
+- **`graphlang.recipes`**: `Recipe` (load once, run many), `run_recipe`, `RecipeRun` (`outputs`, `exit`, `error_code`, `llm_calls`, `summary`, `log_path`), `RecipeError`. It is what app-graph and work-graph each wrote for themselves: a recipe run from library code, with nothing written beside the recipe, a metered model (a dd-llm spec or any object with `generate`), adapter options, a default output budget, checkpoints, record/replay, optional logging, and `passthrough` for a caller's own exceptions. `tests/test_recipes_api.py`.
+- **Prompts are filled in one pass.** A value that contains `{{in_x}}` is no longer expanded by a later placeholder (it was, depending on the order of `in:`). Prompts whose values contain no placeholders render as before.
+- **`max_tokens:` on a GENERATE** sets that call's output budget.
+- **`python3` / `python` in a subprocess command is the interpreter running the graph** (`sys.executable`), not the first on `PATH`; container commands are unchanged.
+- **Adapter options**: `make_llm(adapter, model, **options)` and `DDLLM(..., options=)` give them (e.g. `timeout=900`) to every dd-llm adapter the run makes. `DefaultsLLM` gives calls defaults they don't set.
+- **The exit a run ended at**: `GraphLangRuntime.exit` and `summary()["exit"]` / `["error_code"]` name the error exit (`output: ..., exit: name`) of a top-level run, None for a normal end.
+
 ## 0.2.1
 
 - Needs `zinet>=0.2.2`: 0.2.0 asked for `zinet>=0.2.1`, whose PyPI build lacks `Style.default_layout`, so `graf vis` and the app's pictures failed with a `TypeError`.

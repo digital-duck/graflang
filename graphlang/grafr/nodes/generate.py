@@ -1,6 +1,7 @@
 """GENERATE node executor (probabilistic LLM calls)."""
 
 import json
+import re
 import time
 from typing import Dict
 from .base import NodeExecutor
@@ -23,6 +24,18 @@ def prompt_text(value) -> str:
     return str(value)
 
 
+_PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
+
+
+def fill_prompt(prompt: str, in_data: Dict) -> str:
+    """Replace each `{{in_x}}` by the value on port in_x, in one pass: a value that itself contains `{{in_y}}` (a document
+    about prompts, code with a template) is put in as it is, never expanded again. A placeholder with no such port stays."""
+    def value(m):
+        key = m.group(1)
+        return prompt_text(in_data[key]) if key in in_data else m.group(0)    # a LOOP's carried value is None before the first iteration
+    return _PLACEHOLDER.sub(value, prompt)
+
+
 class GenerateExecutor(NodeExecutor):
     """Executes GENERATE nodes: builds the prompt and asks the run's LLM (`mock`, `claude_cli`, ...)."""
 
@@ -39,9 +52,7 @@ class GenerateExecutor(NodeExecutor):
         else:
             raise ValueError(f"GENERATE node {node_data['id']!r} needs prompt_ref, prompt_inline or procedure_ref")
 
-        for key, value in in_data.items():                 # {{in_topic}} <- the value on port in_topic
-            text = prompt_text(value)                       # a LOOP's carried value is None before the first iteration
-            prompt = prompt.replace(f"{{{{{key}}}}}", text)
+        prompt = fill_prompt(prompt, in_data)
 
         schema = config.get('phases', {}).get('post', {}).get('out_schema')
         if schema is not None:
@@ -54,6 +65,8 @@ class GenerateExecutor(NodeExecutor):
         adapter, model = resolve_call(llm.name, config.get('llm'), getattr(llm, 'model_override', None), getattr(llm, 'default_model', None))
         extra = {'adapter': adapter} if adapter != llm.name else {}      # a node that names another adapter than the run's
         started = time.perf_counter()
+        if config.get('max_tokens') is not None:                         # the node's own output budget
+            extra['max_tokens'] = int(config['max_tokens'])
         response = llm.generate(prompt, model=model, temperature=config.get('temperature'), **extra)
         log_event(_log, "llm.call", node=node_data['id'], adapter=adapter, model=model,
                   prompt_chars=len(prompt), response_chars=len(str(response)),

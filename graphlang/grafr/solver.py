@@ -18,6 +18,7 @@ import os
 import re
 import resource
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -210,6 +211,18 @@ def container_command(command: List[str], container: Dict[str, Any], *, base_dir
     return [*argv, container["image"], *command]
 
 
+PYTHON_NAMES = ("python3", "python")
+
+
+def own_python(command: List[str]) -> List[str]:
+    """A command that starts with `python3` or `python` runs in the Python that runs the graph (sys.executable), not the first
+    `python3` on PATH, which may be another environment's (then the program cannot import what the run's environment has).
+    Inside a container the image's own Python is meant, so container commands are left as they are."""
+    if command and command[0] in PYTHON_NAMES and sys.executable:
+        return [sys.executable, *command[1:]]
+    return command
+
+
 def run_solver(command: List[str], inputs: Dict[str, Any], *, parse: Any, out_type: str, base_dir: Path,
                timeout: float = TIMEOUT, memory_mb: int = MEMORY_MB, cwd: Optional[Path] = None,
                env: Optional[Dict[str, str]] = None, container: Optional[Dict[str, Any]] = None) -> SolverResult:
@@ -231,7 +244,7 @@ def run_solver(command: List[str], inputs: Dict[str, Any], *, parse: Any, out_ty
         base_env.update({k: os.environ[k] for k in DOCKER_ENV if k in os.environ})
         limit = None
     else:
-        argv, limit = command, (lambda: _limits(memory_mb))
+        argv, limit = own_python(command), (lambda: _limits(memory_mb))
     try:
         done = subprocess.run(argv, input=payload, capture_output=True, text=True, timeout=timeout,
                               cwd=str(cwd) if cwd else None, env=base_env, preexec_fn=limit)

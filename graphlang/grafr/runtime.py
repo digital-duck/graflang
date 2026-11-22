@@ -163,6 +163,7 @@ class GraphLangRuntime:
         self.fired: Dict[str, int] = {}                 # node -> times fired
         self.emitted: set = set()                       # (node, control port) that sent a token
         self.outputs: Dict[str, Any] = {}
+        self.exit: Optional[str] = None                  # the error exit the run ended at (an OUTPUT's `exit:`), None for a normal end
         self.loop_iterations: Dict[str, int] = {}
         self._pending_join: Dict[str, set] = {}          # JOIN tokens that have arrived, per node
         self.checkpoint_path: Optional[Path] = None      # set by the caller (graf run --checkpoint) on the top-level runtime
@@ -258,8 +259,14 @@ class GraphLangRuntime:
     def summary(self) -> Dict[str, Any]:
         """What the last run did: steps, per-node firings and time, and the LLM's calls, tokens and cost when it is metered."""
         llm = self.llm.snapshot() if hasattr(self.llm, "snapshot") else None
-        return {"steps": self.steps, "mutations": self.budget.mutations, "llm": llm,
+        return {"steps": self.steps, "mutations": self.budget.mutations, "llm": llm, "exit": self.exit, "error_code": self.error_code(),
                 "nodes": {k: dict(v) for k, v in sorted(self.stats.items(), key=lambda kv: -kv[1]["ms"])}}
+
+    def error_code(self) -> Optional[str]:
+        """The catalogue code of the error exit the run ended at (`workflow.errors`), or None."""
+        if not self.exit:
+            return None
+        return next((e.get("code") for e in self.graph_data["workflow"].get("errors") or [] if e.get("name") == self.exit), None)
 
     # ---- checkpoint and resume -------------------------------------------------------------------
     def _graph_id(self) -> str:
@@ -453,6 +460,8 @@ class GraphLangRuntime:
                 log_event(_log, "on_node.failed", level=WARNING, node=node, error=f"{type(e).__name__}: {e}")
         if data["type"] == "OUTPUT":
             self._collect_outputs(in_data)
+            if not self.depth:
+                self.exit = (data.get("config") or {}).get("exit")
         self._emit(node, result, queue)
 
     def _write(self, node: str, port: str, value: Any) -> None:
