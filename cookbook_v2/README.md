@@ -1,7 +1,7 @@
 # cookbook_v2: recipes in the layered form
 
-Twelve recipes from `cookbook/` and one new one (`code_gen`), rewritten as a short top graph plus composites, each composite in its own subfolder with the prompts, procedures and
-policies it uses. The originals in `cookbook/` are left alone (the experiments and many tests run them). Status and what each port taught us:
+Recipes from `cookbook/` and one new one (`code_gen`): the staged ones are rewritten as a short top graph plus composites, each composite in its own subfolder with the prompts, procedures and
+policies it uses; the small ones that were already in the compact `steps:` form are copied as they are (second table). The solver and PocketFlow recipes are in `cookbook_solvers_v2/` and `cookbook_pocketflow_v2/`. The originals in `cookbook/` are left alone (the experiments and many tests run them). Status and what each port taught us:
 `docs/DEV/DESIGN/graflang-recipes.md`. The design: `docs/DEV/DESIGN/graflang-layers.md`.
 
 | Recipe | Top level reads | Composites |
@@ -15,10 +15,30 @@ policies it uses. The originals in `cookbook/` are left alone (the experiments a
 | supervisor | supervise | `supervise` (exit `unapproved`) |
 | self_heal | extract, heal | `extract`, `heal` (exit `invalid`) |
 | heartbeat | guard, news, announce | `news` (exit `quiet`), `announce`; one extra input `state_file` |
-| stock_copy | gather, report | `gather` (the per-ticker loop), `report` |
+| stock_report | gather, report | `gather` (the per-ticker loop), `report` |
 | ts_verify | repair, finalize | `repair` (the loop); needs Node 22.18+ and `npm install` in `cookbook_v2/ts_verify` (once, after a clone) |
 | notes_digest | guard, read, digest, publish | `read`, `digest`, `publish` |
 | chat_memory | guard, recall, reply, remember | `recall`, `reply`, `remember` |
+
+Already in the compact form, so copied rather than regrouped (each has at most 11 boxes at the top level; paths fixed):
+
+| Recipe | Top level reads | What it shows |
+|---|---|---|
+| hello_world | is_solver, solver, solver_program, hello, allowed, run, ran, skipped, not_run | a program written (by the model or a solver), then run behind a guard |
+| chain_of_thought | gen_1, gen_2, gen_3 | three model calls in a line, each reading the one before |
+| guardrail | check, on_topic, advise, decline | a cheap on-topic check in front of the answering prompt |
+| assembler | choose, pick | a model assembles its own workflow: a `MUTATE` adds one recipe, under the policy |
+| release_approval | draft, approve, allowed, publish, held, stopped | a person as a node (`DECISION`), then a Cedar guard, then the file is written; interactive |
+| parts_demo | draft, first, second | one part (`polish`) used twice |
+| expand_demo | (an `expand:` block) | one template part applied to every node of a small knowledge graph |
+| recipe_chain | screen, notes, review | three recipes (`guardrail`, `agent_notes`, `supervisor`) used unchanged as parts; its `graflang.errors.yaml` holds their codes |
+| code_parts | analyze, gate, write, review, repair | `code_pipeline` without SPL: parts, a verification loop, no `.spl` files |
+| doc_it | gather, digest, outline, write, check, fix | a documentation agent (what `graf docs` runs) |
+| stock_analysis | split, each_ticker, join_lines, synthesize | prices and metrics by Python, comments and the outlook by the model |
+| solver_check | sum_kernel, sum_script, agree, report | two deterministic solvers compared by an `ASSERT`; no model |
+| container_demo | probe | a program run in a Docker container with no network |
+| lifted_tool | tool_1 | a Python tool lifted from SPL as one `SOLVE` node; no model |
+| pocketflow | `debate`, `majority_vote`, `text_transformer` | the three R1 acceptance graphs (`FORK`/`JOIN`, a judge loop, a command loop), two replayed from cassettes |
 
 Each recipe has a `readme.md` of its own (what it does, its composites and exits, inputs and outputs, model calls, a run command).
 Run a recipe by path (named lookups such as `cookbook:name` and the Browse page only see `cookbook/`). Use the `graf` conda env.
@@ -26,12 +46,12 @@ Run a recipe by path (named lookups such as `cookbook:name` and the Browse page 
 ## 1. Offline checks (free, no model)
 
 ```bash
-pytest tests/test_cookbook_v2.py -q
+pytest tests/test_cookbook_v2.py tests/test_cookbook_core_v2.py -q
 ```
 
 Every top graph validates with no errors or warnings, and each port runs next to its original (each in a copy of its folder) with a scripted model
 that forces the retry, revision, approval, give-up, redaction and escalation paths. Outputs and the number of model calls must be equal.
-heartbeat runs three beats; the ts_verify check needs Node and skips without it.
+heartbeat runs three beats; the ts_verify check needs Node and skips without it. The copied recipes (second table) are checked by `test_cookbook_core_v2.py`: each validates and, on the mock adapter, gives its original's output.
 
 ## 2. Look at the levels, one recipe at a time
 
@@ -61,7 +81,7 @@ graf vis --edit --src-dir cookbook_v2
 - **Run from the page** needs the model chosen in Settings and is billed. Not tried on these recipes yet. heartbeat, notes_digest and chat_memory write files
   next to their composites.
 
-The editor was checked only by loading all eleven recipes and drawing the depth-0 view; the clicks above have not been exercised on them.
+The editor was checked only by loading the first eleven ported recipes and drawing the depth-0 view; the clicks above have not been exercised on them.
 
 ## 4. Real model runs (billed: always cap them)
 
@@ -125,4 +145,4 @@ Everything a run produces sits in `.graf/` beside the recipe's top graph (git-ig
 
 - **heartbeat** has an extra input `state_file` (default `output/state.txt`); its alerts log is in `announce/output/`.
 - **notes_digest** reads `read/input/notes.md` and saves `publish/output/digest.md`.
-- A subprocess `command` runs from the top graph's folder, so `procedures/`, `tools/` and `examples/` (compliance_audit, stock_copy, ts_verify) stay beside the top graph.
+- A subprocess `command` runs from the top graph's folder, so `procedures/`, `tools/` and `examples/` (compliance_audit, stock_report, ts_verify) stay beside the top graph.
