@@ -105,11 +105,14 @@ def copy_recipe(src: Path, dst: Path) -> Path:
     return dst / f"{src.name}.graph.yaml"
 
 
+RENAMED = {"stock_report": "stock_copy"}       # a port named differently from its original: port -> original
+
+
 def both(name, params, script, tmp_path, monkeypatch):
     """Run the original and the port in their own copies; return (old output, new output, old llm calls, new llm calls)."""
     results = []
-    for who, root in (("old", ROOT / "cookbook"), ("new", V2)):
-        graph = copy_recipe(root / name, tmp_path / who / name)
+    for who, root, folder in (("old", ROOT / "cookbook", RENAMED.get(name, name)), ("new", V2, name)):
+        graph = copy_recipe(root / folder, tmp_path / who / folder)
         monkeypatch.chdir(graph.parent)
         llm = Scripted(script)
         out = GraphLangRuntime(load_graph(graph), llm=llm, verbose=False).execute(dict(params))
@@ -136,7 +139,7 @@ SCRIPTED = {
     "compliance_audit-released-after-redaction": ("compliance_audit", {"document": "SSN 123-45-6789", "destination": "external_api", "engine": "stdlib"}, {1: SSN, 3: NONE}),
     "compliance_audit-escalated": ("compliance_audit", {"document": "SSN 123-45-6789", "destination": "external_api", "engine": "stdlib"}, {1: SSN, 3: SSN}),
     "compliance_audit-clean-first-time": ("compliance_audit", {"document": "hello", "destination": "internal", "engine": "stdlib"}, {1: NONE}),
-    "stock_copy": ("stock_copy", {"tickers": "AAPL,MSFT", "days": 5}, {}),
+    "stock_report": ("stock_report", {"tickers": "AAPL,MSFT", "days": 5}, {}),
     "notes_digest": ("notes_digest", {}, {}),
     "chat_memory": ("chat_memory", {"message": "hi, I am Wen"}, {}),
 }
@@ -182,7 +185,7 @@ def test_ts_verify_repairs_a_wrong_function_like_the_original(tmp_path, monkeypa
 
 def test_the_ports_have_fewer_top_level_steps_than_their_originals_have_nodes():
     """The point of the layering: the top graph is a handful of boxes."""
-    for name in ("code_gen", "code_pipeline", "code_pipeline_spl", "compliance_audit", "your_book", "agent_notes", "supervisor", "self_heal", "heartbeat", "stock_copy", "ts_verify", "notes_digest", "chat_memory"):
+    for name in ("code_gen", "code_pipeline", "code_pipeline_spl", "compliance_audit", "your_book", "agent_notes", "supervisor", "self_heal", "heartbeat", "stock_report", "ts_verify", "notes_digest", "chat_memory"):
         top = [n for n in load_graph(V2 / name / f"{name}.graph.yaml", levels=0)["nodes"] if n["type"] != "INPUT"]
         assert len(top) <= 10, (name, len(top))
 

@@ -12,11 +12,11 @@ from graphlang.grafr.topology import check
 ROOT = Path(__file__).resolve().parents[1]
 V2, ORIGINALS = ROOT / "cookbook_v2", ROOT / "cookbook"
 NAMES = ["assembler", "chain_of_thought", "code_parts", "container_demo", "doc_it", "expand_demo", "guardrail", "hello_world", "lifted_tool", "parts_demo",
-         "recipe_chain", "release_approval", "solver_check", "stock_analysis", "pocketflow/debate", "pocketflow/majority_vote", "pocketflow/text_transformer"]
+         "recipe_chain", "release_approval", "solver_check", "stock_analysis"]
 
 
 def graph(base, name):
-    folder, _, stem = name.partition("/")              # "stock_analysis", or "pocketflow/debate" for a folder of several graphs
+    folder, _, stem = name.partition("/")              # "stock_analysis", or "folder/stem" for a folder of several graphs
     return base / folder / f"{stem or folder}.graph.yaml"
 
 

@@ -32,7 +32,7 @@ Named lookups (`cookbook:name`) and the Browse page see only `cookbook/`; run a 
 | supervisor | `cookbook/supervisor` | `cookbook_v2/supervisor` | **ported, offline-equivalent** | `supervise` (first answer + review loop; exit `unapproved` E_NOT_APPROVED) | retries then approved; never approved |
 | self_heal | `cookbook/self_heal` | `cookbook_v2/self_heal` | **ported, offline-equivalent** | `extract`, `heal` (loop; exit `invalid` E_STILL_INVALID) | heals; gives up |
 | heartbeat | `cookbook/heartbeat` | `cookbook_v2/heartbeat` | **ported, offline-equivalent** (three beats, echo adapter) | guard, `news` (exit `quiet`), `announce` | the count is remembered between beats like the original; **one new input** `state_file` (see below) |
-| stock_copy | `cookbook/stock_copy` | `cookbook_v2/stock_copy` | **ported, offline-equivalent** | `gather` (the per-ticker loop), `report` | same output (the fetch tool falls back when offline) |
+| stock_report | `cookbook/stock_copy` | `cookbook_v2/stock_report` (renamed) | **ported, offline-equivalent** | `gather` (the per-ticker loop), `report` | same output (the fetch tool falls back when offline) |
 | ts_verify | `cookbook/ts_verify` | `cookbook_v2/ts_verify` | **ported, equivalent with Node** (test skips without Node + `npm install` in the original) | `repair` (the loop), top `finalize` | wrong first try then a right one: same output and model calls |
 | notes_digest | `cookbook/notes_digest` | `cookbook_v2/notes_digest` | **ported, offline-equivalent** | guard, `read`, `digest`, `publish` | same output |
 | chat_memory | `cookbook/chat_memory` | `cookbook_v2/chat_memory` | **ported, offline-equivalent** | guard, `recall`, `reply`, `remember` | same output |
@@ -76,7 +76,7 @@ Each runs from its own folder like the original; the offline checks are `pytest 
 copy of its folder, with a scripted model that forces the retry, revision, escalation and give-up paths; outputs and model-call counts must be equal).
 
 ```bash
-for r in compliance_audit your_book agent_notes supervisor self_heal heartbeat stock_copy ts_verify notes_digest chat_memory; do
+for r in compliance_audit your_book agent_notes supervisor self_heal heartbeat stock_report ts_verify notes_digest chat_memory; do
   graf vis cookbook_v2/$r/$r.graph.yaml --depth 0 --no-open; done           # then --depth 1 / all, and `graf describe ... --depth 0 -o -`
 graf errors --dir cookbook_v2/compliance_audit                               # E_STILL_NONCOMPLIANT (each recipe with an error exit has its own file)
 ```
@@ -84,7 +84,7 @@ graf errors --dir cookbook_v2/compliance_audit                               # E
 ### What the second batch showed (feeds the design)
 
 - **A subprocess command runs from the top graph's folder**, not the composite's. So `procedures/`, `tools/` and `examples/` stay beside the top
-  graph (compliance_audit, stock_copy, ts_verify) while prompts, `.spl` files and policies sit in the composite that uses them. A composite that
+  graph (compliance_audit, stock_report, ts_verify) while prompts, `.spl` files and policies sit in the composite that uses them. A composite that
   runs a command is therefore not relocatable by itself. Open: anchor `command` and `parse.tool` paths to the part's folder as QUERY/EMIT `file` is?
 - **A static QUERY/EMIT `file` is anchored to its composite's folder**, so two composites that must share a file cannot both name it. heartbeat
   passes the state path as a workflow input (`state_file`, default `output/state.txt`); that is a new input the original does not have. The
@@ -115,7 +115,7 @@ passes the checker is used and the objections are an output, `plan_review`); onl
 
 ## Next candidates (not committed to; say which)
 
-None left to port. The 15 core recipes that were still in `cookbook/` and already written in the compact form (`assembler`, `chain_of_thought`, `code_parts`, `container_demo`, `doc_it`, `expand_demo`, `guardrail`, `hello_world`, `lifted_tool`, `parts_demo`, `recipe_chain`, `release_approval`, `solver_check`, `stock_analysis`, and `pocketflow`, the three R1 acceptance graphs replayed from cassettes) were copied into `cookbook_v2/` with their paths fixed (`recipe_chain` needs the error codes of the parts it chains beside it: its own `graflang.errors.yaml`); each is offline-equivalent to its original (`tests/test_cookbook_core_v2.py`). Left out: `stock_copy` (became `stock_report`).
+None left to port. The 14 core recipes that were still in `cookbook/` and already written in the compact form (`assembler`, `chain_of_thought`, `code_parts`, `container_demo`, `doc_it`, `expand_demo`, `guardrail`, `hello_world`, `lifted_tool`, `parts_demo`, `recipe_chain`, `release_approval`, `solver_check`, `stock_analysis`) were copied into `cookbook_v2/` with their paths fixed (`recipe_chain` needs the error codes of the parts it chains beside it: its own `graflang.errors.yaml`); each is offline-equivalent to its original (`tests/test_cookbook_core_v2.py`). Left out: `pocketflow` (the three R1 acceptance graphs; they stay in `cookbook/pocketflow/`). `stock_copy` is ported as `stock_report`.
 
 
 ## Solver and PocketFlow recipes (`cookbook_solvers_v2/`, `cookbook_pocketflow_v2/`)

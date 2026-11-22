@@ -1,7 +1,7 @@
-# stock_copy (layered): gather one insight line per ticker (a loop over the tickers), then write the report from them.
+# stock_report (layered; the port of cookbook/stock_copy): gather one insight line per ticker (a loop over the tickers), then write the report from them.
 version: "1.0-graph"
 workflow:
-  name: stock_copy
+  name: stock_report
   description: Fetches a few weeks of prices for each ticker, computes metrics with plain Python, has a model interpret each, then writes one report across them.
   inputs:
     - {name: tickers, type: TEXT, default: "AAPL,META,GOOG,CRM"}

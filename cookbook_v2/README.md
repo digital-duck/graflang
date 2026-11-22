@@ -39,7 +39,6 @@ Already in the compact form, so copied rather than regrouped (each has at most 1
 | solver_check | sum_kernel, sum_script, agree, report | two deterministic solvers compared by an `ASSERT`; no model |
 | container_demo | probe | a program run in a Docker container with no network |
 | lifted_tool | tool_1 | a Python tool lifted from SPL as one `SOLVE` node; no model |
-| pocketflow | `debate`, `majority_vote`, `text_transformer` | the three R1 acceptance graphs (`FORK`/`JOIN`, a judge loop, a command loop), two replayed from cassettes |
 
 Each recipe has a `readme.md` of its own (what it does, its composites and exits, inputs and outputs, model calls, a run command).
 Run a recipe by path (named lookups such as `cookbook:name` and the Browse page only see `cookbook/`). Use the `graf` conda env.
