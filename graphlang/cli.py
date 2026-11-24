@@ -3,6 +3,7 @@
 import copy
 
 import click
+from zinet.click_helpers import HELP_OPTION_NAMES, FullHelpGroup
 
 from .grafc.cli import cmd_compile, cmd_create, cmd_describe, cmd_prettier
 from .grafd.cli import cmd_docs
@@ -10,9 +11,9 @@ from .grafr.cli import cmd_compact, cmd_errors, cmd_expand, cmd_group, cmd_info,
 from .grafv.cli import cmd_vis
 
 
-@click.group(help="GraphLang: graph-first agentic workflows. Run, validate, compile and draw a *.graph.yaml.",
+@click.group(cls=FullHelpGroup, help="GraphLang: graph-first agentic workflows. Run, validate, compile and draw a *.graph.yaml.",
              epilog="Base package: zinet  https://www.piwheels.org/project/zinet/",
-             context_settings={"help_option_names": ["-h", "--help"]})
+             context_settings={"help_option_names": HELP_OPTION_NAMES})
 def main():
     pass
 
