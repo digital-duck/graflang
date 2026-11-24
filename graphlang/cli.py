@@ -3,10 +3,11 @@
 import copy
 
 import click
-from zinet.click_helpers import HELP_OPTION_NAMES, FullHelpGroup
+from zinet.click_helpers import HELP_OPTION_NAMES, FullHelpGroup, version_option
 
 from .grafc.cli import cmd_compile, cmd_create, cmd_describe, cmd_prettier
 from .grafd.cli import cmd_docs
+from .grafu.cli import util
 from .grafr.cli import cmd_compact, cmd_errors, cmd_expand, cmd_group, cmd_info, cmd_parts, cmd_run, cmd_trace, cmd_ungroup, cmd_validate, cmd_watch
 from .grafv.cli import cmd_vis
 
@@ -14,10 +15,12 @@ from .grafv.cli import cmd_vis
 @click.group(cls=FullHelpGroup, help="GraphLang: graph-first agentic workflows. Run, validate, compile and draw a *.graph.yaml.",
              epilog="Base package: zinet  https://www.piwheels.org/project/zinet/",
              context_settings={"help_option_names": HELP_OPTION_NAMES})
+@version_option("graflang", "graf")
 def main():
     pass
 
 
+main.add_command(util)
 for _cmd in (cmd_run, cmd_validate, cmd_info, cmd_compile, cmd_create, cmd_describe, cmd_prettier, cmd_vis, cmd_expand, cmd_compact, cmd_errors, cmd_group, cmd_ungroup, cmd_parts, cmd_trace, cmd_watch, cmd_docs):
     main.add_command(_cmd)
 

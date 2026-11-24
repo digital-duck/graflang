@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `graf util`: the conversion and document helpers of `spl3 util`. Own code: `clean-port`, `html2pdf`, `md2pdf`, `mmd2img`. Run by spl3 when called (`pip install 'graflang[spl]'`): `describe`, `explain`, `graph2spl`, `img2mmd`, `img2text`, `mmd2spl`, `spl2graph`, `spl2mmd`, `text2mmd`. `install-skill` is not ported (it installs the `/spl3` skill).
+
 ## 0.3.0 (unreleased)
 
 - **`graphlang.recipes`**: `Recipe` (load once, run many), `run_recipe`, `RecipeRun` (`outputs`, `exit`, `error_code`, `llm_calls`, `summary`, `log_path`), `RecipeError`. It is what app-graph and work-graph each wrote for themselves: a recipe run from library code, with nothing written beside the recipe, a metered model (a dd-llm spec or any object with `generate`), adapter options, a default output budget, checkpoints, record/replay, optional logging, and `passthrough` for a caller's own exceptions. `tests/test_recipes_api.py`.
