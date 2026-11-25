@@ -1,6 +1,6 @@
 """`graf util`: conversion and document helpers (ported from `spl3 util`).
 
-Self-contained here (no SPL runtime needed): clean-port, html2pdf, md2pdf, mmd2img.
+Self-contained here (no SPL runtime needed): clean-port, html2pdf, md2html, md2pdf, mmd2img.
 Delegated to spl3 when you run them (`pip install 'graflang[spl]'`): the commands that read or write SPL source or use spl3's LLM
 adapters: describe, explain, graph2spl, img2mmd, img2text, mmd2spl, spl2graph, spl2mmd, text2mmd. They are listed here, and `graf util NAME -h`
 shows spl3's own help for them.
@@ -307,6 +307,8 @@ def cmd_mmd2img(mmd_files, fmt, out, out_dir, background, theme, width, height):
                 args += ["-w", str(width)]
             if height is not None and fmt in ("png", "svg"):
                 args += ["-H", str(height)]
+            if fmt == "pdf":
+                args.append("--pdfFit")  # one page sized to the diagram, not paginated A4
             try:
                 r = subprocess.run(args, capture_output=True, timeout=60)
                 if r.returncode == 0:
@@ -777,3 +779,35 @@ end
             except Exception:
                 pass
 
+
+
+# ---- md2html (logic in grafu/md2html.py) ---------------------------------------------------------------------------------------------
+
+@util.command("md2html", short_help="Convert a Markdown file to a standalone .html page (Mermaid diagrams drawn in the browser).")
+@click.argument("md_file", metavar="MD_FILE")
+@click.option("-o", "--output", default=None, metavar="HTML", help="Output file (default: next to the input, same name, .html).")
+@click.option("--title", default="", metavar="TEXT", help="Page title (default: the first # heading).")
+@click.option("--max-width", default="64rem", show_default=True, metavar="CSS", help="Page text width, any CSS length (e.g. 52rem, 1200px, none).")
+def cmd_md2html(md_file, output, title, max_width):
+    """Convert a Markdown file to one self-contained .html page (no LLM, no pandoc).
+
+    Handles headings (GitHub anchors), paragraphs, lists, tables, code fences, quotes and links. A ```mermaid fence becomes a diagram,
+    drawn in the browser by Mermaid 11 from a CDN (and its ELK loader when the diagram says `layout: elk`), so the page needs network
+    access to show diagrams; offline the diagram source stays readable.
+
+    \b
+    Examples:
+      graf util md2html readme-techstack.md
+      graf util md2html notes.md -o out/notes.html --title "Notes" --max-width 80rem
+    """
+    from pathlib import Path
+
+    from .md2html import convert
+
+    src = Path(md_file)
+    if not src.is_file():
+        raise click.ClickException(f"{md_file} not found")
+    out = Path(output) if output else src.with_suffix(".html")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(convert(src.read_text(encoding="utf-8"), title, max_width), encoding="utf-8")
+    click.echo(f"HTML: {out}")
