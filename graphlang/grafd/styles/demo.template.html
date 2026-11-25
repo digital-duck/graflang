@@ -12,7 +12,9 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #e9ebef; color: var(--ink);
-    font: 26px/1.42 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    font: calc(min(96vw, 158vh) / 54.7)/1.42 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  /* the text scales with the slide (26px on a 1600x900 window), so what fits on a slide is the same on every screen:
+     about 117 characters of code full width, 55 in a column (48 / 61 in the narrow / wide one of cols wide-*) */
   .deck { position: fixed; inset: 0 0 4.5vh 0; display: grid; place-items: center; }
   .slide { display: none; width: min(96vw, 158vh); height: min(54vw, 89vh); background: var(--paper);
     border-radius: 14px; box-shadow: 0 8px 40px rgba(20,30,50,.18); padding: 4.2% 5.5% 3.5%;

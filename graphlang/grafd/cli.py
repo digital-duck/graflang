@@ -4,15 +4,20 @@
     graf docs . --style demo,tutorial,user-guide --out-dir docs/graf-docs     # three files in one folder
     graf docs https://github.com/org/repo --style tutorial --format markdown  # cloned to the temp area first: ./repo.tutorial.md
     graf docs ./proj --style custom --prompt "a one-page FAQ"      # your own instructions (--prompt TEXT or @FILE)
+    graf docs . --style setup,tutorial,user-guide,demo --layout guide --out-dir docs \
+        --like ../work-graph/docs/GUIDE/Tutorial.md --transcript tutorial-run.txt    # the family's names, a sibling's shape, real output
 
 The default format is html (the Markdown styles are converted to a page, `md2html.py`); `--format markdown` keeps Markdown (a deck is html only).
 It runs the `cookbook/doc_it` recipe: a program reads the codebase into a digest, a model plans and writes, a program assembles and checks the
 page, and a model fixes it once if the check fails. The styles are files (`graphlang/grafd/styles/*.md`): edit them to change a style.
+The digest gets the code's own CLI declarations (the ground truth for commands), and, when given, documents to match in shape (--like),
+real command output to quote (--transcript) and the other documents of the run (to link rather than repeat).
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -25,7 +30,7 @@ from typing import Optional, Tuple
 import click
 
 STYLES_DIR = Path(__file__).resolve().parent / "styles"
-STYLES = ("demo", "tutorial", "user-guide", "custom")
+STYLES = ("demo", "setup", "tutorial", "user-guide", "custom")
 URL = re.compile(r"^(https?://|git@|ssh://|git://)|\.git$")
 
 
@@ -92,32 +97,78 @@ def safe_name(name: str) -> str:
     return got
 
 
-def run_gather(recipe: Path, source: Path, guide: Path, budget: int, name: str = "") -> dict:
-    job = json.dumps({"source": str(source), "style_guide": str(guide), "budget": budget, "name": name})
+def run_gather(recipe: Path, source: Path, guide: Path, budget: int, name: str = "", extras: Optional[dict] = None) -> dict:
+    job = json.dumps({"source": str(source), "style_guide": str(guide), "budget": budget, "name": name, "extras": extras or {}})
     done = subprocess.run([sys.executable, "-I", str(recipe.parent / "procedures" / "gather.py")], input=job, capture_output=True, text=True)
     if done.returncode != 0:
         raise click.ClickException((done.stderr or "gather failed").strip())
     return json.loads(done.stdout)
 
 
-@click.command("docs", short_help="Write documents (deck, tutorial, user guide, or your own) about a codebase.")
+# --layout guide: the names the GraphLang apps use (docs/GUIDE/Setup.md, docs/DEMO/<name>-v1.demo.html); the guides are Markdown
+GUIDE_LAYOUT = {"setup": "GUIDE/Setup", "tutorial": "GUIDE/Tutorial", "user-guide": "GUIDE/User-Guide", "custom": "GUIDE/{name}.custom",
+                "demo": "DEMO/{name}-v1.demo"}
+
+
+def style_kind(style: str) -> str:
+    """The format a style's recipe run writes: html for a deck, markdown for the others (custom included)."""
+    if style == "custom":
+        return "markdown"
+    got = re.search(r"^format:\s*(\w+)", (STYLES_DIR / f"{style}.md").read_text(encoding="utf-8"), re.M)
+    return got.group(1) if got else "markdown"
+
+
+def resolve_target(style: str, fmt: str, name: str, out_dir: Optional[str], out: Optional[str], layout: str, quiet: bool = False):
+    """(target file, format written, format wanted, convert Markdown to an HTML page at the end) for one style."""
+    kind = style_kind(style)
+    if out and Path(out).suffix.lower() in (".md", ".html", ".htm"):
+        want = "html" if Path(out).suffix.lower() in (".html", ".htm") else "markdown"
+    else:
+        want = "markdown" if layout == "guide" and kind != "html" else fmt
+    if kind == "html":
+        if want == "markdown":
+            raise click.ClickException(f"style {style} is a slide deck and only comes as html (use --format html, or drop it from --style)")
+        want = "html"
+    ext = "html" if want == "html" else "md"
+    if out:
+        target = Path(out)
+        if target.suffix.lower() not in (".html", ".htm", ".md"):
+            target = target.with_name(target.name + f".{ext}")
+        elif kind == "html" and target.suffix.lower() == ".md":
+            target = target.with_suffix(".html")
+            if not quiet:
+                click.echo(f"note: style {style} writes html, so the file is {target.name}")
+    elif layout == "guide":
+        target = Path(out_dir or "docs").expanduser().resolve() / (GUIDE_LAYOUT[style].format(name=name) + f".{ext}")
+    else:
+        target = Path(out_dir or ".").expanduser().resolve() / f"{name}.{style}.{ext}"
+    return target, kind, want, kind != "html" and want == "html"
+
+
+@click.command("docs", short_help="Write documents (deck, setup, tutorial, user guide, or your own) about a codebase.")
 @click.argument("source")
 @click.option("--style", "styles", default="demo", show_default=True,
-              help="one or more, comma separated: demo (a slide deck, HTML only), tutorial, user-guide, custom (your --prompt); e.g. demo,tutorial,user-guide")
+              help="one or more, comma separated: demo (a slide deck, HTML only), setup, tutorial, user-guide, custom (your --prompt); e.g. setup,tutorial,user-guide,demo")
 @click.option("--prompt", default=None, help="with --style custom: how the document should be built and structured (text, or @FILE)")
 @click.option("--format", "fmt", type=click.Choice(["html", "markdown"]), default="html", show_default=True,
               help="html pages (a PDF is one print away) or markdown; a deck is always html; a --out ending in .md/.html decides for itself")
 @click.option("--name", default=None, help="what to call the project in file names and titles (default: the folder's name, or the repository's name for a url)")
-@click.option("--out-dir", "out_dir", default=None, type=click.Path(file_okay=False), help="the folder for the files, one per style: <name>.<style>.html|md (default: the current folder; made if missing)")
+@click.option("--out-dir", "out_dir", default=None, type=click.Path(file_okay=False), help="the folder for the files, one per style: <name>.<style>.html|md (default: the current folder; with --layout guide: docs; made if missing)")
 @click.option("--out", "-o", default=None, help="one style only: the file to write (instead of --out-dir)")
+@click.option("--layout", type=click.Choice(["flat", "guide"]), default="flat", show_default=True,
+              help="flat: <name>.<style>.<ext>; guide: the GraphLang apps' names under --out-dir: GUIDE/Setup.md, GUIDE/Tutorial.md, GUIDE/User-Guide.md (Markdown), DEMO/<name>-v1.demo.html")
+@click.option("--like", "likes", multiple=True, type=click.Path(exists=True, dir_okay=False),
+              help="a document to match in structure, section names and tone, never a source of facts (repeatable): e.g. a sibling project's guide")
+@click.option("--transcript", "transcripts", multiple=True, type=click.Path(exists=True, dir_okay=False),
+              help="real output of the project's commands, captured by running them (repeatable): what a tutorial may show as output")
 @click.option("--force", is_flag=True, help="overwrite files that exist")
 @click.option("--ref", default=None, help="for a repository url: the branch or tag to clone")
 @click.option("--llm", "llm", default=None, metavar="ADAPTER[:MODEL]", help="the model (default: graf run's default, claude_cli with claude-sonnet-5-5; billed)")
 @click.option("--budget", type=int, default=60000, show_default=True, help="characters of the source to put in the digest")
 @click.option("--margin", type=float, default=0.5, show_default=True, help="safety margin on the model-call cap (cap = ceil(calls x (1 + margin)))")
 @click.option("--max-calls", type=int, default=None, help="refuse to run a style when its cap on model calls is above this")
-@click.option("--dry-run", is_flag=True, help="read the codebase and print the plan (files, size, model calls, output files); no model is called")
-def cmd_docs(source, styles, prompt, fmt, name, out_dir, out, force, ref, llm, budget, margin, max_calls, dry_run):
+@click.option("--dry-run", is_flag=True, help="read the codebase and print the plan (files and how much of each, size, model calls, output files); no model is called")
+def cmd_docs(source, styles, prompt, fmt, name, out_dir, out, layout, likes, transcripts, force, ref, llm, budget, margin, max_calls, dry_run):
     """Write one document per style about SOURCE (a folder or a repository url)."""
     wanted = list(dict.fromkeys(x.strip() for x in styles.split(",") if x.strip()))
     bad = [x for x in wanted if x not in STYLES]
@@ -127,6 +178,8 @@ def cmd_docs(source, styles, prompt, fmt, name, out_dir, out, force, ref, llm, b
         raise click.UsageError("--out names one file; with several styles use --out-dir")
     if out and out_dir:
         raise click.UsageError("give --out or --out-dir, not both")
+    if out and layout == "guide":
+        raise click.UsageError("--layout guide names the files itself: give --out-dir, not --out")
     if prompt and "custom" not in wanted:
         raise click.UsageError("--prompt goes with --style custom")
     if is_url(source):
@@ -139,12 +192,21 @@ def cmd_docs(source, styles, prompt, fmt, name, out_dir, out, force, ref, llm, b
         root = Path(source).expanduser().resolve()
         if not root.is_dir():
             raise click.ClickException(f"no such folder: {source}")
+    fname = safe_name(name) if name else root.name
+    targets = {}                                        # every style's file, so each document can link the others (the document set)
+    for style in wanted:
+        try:
+            targets[style] = resolve_target(style, fmt, fname, out_dir, out, layout, quiet=True)[0]
+        except click.ClickException:
+            pass                                        # reported when that style runs
     failed = []
     for style in wanted:
         if len(wanted) > 1:
             click.echo(f"\n== {style} ==")
+        others = [{"style": s, "file": os.path.relpath(t, targets[style].parent)} for s, t in targets.items() if s != style] if style in targets else []
+        extras = {"examples": [str(Path(p).resolve()) for p in likes], "transcripts": [str(Path(p).resolve()) for p in transcripts], "set": others}
         try:
-            make_one(root, source, style, prompt, fmt, name, out_dir, out, force, llm, budget, margin, max_calls, dry_run)
+            make_one(root, source, style, prompt, fmt, name, out_dir, out, layout, extras, force, llm, budget, margin, max_calls, dry_run)
         except click.ClickException as e:
             if len(wanted) == 1:
                 raise
@@ -154,7 +216,7 @@ def cmd_docs(source, styles, prompt, fmt, name, out_dir, out, force, ref, llm, b
         raise click.ClickException(f"not written: {', '.join(failed)}")
 
 
-def make_one(root, source, style, prompt, fmt, name, out_dir, out, force, llm, budget, margin, max_calls, dry_run):
+def make_one(root, source, style, prompt, fmt, name, out_dir, out, layout, extras, force, llm, budget, margin, max_calls, dry_run):
     """One style: plan, run the recipe, convert if an HTML page was asked for, write the file."""
     from ..grafr import partinfo
     from ..grafr.runtime import load_graph
@@ -162,51 +224,45 @@ def make_one(root, source, style, prompt, fmt, name, out_dir, out, force, llm, b
     recipe = find_recipe()
     folder = work_root() / f"run-{time.strftime('%Y%m%d-%H%M%S')}-{style}"
     folder.mkdir(parents=True, exist_ok=True)
-    guide, kind = style_file(style, prompt, None, folder)       # kind: the format the recipe writes (a deck: html; the others: markdown)
+    guide, _ = style_file(style, prompt, None, folder)
     title, name = (name.strip(), safe_name(name)) if name else (root.name, root.name)      # title: as typed; name: the file-name part
-    if out and Path(out).suffix.lower() in (".md", ".html", ".htm"):
-        want = "html" if Path(out).suffix.lower() in (".html", ".htm") else "markdown"
-    else:
-        want = fmt
-    if kind == "html":
-        if want == "markdown":
-            raise click.ClickException(f"style {style} is a slide deck and only comes as html (use --format html, or drop it from --style)")
-        want = "html"
-    ext = "html" if want == "html" else "md"
-    if out:
-        target = Path(out)
-        if target.suffix.lower() not in (".html", ".htm", ".md"):
-            target = target.with_name(target.name + f".{ext}")
-        elif kind == "html" and target.suffix.lower() == ".md":
-            target = target.with_suffix(".html")
-            click.echo(f"note: style {style} writes html, so the file is {target.name}")
-    else:
-        target = Path(out_dir or ".").expanduser().resolve() / f"{name}.{style}.{ext}"
-    to_html = kind != "html" and want == "html"      # a Markdown style, an HTML page wanted: convert at the end
+    target, kind, want, to_html = resolve_target(style, fmt, name, out_dir, out, layout)
     if target.exists() and not force:
         raise click.ClickException(f"{target} exists (use --force to overwrite, or another --out-dir)")
 
     caps = partinfo.capabilities(load_graph(recipe).get("nodes", []))
     calls, cap = caps["llm_calls"], partinfo.suggested_cap(caps["llm_calls"], margin)
-    info = run_gather(recipe, root, guide, budget, title)
+    info = run_gather(recipe, root, guide, budget, title, extras)
     click.echo("plan")
     click.echo(f"  source       {root}" + (f"  (cloned from {source})" if is_url(source) else ""))
     click.echo(f"  style        {style}  ({want})")
     click.echo(f"  reads        {len(info['files'])} file(s), {len(info['digest'])} characters of digest")
+    if info.get("surfaces"):
+        click.echo(f"  cli surface  {', '.join(info['surfaces'])}  (the code's declarations of commands and options)")
+    for key, label in (("examples", "like"), ("transcripts", "transcripts")):
+        if extras.get(key):
+            click.echo(f"  {label:12} {', '.join(Path(p).name for p in extras[key])}")
+    if extras.get("set"):
+        click.echo(f"  links to     {', '.join(d['file'] for d in extras['set'])}")
+    for note in info.get("extras", []):
+        click.echo(f"  note         {note}")
     click.echo(f"  model calls  {calls} expected, cap {cap}")
     click.echo(f"  writes       {target}")
     if max_calls is not None and cap > max_calls:
         raise click.ClickException(f"the cap {cap} is above --max-calls {max_calls}")
     if dry_run:
         click.echo("dry run: nothing was run")
+        cov = info.get("coverage", {})
         for f in info["files"]:
-            click.echo(f"    {f}")
+            got, total = cov.get(f, (0, 0))
+            click.echo(f"    {f}" + (f"  ({got * 100 // total}% of {total} characters)" if total else ""))
         return
 
     bind = folder / "limits.bind.yaml"
     bind.write_text(f"limits:\n  max_llm_calls: {cap}\n  max_steps: 80\n  wall_time_s: 1800\n")
     cmd = [sys.executable, "-m", "graphlang", "run", str(recipe), "--bind", str(bind), "--output-dir", str(folder / "run"),
-           "--param", f"source={root}", "--param", f"style_guide={guide}", "--param", f"budget={budget}", "--param", f"name={title}"] + (["--llm", llm] if llm else [])
+           "--param", f"source={root}", "--param", f"style_guide={guide}", "--param", f"budget={budget}", "--param", f"name={title}",
+           "--param", f"extras={json.dumps(extras)}"] + (["--llm", llm] if llm else [])
     click.echo(f"running ({calls} model calls expected, cap {cap}) ...")
     done = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if done.returncode != 0:

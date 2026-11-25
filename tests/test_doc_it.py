@@ -285,3 +285,83 @@ def test_gather_reads_every_coding_agents_instruction_file(tmp_path):
     d = json.loads(out.stdout)["digest"]
     for t in ("CLAUDE-RULES", "GEMINI-RULES", "CODEX-RULES", "AGENTS-RULES", "CURSOR-RULES", "COPILOT-RULES"):
         assert t in d
+
+
+# ---- what the book-graph documentation run did by hand (docs/DEV/review-graf-docs-by-opus-5-5.md) --------------------------
+CLI = '''import click
+
+@click.group()
+def main():
+    """The tool."""
+
+''' + "\n".join(f'''@main.command()
+@click.argument("target")
+@click.option("--level{k}", default="core", show_default=True,
+              help="option {k} of command {k}")
+def cmd{k}(target, level{k}):
+    """Command {k} does thing {k}."""
+    print("{'x' * 400}")
+''' for k in range(19))
+
+
+def test_gather_reads_the_cli_surface_whole_even_when_the_entry_file_is_cut(project):
+    (project / "src" / "cli.py").write_text(CLI)
+    g = json.loads(program("gather", {"source": str(project), "style_guide": "x", "budget": 60000}).stdout)
+    assert g["surfaces"] == ["src/cli.py"] and "=== CLI SURFACE src/cli.py" in g["digest"]
+    for k in range(19):                                       # every command, its option, default and help, and its docstring
+        assert f"def cmd{k}(" in g["digest"] and f'"--level{k}", default="core"' in g["digest"] and f"Command {k} does thing {k}." in g["digest"]
+    assert g["coverage"]["README.md"] == [len((project / "README.md").read_text())] * 2
+
+
+def test_docs_share_what_is_left_of_the_budget(project):
+    (project / "docs" / "long.md").write_text("long " * 4000)                       # 20000 characters
+    g = json.loads(program("gather", {"source": str(project), "style_guide": "x", "budget": 60000}).stdout)
+    got, total = g["coverage"]["docs/long.md"]
+    assert total == 20000 and got > 3500                          # not the old fixed 3500
+
+
+def test_extras_examples_transcripts_and_the_document_set(project, tmp_path):
+    ex = tmp_path / "sibling-tutorial.md"
+    ex.write_text("# Tutorial: another project\n\n## 1. First step\n")
+    deck = tmp_path / "deck.html"
+    deck.write_text("<style>body{}</style><script>alert(1)</script><section class='slide'><h2>Shape</h2></section>")
+    tr = tmp_path / "run.txt"
+    tr.write_text("$ proj run\nok\n")
+    secret = tmp_path / "token.txt"
+    secret.write_text("SECRET")
+    extras = {"examples": [str(ex), str(deck), str(secret)], "transcripts": [str(tr)], "set": [{"style": "setup", "file": "Setup.md"}]}
+    g = json.loads(program("gather", {"source": str(project), "style_guide": "x", "extras": extras}).stdout)
+    d = g["digest"]
+    assert "=== HOUSE STYLE EXAMPLE sibling-tutorial.md" in d and "NEVER a source of facts" in d and "<h2>Shape</h2>" in d
+    assert "alert(1)" not in d and "body{}" not in d and "SECRET" not in d and any("token.txt" in n for n in g["extras"])
+    assert "=== TRANSCRIPT run.txt" in d and "$ proj run" in d and "=== DOCUMENT SET" in d and "- setup: Setup.md" in d
+
+
+def test_a_deck_with_code_too_wide_for_its_column_fails_the_check(project):
+    wide = '<section class="slide"><h2>Wide</h2><div class="cols"><ul><li>a</li></ul><pre>' + "x" * 60 + '</pre></div><aside class="notes">n</aside></section>'
+    fits = '<section class="slide"><h2>Fits</h2><pre>' + "x" * 100 + '</pre><aside class="notes">n</aside></section>'
+    narrow = '<section class="slide"><h2>Narrow</h2><div class="cols wide-left"><ul><li>a</li></ul><pre>' + "x" * 50 + '</pre></div><aside class="notes">n</aside></section>'
+    for extra, bad in ((wide, "slide 9: a code line is 60 characters; 53 fit in its column"), (fits, None), (narrow, "a code line is 50 characters; 47 fit")):
+        r = json.loads(program("assemble", {"body": slides(8) + extra, "gathered": gathered(project), "source": str(project)}).stdout)
+        if bad:
+            assert not r["ok"] and any(bad in e for e in r["errors"]), r["errors"]
+        else:
+            assert r["ok"], r["errors"]
+
+
+def test_the_deck_text_scales_with_the_slide():
+    t = (STYLES / "demo.template.html").read_text(encoding="utf-8")
+    assert "font: calc(min(96vw, 158vh) / 54.7)/1.42" in t and "font-size: 24px" in t          # screen: scales; print: a fixed page
+
+
+def test_setup_style_and_the_guide_layout(project, tmp_path):
+    assert "setup" in docs_cli.STYLES and docs_cli.style_kind("setup") == "markdown"
+    out = CliRunner().invoke(cmd_docs, [str(project), "--style", "setup,tutorial,user-guide,demo", "--layout", "guide", "--out-dir", str(tmp_path / "docs"),
+                                        "--transcript", str(project / "README.md"), "--dry-run"])
+    assert out.exit_code == 0, out.output
+    for name in ("GUIDE/Setup.md", "GUIDE/Tutorial.md", "GUIDE/User-Guide.md", "DEMO/proj-v1.demo.html"):
+        assert str(tmp_path / "docs" / name) in out.output
+    assert "links to     Tutorial.md, User-Guide.md, ../DEMO/proj-v1.demo.html" in out.output and "transcripts  README.md" in out.output
+    assert "(100% of" in out.output
+    r = CliRunner().invoke(cmd_docs, [str(project), "--style", "setup", "--layout", "guide", "--out", str(tmp_path / "x.md"), "--dry-run"])
+    assert r.exit_code == 2 and "--layout guide names the files itself" in r.output

@@ -9,6 +9,10 @@ What it does
   html       takes the `<section class="slide">` elements of the answer, removes anything active (script, style, link, iframe, object, on*= handlers,
              javascript: urls, external src), puts an outline slide after the cover and wraps them in the style's template; checks there are
              at least `min_sections` slides, each closed, each with a title (the cover an h1), and that the page is a whole document.
+             It also checks that each slide's code fits: a slide is a fixed 16:9 page that cuts off what does not fit, so a code line
+             wider than its box (measured in Chromium per layout: 114 characters full width, 53 in a column, 47 / 60 in the narrow / wide
+             column of cols wide-*) or a block over 20 lines is an error, which sends the deck to the fix step; more than 8 bullets on a
+             slide is a warning.
   both       lists every `code` token that looks like a path, does not exist in the source and does not appear in its text either (a warning: the writer may have invented it).
 `ok` is false only for structure errors; unverified paths are warnings. Nothing here calls a model.
 """
@@ -16,12 +20,81 @@ import html as htmllib
 import json
 import re
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 
 OUTLINE = ('<section class="slide" id="outline">\n  <h2>Outline</h2>\n  <ol class="toc" id="toc"></ol>\n'
            '  <aside class="notes">The outline lists every slide title; click a line to jump.</aside>\n</section>')
 EXT = r"\.(py|md|yaml|yml|json|toml|js|ts|rs|go|sh|html|txt|cfg|ini)"
 PATHISH = re.compile(rf"^[\w.\-]+(/[\w.\-]+)*{EXT}$|^[\w.\-]+(/[\w.\-]+)*/$")      # a file with a known extension, or a folder written with a trailing slash
+
+
+# What fits, measured in Chromium on the template (its text scales with the slide, so these hold on any screen): characters of code a line,
+# full width and per column of each layout, less a margin of 2 to 3; lines of code under a title; bullets.
+PRE_FULL, PRE_LINES, BULLETS = 114, 20, 8
+PRE_COLS = {"cols": (53, 53), "wide-left": (60, 47), "wide-right": (47, 60)}
+VOID = {"br", "img", "hr", "input", "meta", "link", "source", "wbr", "area", "col", "embed", "param", "track"}
+
+
+class _Slide(HTMLParser):
+    """The code blocks of one slide, each with the width it has (full, or its column's), and the slide's bullet count."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack, self.blocks, self.bullets, self._pre = [], [], 0, None
+
+    def handle_starttag(self, tag, attrs):
+        if tag in VOID:
+            return
+        cls = (dict(attrs).get("class") or "").split()
+        node = {"tag": tag, "layout": None, "children": 0, "width": None}
+        if self.stack:
+            parent = self.stack[-1]
+            if parent["layout"]:                                       # a direct child of a two-column layout: one column
+                parent["children"] += 1
+                node["width"] = PRE_COLS[parent["layout"]][min(parent["children"], 2) - 1]
+            node["width"] = node["width"] or parent["width"]
+        if tag == "div" and "cols" in cls:
+            node["layout"] = next((v for v in ("wide-left", "wide-right") if v in cls), "cols")
+        self.stack.append(node)
+        if tag == "pre":
+            self._pre = [node["width"] or PRE_FULL, ""]
+        elif tag == "li":
+            self.bullets += 1
+
+    def handle_endtag(self, tag):
+        if tag in VOID:
+            return
+        if tag == "pre" and self._pre is not None:
+            self.blocks.append(tuple(self._pre))
+            self._pre = None
+        for k in range(len(self.stack) - 1, -1, -1):                   # tolerate an unclosed element inside
+            if self.stack[k]["tag"] == tag:
+                del self.stack[k:]
+                break
+
+    def handle_data(self, data):
+        if self._pre is not None:
+            self._pre[1] += data
+
+
+def fit_problems(slides):
+    """(errors, warnings) about what a slide cannot show: code too wide or too long, too many bullets."""
+    errors, warnings = [], []
+    for k, s in enumerate(slides, 1):
+        p = _Slide()
+        p.feed(s)
+        for limit, text in p.blocks:
+            lines = text.strip("\n").split("\n")
+            width = max((len(x.rstrip()) for x in lines), default=0)
+            if width > limit:
+                where = "full width" if limit == PRE_FULL else "in its column"
+                errors.append(f"slide {k}: a code line is {width} characters; {limit} fit {where}: shorten it")
+            if len(lines) > PRE_LINES:
+                errors.append(f"slide {k}: a code block has {len(lines)} lines; {PRE_LINES} fit: cut it")
+        if p.bullets > BULLETS:
+            warnings.append(f"slide {k}: {p.bullets} bullets (more than {BULLETS} may not fit)")
+    return errors, warnings
 
 
 def slug(title: str) -> str:
@@ -168,6 +241,9 @@ def main() -> int:
                 errors.append(f"slide {k} has no title (h1 for the cover, h2 for the others)")
         if slides and not re.search(r"<h1\b", slides[0]):
             errors.append("the first slide is not a cover (it has no h1)")
+        fit_errors, fit_warnings = fit_problems(slides)
+        errors += fit_errors
+        warnings += fit_warnings
         titles = [re.sub(r"<[^>]+>", "", t).strip() for s in slides for t in re.findall(r"<h2\b[^>]*>(.*?)</h2>", s, re.S)]
         page = Path(g["template"]).read_text(encoding="utf-8")
         title = htmllib.escape(g.get("name", "document"), quote=True)
