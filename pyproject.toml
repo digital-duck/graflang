@@ -43,6 +43,7 @@ edit = [                       # `graf vis --edit`, the app with the Create, Edi
 semantic = ["dd-embed[sentence-transformers]>=0.1.0"]   # recipe search by meaning with sentence-transformers (or use a local Ollama embedding model)
 solver = ["sympy>=1.12", "z3-solver>=4.12"]   # the sympy and z3 rule engines of cookbook/compliance_audit (`engine=sympy|z3`); stdlib needs neither
 kernel = ["jupyter_client>=8", "ipykernel>=6"]   # `backend: kernel` on SOLVE nodes
+format = ["dd-format>=0.2.0"]   # `graf util md2html | md2pdf | html2pdf` (the conversions live in dd-format)
 spl = ["spl-llm>=3.4"]        # only for SPL procedure_ref nodes (runs SPL.py workflows); plain GENERATE needs just dd-llm
 anthropic = ["dd-llm[anthropic]>=0.2.0"]
 gemini = ["dd-llm[gemini]>=0.2.0"]

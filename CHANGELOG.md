@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- `graf util arch-gate`: a promotion gate for architecture graphs. A node may declare `status` (planned, prototype, validated, product) and a `contract` (`tests`, `files`, `guarantees`); the gate works out the status each node has earned (repo exists; + tests/files exist and no drift error; + guarantees stated and every `requires` target is product) and exits 1 when a node claims more.
+- `graf util arch-drift` also checks commands: a node's `cmd` must be console scripts its repo ships (`unknown-command`), and a shipped script the node omits is a warning (`unlisted-command`).
+- `graf util mmd2arch`: the inverse of `arch2mmd`, so the pair can be proven lossless: `mmd2arch FILE --verify` (mmd -> arch -> mmd draws the same picture) and `arch2mmd FILE --verify` (arch -> mmd -> arch is identical). `arch2mmd` writes an `%% arch-meta:` line with what a picture cannot show.
+- `graf util arch-drift`: compares an architecture graph's `requires` / `optional` edges with each repo's `pyproject.toml` dependencies (missing in the graph, missing in the code, weaker or stronger in the code, wrong package name). An edge can be `draw: false`: in the graph, left out of the picture.
+
+- `graf util md2html`: a Markdown file to one standalone `.html` page; a ```` ```mermaid ```` fence is drawn in the browser (ELK layout loaded when the diagram asks for it); prints cleanly from the browser.
+- **`graf util` is thinner**: `md2html`, `md2pdf` and `html2pdf` keep their options but are wrappers over dd-format (`pip install "graflang[format]"`); the ~650 lines of converter, Lua filter and Chromium code that were copied here now live there (`grafu/cli.py` 990 -> 600 lines). What stays in `graf util` is graph-specific (`arch2mmd`, `mmd2arch`, `arch-drift`, `arch-gate`), `mmd2img` and `clean-port`.
+- `graf util arch2mmd`: an architecture graph (`*.arch.yaml`: layers, groups, nodes, `requires`/`optional`/`network` edges, rules) to a Mermaid `.mmd`. The graph is checked first (unknown nodes, edges that point up the layers, `requires` cycles); `--check` only validates.
+- `graf util mmd2img -f pdf` passes `--pdfFit`: one page sized to the diagram.
 
 - `graf util`: the conversion and document helpers of `spl3 util`. Own code: `clean-port`, `html2pdf`, `md2pdf`, `mmd2img`. Run by spl3 when called (`pip install 'graflang[spl]'`): `describe`, `explain`, `graph2spl`, `img2mmd`, `img2text`, `mmd2spl`, `spl2graph`, `spl2mmd`, `text2mmd`. `install-skill` is not ported (it installs the `/spl3` skill).
 

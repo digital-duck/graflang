@@ -1,6 +1,7 @@
 """`graf util`: conversion and document helpers (ported from `spl3 util`).
 
-Self-contained here (no SPL runtime needed): clean-port, html2pdf, md2html, md2pdf, mmd2img.
+Here (no SPL runtime needed): the architecture-graph tools (arch2mmd, mmd2arch, arch-drift, arch-gate), clean-port and mmd2img. The document
+conversions (html2pdf, md2html, md2pdf) are thin wrappers over dd-format (`pip install "graflang[format]"`).
 Delegated to spl3 when you run them (`pip install 'graflang[spl]'`): the commands that read or write SPL source or use spl3's LLM
 adapters: describe, explain, graph2spl, img2mmd, img2text, mmd2spl, spl2graph, spl2mmd, text2mmd. They are listed here, and `graf util NAME -h`
 shows spl3's own help for them.
@@ -59,7 +60,10 @@ def util() -> None:
     """Utility commands: format conversion (Markdown/HTML to PDF, Mermaid to image, SPL and GraphLang), document tools, helpers."""
 
 
-# ---- html2pdf (logic in grafu/html2pdf.py) -------------------------------------------------------------------------------------------
+# ---- html2pdf (dd-format's html_to_pdf) -------------------------------------------------------------------------------------------
+
+_NEED_DD_FORMAT = "this command is dd-format's ({e}): pip install \"graflang[format]\" (or: pip install dd-format)"
+
 
 @util.command("html2pdf", short_help="Convert an .html slide deck (or page) to .pdf with headless Chromium.")
 @click.argument("html_file", metavar="HTML_FILE")
@@ -79,14 +83,18 @@ def cmd_html2pdf(html_file, output, browser, timeout):
       graf util html2pdf deck.html -o deck-20261103.pdf
     """
     from pathlib import Path
-    from .html2pdf import Html2PdfError, count_pages, html_to_pdf
 
     try:
+        from dd_format.html_pdf import HtmlToPdfError, count_pages, html_to_pdf
+    except ImportError as e:
+        raise click.ClickException(_NEED_DD_FORMAT.format(e=e))
+    try:
         out = html_to_pdf(Path(html_file), Path(output) if output else None, browser=browser, timeout=timeout)
-    except Html2PdfError as exc:
+    except HtmlToPdfError as exc:
         click.echo(f"FAILED: {exc}", err=True)
         raise SystemExit(1)
     click.echo(f"{out.resolve()}  ({count_pages(out)} pages)")
+
 
 
 # ---- clean-port, mmd2img, md2pdf (copied from spl3 util) -----------------------------------------------------------------------------
@@ -366,422 +374,21 @@ def cmd_md2pdf(md_file, output, font, mono_font, font_size, margin, toc, toc_dep
       graf util md2pdf spec.md --font "Liberation Serif" --font-size 12pt
       graf util md2pdf big-table.md --no-v-lines
     """
-    import subprocess
-    import tempfile
     from pathlib import Path
 
-    md_path = Path(md_file).resolve()
-    if not md_path.exists():
-        raise click.ClickException(f"File not found: {md_path}")
-
-    if output:
-        out_path = Path(output).resolve()
-    else:
-        out_path = md_path.with_suffix(".pdf")
-
-    click.echo(f"Input:  {md_path}", err=True)
-    click.echo(f"Output: {out_path}", err=True)
-
-    # Lua filter: reassign table column widths from actual content length.
-    # Pandoc's default uses separator-dash counts (|:---:| = 5 dashes → ~45%
-    # for a 3-column table) which ignores content — short columns bloat,
-    # long-text columns overflow. This filter measures each column's content
-    # two ways: total text length (for proportional distribution) and the
-    # longest single unbreakable "word" (for a hard minimum) — a column
-    # holding short terms like "ChromaDB" or "case_profile.json" has a tiny
-    # total length but still needs enough width to fit that one token,
-    # otherwise LaTeX can't hyphenate it and it overflows into the next
-    # column instead of wrapping. Widths are clamped 4%-60%, then
-    # renormalised so the sum <= 0.98.
-    #
-    # FULL_WIDTH_CHARS estimates how many characters fit across the full
-    # table width, derived from this document's margin/font-size, so the
-    # word-length minimum converts to a width fraction. The estimate is
-    # deliberately conservative (fewer chars per line than a typical serif
-    # font would fit) so narrow columns get a bit more room rather than less.
     try:
-        _margin_in = float(margin.rstrip("in")) if margin.endswith("in") else \
-            float(margin.rstrip("cm")) / 2.54
-    except ValueError:
-        _margin_in = 0.75
+        from dd_format.pandoc_pdf import PandocError, markdown_to_pdf_pandoc
+    except ImportError as e:
+        raise click.ClickException(_NEED_DD_FORMAT.format(e=e))
     try:
-        _font_pt = float(font_size.rstrip("pt"))
-    except ValueError:
-        _font_pt = 11.0
-    _text_width_in = max(3.0, 8.5 - 2 * _margin_in)
-    _chars_per_inch = 120.0 / _font_pt
-    _full_width_chars = max(40, round(_text_width_in * _chars_per_inch))
-    # Column widths are computed as fractions of \linewidth, but LaTeX also
-    # spends 2*tabcolsep of real width on EVERY column for its own left/right
-    # cell padding -- overhead the width algorithm must budget for or a
-    # many-column table silently overflows past the page's right margin.
-    # Reducing tabcolsep (default 6pt) claws back some of that budget too.
-    _tabcolsep_pt = 3.0
-    _tabcolsep_in = _tabcolsep_pt / 72.27
-
-    _LUA_AUTO_TABLE_WIDTHS = """\
-local FULL_WIDTH_CHARS = __FULL_WIDTH_CHARS__
-local TEXT_WIDTH_IN = __TEXT_WIDTH_IN__
-local TABCOLSEP_IN = __TABCOLSEP_IN__
-local GRID_H = __GRID_H__
-local GRID_V = __GRID_V__
-
--- blocks is a plain Lua list of Block elements (Cell.content on new-AST
--- pandoc, or a table cell directly on pre-1.22 pandoc). stringify only
--- accepts a single AST element, not a bare list, so process block by block.
--- Returns total text length and the length of the longest whitespace-
--- delimited token (an approximation of what LaTeX cannot hyphenate/wrap).
-local function col_stats(blocks)
-  local total = 0
-  local longest_word = 0
-  for _, block in ipairs(blocks) do
-    local text = pandoc.utils.stringify(block)
-    total = total + #text
-    for word in text:gmatch("%S+") do
-      if #word > longest_word then longest_word = #word end
-    end
-  end
-  return total, longest_word
-end
-
-local function compute_widths(n, totlen, maxword)
-  -- Every column costs 2*tabcolsep of real width beyond its p{} content box
-  -- (its own left+right cell padding), so the fraction-of-\linewidth budget
-  -- has to shrink as column count grows, or wide tables overflow the page
-  -- margin regardless of how well the per-column widths below are chosen.
-  local overhead_frac = (2 * n * TABCOLSEP_IN) / TEXT_WIDTH_IN
-  local budget = math.max(0.5, 0.98 - overhead_frac)
-
-  local total = 0
-  for i = 1, n do total = total + totlen[i] end
-  if total == 0 then total = 1 end
-
-  -- minw is a hard floor: the width the column's single longest unbreakable
-  -- word needs. desired is what content volume would like to have. Below,
-  -- if the desireds don't all fit, only the slack ABOVE each column's floor
-  -- gets squeezed -- never the floor itself. A uniform scale-down here would
-  -- shrink already-minimal columns below their word-fit width, and since
-  -- LaTeX can't hyphenate a word it doesn't wrap it -- it silently overflows
-  -- the column box into whatever sits to the right instead of erroring.
-  local minw, desired = {}, {}
-  for i = 1, n do
-    local content_frac = totlen[i] / total
-    local word_frac = (maxword[i] + 2) / FULL_WIDTH_CHARS
-    minw[i] = math.max(0.04, math.min(0.60, word_frac))
-    desired[i] = math.max(minw[i], math.min(0.60, content_frac))
-  end
-
-  local sum_desired = 0
-  for i = 1, n do sum_desired = sum_desired + desired[i] end
-  if sum_desired <= budget then
-    return desired
-  end
-
-  local sum_min = 0
-  for i = 1, n do sum_min = sum_min + minw[i] end
-  if sum_min >= budget then
-    -- Even every column's bare minimum doesn't fit the budget -- last
-    -- resort: scale the floors themselves (rare; many long-word columns).
-    local scale = budget / sum_min
-    local widths = {}
-    for i = 1, n do widths[i] = minw[i] * scale end
-    return widths
-  end
-
-  local slack_total = sum_desired - sum_min
-  local shrink_ratio = (sum_desired - budget) / slack_total
-  local widths = {}
-  for i = 1, n do
-    widths[i] = desired[i] - (desired[i] - minw[i]) * shrink_ratio
-  end
-  return widths
-end
-
--- Renders a table as a raw LaTeX longtable with explicit \\hline / "|" grid
--- lines, since pandoc's own booktabs-style output only ever draws a rule
--- above the header, below the header, and at the very end -- there is no
--- built-in way to ask pandoc for a line after every body row or for vertical
--- column rules. pandoc.write() isn't available in this pandoc's Lua API
--- (pandoc-types 1.20 / pandoc 2.9), so cell content is converted to LaTeX by
--- hand, covering the inline styles markdown tables actually use.
-local function align_cmd(a)
-  if a == "AlignRight" then return "\\\\raggedleft\\\\arraybackslash"
-  elseif a == "AlignCenter" then return "\\\\centering\\\\arraybackslash"
-  else return "\\\\raggedright\\\\arraybackslash" end
-end
-
-local function escape_latex(s)
-  s = s:gsub("\\\\", "\\\\textbackslash{}")
-  s = s:gsub("([%%$#&_{}])", "\\\\%1")
-  s = s:gsub("~", "\\\\textasciitilde{}")
-  s = s:gsub("%^", "\\\\textasciicircum{}")
-  return s
-end
-
-local function inlines_to_latex(inlines)
-  local parts = {}
-  for _, il in ipairs(inlines) do
-    local t = il.t
-    if t == "Str" then
-      table.insert(parts, escape_latex(il.text))
-    elseif t == "Space" or t == "SoftBreak" then
-      table.insert(parts, " ")
-    elseif t == "LineBreak" then
-      table.insert(parts, "\\\\\\\\ ")
-    elseif t == "Emph" then
-      table.insert(parts, "\\\\emph{" .. inlines_to_latex(il.content) .. "}")
-    elseif t == "Strong" then
-      table.insert(parts, "\\\\textbf{" .. inlines_to_latex(il.content) .. "}")
-    elseif t == "Code" then
-      table.insert(parts, "\\\\texttt{" .. escape_latex(il.text) .. "}")
-    elseif t == "Math" then
-      table.insert(parts, "$" .. il.text .. "$")
-    elseif t == "Link" then
-      table.insert(parts, "\\\\href{" .. il.target[1] .. "}{" .. inlines_to_latex(il.content) .. "}")
-    elseif il.content then
-      table.insert(parts, inlines_to_latex(il.content))
-    else
-      local ok, s = pcall(pandoc.utils.stringify, il)
-      table.insert(parts, ok and escape_latex(s) or "")
-    end
-  end
-  return table.concat(parts)
-end
-
-local function blocks_to_latex(blocks)
-  local parts = {}
-  for _, b in ipairs(blocks) do
-    if b.t == "Para" or b.t == "Plain" then
-      table.insert(parts, inlines_to_latex(b.content))
-    else
-      local ok, s = pcall(pandoc.utils.stringify, b)
-      table.insert(parts, ok and escape_latex(s) or "")
-    end
-  end
-  return table.concat(parts, " \\\\newline{} ")
-end
-
-local function cell_to_latex(blocks)
-  local ok, latex = pcall(blocks_to_latex, blocks)
-  if not ok or not latex then return "" end
-  return latex
-end
-
-local function render_grid_table(n, aligns, widths, header_cells, body_rows, caption_inlines)
-  local vbar = GRID_V and "|" or ""
-  local hline = GRID_H and "\\\\hline" or ""
-
-  local colspec_parts = {vbar}
-  for i = 1, n do
-    table.insert(colspec_parts,
-      string.format(">{%s}p{%.4f\\\\linewidth}", align_cmd(aligns[i]), widths[i]))
-    table.insert(colspec_parts, vbar)
-  end
-
-  local lines = {}
-  table.insert(lines, "\\\\begin{longtable}{" .. table.concat(colspec_parts) .. "}")
-
-  if caption_inlines and #caption_inlines > 0 then
-    local cap = cell_to_latex({pandoc.Para(caption_inlines)})
-    if cap ~= "" then
-      table.insert(lines, "\\\\caption{" .. cap .. "}\\\\\\\\")
-    end
-  end
-
-  if hline ~= "" then table.insert(lines, hline) end
-
-  if header_cells and #header_cells > 0 then
-    local hdr = {}
-    for i, cell in ipairs(header_cells) do
-      table.insert(hdr, "\\\\textbf{" .. cell_to_latex(cell) .. "}")
-    end
-    table.insert(lines, table.concat(hdr, " & ") .. " \\\\\\\\")
-    if hline ~= "" then table.insert(lines, hline) end
-    table.insert(lines, "\\\\endhead")
-  end
-
-  for _, row in ipairs(body_rows) do
-    local cells = {}
-    for i, cell in ipairs(row) do
-      if i <= n then table.insert(cells, cell_to_latex(cell)) end
-    end
-    table.insert(lines, table.concat(cells, " & ") .. " \\\\\\\\")
-    if hline ~= "" then table.insert(lines, hline) end
-  end
-
-  table.insert(lines, "\\\\end{longtable}")
-  return pandoc.RawBlock("latex", table.concat(lines, "\\n"))
-end
-
--- pandoc >= 2.10 (pandoc-types >= 1.22): Table has colspecs/head/bodies.
--- pandoc < 2.10 (pandoc-types < 1.22, e.g. 2.9.x): Table has widths/headers/rows,
--- and each cell is a plain list of Blocks rather than a Cell object.
-function Table(t)
-  if t.colspecs then
-    local n = #t.colspecs
-    if n == 0 then return t end
-
-    local totlen, maxword = {}, {}
-    for i = 1, n do totlen[i], maxword[i] = 4, 0 end
-
-    for _, row in ipairs(t.head.rows) do
-      for i, cell in ipairs(row.cells) do
-        if i <= n then
-          local tl, mw = col_stats(cell.content)
-          if tl > totlen[i] then totlen[i] = tl end
-          if mw > maxword[i] then maxword[i] = mw end
-        end
-      end
-    end
-
-    for _, body in ipairs(t.bodies) do
-      for _, row in ipairs(body.body) do
-        for i, cell in ipairs(row.cells) do
-          if i <= n then
-            local tl, mw = col_stats(cell.content)
-            if tl > totlen[i] then totlen[i] = tl end
-            if mw > maxword[i] then maxword[i] = mw end
-          end
-        end
-      end
-    end
-
-    local widths = compute_widths(n, totlen, maxword)
-    for i = 1, n do t.colspecs[i][2] = widths[i] end
-
-    if not (GRID_H or GRID_V) then return t end
-
-    local aligns = {}
-    for i = 1, n do aligns[i] = tostring(t.colspecs[i][1]) end
-
-    local header_cells = {}
-    if t.head.rows[1] then
-      for i, cell in ipairs(t.head.rows[1].cells) do
-        if i <= n then header_cells[i] = cell.content end
-      end
-    end
-
-    local body_rows = {}
-    for _, body in ipairs(t.bodies) do
-      for _, row in ipairs(body.body) do
-        local cells = {}
-        for i, cell in ipairs(row.cells) do
-          if i <= n then cells[i] = cell.content end
-        end
-        table.insert(body_rows, cells)
-      end
-    end
-
-    return render_grid_table(n, aligns, widths, header_cells, body_rows, nil)
-  end
-
-  -- Old-style Table (pandoc-types < 1.22)
-  local n = #t.headers
-  if n == 0 and t.rows[1] then n = #t.rows[1] end
-  if n == 0 then return t end
-
-  local totlen, maxword = {}, {}
-  for i = 1, n do totlen[i], maxword[i] = 4, 0 end
-
-  for i, cell in ipairs(t.headers) do
-    if i <= n then
-      local tl, mw = col_stats(cell)
-      if tl > totlen[i] then totlen[i] = tl end
-      if mw > maxword[i] then maxword[i] = mw end
-    end
-  end
-
-  for _, row in ipairs(t.rows) do
-    for i, cell in ipairs(row) do
-      if i <= n then
-        local tl, mw = col_stats(cell)
-        if tl > totlen[i] then totlen[i] = tl end
-        if mw > maxword[i] then maxword[i] = mw end
-      end
-    end
-  end
-
-  t.widths = compute_widths(n, totlen, maxword)
-
-  if not (GRID_H or GRID_V) then return t end
-
-  return render_grid_table(n, t.aligns, t.widths, t.headers, t.rows, t.caption)
-end
-""".replace("__FULL_WIDTH_CHARS__", str(_full_width_chars)) \
-   .replace("__TEXT_WIDTH_IN__", str(_text_width_in)) \
-   .replace("__TABCOLSEP_IN__", str(_tabcolsep_in)) \
-   .replace("__GRID_H__", "true" if h_lines else "false") \
-   .replace("__GRID_V__", "true" if v_lines else "false")
-
-    cmd = [
-        "pandoc", str(md_path),
-        "--pdf-engine=xelatex",
-        "--resource-path=.",
-        f"-V", f"mainfont={font}",
-        f"-V", "sansfont=DejaVu Sans",
-        f"-V", f"monofont={mono_font}",
-        f"-V", "monofontoptions=Scale=0.88",
-        f"-V", f"geometry=margin={margin}",
-        f"-V", f"fontsize={font_size}",
-        f"-V", "colorlinks=true",
-        f"-V", "linkcolor=NavyBlue",
-        f"-V", "urlcolor=NavyBlue",
-        f"-V", "toccolor=black",
-        f"-V", "linestretch=1.15",
-        "--standalone",
-        "-f", "markdown+smart",
-        "-o", str(out_path),
-    ]
-    if toc:
-        cmd += ["--toc", f"--toc-depth={toc_depth}"]
-    # \tabcolsep is trimmed for every table (not just grid ones) since it
-    # trades directly against the column-width budget the lua filter above
-    # computes -- the default 6pt costs a many-column table real inches of
-    # page width it never gets to spend on content.
-    _header_includes = f"\\setlength{{\\tabcolsep}}{{{_tabcolsep_pt:g}pt}}"
-    if h_lines or v_lines:
-        # Grid-line tables are emitted as raw `longtable` LaTeX by the lua
-        # filter below, which bypasses pandoc's own table detection (the
-        # $tables$ template variable), so the packages it needs must be
-        # pulled in explicitly here.
-        _header_includes += "\\usepackage{longtable}\\usepackage{array}"
-    cmd += ["-V", f"header-includes={_header_includes}"]
-
-    lua_path = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False) as lf:
-            lf.write(_LUA_AUTO_TABLE_WIDTHS)
-            lua_path = lf.name
-        cmd += [f"--lua-filter={lua_path}"]
-
-        result = subprocess.run(
-            cmd,
-            cwd=str(md_path.parent),   # resolve relative image paths correctly
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        if result.stderr.strip():
-            click.echo(result.stderr.strip(), err=True)
-        click.echo(f"Done: {out_path}")
-    except FileNotFoundError:
-        raise click.ClickException(
-            "pandoc not found. Install with: sudo apt install pandoc texlive-xetex"
-        )
-    except subprocess.CalledProcessError as e:
-        click.echo(e.stderr, err=True)
-        raise click.ClickException("pandoc conversion failed (see errors above).")
-    finally:
-        import os
-        if lua_path:
-            try:
-                os.unlink(lua_path)
-            except Exception:
-                pass
+        markdown_to_pdf_pandoc(Path(md_file), output, font=font, mono_font=mono_font, font_size=font_size, margin=margin, toc=toc,
+                                     toc_depth=toc_depth, h_lines=h_lines, v_lines=v_lines, log=lambda m: click.echo(m, err=True))
+    except PandocError as e:
+        raise click.ClickException(str(e))
 
 
 
-# ---- md2html (logic in grafu/md2html.py) ---------------------------------------------------------------------------------------------
+# ---- md2html (dd-format's markdown_to_html) ---------------------------------------------------------------------------------------------
 
 @util.command("md2html", short_help="Convert a Markdown file to a standalone .html page (Mermaid diagrams drawn in the browser).")
 @click.argument("md_file", metavar="MD_FILE")
@@ -802,12 +409,192 @@ def cmd_md2html(md_file, output, title, max_width):
     """
     from pathlib import Path
 
-    from .md2html import convert
-
+    try:
+        from dd_format.html_writer import markdown_to_html
+    except ImportError as e:
+        raise click.ClickException(_NEED_DD_FORMAT.format(e=e))
     src = Path(md_file)
     if not src.is_file():
         raise click.ClickException(f"{md_file} not found")
     out = Path(output) if output else src.with_suffix(".html")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(convert(src.read_text(encoding="utf-8"), title, max_width), encoding="utf-8")
+    markdown_to_html(src.read_text(encoding="utf-8"), str(out), title=title, theme="light", max_width=max_width)
     click.echo(f"HTML: {out}")
+
+
+
+# ---- arch2mmd (logic in grafu/arch2mmd.py) -------------------------------------------------------------------------------------------
+
+@util.command("arch2mmd", short_help="Convert an architecture graph (.arch.yaml) to a Mermaid .mmd flowchart, after checking its rules.")
+@click.argument("arch_file", metavar="ARCH_FILE")
+@click.option("-o", "--output", default=None, metavar="MMD", help="Output file (default: next to the input, NAME.arch.yaml -> NAME.mmd).")
+@click.option("--check", is_flag=True, help="Only validate the graph (rules, unknown nodes, cycles); write nothing.")
+@click.option("--strict", is_flag=True, help="Treat warnings (e.g. a node with no edges) as errors.")
+@click.option("--verify", is_flag=True, help="Write nothing: draw the graph, read the drawing back (arch -> mmd -> arch) and compare. Exit 1 if anything is lost.")
+def cmd_arch2mmd(arch_file, output, check, strict, verify):
+    """Draw an architecture graph, graph-first: the `.arch.yaml` is the source of truth and the picture is generated from it.
+
+    The file lists layers (each with a rank), groups, nodes and edges (`requires`, `optional`, `network`), plus the rules it must
+    keep: edges never point up the layers, and `requires` edges have no cycle. The graph is checked before anything is drawn, so a
+    picture never shows an architecture that breaks its own rules. Exit status is 1 if the check fails.
+
+    \b
+    Examples:
+      graf util arch2mmd digital-duck.arch.yaml                 # -> digital-duck.mmd
+      graf util arch2mmd digital-duck.arch.yaml --check         # validate only
+      graf util arch2mmd digital-duck.arch.yaml -o out/stack.mmd && graf util mmd2img out/stack.mmd -f pdf
+    """
+    from .arch2mmd import ArchError, convert, load, validate
+
+    try:
+        if verify:
+            from .mmd2arch import roundtrip_arch
+
+            diffs = roundtrip_arch(load(arch_file))
+            if diffs:
+                click.echo(f"LOSSY: {len(diffs)} difference(s) after arch -> mmd -> arch:", err=True)
+                for d in diffs[:20]:
+                    click.echo(f"  {d}", err=True)
+                raise SystemExit(1)
+            click.echo(f"OK: {arch_file} -> mmd -> arch is identical")
+            return
+        if check:
+            errors, warnings = validate(load(arch_file))
+            for w in warnings:
+                click.echo(f"warning: {w}", err=True)
+            if errors or (strict and warnings):
+                raise ArchError("\n".join("  " + m for m in errors + (warnings if strict else [])))
+            click.echo(f"OK: {arch_file}")
+            return
+        dest, warnings = convert(arch_file, output, strict=strict)
+    except FileNotFoundError:
+        raise click.ClickException(f"{arch_file} not found")
+    except ArchError as exc:
+        raise click.ClickException(f"{arch_file}:\n{exc}")
+    for w in warnings:
+        click.echo(f"warning: {w}", err=True)
+    click.echo(f"MMD: {dest}")
+
+
+# ---- mmd2arch (logic in grafu/mmd2arch.py) -------------------------------------------------------------------------------------------
+
+@util.command("mmd2arch", short_help="Convert a Mermaid .mmd flowchart back to an architecture graph (.arch.yaml); --verify proves the round trip is lossless.")
+@click.argument("mmd_file", metavar="MMD_FILE")
+@click.option("-o", "--output", default=None, metavar="ARCH", help="Output file (default: next to the input, NAME.mmd -> NAME.arch.yaml).")
+@click.option("--verify", is_flag=True, help="Write nothing: read the picture into an architecture, draw that again, and compare the two pictures. Exit 1 if they differ.")
+def cmd_mmd2arch(mmd_file, output, verify):
+    """Read a Mermaid flowchart as an architecture graph: the inverse of `graf util arch2mmd`.
+
+    Layers (`N · Title` subgraphs), groups, nodes (name, commands, summary lines), edges (solid = requires, dashed = optional), classes and
+    styles come from the picture. What a picture cannot show (package names, rules, network edges) comes from the `%% arch-meta:` line that
+    `arch2mmd` writes; a hand-written `.mmd` has none and gets defaults, which the command reports.
+
+    The round trip is how fidelity is shown: `--verify` reads the picture, draws it again and diffs the two. For an architecture file the
+    other direction is `graf util arch2mmd FILE --verify` (arch -> mmd -> arch).
+
+    \b
+    Examples:
+      graf util mmd2arch dd-techstack-chart.mmd                  # -> dd-techstack-chart.arch.yaml
+      graf util mmd2arch dd-techstack-chart.mmd --verify         # prove nothing in the picture is lost
+    """
+    from pathlib import Path
+
+    from .mmd2arch import convert, roundtrip_mmd
+
+    path = Path(mmd_file)
+    if not path.is_file():
+        raise click.ClickException(f"{mmd_file} not found")
+    if verify:
+        diffs = roundtrip_mmd(path.read_text(encoding="utf-8"))
+        if diffs:
+            click.echo(f"LOSSY: {len(diffs)} difference(s) between {mmd_file} and its re-drawing:", err=True)
+            for d in diffs[:20]:
+                click.echo(f"  {d}", err=True)
+            raise SystemExit(1)
+        click.echo(f"OK: {mmd_file} -> arch -> mmd draws the same picture")
+        return
+    dest, notes = convert(path, output)
+    for note in notes:
+        click.echo(f"note: {note}", err=True)
+    click.echo(f"ARCH: {dest}")
+
+
+# ---- arch-drift (logic in grafu/arch_drift.py) ---------------------------------------------------------------------------------------
+
+@util.command("arch-drift", short_help="Compare an architecture graph's edges with what each repo's pyproject.toml really depends on.")
+@click.argument("arch_file", metavar="ARCH_FILE")
+@click.option("--root", default=".", show_default=True, metavar="DIR", help="Folder that holds the repos the nodes name with `repo:`.")
+@click.option("--strict", is_flag=True, help="Treat warnings as errors too.")
+def cmd_arch_drift(arch_file, root, strict):
+    """Check that the code still matches the architecture: the "validate" step of arch-design -> prototype -> validate.
+
+    For every node that names a `pkg` and a `repo`, the repo's `pyproject.toml` dependencies (and extras) are compared with the graph's
+    `requires` / `optional` edges. A dependency the graph lacks, or an edge the code does not use, is an error; a `requires` edge the code has
+    only as an extra (or the reverse) is a warning. Exit status is 1 on any error.
+
+    \b
+    Example:
+      graf util arch-drift digital-duck.arch.yaml --root ~/projects/digital-duck
+    """
+    from .arch2mmd import load
+    from .arch_drift import drift
+
+    try:
+        arch = load(arch_file)
+    except FileNotFoundError:
+        raise click.ClickException(f"{arch_file} not found")
+    findings = drift(arch, root)
+    for f in findings:
+        click.echo(str(f), err=not f.is_error)
+    errors = [f for f in findings if f.is_error or strict]
+    click.echo(f"{'DRIFT' if errors else 'OK'}: {len(findings)} finding(s)" + (f", {len(errors)} counted as errors" if findings else ""))
+    if errors:
+        raise SystemExit(1)
+
+
+# ---- arch-gate (logic in grafu/arch_gate.py) -----------------------------------------------------------------------------------------
+
+@util.command("arch-gate", short_help="Fail when a component claims a lifecycle status (prototype, validated, product) its contract and code have not earned.")
+@click.argument("arch_file", metavar="ARCH_FILE")
+@click.option("--root", default=".", show_default=True, metavar="DIR", help="Folder that holds the repos the nodes name with `repo:`.")
+@click.option("--all", "show_all", is_flag=True, help="Also list the components that have no `status` (they are never gated).")
+def cmd_arch_gate(arch_file, root, show_all):
+    """The promotion gate of the design cycle: arch-design -> prototype -> validate -> product.
+
+    Each node may declare `status: planned | prototype | validated | product` and a `contract` (`tests`, `files`, `guarantees`). The gate works
+    out the status each node has really earned and exits 1 when a node claims more:
+
+    \b
+      prototype   the repo exists
+      validated   + contract tests/files exist, and `arch-drift` finds no error for the node
+      product     + the contract states guarantees, and every `requires` target has earned `product`
+
+    \b
+    Example:
+      graf util arch-gate digital-duck.arch.yaml --root ~/projects/digital-duck
+    """
+    from .arch2mmd import ArchError, load, validate
+    from .arch_gate import gate
+
+    try:
+        arch = load(arch_file)
+    except FileNotFoundError:
+        raise click.ClickException(f"{arch_file} not found")
+    errors, _ = validate(arch)
+    if errors:
+        raise click.ClickException(f"{arch_file}:\n" + "\n".join("  " + e for e in errors))
+    results = gate(arch, root)
+    bad = [r for r in results if not r.ok]
+    for r in results:
+        if r.claimed is None and not show_all:
+            continue
+        mark = "-" if r.claimed is None else ("ok " if r.ok else "FAIL")
+        claim = r.claimed or "unrated"
+        click.echo(f"{mark:5}{r.node:14} claims {claim:10} earned {r.earned}", err=not r.ok)
+        if (not r.ok or r.claimed is None) and r.blockers:
+            for b in r.blockers[:4]:
+                click.echo(f"        next level blocked: {b}", err=not r.ok)
+    rated = [r for r in results if r.claimed is not None]
+    click.echo(f"{'GATE FAILED' if bad else 'GATE OK'}: {len(rated) - len(bad)}/{len(rated)} rated component(s) hold their status; {len(results) - len(rated)} unrated")
+    if bad:
+        raise SystemExit(1)
