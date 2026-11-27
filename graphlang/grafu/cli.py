@@ -558,7 +558,11 @@ def cmd_arch_drift(arch_file, root, strict):
 @click.argument("arch_file", metavar="ARCH_FILE")
 @click.option("--root", default=".", show_default=True, metavar="DIR", help="Folder that holds the repos the nodes name with `repo:`.")
 @click.option("--all", "show_all", is_flag=True, help="Also list the components that have no `status` (they are never gated).")
-def cmd_arch_gate(arch_file, root, show_all):
+@click.option("--run-cited", is_flag=True, help="Also RUN the tests the guarantees cite (in each node's repo) and refuse `product` where one failed, was skipped or was not found.")
+@click.option("--python", "python", default=None, metavar="EXE", help="With --run-cited: the interpreter that runs pytest (default: the one running graf). It needs each repo's test dependencies.")
+@click.option("--timeout", default=300, show_default=True, help="With --run-cited: seconds allowed per test file.")
+@click.option("--node", "only", multiple=True, metavar="ID", help="With --run-cited: run only this node's cited tests (repeatable).")
+def cmd_arch_gate(arch_file, root, show_all, run_cited, python, timeout, only):
     """The promotion gate of the design cycle: arch-design -> prototype -> validate -> product.
 
     Each node may declare `status: planned | prototype | validated | product` and a `contract` (`tests`, `files`, `guarantees`). The gate works
@@ -567,14 +571,20 @@ def cmd_arch_gate(arch_file, root, show_all):
     \b
       prototype   the repo exists
       validated   + contract tests/files exist, and `arch-drift` finds no error for the node
-      product     + the contract states guarantees, and every `requires` target has earned `product`
+      product     + the contract states guarantees (each cited `path.py::test_name` must exist), and every `requires` target has earned `product`
+
+    A guarantee may cite the test that proves it. `--run-cited` runs those tests for real, so a cited test that fails, is skipped (a missing optional
+    package, a server that is down) or is not collected also blocks `product`: a skipped test proves nothing. Exit status is 1 if any rated node
+    claims more than it earned, or if any cited test of a rated node did not pass.
 
     \b
-    Example:
+    Examples:
       graf util arch-gate digital-duck.arch.yaml --root ~/projects/digital-duck
+      graf util arch-gate digital-duck.arch.yaml --root ~/projects/digital-duck --run-cited
+      graf util arch-gate digital-duck.arch.yaml --root ~/projects/digital-duck --run-cited --node dd-config --python ~/anaconda3/envs/graf/bin/python
     """
     from .arch2mmd import ArchError, load, validate
-    from .arch_gate import gate
+    from .arch_gate import gate, run_cited as run_cited_tests
 
     try:
         arch = load(arch_file)
@@ -583,7 +593,11 @@ def cmd_arch_gate(arch_file, root, show_all):
     errors, _ = validate(arch)
     if errors:
         raise click.ClickException(f"{arch_file}:\n" + "\n".join("  " + e for e in errors))
-    results = gate(arch, root)
+    evidence = None
+    if run_cited:
+        click.echo("running the cited tests ...", err=True)
+        evidence = run_cited_tests(arch, root, python=python, timeout=timeout, only=list(only) or None)
+    results = gate(arch, root, evidence)
     bad = [r for r in results if not r.ok]
     for r in results:
         if r.claimed is None and not show_all:
@@ -595,6 +609,19 @@ def cmd_arch_gate(arch_file, root, show_all):
             for b in r.blockers[:4]:
                 click.echo(f"        next level blocked: {b}", err=not r.ok)
     rated = [r for r in results if r.claimed is not None]
-    click.echo(f"{'GATE FAILED' if bad else 'GATE OK'}: {len(rated) - len(bad)}/{len(rated)} rated component(s) hold their status; {len(results) - len(rated)} unrated")
-    if bad:
+    broken = []
+    if evidence is not None:
+        claimed = {r.node for r in rated}
+        for nid, items in evidence.items():
+            total = len(items)
+            problems = [e for e in items if not e.ok]
+            if nid in claimed or problems:
+                click.echo(f"      evidence {nid}: {total - len(problems)}/{total} cited tests passed", err=bool(problems))
+            for e in problems:
+                click.echo(f"        {e}", err=True)
+            if nid in claimed:
+                broken += problems
+    click.echo(f"{'GATE FAILED' if bad or broken else 'GATE OK'}: {len(rated) - len(bad)}/{len(rated)} rated component(s) hold their status; {len(results) - len(rated)} unrated"
+               + (f"; {sum(len(v) for v in evidence.values())} cited tests run, {len(broken)} did not pass" if evidence is not None else ""))
+    if bad or broken:
         raise SystemExit(1)

@@ -109,3 +109,105 @@ def test_cli_exit_status(tmp_path):
     f.write_text(yaml.safe_dump(_arch(lib_contract={"tests": ["tests"]})), encoding="utf-8")
     out = r.invoke(main, ["util", "arch-gate", str(f), "--root", str(tmp_path)])
     assert out.exit_code == 1 and "GATE FAILED" in out.output
+
+
+def test_a_guarantee_that_cites_a_missing_test_blocks_product(tmp_path):
+    g = _both(tmp_path, lib_contract={"tests": ["tests"], "guarantees": ["it works (tests/test_x.py::test_x)"]})
+    assert g["lib"].earned == "product"                                 # test_x exists
+    g = _both(tmp_path / "other", lib_contract={"tests": ["tests"], "guarantees": ["it works (tests/test_x.py::test_gone)"]}) if (tmp_path / "other").mkdir() is None else None
+    assert not g["lib"].ok and g["lib"].earned == "validated" and "test_gone" in g["lib"].blockers[0]
+
+
+def test_an_outside_service_without_a_repo_does_not_hold_a_product_back(tmp_path):
+    arch = _arch()
+    arch["layers"].append({"id": "outside", "rank": 0, "title": "Outside", "nodes": [{"id": "svc", "name": "hosted service"}]})
+    arch["edges"].append({"from": "lib", "to": "svc"})
+    _repo(tmp_path, "app", deps=["lib"], scripts=["app"])
+    _repo(tmp_path, "lib")
+    g = {x.node: x for x in gate(arch, tmp_path)}
+    assert g["lib"].earned == "product" and g["app"].earned == "product"
+
+
+# ---- --run-cited: the cited tests are run, and what happens to each counts -----------------------------------------------------------------
+
+def _repo_with_tests(root: Path, name: str, body: str, conftest: str = ""):
+    (root / name / "tests").mkdir(parents=True)
+    (root / name / "pyproject.toml").write_text(f'[project]\nname = "{name}"\nversion = "0.1"\n', encoding="utf-8")
+    (root / name / "tests" / "test_x.py").write_text(body, encoding="utf-8")
+    if conftest:
+        (root / name / "tests" / "conftest.py").write_text(conftest, encoding="utf-8")
+
+
+def _cited_arch(*cites):
+    return {"arch": 1, "layers": [{"id": "libs", "rank": 1, "title": "Libs", "nodes": [{
+        "id": "lib", "name": "lib", "pkg": "lib", "repo": "lib", "status": "product",
+        "contract": {"tests": ["tests"], "guarantees": [f"it works ({', '.join('tests/' + c for c in cites)})"]}}]}], "edges": []}
+
+
+BODY = '''import pytest
+
+def test_good():
+    assert True
+
+def test_bad():
+    assert False
+
+@pytest.mark.skip(reason="needs a server")
+def test_skipped():
+    pass
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_param(n):
+    assert n
+
+class TestGroup:
+    def test_in_a_class(self):
+        assert True
+'''
+
+
+def test_run_cited_reports_passed_failed_skipped_and_missing(tmp_path):
+    from graphlang.grafu.arch_gate import run_cited
+    _repo_with_tests(tmp_path, "lib", BODY)
+    arch = _cited_arch("test_x.py::test_good", "test_x.py::test_bad", "test_x.py::test_skipped", "test_x.py::test_param", "test_x.py::test_in_a_class")
+    got = {e.name: e for e in run_cited(arch, tmp_path)["lib"]}
+    assert {k: v.outcome for k, v in got.items()} == {"test_good": "passed", "test_bad": "failed", "test_skipped": "skipped", "test_param": "passed", "test_in_a_class": "passed"}
+    assert "needs a server" in got["test_skipped"].detail
+
+
+def test_a_failed_or_skipped_cited_test_blocks_product_and_a_passing_one_does_not(tmp_path):
+    from graphlang.grafu.arch_gate import run_cited
+    _repo_with_tests(tmp_path, "lib", BODY)
+    good = _cited_arch("test_x.py::test_good", "test_x.py::test_in_a_class")
+    assert gate(good, tmp_path, run_cited(good, tmp_path))[0].earned == "product"
+    for bad_name in ("test_bad", "test_skipped"):
+        arch = _cited_arch("test_x.py::test_good", f"test_x.py::{bad_name}")
+        g = gate(arch, tmp_path, run_cited(arch, tmp_path))[0]
+        assert g.earned == "validated" and not g.ok and bad_name in g.blockers[0]
+    assert gate(_cited_arch("test_x.py::test_bad"), tmp_path)[0].earned == "product"       # without --run-cited the gate only checks that the test exists
+
+
+def test_a_contract_mixin_in_conftest_is_collected_through_its_test_files(tmp_path):
+    from graphlang.grafu.arch_gate import run_cited
+    conftest = "class Contract:\n    def test_contract_rule(self):\n        assert True\n"
+    _repo_with_tests(tmp_path, "lib", "from conftest import Contract\n\nclass TestImpl(Contract):\n    pass\n", conftest)
+    arch = _cited_arch("conftest.py::test_contract_rule")
+    assert [e.outcome for e in run_cited(arch, tmp_path)["lib"]] == ["passed"]
+
+
+def test_run_cited_only_limits_the_nodes_and_a_missing_repo_is_an_error(tmp_path):
+    from graphlang.grafu.arch_gate import run_cited
+    arch = _cited_arch("test_x.py::test_good")
+    assert run_cited(arch, tmp_path, only=["other"]) == {}
+    assert [e.outcome for e in run_cited(arch, tmp_path)["lib"]] == ["error"]
+
+
+def test_cli_run_cited_exit_status(tmp_path):
+    _repo_with_tests(tmp_path, "lib", BODY)
+    f = tmp_path / "a.arch.yaml"
+    f.write_text(yaml.safe_dump(_cited_arch("test_x.py::test_good")), encoding="utf-8")
+    r = CliRunner()
+    assert r.invoke(main, ["util", "arch-gate", str(f), "--root", str(tmp_path), "--run-cited"]).exit_code == 0
+    f.write_text(yaml.safe_dump(_cited_arch("test_x.py::test_good", "test_x.py::test_skipped")), encoding="utf-8")
+    out = r.invoke(main, ["util", "arch-gate", str(f), "--root", str(tmp_path), "--run-cited"])
+    assert out.exit_code == 1 and "test_skipped skipped" in out.output and "GATE FAILED" in out.output
